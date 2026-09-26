@@ -207,16 +207,23 @@ class Rooms {
   }
 
   /**
-   * Utility method to determine if a player is in a room
+   * Get the last player status reported for a room.
    */
-  static isPlayerPresent (io: any, roomId: number): boolean {
+  static getPlayerStatus (io: any, roomId: number): any | null {
     for (const sock of io.of('/').sockets.values()) {
       if (sock.user && sock.user.roomId === roomId && sock._lastPlayerStatus) {
-        return true
+        return sock._lastPlayerStatus
       }
     }
 
-    return false
+    return null
+  }
+
+  /**
+   * Utility method to determine if a player is in a room
+   */
+  static isPlayerPresent (io: any, roomId: number): boolean {
+    return Rooms.getPlayerStatus(io, roomId) !== null
   }
 
   /**
