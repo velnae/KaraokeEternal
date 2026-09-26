@@ -48,6 +48,13 @@ export interface IRoomPrefs {
   roles?: Record<number, {
     allowNew: boolean
   }>
+  queue?: {
+    maxPendingPerParticipant?: number
+    maxSongsPerParticipantRound?: number
+    houseTracksBeforeParticipant?: number
+    approvalMode?: 'AUTO' | 'MANUAL'
+    rotationMode?: 'FAIR' | 'FIFO'
+  }
 }
 
 export interface Room {
