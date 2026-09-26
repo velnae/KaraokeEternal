@@ -34,6 +34,19 @@ class Queue {
   }
 
   /**
+   * Count queued items owned by a user in a room.
+   */
+  static countByUser (roomId: number, userId: number): number {
+    const query = sql`
+      SELECT COUNT(*) AS count
+      FROM queue
+      WHERE roomId = ${roomId} AND userId = ${userId}
+    `
+    const res = db.get<{ count: number }>(String(query), query.parameters)
+    return res?.count ?? 0
+  }
+
+  /**
    * Get queued items for a given room
    */
   static get (roomId: number): { result: number[], entities: Record<number, QueueItem> } {
