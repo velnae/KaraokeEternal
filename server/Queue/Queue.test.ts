@@ -91,4 +91,26 @@ describe('Queue lifecycle persistence', () => {
     expect(after.entities[childId].prevQueueId).toBe(expectedParentId)
     expect(db.get<{ status: string }>('SELECT status FROM queue WHERE queueId = ?', [removedId])?.status).toBe('REMOVED')
   })
+
+  it('approves or rejects pending items without breaking playable order', () => {
+    db.run('INSERT INTO rooms (roomId, name, status, data) VALUES (3, \'Moderation room\', \'open\', \'{}\')')
+    db.run('INSERT INTO users (userId, username, password, name, roleId) VALUES (3, \'moderated\', \'\', \'Moderated\', 3)')
+    Queue.add({ roomId: 3, songId: 1, userId: 3, status: 'PENDING_APPROVAL' })
+    Queue.add({ roomId: 3, songId: 2, userId: 3, status: 'PENDING_APPROVAL' })
+    Queue.add({ roomId: 3, songId: 3, userId: 3, status: 'PENDING_APPROVAL' })
+    const before = Queue.get(3)
+    const [approvedId, rejectedId, remainingId] = before.result
+
+    expect(Queue.moderate(3, approvedId, 'APPROVED')).toBe(true)
+    expect(Queue.moderate(3, approvedId, 'APPROVED')).toBe(false)
+    expect(Queue.moderate(3, rejectedId, 'REJECTED')).toBe(true)
+    expect(Queue.moderate(3, rejectedId, 'REJECTED')).toBe(false)
+
+    const after = Queue.get(3)
+    expect(after.entities[approvedId].status).toBe('APPROVED')
+    expect(after.entities[rejectedId].status).toBe('REJECTED')
+    expect(after.entities[remainingId].prevQueueId).toBe(approvedId)
+    expect(after.result.indexOf(rejectedId)).toBeGreaterThan(after.result.indexOf(remainingId))
+    expect(() => Queue.moderate(3, approvedId, 'REJECTED')).toThrow('Only pending requests')
+  })
 })

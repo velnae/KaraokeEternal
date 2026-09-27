@@ -83,6 +83,16 @@
   margin-bottom: 0.25rem;
 }
 
+.status {
+  color: hsl(45, 95%, 65%);
+  font-size: var(--font-size-s);
+  margin-bottom: 0.25rem;
+}
+
+.status.rejected {
+  color: hsl(0, 75%, 65%);
+}
+
 .isOwner {
   color: var(--queued-item-color);
   text-shadow: var(--text-shadow-glow);
@@ -130,6 +140,7 @@
 }
 
 .btnAdd svg,
+.btnApprove svg,
 .btnPlayNext svg {
   width: 60px !important;
   height: 60px !important;

@@ -11,7 +11,8 @@ import { requestPlayNext, requestReplay } from 'store/modules/status'
 import { showSongInfo } from 'store/modules/songInfo'
 import { toggleSongStarred } from 'store/modules/userStars'
 import { showErrorMessage } from 'store/modules/ui'
-import { queueSong, removeItem } from '../../modules/queue'
+import { approveRequest, queueSong, rejectRequest, removeItem } from '../../modules/queue'
+import type { QueueItemStatus } from 'shared/queueLifecycle'
 import styles from './QueueItem.css'
 
 const LONG_PRESS_THRESHOLD_MS = 700
@@ -35,6 +36,7 @@ interface QueueItemProps {
   queueId: number
   songId: number
   starCount: number
+  status: QueueItemStatus
   title: string
   userDateUpdated: number
   userDisplayName: string
@@ -66,6 +68,7 @@ const QueueItem = ({
   queueId,
   songId,
   starCount,
+  status,
   title,
   userDateUpdated,
   userDisplayName,
@@ -96,6 +99,14 @@ const QueueItem = ({
   }
   const handleRemoveClick = () => dispatch(removeItem({ queueId }))
   const handleStarClick = () => dispatch(toggleSongStarred(songId))
+  const handleApproveClick = () => dispatch(approveRequest({ queueId }))
+  const handleRejectClick = () => dispatch(rejectRequest({ queueId }))
+
+  const statusLabel = status === 'PENDING_APPROVAL'
+    ? 'Waiting for approval'
+    : status === 'REJECTED'
+      ? 'Request rejected'
+      : null
 
   const swipeHandlers = useSwipeable({
     onSwipedLeft: () => {
@@ -155,6 +166,11 @@ const QueueItem = ({
           <div className={clsx(styles.user, isOwner && styles.isOwner)}>
             {userDisplayName}
           </div>
+          {statusLabel && (
+            <div className={clsx(styles.status, status === 'REJECTED' && styles.rejected)}>
+              {statusLabel}
+            </div>
+          )}
         </div>
 
         <Buttons btnWidth={56} isExpanded={isExpanded} className={styles.btnContainer}>
@@ -177,6 +193,22 @@ const QueueItem = ({
               data-hide
               icon='INFO_OUTLINE'
               onClick={handleInfoClick}
+            />
+          )}
+          {status === 'PENDING_APPROVAL' && isInfoable && (
+            <Button
+              aria-label='Approve request'
+              className={clsx(styles.btnApprove, styles.active)}
+              icon='PLUS'
+              onClick={handleApproveClick}
+            />
+          )}
+          {status === 'PENDING_APPROVAL' && isInfoable && (
+            <Button
+              aria-label='Reject request'
+              className={clsx(styles.btnReject, styles.danger)}
+              icon='CLEAR'
+              onClick={handleRejectClick}
             />
           )}
           {isMovable && (

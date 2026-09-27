@@ -59,3 +59,14 @@ Vitest now excludes `build/**`, preventing compiled test files from being discov
 | Production build | Passed with the inherited size/license warnings |
 
 Phase 2 adds migration, lifecycle transition, pending-status, player authorization/recovery and socket integration coverage. The persisted queue state, rather than `historyJSON`, now determines pending limits and survives player refresh/reconnect.
+
+## Results after Phase 3
+
+| Check | Result |
+| --- | --- |
+| Lint | 29 inherited errors remain; no Phase 3 regression |
+| Typecheck | Only the inherited `Player.tsx` TS2604 failure remains |
+| Automated tests | 86 passed across 10 files |
+| Production build | Passed with the inherited size/license warnings |
+
+Phase 3 adds AUTO/MANUAL creation, admin authorization, idempotent approve/reject, mode-change isolation and playable-eligibility coverage. The operator can filter pending requests while participants receive realtime status for their own requests.

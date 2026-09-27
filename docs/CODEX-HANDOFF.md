@@ -53,10 +53,12 @@ Already present at the time of this handoff:
 - Persisted pending-count enforcement independent of player history.
 - Idempotent player lifecycle synchronization and interrupted-player recovery.
 - Client history reconstruction from persisted terminal states.
+- AUTO/MANUAL initial request status based on current room settings.
+- Admin-only approve/reject Socket.IO actions.
+- Operator pending-request filter and participant realtime status feedback.
 
 Not yet implemented:
 
-- Manual approval.
 - FAIR parameter/FIFO selection.
 - House/operator items.
 - Song-source abstraction.
@@ -67,7 +69,7 @@ Always inspect the current diff because this section may become stale as impleme
 
 ## First task
 
-Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 2 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 3.
+Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 3 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 4.
 
 ## Non-negotiable behavioral rules
 

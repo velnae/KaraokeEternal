@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useState } from 'react'
+import clsx from 'clsx'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { ensureState } from 'redux-optimistic-ui'
 import QueueItem from '../QueueItem/QueueItem'
@@ -8,6 +9,10 @@ import { moveItem, removeUpcomingItems } from '../../modules/queue'
 import getPlayerHistory from '../../selectors/getPlayerHistory'
 import getRoundRobinQueue from '../../selectors/getRoundRobinQueue'
 import getWaits from '../../selectors/getWaits'
+import Button from 'components/Button/Button'
+import styles from './QueueList.css'
+
+type QueueFilter = 'queue' | 'pending'
 
 const QueueList = () => {
   const artists = useAppSelector(state => state.artists)
@@ -15,11 +20,28 @@ const QueueList = () => {
 
   const playerHistory = useAppSelector(getPlayerHistory)
   const queue = useAppSelector(getRoundRobinQueue)
+  const rawQueue = useAppSelector(state => ensureState(state.queue))
   const songs = useAppSelector(state => state.songs)
   const starredSongs = useAppSelector(state => ensureState(state.userStars).starredSongs)
   const starCounts = useAppSelector(state => state.starCounts)
   const user = useAppSelector(state => state.user)
   const waits = useAppSelector(getWaits)
+  const [filter, setFilter] = useState<QueueFilter>('queue')
+
+  const pendingIds = rawQueue.result.filter((queueId) => {
+    const item = rawQueue.entities[queueId]
+    return item.isOptimistic !== true && item.status === 'PENDING_APPROVAL'
+  })
+  const ownerFeedbackIds = rawQueue.result.filter((queueId) => {
+    const item = rawQueue.entities[queueId]
+    return item.isOptimistic !== true
+      && item.userId === user.userId
+      && (item.status === 'PENDING_APPROVAL' || item.status === 'REJECTED')
+  })
+  const result = user.isAdmin && filter === 'pending'
+    ? pendingIds
+    : [...ownerFeedbackIds, ...queue.result.filter(queueId => !ownerFeedbackIds.includes(queueId))]
+  const pendingLabel = `Pending approval (${pendingIds.length})`
 
   // actions
   const dispatch = useAppDispatch()
@@ -43,12 +65,15 @@ const QueueList = () => {
   }
 
   // build children array
-  const items = queue.result.map((qId) => {
-    const item = queue.entities[qId]
+  const items = result.map((qId) => {
+    const item = rawQueue.entities[qId]
+    if (item.isOptimistic === true) return null
+
     const duration = songs.entities[item.songId].duration
     const isCurrent = (qId === queueId) && !isAtQueueEnd
-    const isUpcoming = qId !== queueId && !playerHistory.includes(qId)
+    const isUpcoming = item.status === 'APPROVED' && qId !== queueId && !playerHistory.includes(qId)
     const isOwner = item.userId === user.userId
+    const isTerminal = item.status === 'PLAYED' || item.status === 'FAILED'
 
     return (
       <QueueItem
@@ -61,16 +86,17 @@ const QueueList = () => {
         isInfoable={user.isAdmin}
         isMovable={isUpcoming && (isOwner || user.isAdmin)}
         isOwner={isOwner}
-        isPlayed={!isUpcoming && !isCurrent}
+        isPlayed={isTerminal && !isCurrent}
         isPlaying={isCurrent && isPlaying}
-        isRemovable={isUpcoming && (isOwner || user.isAdmin)}
-        isReplayable={(!isUpcoming || isCurrent) && user.isAdmin}
+        isRemovable={(item.status === 'PENDING_APPROVAL' || isUpcoming) && (isOwner || user.isAdmin)}
+        isReplayable={(isTerminal || isCurrent) && user.isAdmin}
         isSkippable={isCurrent && (isOwner || user.isAdmin)}
         isStarred={starredSongs.includes(item.songId)}
         isUpcoming={isUpcoming}
         pctPlayed={isCurrent ? position / duration * 100 : 0}
         starCount={starCounts.songs[item.songId] || 0}
         title={songs.entities[item.songId].title}
+        status={item.status}
         wait={formatSeconds(waits[qId], true)} // fuzzy
         // actions
         onMoveClick={handleMoveClick}
@@ -79,7 +105,30 @@ const QueueList = () => {
     )
   })
 
-  return <QueueListAnimator queueItems={items} />
+  return (
+    <>
+      {user.isAdmin && (
+        <div className={styles.filters}>
+          <Button
+            className={clsx(styles.filter, filter === 'queue' && styles.active)}
+            onClick={() => setFilter('queue')}
+          >
+            Queue
+          </Button>
+          <Button
+            className={clsx(styles.filter, filter === 'pending' && styles.active)}
+            onClick={() => setFilter('pending')}
+          >
+            {pendingLabel}
+          </Button>
+        </div>
+      )}
+      {user.isAdmin && filter === 'pending' && pendingIds.length === 0 && (
+        <div className={styles.empty}>No requests are waiting for approval.</div>
+      )}
+      <QueueListAnimator queueItems={items.filter(item => item !== null)} />
+    </>
+  )
 }
 
 export default QueueList

@@ -1,6 +1,13 @@
 import Queue from './Queue.js'
 import Rooms from '../Rooms/Rooms.js'
-import { QUEUE_ADD, QUEUE_MOVE, QUEUE_REMOVE, QUEUE_PUSH } from '../../shared/actionTypes.js'
+import {
+  QUEUE_ADD,
+  QUEUE_APPROVE,
+  QUEUE_MOVE,
+  QUEUE_REJECT,
+  QUEUE_REMOVE,
+  QUEUE_PUSH,
+} from '../../shared/actionTypes.js'
 import { normalizeQueuePrefs } from '../../shared/queueRules.js'
 
 // ------------------------------------
@@ -21,7 +28,8 @@ const ACTION_HANDLERS = {
     }
 
     const room = Rooms.get(roomId).entities[roomId]
-    const maxPending = normalizeQueuePrefs(room?.prefs?.queue).maxPendingPerParticipant
+    const queuePrefs = normalizeQueuePrefs(room?.prefs?.queue)
+    const maxPending = queuePrefs.maxPendingPerParticipant
 
     if (!sock.user.isAdmin) {
       const pendingCount = Queue.countPending(roomId, sock.user.userId)
@@ -38,6 +46,9 @@ const ACTION_HANDLERS = {
       roomId,
       songId,
       userId: sock.user.userId,
+      status: !sock.user.isAdmin && queuePrefs.approvalMode === 'MANUAL'
+        ? 'PENDING_APPROVAL'
+        : 'APPROVED',
     })
 
     // success
@@ -48,6 +59,12 @@ const ACTION_HANDLERS = {
       type: QUEUE_PUSH,
       payload: Queue.get(roomId),
     })
+  },
+  [QUEUE_APPROVE]: (sock, { payload }, acknowledge) => {
+    moderateRequest(sock, payload.queueId, 'APPROVED', acknowledge)
+  },
+  [QUEUE_REJECT]: (sock, { payload }, acknowledge) => {
+    moderateRequest(sock, payload.queueId, 'REJECTED', acknowledge)
   },
   [QUEUE_MOVE]: async (sock, { payload }, acknowledge) => {
     const { queueId, prevQueueId } = payload
@@ -107,6 +124,29 @@ const ACTION_HANDLERS = {
       payload: Queue.get(sock.user.roomId),
     })
   },
+}
+
+const moderateRequest = (
+  sock,
+  queueId: number,
+  status: 'APPROVED' | 'REJECTED',
+  acknowledge,
+) => {
+  const actionType = status === 'APPROVED' ? QUEUE_APPROVE : QUEUE_REJECT
+
+  if (!sock.user.isAdmin) {
+    return acknowledge({
+      type: actionType + '_ERROR',
+      error: 'Only administrators can moderate requests',
+    })
+  }
+
+  Queue.moderate(sock.user.roomId, queueId, status)
+  acknowledge({ type: actionType + '_SUCCESS' })
+  sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {
+    type: QUEUE_PUSH,
+    payload: Queue.get(sock.user.roomId),
+  })
 }
 
 export default ACTION_HANDLERS

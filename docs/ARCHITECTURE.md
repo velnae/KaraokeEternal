@@ -108,6 +108,7 @@ PLAYING          -> APPROVED (only when the active player leaves unexpectedly)
 - Status transitions are persisted by the backend and broadcast through Socket.IO.
 - Player reports must be idempotent: repeating the same transition must not duplicate history or counters.
 - If the last active player disconnects while an item is `PLAYING`, the backend returns that item to `APPROVED`; terminal items are never revived.
+- The operator queue offers a pending-approval filter with approve/reject actions. Participants see realtime status only for their own pending or rejected requests; these items never enter playable ordering.
 
 Persisting lifecycle state removes the pending-limit dependency on the browser player's ephemeral `historyJSON`. The player may continue to use its history for presentation and round-robin continuity, but it is not the authoritative source for whether a request is pending.
 

@@ -15,7 +15,9 @@ const QueueView = () => {
   const isInRoom = useAppSelector(state => !!state.user.roomId)
   const isLoading = useAppSelector(state => ensureState(state.queue).isLoading)
   const queue = useAppSelector(getRoundRobinQueue)
+  const rawQueue = useAppSelector(state => ensureState(state.queue))
   const queueId = useAppSelector(state => state.status.queueId)
+  const user = useAppSelector(state => state.user)
   const containerRef = useRef<HTMLDivElement>(null)
 
   // ensure current song is in view on first mount only
@@ -50,7 +52,13 @@ const QueueView = () => {
 
       {isLoading && <Spinner />}
 
-      {!isLoading && queue.result.length === 0 && (
+      {!isLoading && queue.result.length === 0 && !rawQueue.result.some((queuedId) => {
+        const item = rawQueue.entities[queuedId]
+        return item.isOptimistic !== true && (
+          (user.isAdmin && item.status === 'PENDING_APPROVAL')
+          || (item.userId === user.userId && ['PENDING_APPROVAL', 'REJECTED'].includes(item.status))
+        )
+      }) && (
         <TextOverlay>
           <h1>Queue Empty</h1>
           <p>

@@ -15,7 +15,17 @@ class Queue {
   /**
    * Add a songId to a room's queue
    */
-  static add ({ roomId, songId, userId }: { roomId: number, songId: number, userId: number }): void {
+  static add ({
+    roomId,
+    songId,
+    userId,
+    status = 'APPROVED',
+  }: {
+    roomId: number
+    songId: number
+    userId: number
+    status?: 'PENDING_APPROVAL' | 'APPROVED'
+  }): void {
     const fields = new Map()
     const now = Math.floor(Date.now() / 1000)
     fields.set('roomId', roomId)
@@ -34,7 +44,7 @@ class Queue {
     )`)
     fields.set('origin', 'PARTICIPANT')
     fields.set('source', 'LOCAL')
-    fields.set('status', 'APPROVED')
+    fields.set('status', status)
     fields.set('title', sql`(SELECT title FROM songs WHERE songId = ${songId})`)
     fields.set('artistOrChannel', sql`(
       SELECT artists.name
@@ -87,7 +97,7 @@ class Queue {
         INNER JOIN users USING(userId)
         LEFT JOIN media USING(songId)
         LEFT JOIN paths USING(pathId)
-      WHERE roomId = ${roomId} AND queue.status NOT IN ${sql.tuple(HIDDEN_QUEUE_STATUSES)}
+      WHERE roomId = ${roomId} AND queue.status != 'REMOVED'
       GROUP BY queueId
       ORDER BY queueId, paths.priority ASC
     `
@@ -95,7 +105,7 @@ class Queue {
       queueId: number
       songId: number
       userId: number
-      prevQueueId: number
+      prevQueueId: number | null
       origin: QueueItemOrigin
       source: SongSource
       status: QueueItemStatus
@@ -116,6 +126,8 @@ class Queue {
       pathData: string | null
       isPreferred: number | null
     }>(String(query), query.parameters)
+
+    const activeRows = rows.filter(row => row.status !== 'REJECTED')
 
     for (const row of rows) {
       if (row.pathId !== null && row.pathData !== null && !pathData.has(row.pathId)) {
@@ -140,7 +152,9 @@ class Queue {
         isVideoKeyingEnabled: !!pathPrefs?.isVideoKeyingEnabled,
       }
 
-      if (row.prevQueueId === null) {
+      if (row.status === 'REJECTED') {
+        continue
+      } else if (row.prevQueueId === null) {
         // found the first item
         result.push(row.queueId)
         curQueueId = row.queueId
@@ -150,13 +164,19 @@ class Queue {
       }
     }
 
-    while (result.length < rows.length) {
+    while (result.length < activeRows.length) {
       // get the item whose prevQueueId references the current one
       const nextQueueId = map.get(curQueueId)
       if (typeof nextQueueId !== 'number' || !entities[nextQueueId]) break
       result.push(nextQueueId)
       curQueueId = nextQueueId
     }
+
+    // Retain rejected requests for realtime owner feedback without making them
+    // part of the playable linked list.
+    rows
+      .filter(row => row.status === 'REJECTED')
+      .forEach(row => result.push(row.queueId))
 
     return { result, entities }
   }
@@ -331,6 +351,61 @@ class Queue {
       WHERE roomId = ${roomId} AND queueId = ${queueId} AND status = ${current.status}
     `
     return db.run(String(updateQuery), updateQuery.parameters).changes === 1
+  }
+
+  /**
+   * Approve or reject one pending participant request.
+   */
+  static moderate (roomId: number, queueId: number, status: 'APPROVED' | 'REJECTED'): boolean {
+    const currentQuery = sql`
+      SELECT status, prevQueueId
+      FROM queue
+      WHERE roomId = ${roomId} AND queueId = ${queueId}
+    `
+    const current = db.get<{ status: QueueItemStatus, prevQueueId: number | null }>(
+      String(currentQuery),
+      currentQuery.parameters,
+    )
+
+    if (!current) throw new Error('Queue item not found')
+    if (current.status === status) return false
+    if (current.status !== 'PENDING_APPROVAL') {
+      throw new Error('Only pending requests can be moderated')
+    }
+
+    if (status === 'APPROVED') {
+      return Queue.transition(roomId, queueId, status)
+    }
+
+    db.exec('BEGIN IMMEDIATE')
+    db.exec('PRAGMA defer_foreign_keys = ON')
+
+    try {
+      const childQuery = sql`
+        UPDATE queue
+        SET prevQueueId = ${current.prevQueueId}
+        WHERE roomId = ${roomId}
+          AND prevQueueId = ${queueId}
+          AND status NOT IN ${sql.tuple(HIDDEN_QUEUE_STATUSES)}
+      `
+      db.run(String(childQuery), childQuery.parameters)
+
+      const rejectQuery = sql`
+        UPDATE queue
+        SET status = 'REJECTED',
+            prevQueueId = NULL,
+            dateUpdated = ${Math.floor(Date.now() / 1000)}
+        WHERE roomId = ${roomId}
+          AND queueId = ${queueId}
+          AND status = 'PENDING_APPROVAL'
+      `
+      const changed = db.run(String(rejectQuery), rejectQuery.parameters).changes === 1
+      db.exec('COMMIT')
+      return changed
+    } catch (err) {
+      db.exec('ROLLBACK')
+      throw err
+    }
   }
 
   /**
