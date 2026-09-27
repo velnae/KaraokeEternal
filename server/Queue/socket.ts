@@ -9,7 +9,13 @@ import {
   QUEUE_PUSH,
 } from '../../shared/actionTypes.js'
 import { normalizeQueuePrefs } from '../../shared/queueRules.js'
-import { QUEUE_ITEM_ORIGINS, type QueueItemOrigin } from '../../shared/queueLifecycle.js'
+import {
+  QUEUE_ITEM_ORIGINS,
+  SONG_SOURCES,
+  type QueueItemOrigin,
+  type SongSource,
+} from '../../shared/queueLifecycle.js'
+import { getSongSource } from '../SongSources/index.js'
 
 // ------------------------------------
 // Action Handlers
@@ -18,6 +24,8 @@ const ACTION_HANDLERS = {
   [QUEUE_ADD]: async (sock, { payload }, acknowledge) => {
     const { songId } = payload
     const origin: QueueItemOrigin = payload.origin ?? 'PARTICIPANT'
+    const source: SongSource = payload.source ?? 'LOCAL'
+    const sourceId = String(payload.sourceId ?? songId ?? '')
     const roomId = sock.user.roomId
 
     if (!QUEUE_ITEM_ORIGINS.includes(origin)) {
@@ -31,6 +39,13 @@ const ACTION_HANDLERS = {
       return acknowledge({
         type: QUEUE_ADD + '_ERROR',
         error: 'Only administrators can create house or operator items',
+      })
+    }
+
+    if (!SONG_SOURCES.includes(source)) {
+      return acknowledge({
+        type: QUEUE_ADD + '_ERROR',
+        error: 'Invalid song source',
       })
     }
 
@@ -58,9 +73,20 @@ const ACTION_HANDLERS = {
       }
     }
 
+    let song
+    try {
+      song = await getSongSource(source).resolve(sourceId, { roomId })
+      if (!song || !song.isPlayable) throw new Error('Song is unavailable or not playable')
+    } catch (err) {
+      return acknowledge({
+        type: QUEUE_ADD + '_ERROR',
+        error: err.message,
+      })
+    }
+
     Queue.add({
       roomId,
-      songId,
+      song,
       userId: sock.user.userId,
       origin,
       status: origin === 'PARTICIPANT' && !sock.user.isAdmin && queuePrefs.approvalMode === 'MANUAL'

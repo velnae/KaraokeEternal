@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   QUEUE_ADD,
   QUEUE_APPROVE,
@@ -9,8 +9,24 @@ import Rooms from '../Rooms/Rooms.js'
 import Queue from './Queue.js'
 import ACTION_HANDLERS from './socket.js'
 import type { QueueItem } from '../../shared/types.js'
+import type { ResolvedSong } from '../../shared/songSource.js'
+import { localSongSource } from '../SongSources/LocalSongSource.js'
 
 const handler = ACTION_HANDLERS[QUEUE_ADD]
+
+const resolvedSong = (songId: number): ResolvedSong => ({
+  source: 'LOCAL',
+  sourceId: String(songId),
+  localSongId: songId,
+  externalId: null,
+  mediaId: songId,
+  mediaType: 'mp4',
+  title: `Song ${songId}`,
+  artistOrChannel: 'Artist',
+  durationSeconds: 180,
+  thumbnailUrl: null,
+  isPlayable: true,
+})
 
 const createSocket = ({ isAdmin = false } = {}) => {
   const emit = vi.fn()
@@ -61,6 +77,7 @@ const mockQueue = (userIds: number[]) => {
 }
 
 describe('participant pending request limit', () => {
+  beforeEach(() => vi.spyOn(localSongSource, 'resolve').mockImplementation(async sourceId => resolvedSong(Number(sourceId))))
   afterEach(() => vi.restoreAllMocks())
 
   it('rejects a participant at the configured pending limit', async () => {
@@ -100,11 +117,12 @@ describe('participant pending request limit', () => {
 
     expect(add).toHaveBeenCalledWith({
       roomId: 1,
-      songId: 99,
+      song: resolvedSong(99),
       userId: 10,
       origin: 'PARTICIPANT',
       status: 'APPROVED',
     })
+    expect(localSongSource.resolve).toHaveBeenCalledWith('99', { roomId: 1 })
     expect(acknowledge).toHaveBeenCalledWith({ type: QUEUE_ADD + '_SUCCESS' })
     expect(emit).toHaveBeenCalledWith('action', {
       type: QUEUE_PUSH,
@@ -147,7 +165,7 @@ describe('participant pending request limit', () => {
 
     expect(add).toHaveBeenCalledWith({
       roomId: 1,
-      songId: 99,
+      song: resolvedSong(99),
       userId: 10,
       origin: 'PARTICIPANT',
       status: 'PENDING_APPROVAL',
@@ -175,6 +193,7 @@ describe('participant pending request limit', () => {
 })
 
 describe('house and operator creation', () => {
+  beforeEach(() => vi.spyOn(localSongSource, 'resolve').mockImplementation(async sourceId => resolvedSong(Number(sourceId))))
   afterEach(() => vi.restoreAllMocks())
 
   it.each(['HOUSE', 'OPERATOR'] as const)('allows an admin to create an approved %s item', async (origin) => {
@@ -189,7 +208,7 @@ describe('house and operator creation', () => {
 
     expect(add).toHaveBeenCalledWith({
       roomId: 1,
-      songId: 99,
+      song: resolvedSong(99),
       userId: 10,
       origin,
       status: 'APPROVED',
@@ -222,6 +241,37 @@ describe('house and operator creation', () => {
     expect(acknowledge).toHaveBeenCalledWith({
       type: QUEUE_ADD + '_ERROR',
       error: 'Invalid queue item origin',
+    })
+  })
+
+  it('rejects an unknown song source before queue creation', async () => {
+    const add = vi.spyOn(Queue, 'add')
+    const acknowledge = vi.fn()
+    const { socket } = createSocket({ isAdmin: true })
+
+    await handler(socket, { payload: { songId: 99, source: 'ARCHIVE' } }, acknowledge)
+
+    expect(add).not.toHaveBeenCalled()
+    expect(acknowledge).toHaveBeenCalledWith({
+      type: QUEUE_ADD + '_ERROR',
+      error: 'Invalid song source',
+    })
+  })
+
+  it('rejects a local song that cannot be resolved', async () => {
+    vi.mocked(localSongSource.resolve).mockResolvedValue(null)
+    vi.spyOn(Rooms, 'validate').mockResolvedValue(true)
+    vi.spyOn(Rooms, 'get').mockReturnValue({ result: [1], entities: { 1: { prefs: {} } } })
+    const add = vi.spyOn(Queue, 'add')
+    const acknowledge = vi.fn()
+    const { socket } = createSocket({ isAdmin: true })
+
+    await handler(socket, { payload: { songId: 404 } }, acknowledge)
+
+    expect(add).not.toHaveBeenCalled()
+    expect(acknowledge).toHaveBeenCalledWith({
+      type: QUEUE_ADD + '_ERROR',
+      error: 'Song is unavailable or not playable',
     })
   })
 })

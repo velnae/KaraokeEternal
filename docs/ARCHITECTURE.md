@@ -198,11 +198,15 @@ resolve(id, roomContext)   -> ResolvedSong
 
 `SongSearchResult` and `ResolvedSong` expose normalized metadata such as source, identifier, title, artist/channel, duration, thumbnail and playability.
 
+The shared contract lives in `shared/songSource.ts`. Queue creation accepts a validated `ResolvedSong`; it no longer rebuilds snapshots independently from mutable library rows. The source registry rejects sources that are not configured.
+
 ### Local source
 
 - Adapts the existing library and scanner.
 - Does not rewrite local media persistence.
 - Resolves to existing `songId`, `mediaId` and CDG/MP4 playback data.
+- Search reads the existing `Library` cache, while resolution uses current media/path priority and the preferred-media flag.
+- Existing local clients remain compatible by sending `songId`; the backend normalizes it to `source=LOCAL` and `sourceId=<songId>` before resolution.
 
 ### YouTube source
 

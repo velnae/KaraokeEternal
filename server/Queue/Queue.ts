@@ -8,30 +8,35 @@ import {
   type QueueItemStatus,
   type SongSource,
 } from '../../shared/queueLifecycle.js'
+import { getResolvedSongValidationError, type ResolvedSong } from '../../shared/songSource.js'
 
 const HIDDEN_QUEUE_STATUSES = ['REJECTED', 'REMOVED']
 
 class Queue {
   /**
-   * Add a songId to a room's queue
+   * Add a validated, resolved song snapshot to a room's queue.
    */
   static add ({
     roomId,
-    songId,
+    song,
     userId,
     origin = 'PARTICIPANT',
     status = 'APPROVED',
   }: {
     roomId: number
-    songId: number
+    song: ResolvedSong
     userId: number
     origin?: QueueItemOrigin
     status?: 'PENDING_APPROVAL' | 'APPROVED'
   }): void {
+    const validationError = getResolvedSongValidationError(song)
+    if (validationError) throw new Error(validationError)
+    if (!song.isPlayable) throw new Error('Song is not playable')
+
     const fields = new Map()
     const now = Math.floor(Date.now() / 1000)
     fields.set('roomId', roomId)
-    fields.set('songId', songId)
+    fields.set('songId', song.localSongId)
     fields.set('userId', userId)
     fields.set('prevQueueId', sql`(
       SELECT queueId
@@ -45,23 +50,13 @@ class Queue {
       )
     )`)
     fields.set('origin', origin)
-    fields.set('source', 'LOCAL')
+    fields.set('source', song.source)
     fields.set('status', status)
-    fields.set('title', sql`(SELECT title FROM songs WHERE songId = ${songId})`)
-    fields.set('artistOrChannel', sql`(
-      SELECT artists.name
-      FROM songs
-        INNER JOIN artists USING(artistId)
-      WHERE songs.songId = ${songId}
-    )`)
-    fields.set('durationSeconds', sql`(
-      SELECT media.duration
-      FROM media
-        INNER JOIN paths USING(pathId)
-      WHERE media.songId = ${songId}
-      ORDER BY media.isPreferred DESC, paths.priority ASC, media.mediaId ASC
-      LIMIT 1
-    )`)
+    fields.set('externalId', song.externalId)
+    fields.set('title', song.title)
+    fields.set('artistOrChannel', song.artistOrChannel)
+    fields.set('durationSeconds', song.durationSeconds)
+    fields.set('thumbnailUrl', song.thumbnailUrl)
     fields.set('dateCreated', now)
     fields.set('dateUpdated', now)
 

@@ -4,6 +4,21 @@ import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { close, db, open } from '../lib/Database.js'
 import Queue from './Queue.js'
+import type { ResolvedSong } from '../../shared/songSource.js'
+
+const resolvedSong = (songId: number): ResolvedSong => ({
+  source: 'LOCAL',
+  sourceId: String(songId),
+  localSongId: songId,
+  externalId: null,
+  mediaId: songId,
+  mediaType: 'mp4',
+  title: songId === 1 ? 'First' : songId === 2 ? 'Second' : 'Third',
+  artistOrChannel: 'Artist',
+  durationSeconds: songId === 1 ? 181 : songId === 2 ? 202 : 223,
+  thumbnailUrl: null,
+  isPlayable: true,
+})
 
 describe('Queue lifecycle persistence', () => {
   let tempDir: string
@@ -17,6 +32,8 @@ describe('Queue lifecycle persistence', () => {
     db.run('INSERT INTO media (mediaId, songId, pathId, relPath, duration, isPreferred) VALUES (1, 1, 1, \'first.mp4\', 181, 1), (2, 2, 1, \'second.mp4\', 202, 1), (3, 3, 1, \'third.mp4\', 223, 1)')
     db.run('INSERT INTO rooms (roomId, name, status, data) VALUES (1, \'Room\', \'open\', \'{}\')')
     db.run('INSERT INTO users (userId, username, password, name, roleId) VALUES (1, \'singer\', \'\', \'Singer\', 3)')
+    db.run('INSERT INTO rooms (roomId, name, status, data) VALUES (4, \'Origin room\', \'open\', \'{}\')')
+    db.run('INSERT INTO users (userId, username, password, name, roleId) VALUES (4, \'operator\', \'\', \'Operator\', 1)')
   })
 
   afterAll(() => {
@@ -25,8 +42,8 @@ describe('Queue lifecycle persistence', () => {
   })
 
   it('stores snapshots and counts only participant requests still pending', () => {
-    Queue.add({ roomId: 1, songId: 1, userId: 1 })
-    Queue.add({ roomId: 1, songId: 2, userId: 1 })
+    Queue.add({ roomId: 1, song: resolvedSong(1), userId: 1 })
+    Queue.add({ roomId: 1, song: resolvedSong(2), userId: 1 })
     const queue = Queue.get(1)
 
     expect(queue.result).toHaveLength(2)
@@ -58,10 +75,7 @@ describe('Queue lifecycle persistence', () => {
   })
 
   it.each(['HOUSE', 'OPERATOR'] as const)('persists an approved local %s item without participant quota usage', (origin) => {
-    db.run('INSERT INTO rooms (roomId, name, status, data) VALUES (4, \'Origin room\', \'open\', \'{}\') ON CONFLICT DO NOTHING')
-    db.run('INSERT INTO users (userId, username, password, name, roleId) VALUES (4, \'operator\', \'\', \'Operator\', 1) ON CONFLICT DO NOTHING')
-
-    Queue.add({ roomId: 4, songId: 1, userId: 4, origin })
+    Queue.add({ roomId: 4, song: resolvedSong(1), userId: 4, origin })
     const queue = Queue.get(4)
 
     expect(queue.entities[queue.result[queue.result.length - 1]]).toMatchObject({
@@ -70,6 +84,43 @@ describe('Queue lifecycle persistence', () => {
       status: 'APPROVED',
     })
     expect(Queue.countPending(4, 4)).toBe(0)
+  })
+
+  it('persists the normalized metadata snapshot instead of rereading mutable library metadata', () => {
+    const song = {
+      ...resolvedSong(1),
+      title: 'Resolved title snapshot',
+      artistOrChannel: 'Resolved artist snapshot',
+      durationSeconds: 321,
+    }
+
+    Queue.add({ roomId: 4, song, userId: 4 })
+    const queue = Queue.get(4)
+    const queued = queue.entities[queue.result[queue.result.length - 1]]
+
+    expect(queued).toMatchObject({
+      songId: 1,
+      source: 'LOCAL',
+      externalId: null,
+      title: 'Resolved title snapshot',
+      artistOrChannel: 'Resolved artist snapshot',
+      durationSeconds: 321,
+      thumbnailUrl: null,
+    })
+  })
+
+  it('rejects invalid or unplayable normalized songs', () => {
+    expect(() => Queue.add({
+      roomId: 1,
+      song: { ...resolvedSong(1), mediaId: null },
+      userId: 1,
+    })).toThrow('Local songs require a valid mediaId')
+
+    expect(() => Queue.add({
+      roomId: 1,
+      song: { ...resolvedSong(1), isPlayable: false },
+      userId: 1,
+    })).toThrow('Song is not playable')
   })
 
   it('applies valid transitions idempotently and rejects terminal transitions', () => {
@@ -93,7 +144,7 @@ describe('Queue lifecycle persistence', () => {
   })
 
   it('soft-removes an item and closes the linked-list gap', () => {
-    Queue.add({ roomId: 1, songId: 3, userId: 1 })
+    Queue.add({ roomId: 1, song: resolvedSong(3), userId: 1 })
     const before = Queue.get(1)
     const removedId = before.result[before.result.length - 2]
     const childId = before.result[before.result.length - 1]
@@ -110,9 +161,9 @@ describe('Queue lifecycle persistence', () => {
   it('approves or rejects pending items without breaking playable order', () => {
     db.run('INSERT INTO rooms (roomId, name, status, data) VALUES (3, \'Moderation room\', \'open\', \'{}\')')
     db.run('INSERT INTO users (userId, username, password, name, roleId) VALUES (3, \'moderated\', \'\', \'Moderated\', 3)')
-    Queue.add({ roomId: 3, songId: 1, userId: 3, status: 'PENDING_APPROVAL' })
-    Queue.add({ roomId: 3, songId: 2, userId: 3, status: 'PENDING_APPROVAL' })
-    Queue.add({ roomId: 3, songId: 3, userId: 3, status: 'PENDING_APPROVAL' })
+    Queue.add({ roomId: 3, song: resolvedSong(1), userId: 3, status: 'PENDING_APPROVAL' })
+    Queue.add({ roomId: 3, song: resolvedSong(2), userId: 3, status: 'PENDING_APPROVAL' })
+    Queue.add({ roomId: 3, song: resolvedSong(3), userId: 3, status: 'PENDING_APPROVAL' })
     const before = Queue.get(3)
     const [approvedId, rejectedId, remainingId] = before.result
 

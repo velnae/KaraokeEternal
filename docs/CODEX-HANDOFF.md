@@ -60,10 +60,12 @@ Already present at the time of this handoff:
 - Immediate-next participant locking across queue and preference changes.
 - Admin creation of local `HOUSE` and `OPERATOR` items with backend authorization.
 - House-pool UI, origin labels, deterministic house interleaving and manual operator positioning.
+- Shared normalized song-source contracts and source registry.
+- `LocalSongSource` search/resolve adapter over the inherited library and media persistence.
+- Queue creation through validated resolved metadata snapshots.
 
 Not yet implemented:
 
-- Song-source abstraction.
 - YouTube search/playback.
 - Remaining business-rule tests for later phases.
 
@@ -71,7 +73,7 @@ Always inspect the current diff because this section may become stale as impleme
 
 ## First task
 
-Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 5 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 6.
+Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 6 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 7.
 
 ## Non-negotiable behavioral rules
 

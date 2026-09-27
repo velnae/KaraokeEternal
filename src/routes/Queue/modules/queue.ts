@@ -24,7 +24,7 @@ export const removeItem = createAction<{ queueId: number | number[] }>(QUEUE_REM
 export const queuePush = createAction<QueueState>(QUEUE_PUSH)
 
 export const queueSong = createAction(QUEUE_ADD, (songId: number, origin: QueueItemOrigin = 'PARTICIPANT') => ({
-  payload: { songId, origin },
+  payload: { songId, source: 'LOCAL' as const, sourceId: String(songId), origin },
   meta: { isOptimistic: true },
 }))
 

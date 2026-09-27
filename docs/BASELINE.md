@@ -92,3 +92,14 @@ Phase 4 adds deterministic selector coverage for FAIR turns of one or multiple s
 | Production build | Passed with the inherited size/license warnings |
 
 Phase 5 adds authorized local `HOUSE`/`OPERATOR` creation, origin labels, a manageable house pool, deterministic interleaving for zero/exact/fewer/excess availability and operator placement outside participant fairness history.
+
+## Results after Phase 6
+
+| Check | Result |
+| --- | --- |
+| Lint | 29 inherited errors remain; no Phase 6 regression |
+| Typecheck | Only the inherited `Player.tsx` TS2604 failure remains |
+| Automated tests | 116 passed across 12 files |
+| Production build | Passed with the inherited size/license warnings |
+
+Phase 6 adds shared normalized source contracts, `LocalSongSource` search/resolution, source invariants and queue creation from immutable resolved metadata. The scanner, local tables and client-visible library behavior remain unchanged.
