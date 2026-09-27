@@ -19,11 +19,13 @@ class Queue {
     roomId,
     songId,
     userId,
+    origin = 'PARTICIPANT',
     status = 'APPROVED',
   }: {
     roomId: number
     songId: number
     userId: number
+    origin?: QueueItemOrigin
     status?: 'PENDING_APPROVAL' | 'APPROVED'
   }): void {
     const fields = new Map()
@@ -42,7 +44,7 @@ class Queue {
         WHERE prevQueueId IS NOT NULL AND status NOT IN ${sql.tuple(HIDDEN_QUEUE_STATUSES)}
       )
     )`)
-    fields.set('origin', 'PARTICIPANT')
+    fields.set('origin', origin)
     fields.set('source', 'LOCAL')
     fields.set('status', status)
     fields.set('title', sql`(SELECT title FROM songs WHERE songId = ${songId})`)

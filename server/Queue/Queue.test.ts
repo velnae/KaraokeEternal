@@ -57,6 +57,21 @@ describe('Queue lifecycle persistence', () => {
     expect(Queue.countPending(2, 2)).toBe(2)
   })
 
+  it.each(['HOUSE', 'OPERATOR'] as const)('persists an approved local %s item without participant quota usage', (origin) => {
+    db.run('INSERT INTO rooms (roomId, name, status, data) VALUES (4, \'Origin room\', \'open\', \'{}\') ON CONFLICT DO NOTHING')
+    db.run('INSERT INTO users (userId, username, password, name, roleId) VALUES (4, \'operator\', \'\', \'Operator\', 1) ON CONFLICT DO NOTHING')
+
+    Queue.add({ roomId: 4, songId: 1, userId: 4, origin })
+    const queue = Queue.get(4)
+
+    expect(queue.entities[queue.result[queue.result.length - 1]]).toMatchObject({
+      origin,
+      source: 'LOCAL',
+      status: 'APPROVED',
+    })
+    expect(Queue.countPending(4, 4)).toBe(0)
+  })
+
   it('applies valid transitions idempotently and rejects terminal transitions', () => {
     const queueId = Queue.get(1).result[0]
 

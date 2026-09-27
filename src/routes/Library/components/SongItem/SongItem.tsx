@@ -8,6 +8,7 @@ import Buttons from 'components/Buttons/Buttons'
 import Icon from 'components/Icon/Icon'
 import ToggleAnimation from 'components/ToggleAnimation/ToggleAnimation'
 import { formatDuration } from 'lib/dateTime'
+import type { QueueItemOrigin } from 'shared/queueLifecycle'
 import styles from './SongItem.css'
 
 let ignoreMouseup = false
@@ -17,7 +18,7 @@ interface SongItemProps {
   artist?: string
   title: string
   duration: number
-  onSongQueue(songId: number): void
+  onSongQueue(songId: number, origin?: QueueItemOrigin): void
   onSongStarClick(songId: number): void
   onSongInfo(songId: number): void
   isPlayed: boolean
@@ -53,6 +54,10 @@ const SongItem = ({
   }
   const handleInfoClick = () => onSongInfo(songId)
   const handleStarClick = () => onSongStarClick(songId)
+  const handleAdminQueue = (origin: 'HOUSE' | 'OPERATOR') => {
+    onSongQueue(songId, origin)
+    setExpanded(false)
+  }
 
   const swipeHandlers = useSwipeable({
     onSwipedLeft: ({ event }) => {
@@ -100,6 +105,28 @@ const SongItem = ({
       </ToggleAnimation>
 
       <Buttons btnWidth={56} isExpanded={isExpanded}>
+        {isAdmin && (
+          <Button
+            aria-label='Add as house track'
+            className={clsx(styles.btn, styles.originButton, styles.house)}
+            onClick={() => handleAdminQueue('HOUSE')}
+            title='Add as house track'
+            data-hide
+          >
+            H
+          </Button>
+        )}
+        {isAdmin && (
+          <Button
+            aria-label='Add as operator item'
+            className={clsx(styles.btn, styles.originButton, styles.operator)}
+            onClick={() => handleAdminQueue('OPERATOR')}
+            title='Add as operator item'
+            data-hide
+          >
+            O
+          </Button>
+        )}
         <ButtonStar
           className={styles.btn}
           onClick={handleStarClick}

@@ -157,7 +157,7 @@ The backend does not become a canonical scheduler during the MVP. It is authorit
 - Choose the participant who has waited the longest since their last played turn.
 - Play up to `maxSongsPerParticipantRound` consecutive songs for that participant.
 - A newly joined participant is eligible for the next unlocked turn, preserving inherited Karaoke Eternal behavior.
-- The player locks the participant for the immediately upcoming item. New requests or preference changes must not replace that already announced turn; only later items are recalculated.
+- The player locks the next participant turn. `HOUSE` or `OPERATOR` items may precede it without allowing new requests or preference changes to replace that announced participant.
 
 ### 8.2 FIFO
 
@@ -167,15 +167,18 @@ The backend does not become a canonical scheduler during the MVP. It is authorit
 ### 8.3 House tracks
 
 - `HOUSE` items are selected or queued by the operator and form a separate eligible pool.
+- Admins add local songs to this pool from the library and manage approved pool entries through the House pool queue filter.
 - Between two participant turns, the player attempts to play `houseTracksBeforeParticipant` approved house items.
 - House tracks do not consume a participant turn and do not affect participant fairness history.
 - If fewer house items are available, play those available and continue with the next participant; the participant queue must never block waiting for house content.
 - The rule is not applied before the first participant turn after playback starts, nor when there are no approved participant requests.
+- Pool order follows the persisted linked-list order. Excess entries remain in the pool for later participant-turn gaps.
 
 ### 8.4 Operator items
 
 - `OPERATOR` identifies an explicit operator insertion or override.
 - The operator chooses its position using existing move/make-next controls.
+- Its persisted position is mapped to the corresponding participant slot after FAIR/FIFO calculation.
 - Operator items are exempt from participant limits and do not alter participant fairness history.
 
 ## 9. Song source abstraction

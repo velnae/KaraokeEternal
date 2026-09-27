@@ -81,3 +81,14 @@ Phase 3 adds AUTO/MANUAL creation, admin authorization, idempotent approve/rejec
 | Production build | Passed with the inherited size/license warnings |
 
 Phase 4 adds deterministic selector coverage for FAIR turns of one or multiple songs, FIFO creation order, late participants, immediate-next locking, mode changes and exclusion of ineligible origins/statuses. Scheduling remains in the frontend/player.
+
+## Results after Phase 5
+
+| Check | Result |
+| --- | --- |
+| Lint | 29 inherited errors remain; no Phase 5 regression |
+| Typecheck | Only the inherited `Player.tsx` TS2604 failure remains |
+| Automated tests | 108 passed across 11 files |
+| Production build | Passed with the inherited size/license warnings |
+
+Phase 5 adds authorized local `HOUSE`/`OPERATOR` creation, origin labels, a manageable house pool, deterministic interleaving for zero/exact/fewer/excess availability and operator placement outside participant fairness history.

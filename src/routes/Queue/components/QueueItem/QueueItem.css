@@ -93,6 +93,26 @@
   color: hsl(0, 75%, 65%);
 }
 
+.origin {
+  align-self: flex-start;
+  border: 1px solid currentColor;
+  border-radius: var(--border-radius);
+  color: var(--color-gray-5);
+  font-size: 0.6875rem;
+  line-height: 1;
+  margin-bottom: 0.25rem;
+  padding: 0.15rem 0.35rem;
+  text-transform: uppercase;
+}
+
+.origin.house {
+  color: hsl(145, 65%, 58%);
+}
+
+.origin.operator {
+  color: hsl(35, 90%, 62%);
+}
+
 .isOwner {
   color: var(--queued-item-color);
   text-shadow: var(--text-shadow-glow);

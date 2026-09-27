@@ -58,19 +58,20 @@ Already present at the time of this handoff:
 - Operator pending-request filter and participant realtime status feedback.
 - Configurable participant ordering: FAIR batches of 1–5 songs and FIFO by creation order.
 - Immediate-next participant locking across queue and preference changes.
+- Admin creation of local `HOUSE` and `OPERATOR` items with backend authorization.
+- House-pool UI, origin labels, deterministic house interleaving and manual operator positioning.
 
 Not yet implemented:
 
-- House/operator items.
 - Song-source abstraction.
 - YouTube search/playback.
-- Business-rule tests.
+- Remaining business-rule tests for later phases.
 
 Always inspect the current diff because this section may become stale as implementation advances.
 
 ## First task
 
-Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 4 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 5.
+Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 5 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 6.
 
 ## Non-negotiable behavioral rules
 

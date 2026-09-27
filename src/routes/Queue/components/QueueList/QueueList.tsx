@@ -12,7 +12,7 @@ import getWaits from '../../selectors/getWaits'
 import Button from 'components/Button/Button'
 import styles from './QueueList.css'
 
-type QueueFilter = 'queue' | 'pending'
+type QueueFilter = 'queue' | 'pending' | 'house'
 
 const QueueList = () => {
   const artists = useAppSelector(state => state.artists)
@@ -38,10 +38,17 @@ const QueueList = () => {
       && item.userId === user.userId
       && (item.status === 'PENDING_APPROVAL' || item.status === 'REJECTED')
   })
+  const houseIds = rawQueue.result.filter((queueId) => {
+    const item = rawQueue.entities[queueId]
+    return item.isOptimistic !== true && item.origin === 'HOUSE' && item.status === 'APPROVED'
+  })
   const result = user.isAdmin && filter === 'pending'
     ? pendingIds
-    : [...ownerFeedbackIds, ...queue.result.filter(queueId => !ownerFeedbackIds.includes(queueId))]
+    : user.isAdmin && filter === 'house'
+      ? houseIds
+      : [...ownerFeedbackIds, ...queue.result.filter(queueId => !ownerFeedbackIds.includes(queueId))]
   const pendingLabel = `Pending approval (${pendingIds.length})`
+  const houseLabel = `House pool (${houseIds.length})`
 
   // actions
   const dispatch = useAppDispatch()
@@ -71,9 +78,16 @@ const QueueList = () => {
 
     const duration = songs.entities[item.songId].duration
     const isCurrent = (qId === queueId) && !isAtQueueEnd
-    const isUpcoming = item.status === 'APPROVED' && qId !== queueId && !playerHistory.includes(qId)
+    const isUpcoming = item.status === 'APPROVED'
+      && queue.result.includes(qId)
+      && qId !== queueId
+      && !playerHistory.includes(qId)
     const isOwner = item.userId === user.userId
     const isTerminal = item.status === 'PLAYED' || item.status === 'FAILED'
+    const canRemoveByStatus = item.status === 'PENDING_APPROVAL'
+      || isUpcoming
+      || (user.isAdmin && filter === 'house' && item.status === 'APPROVED')
+    const isRemovable = canRemoveByStatus && (isOwner || user.isAdmin)
 
     return (
       <QueueItem
@@ -88,7 +102,7 @@ const QueueList = () => {
         isOwner={isOwner}
         isPlayed={isTerminal && !isCurrent}
         isPlaying={isCurrent && isPlaying}
-        isRemovable={(item.status === 'PENDING_APPROVAL' || isUpcoming) && (isOwner || user.isAdmin)}
+        isRemovable={isRemovable}
         isReplayable={(isTerminal || isCurrent) && user.isAdmin}
         isSkippable={isCurrent && (isOwner || user.isAdmin)}
         isStarred={starredSongs.includes(item.songId)}
@@ -121,10 +135,19 @@ const QueueList = () => {
           >
             {pendingLabel}
           </Button>
+          <Button
+            className={clsx(styles.filter, filter === 'house' && styles.active)}
+            onClick={() => setFilter('house')}
+          >
+            {houseLabel}
+          </Button>
         </div>
       )}
       {user.isAdmin && filter === 'pending' && pendingIds.length === 0 && (
         <div className={styles.empty}>No requests are waiting for approval.</div>
+      )}
+      {user.isAdmin && filter === 'house' && houseIds.length === 0 && (
+        <div className={styles.empty}>No approved house tracks are available.</div>
       )}
       <QueueListAnimator queueItems={items.filter(item => item !== null)} />
     </>

@@ -9,6 +9,7 @@ import {
   QUEUE_PUSH,
 } from '../../shared/actionTypes.js'
 import { normalizeQueuePrefs } from '../../shared/queueRules.js'
+import { QUEUE_ITEM_ORIGINS, type QueueItemOrigin } from '../../shared/queueLifecycle.js'
 
 // ------------------------------------
 // Action Handlers
@@ -16,7 +17,22 @@ import { normalizeQueuePrefs } from '../../shared/queueRules.js'
 const ACTION_HANDLERS = {
   [QUEUE_ADD]: async (sock, { payload }, acknowledge) => {
     const { songId } = payload
+    const origin: QueueItemOrigin = payload.origin ?? 'PARTICIPANT'
     const roomId = sock.user.roomId
+
+    if (!QUEUE_ITEM_ORIGINS.includes(origin)) {
+      return acknowledge({
+        type: QUEUE_ADD + '_ERROR',
+        error: 'Invalid queue item origin',
+      })
+    }
+
+    if (origin !== 'PARTICIPANT' && !sock.user.isAdmin) {
+      return acknowledge({
+        type: QUEUE_ADD + '_ERROR',
+        error: 'Only administrators can create house or operator items',
+      })
+    }
 
     try {
       await Rooms.validate(roomId, null, { validatePassword: false })
@@ -46,7 +62,8 @@ const ACTION_HANDLERS = {
       roomId,
       songId,
       userId: sock.user.userId,
-      status: !sock.user.isAdmin && queuePrefs.approvalMode === 'MANUAL'
+      origin,
+      status: origin === 'PARTICIPANT' && !sock.user.isAdmin && queuePrefs.approvalMode === 'MANUAL'
         ? 'PENDING_APPROVAL'
         : 'APPROVED',
     })

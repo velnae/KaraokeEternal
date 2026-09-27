@@ -36,7 +36,8 @@ const item = (
 const prefs = (
   rotationMode: QueuePrefs['rotationMode'] = 'FAIR',
   maxSongsPerParticipantRound = 1,
-) => ({ rotationMode, maxSongsPerParticipantRound })
+  houseTracksBeforeParticipant = 0,
+) => ({ rotationMode, maxSongsPerParticipantRound, houseTracksBeforeParticipant })
 
 describe('approval eligibility in participant ordering', () => {
   it('includes approved requests and excludes pending requests', () => {
@@ -125,5 +126,81 @@ describe('configurable participant ordering', () => {
     expect(fifo.slice(0, 2)).toEqual([1, 3])
     expect(fair).toEqual([1, 3, 5, 2, 4])
     expect(fifo).toEqual([1, 3, 2, 4, 5])
+  })
+})
+
+describe('house and operator ordering', () => {
+  it('disables house interleaving when the configured value is zero', () => {
+    const entities = {
+      1: item(1, 10),
+      2: item(2, 99, 'APPROVED', 'HOUSE'),
+      3: item(3, 20),
+    }
+
+    expect(buildRoundRobinQueue([1, 2, 3], entities, [], -1, null, prefs('FAIR', 1, 0)).result)
+      .toEqual([1, 3])
+  })
+
+  it.each([
+    { available: 2, expected: [1, 3, 4, 2] },
+    { available: 1, expected: [1, 3, 2] },
+    { available: 3, expected: [1, 3, 4, 2] },
+  ])('interleaves up to two house items when $available are available', ({ available, expected }) => {
+    const entities: Record<number, QueueItem> = {
+      1: item(1, 10),
+      2: item(2, 20),
+    }
+    const result = [1]
+
+    for (let index = 0; index < available; index++) {
+      const queueId = index + 3
+      entities[queueId] = item(queueId, 99, 'APPROVED', 'HOUSE')
+      result.push(queueId)
+    }
+    result.push(2)
+
+    expect(buildRoundRobinQueue(result, entities, [], -1, null, prefs('FAIR', 1, 2)).result)
+      .toEqual(expected)
+  })
+
+  it('never inserts house items before the first participant or without participants', () => {
+    const entities = {
+      1: item(1, 99, 'APPROVED', 'HOUSE'),
+      2: item(2, 10),
+    }
+
+    expect(buildRoundRobinQueue([1, 2], entities, [], -1, null, prefs('FAIR', 1, 2)).result)
+      .toEqual([2])
+    expect(buildRoundRobinQueue([1], { 1: entities[1] }, [], -1, null, prefs('FAIR', 1, 2)).result)
+      .toEqual([])
+  })
+
+  it('does not let house items alter participant fairness history', () => {
+    const entities: Record<number, QueueItem> = {
+      1: item(1, 10, 'PLAYED'),
+      2: item(2, 99, 'PLAYED', 'HOUSE'),
+      3: item(3, 10),
+      4: item(4, 20),
+      5: item(5, 99, 'APPROVED', 'HOUSE'),
+    }
+
+    const ordered = buildRoundRobinQueue([1, 2, 3, 4, 5], entities, [1, 2], -1, null, prefs('FAIR', 1, 1)).result
+
+    expect(ordered).toEqual([1, 2, 4, 5, 3])
+    expect(ordered.filter(queueId => entities[queueId].origin === 'PARTICIPANT')).toEqual([1, 4, 3])
+  })
+
+  it('preserves operator positions without adding them to participant turns', () => {
+    const entities = {
+      1: item(1, 10),
+      2: item(2, 99, 'APPROVED', 'OPERATOR'),
+      3: item(3, 20),
+      4: item(4, 30, 'APPROVED', 'OPERATOR'),
+    }
+
+    expect(buildRoundRobinQueue([1, 2, 3, 4], entities, [], -1, null, prefs()).result)
+      .toEqual([1, 2, 3, 4])
+    expect(buildRoundRobinQueue([4, 1, 2, 3], entities, [], -1, null, prefs()).result)
+      .toEqual([4, 1, 2, 3])
   })
 })

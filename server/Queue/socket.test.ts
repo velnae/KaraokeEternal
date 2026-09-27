@@ -98,7 +98,13 @@ describe('participant pending request limit', () => {
 
     await handler(socket, { payload: { songId: 99 } }, acknowledge)
 
-    expect(add).toHaveBeenCalledWith({ roomId: 1, songId: 99, userId: 10, status: 'APPROVED' })
+    expect(add).toHaveBeenCalledWith({
+      roomId: 1,
+      songId: 99,
+      userId: 10,
+      origin: 'PARTICIPANT',
+      status: 'APPROVED',
+    })
     expect(acknowledge).toHaveBeenCalledWith({ type: QUEUE_ADD + '_SUCCESS' })
     expect(emit).toHaveBeenCalledWith('action', {
       type: QUEUE_PUSH,
@@ -143,6 +149,7 @@ describe('participant pending request limit', () => {
       roomId: 1,
       songId: 99,
       userId: 10,
+      origin: 'PARTICIPANT',
       status: 'PENDING_APPROVAL',
     })
   })
@@ -164,6 +171,58 @@ describe('participant pending request limit', () => {
     expect(getRoom).toHaveBeenCalledTimes(2)
     expect(add.mock.calls.map(([request]) => request.status)).toEqual(['PENDING_APPROVAL', 'APPROVED'])
     expect(moderate).not.toHaveBeenCalled()
+  })
+})
+
+describe('house and operator creation', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it.each(['HOUSE', 'OPERATOR'] as const)('allows an admin to create an approved %s item', async (origin) => {
+    vi.spyOn(Rooms, 'validate').mockResolvedValue(true)
+    vi.spyOn(Rooms, 'get').mockReturnValue({ result: [1], entities: { 1: { prefs: {} } } })
+    vi.spyOn(Queue, 'get').mockReturnValue(mockQueue([]))
+    const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
+    const acknowledge = vi.fn()
+    const { socket } = createSocket({ isAdmin: true })
+
+    await handler(socket, { payload: { songId: 99, origin } }, acknowledge)
+
+    expect(add).toHaveBeenCalledWith({
+      roomId: 1,
+      songId: 99,
+      userId: 10,
+      origin,
+      status: 'APPROVED',
+    })
+    expect(acknowledge).toHaveBeenCalledWith({ type: QUEUE_ADD + '_SUCCESS' })
+  })
+
+  it.each(['HOUSE', 'OPERATOR'] as const)('denies non-admin creation of a %s item', async (origin) => {
+    const add = vi.spyOn(Queue, 'add')
+    const acknowledge = vi.fn()
+    const { socket } = createSocket()
+
+    await handler(socket, { payload: { songId: 99, origin } }, acknowledge)
+
+    expect(add).not.toHaveBeenCalled()
+    expect(acknowledge).toHaveBeenCalledWith({
+      type: QUEUE_ADD + '_ERROR',
+      error: 'Only administrators can create house or operator items',
+    })
+  })
+
+  it('rejects an unknown queue origin', async () => {
+    const add = vi.spyOn(Queue, 'add')
+    const acknowledge = vi.fn()
+    const { socket } = createSocket({ isAdmin: true })
+
+    await handler(socket, { payload: { songId: 99, origin: 'SYSTEM' } }, acknowledge)
+
+    expect(add).not.toHaveBeenCalled()
+    expect(acknowledge).toHaveBeenCalledWith({
+      type: QUEUE_ADD + '_ERROR',
+      error: 'Invalid queue item origin',
+    })
   })
 })
 

@@ -12,7 +12,7 @@ import { showSongInfo } from 'store/modules/songInfo'
 import { toggleSongStarred } from 'store/modules/userStars'
 import { showErrorMessage } from 'store/modules/ui'
 import { approveRequest, queueSong, rejectRequest, removeItem } from '../../modules/queue'
-import type { QueueItemStatus } from 'shared/queueLifecycle'
+import type { QueueItemOrigin, QueueItemStatus } from 'shared/queueLifecycle'
 import styles from './QueueItem.css'
 
 const LONG_PRESS_THRESHOLD_MS = 700
@@ -33,6 +33,7 @@ interface QueueItemProps {
   isStarred: boolean
   isUpcoming: boolean
   pctPlayed: number
+  origin: QueueItemOrigin
   queueId: number
   songId: number
   starCount: number
@@ -64,6 +65,7 @@ const QueueItem = ({
   isUpcoming,
   onMoveClick,
   onRemoveUpcoming,
+  origin,
   pctPlayed,
   queueId,
   songId,
@@ -90,7 +92,7 @@ const QueueItem = ({
     setExpanded(false)
   }
   const handleRequeueClick = () => {
-    dispatch(queueSong(songId))
+    dispatch(queueSong(songId, origin))
     setExpanded(false)
   }
   const handleSkipClick = () => {
@@ -165,6 +167,9 @@ const QueueItem = ({
           </div>
           <div className={clsx(styles.user, isOwner && styles.isOwner)}>
             {userDisplayName}
+          </div>
+          <div className={clsx(styles.origin, styles[origin.toLowerCase()])}>
+            {origin === 'PARTICIPANT' ? 'Participant' : origin === 'HOUSE' ? 'House' : 'Operator'}
           </div>
           {statusLabel && (
             <div className={clsx(styles.status, status === 'REJECTED' && styles.rejected)}>

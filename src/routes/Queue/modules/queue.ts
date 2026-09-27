@@ -11,6 +11,7 @@ import {
   LOGOUT,
 } from 'shared/actionTypes'
 import type { QueueItem, OptimisticQueueItem } from 'shared/types'
+import type { QueueItemOrigin } from 'shared/queueLifecycle'
 
 // ------------------------------------
 // Actions
@@ -22,8 +23,8 @@ export const rejectRequest = createAction<{ queueId: number }>(QUEUE_REJECT)
 export const removeItem = createAction<{ queueId: number | number[] }>(QUEUE_REMOVE)
 export const queuePush = createAction<QueueState>(QUEUE_PUSH)
 
-export const queueSong = createAction(QUEUE_ADD, (songId: number) => ({
-  payload: { songId },
+export const queueSong = createAction(QUEUE_ADD, (songId: number, origin: QueueItemOrigin = 'PARTICIPANT') => ({
+  payload: { songId, origin },
   meta: { isOptimistic: true },
 }))
 

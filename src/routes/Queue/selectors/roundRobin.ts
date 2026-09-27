@@ -1,107 +1,238 @@
 import type { OptimisticQueueItem, QueueItem } from '../../../../shared/types.js'
 import type { QueuePrefs } from '../../../../shared/queueRules.js'
 
+interface ParticipantTurn {
+  ids: number[]
+  startsNewTurn: boolean
+}
+
+const isPersistedItem = (
+  item: QueueItem | OptimisticQueueItem | undefined,
+): item is QueueItem => item !== undefined && item.isOptimistic !== true
+
 export const buildRoundRobinQueue = (
   result: number[],
   entities: Record<number, QueueItem | OptimisticQueueItem>,
   history: number[],
   curId: number,
   nextUserId: number | null,
-  prefs: Pick<QueuePrefs, 'maxSongsPerParticipantRound' | 'rotationMode'>,
+  prefs: Pick<QueuePrefs, 'houseTracksBeforeParticipant' | 'maxSongsPerParticipantRound' | 'rotationMode'>,
 ) => {
-  // in case history references non-existent items or queue is still loading
-  history = history.filter(queueId => result.includes(queueId))
+  // History/current are an immutable playback prefix and may contain every origin.
+  const fixedHistory = history.filter(queueId => result.includes(queueId))
+  if (entities[curId] && !fixedHistory.includes(curId)) fixedHistory.push(curId)
 
-  // consider current item played (don't re-order it)
-  if (entities[curId] && history.lastIndexOf(curId) === -1) {
-    history.push(curId)
-  }
-
-  const isEligible = (queueId: number): boolean => {
+  const isApprovedOrigin = (queueId: number, origin: QueueItem['origin']): boolean => {
     const item = entities[queueId]
-    return item.isOptimistic !== true
-      && item.origin === 'PARTICIPANT'
-      && item.status === 'APPROVED'
+    return isPersistedItem(item) && item.origin === origin && item.status === 'APPROVED'
   }
 
-  // "lock in" the next participant item (don't re-order it)
-  if (nextUserId !== null) {
-    for (const queueId of result) {
-      if (!history.includes(queueId)
-        && isEligible(queueId)
-        && (entities[queueId] as QueueItem).userId === nextUserId
-      ) {
-        history.push(queueId)
-        break
-      }
-    }
-  }
-
-  const eligible = result.filter(queueId => !history.includes(queueId) && isEligible(queueId))
-
-  if (prefs.rotationMode === 'FIFO') {
-    const upcoming = eligible.sort((leftId, rightId) => {
-      const left = entities[leftId] as QueueItem
-      const right = entities[rightId] as QueueItem
-      return left.dateCreated - right.dateCreated || left.queueId - right.queueId
+  const participantIds = result.filter(queueId => (
+    !fixedHistory.includes(queueId) && isApprovedOrigin(queueId, 'PARTICIPANT')
+  ))
+  const lockedId = nextUserId === null
+    ? undefined
+    : participantIds.find(queueId => (entities[queueId] as QueueItem).userId === nextUserId)
+  const unlockedParticipantIds = participantIds.filter(queueId => queueId !== lockedId)
+  const participantHistory = fixedHistory
+    .filter((queueId) => {
+      const item = entities[queueId]
+      return isPersistedItem(item) && item.origin === 'PARTICIPANT'
     })
-
-    return {
-      result: history.concat(upcoming),
-      entities: entities as Record<number, QueueItem>,
-    }
-  }
-
-  const map = new Map<number, number[]>()
-  const upcoming: number[] = []
-  const resultByUser = history
-    .filter(queueId => entities[queueId]?.isOptimistic !== true && entities[queueId]?.origin === 'PARTICIPANT')
     .map(queueId => (entities[queueId] as QueueItem).userId)
 
-  eligible.forEach((queueId) => {
-    const userId = (entities[queueId] as QueueItem).userId
-    map.set(userId, map.has(userId) ? [...map.get(userId), queueId] : [queueId])
+  const turns = prefs.rotationMode === 'FIFO'
+    ? buildFifoTurns(unlockedParticipantIds, entities, lockedId)
+    : buildFairTurns(
+        unlockedParticipantIds,
+        entities,
+        participantHistory,
+        lockedId,
+        prefs.maxSongsPerParticipantRound,
+      )
+
+  const participantOrder = turns.flatMap(turn => turn.ids)
+  const turnStarts = new Set(
+    turns.filter(turn => turn.startsNewTurn).map(turn => turn.ids[0]),
+  )
+  const upcoming = mergeOperatorItems(result, entities, fixedHistory, participantOrder)
+  const housePool = result.filter(queueId => (
+    !fixedHistory.includes(queueId) && isApprovedOrigin(queueId, 'HOUSE')
+  ))
+  const scheduled = interleaveHouseItems(
+    upcoming,
+    entities,
+    fixedHistory,
+    housePool,
+    turnStarts,
+    prefs.houseTracksBeforeParticipant,
+  )
+
+  return {
+    result: fixedHistory.concat(scheduled),
+    entities: entities as Record<number, QueueItem>,
+  }
+}
+
+const buildFifoTurns = (
+  participantIds: number[],
+  entities: Record<number, QueueItem | OptimisticQueueItem>,
+  lockedId?: number,
+): ParticipantTurn[] => {
+  const sorted = [...participantIds].sort((leftId, rightId) => {
+    const left = entities[leftId] as QueueItem
+    const right = entities[rightId] as QueueItem
+    return left.dateCreated - right.dateCreated || left.queueId - right.queueId
   })
 
-  const appendTurn = (userId: number, limit: number) => {
-    const userItems = map.get(userId) ?? []
-    const turnItems = userItems.splice(0, limit)
+  return (lockedId === undefined ? sorted : [lockedId, ...sorted])
+    .map(queueId => ({ ids: [queueId], startsNewTurn: true }))
+}
 
-    if (userItems.length) map.set(userId, userItems)
-    else map.delete(userId)
+const buildFairTurns = (
+  participantIds: number[],
+  entities: Record<number, QueueItem | OptimisticQueueItem>,
+  participantHistory: number[],
+  lockedId: number | undefined,
+  turnLimit: number,
+): ParticipantTurn[] => {
+  const byUser = new Map<number, number[]>()
+  const turns: ParticipantTurn[] = []
+  const resultByUser = [...participantHistory]
 
-    resultByUser.push(...turnItems.map(() => userId))
-    upcoming.push(...turnItems)
+  participantIds.forEach((queueId) => {
+    const userId = (entities[queueId] as QueueItem).userId
+    byUser.set(userId, [...(byUser.get(userId) ?? []), queueId])
+  })
+
+  const appendTurn = (
+    userId: number,
+    limit: number,
+    startsNewTurn: boolean,
+    initialIds: number[] = [],
+  ) => {
+    const userItems = byUser.get(userId) ?? []
+    const ids = [...initialIds, ...userItems.splice(0, Math.max(0, limit - initialIds.length))]
+
+    if (userItems.length) byUser.set(userId, userItems)
+    else byUser.delete(userId)
+
+    resultByUser.push(...ids.map(() => userId))
+    if (ids.length) turns.push({ ids, startsNewTurn })
   }
 
   const trailingUserId = resultByUser[resultByUser.length - 1]
-  if (typeof trailingUserId === 'number' && map.has(trailingUserId)) {
-    let consecutive = 0
-    for (let i = resultByUser.length - 1; i >= 0 && resultByUser[i] === trailingUserId; i--) consecutive++
+  let trailingCount = 0
+  for (let i = resultByUser.length - 1; i >= 0 && resultByUser[i] === trailingUserId; i--) trailingCount++
 
-    const remainingInTurn = prefs.maxSongsPerParticipantRound - consecutive
-    if (remainingInTurn > 0) appendTurn(trailingUserId, remainingInTurn)
+  if (lockedId !== undefined) {
+    const lockedUserId = (entities[lockedId] as QueueItem).userId
+    const continuesTurn = lockedUserId === trailingUserId && trailingCount < turnLimit
+    const limit = continuesTurn ? turnLimit - trailingCount : turnLimit
+    appendTurn(lockedUserId, limit, !continuesTurn, [lockedId])
+  } else if (typeof trailingUserId === 'number' && byUser.has(trailingUserId)) {
+    const remainingInTurn = turnLimit - trailingCount
+    if (remainingInTurn > 0) appendTurn(trailingUserId, remainingInTurn, false)
   }
 
-  while (map.size) {
-    let max = -1
-    let maxUserId
+  while (byUser.size) {
+    let longestWait = -1
+    let selectedUserId: number | undefined
 
-    for (const userId of map.keys()) {
+    for (const userId of byUser.keys()) {
       const idx = resultByUser.lastIndexOf(userId)
       const distance = idx === -1 ? Infinity : resultByUser.length - idx
 
-      if (distance > max) {
-        max = distance
-        maxUserId = userId
+      if (distance > longestWait) {
+        longestWait = distance
+        selectedUserId = userId
       }
     }
 
-    appendTurn(maxUserId, prefs.maxSongsPerParticipantRound)
+    if (selectedUserId === undefined) break
+    appendTurn(selectedUserId, turnLimit, true)
   }
 
-  return {
-    result: history.concat(upcoming) as number[],
-    entities: entities as Record<number, QueueItem>,
+  return turns
+}
+
+const mergeOperatorItems = (
+  result: number[],
+  entities: Record<number, QueueItem | OptimisticQueueItem>,
+  fixedHistory: number[],
+  participantOrder: number[],
+): number[] => {
+  const slots = new Map<number, number[]>()
+  let participantSlot = 0
+
+  result.forEach((queueId) => {
+    if (fixedHistory.includes(queueId)) return
+    const item = entities[queueId]
+    if (!isPersistedItem(item) || item.status !== 'APPROVED') return
+
+    if (item.origin === 'PARTICIPANT') {
+      participantSlot++
+    } else if (item.origin === 'OPERATOR') {
+      slots.set(participantSlot, [...(slots.get(participantSlot) ?? []), queueId])
+    }
+  })
+
+  const merged: number[] = []
+  participantOrder.forEach((queueId, index) => {
+    merged.push(...(slots.get(index) ?? []), queueId)
+  })
+  merged.push(...(slots.get(participantOrder.length) ?? []))
+
+  // Filtering may leave an operator beyond the final participant slot.
+  for (const [slot, queueIds] of slots) {
+    if (slot > participantOrder.length) merged.push(...queueIds)
   }
+
+  return merged
+}
+
+const interleaveHouseItems = (
+  upcoming: number[],
+  entities: Record<number, QueueItem | OptimisticQueueItem>,
+  fixedHistory: number[],
+  housePool: number[],
+  turnStarts: Set<number>,
+  limit: number,
+): number[] => {
+  const scheduled: number[] = []
+  let houseIndex = 0
+  let hasParticipant = false
+  let housesSinceParticipant = 0
+
+  for (let i = fixedHistory.length - 1; i >= 0; i--) {
+    const item = entities[fixedHistory[i]]
+    if (!isPersistedItem(item)) continue
+    if (item.origin === 'PARTICIPANT') {
+      hasParticipant = true
+      break
+    }
+    if (item.origin === 'HOUSE') housesSinceParticipant++
+  }
+
+  upcoming.forEach((queueId) => {
+    const item = entities[queueId] as QueueItem
+
+    if (item.origin === 'PARTICIPANT' && turnStarts.has(queueId) && hasParticipant) {
+      const amount = Math.min(
+        Math.max(0, limit - housesSinceParticipant),
+        housePool.length - houseIndex,
+      )
+      scheduled.push(...housePool.slice(houseIndex, houseIndex + amount))
+      houseIndex += amount
+    }
+
+    scheduled.push(queueId)
+
+    if (item.origin === 'PARTICIPANT') {
+      hasParticipant = true
+      housesSinceParticipant = 0
+    }
+  })
+
+  return scheduled
 }

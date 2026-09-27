@@ -94,17 +94,21 @@ const PlayerController = (props: PlayerControllerProps) => {
     })
   }, [handleStatus, nextQueueItem, player.historyJSON, queueItem])
 
-  // Lock the participant for the immediately upcoming item. This prevents
-  // realtime queue/settings changes from replacing an already announced turn.
+  // Lock the participant for the next participant turn. House/operator items
+  // may play before it without allowing realtime changes to replace that turn.
   useEffect(() => {
-    const upcomingUserId = nextQueueItem?.origin === 'PARTICIPANT'
-      ? nextQueueItem.userId
-      : null
+    const currentIndex = queue.result.indexOf(queueItem?.queueId)
+    const upcomingParticipantId = queue.result
+      .slice(currentIndex + 1)
+      .find(queueId => queue.entities[queueId].origin === 'PARTICIPANT')
+    const upcomingUserId = upcomingParticipantId === undefined
+      ? null
+      : queue.entities[upcomingParticipantId].userId
 
     if (player.nextUserId !== upcomingUserId) {
       handleStatus({ nextUserId: upcomingUserId })
     }
-  }, [handleStatus, nextQueueItem, player.nextUserId])
+  }, [handleStatus, player.nextUserId, queue, queueItem?.queueId])
 
   // always emit status when any of these change
   useEffect(() => handleStatus({ isVideoKeyingEnabled: queueItem?.isVideoKeyingEnabled }), [

@@ -72,9 +72,9 @@ Do not move the full scheduler to the backend during MVP.
 
 ## Current code caveat
 
-Queue Settings, shared validation/defaults and Phases 1–4 tests are implemented. Queue lifecycle, metadata snapshots and pending counts are persisted in SQLite. Player status updates synchronize lifecycle idempotently, and terminal history is reconstructed after refresh/reconnect. AUTO/MANUAL approval, admin moderation, participant feedback and configurable FAIR/FIFO ordering are operational.
+Queue Settings, shared validation/defaults and Phases 1–5 tests are implemented. Queue lifecycle, metadata snapshots and pending counts are persisted in SQLite. Player status updates synchronize lifecycle idempotently, and terminal history is reconstructed after refresh/reconnect. AUTO/MANUAL approval, admin moderation, participant feedback, configurable FAIR/FIFO ordering, house interleaving and manually positioned operator items are operational.
 
-The next implementation phase is house and operator items. Inspect the live branch before relying on this summary.
+The next implementation phase is the local song-source abstraction. Inspect the live branch before relying on this summary.
 
 ## Definition of done
 

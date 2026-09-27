@@ -87,3 +87,16 @@
   color: var(--song-item-btn-active-bg-color);
   filter: var(--song-item-btn-active-filter);
 }
+
+.originButton {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.originButton.house {
+  color: hsl(145, 65%, 58%);
+}
+
+.originButton.operator {
+  color: hsl(35, 90%, 62%);
+}

@@ -6,6 +6,7 @@ import { queueSong } from 'routes/Queue/modules/queue'
 import { showSongInfo } from 'store/modules/songInfo'
 import { toggleSongStarred } from 'store/modules/userStars'
 import getSongsStatus from '../../selectors/getSongsStatus'
+import type { QueueItemOrigin } from 'shared/queueLifecycle'
 
 interface SongListProps {
   filterKeywords?: string[]
@@ -22,7 +23,9 @@ const SongList = (props: SongListProps) => {
   const isAdmin = useAppSelector(state => state.user.isAdmin)
   const { played, upcoming, current } = useAppSelector(getSongsStatus)
 
-  const handleSongQueue = (songId: number) => dispatch(queueSong(songId))
+  const handleSongQueue = (songId: number, origin: QueueItemOrigin = 'PARTICIPANT') => {
+    dispatch(queueSong(songId, origin))
+  }
   const handleSongInfo = (songId: number) => dispatch(showSongInfo(songId))
   const handleSongStar = (songId: number) => dispatch(toggleSongStarred(songId))
 
