@@ -72,11 +72,9 @@ Do not move the full scheduler to the backend during MVP.
 
 ## Current code caveat
 
-Queue Settings, shared validation/defaults and Phase 1 tests are implemented in the current working tree.
+Queue Settings, shared validation/defaults and Phases 1–2 tests are implemented. Queue lifecycle, metadata snapshots and pending counts are persisted in SQLite. Player status updates synchronize lifecycle idempotently, and terminal history is reconstructed after refresh/reconnect.
 
-The branch currently contains an initial pending-limit implementation based on the connected player's `historyJSON`. This is temporary. Phase 2 replaces it with persisted lifecycle counting so player refresh/reconnect cannot revive old requests.
-
-Inspect the live branch before relying on this summary.
+The next implementation phase is automatic/manual approval. Inspect the live branch before relying on this summary.
 
 ## Definition of done
 

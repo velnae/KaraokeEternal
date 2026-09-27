@@ -48,3 +48,14 @@
 | Development HTTP smoke test | Passed; compiled successfully and returned the application shell with HTTP 200 |
 
 Vitest now excludes `build/**`, preventing compiled test files from being discovered and executed a second time after a build.
+
+## Results after Phase 2
+
+| Check | Result |
+| --- | --- |
+| Lint | 29 inherited errors remain; no Phase 2 regression |
+| Typecheck | Only the inherited `Player.tsx` TS2604 failure remains |
+| Automated tests | 77 passed across 9 files |
+| Production build | Passed with the inherited size/license warnings |
+
+Phase 2 adds migration, lifecycle transition, pending-status, player authorization/recovery and socket integration coverage. The persisted queue state, rather than `historyJSON`, now determines pending limits and survives player refresh/reconnect.

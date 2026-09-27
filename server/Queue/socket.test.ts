@@ -39,6 +39,16 @@ const mockQueue = (userIds: number[]) => {
       userDisplayName: `User ${userId}`,
       mediaType: 'mp4',
       isVideoKeyingEnabled: false,
+      origin: 'PARTICIPANT',
+      source: 'LOCAL',
+      status: 'APPROVED',
+      externalId: null,
+      title: `Song ${queueId}`,
+      artistOrChannel: 'Artist',
+      durationSeconds: 180,
+      thumbnailUrl: null,
+      dateCreated: 0,
+      dateUpdated: 0,
     }
   })
 
@@ -49,14 +59,12 @@ describe('participant pending request limit', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('rejects a participant at the configured pending limit', async () => {
-    const queue = mockQueue([10, 10, 20])
     vi.spyOn(Rooms, 'validate').mockResolvedValue(true)
     vi.spyOn(Rooms, 'get').mockReturnValue({
       result: [1],
       entities: { 1: { prefs: { queue: { maxPendingPerParticipant: 2 } } } },
     })
-    vi.spyOn(Rooms, 'getPlayerStatus').mockReturnValue(null)
-    vi.spyOn(Queue, 'get').mockReturnValue(queue)
+    vi.spyOn(Queue, 'countPending').mockReturnValue(2)
     const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
     const acknowledge = vi.fn()
     const { socket } = createSocket()
@@ -70,14 +78,14 @@ describe('participant pending request limit', () => {
     })
   })
 
-  it('excludes played and currently playing items from the pending count', async () => {
+  it('allows a request while the persisted pending count is below the limit', async () => {
     const queue = mockQueue([10, 10, 10, 20])
     vi.spyOn(Rooms, 'validate').mockResolvedValue(true)
     vi.spyOn(Rooms, 'get').mockReturnValue({
       result: [1],
       entities: { 1: { prefs: { queue: { maxPendingPerParticipant: 2 } } } },
     })
-    vi.spyOn(Rooms, 'getPlayerStatus').mockReturnValue({ historyJSON: '[1]', queueId: 2 })
+    vi.spyOn(Queue, 'countPending').mockReturnValue(1)
     vi.spyOn(Queue, 'get').mockReturnValue(queue)
     const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
     const acknowledge = vi.fn()
@@ -100,7 +108,7 @@ describe('participant pending request limit', () => {
       result: [1],
       entities: { 1: { prefs: {} } },
     })
-    vi.spyOn(Rooms, 'getPlayerStatus').mockReturnValue(null)
+    const countPending = vi.spyOn(Queue, 'countPending')
     vi.spyOn(Queue, 'get').mockReturnValue(queue)
     const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
     const acknowledge = vi.fn()
@@ -109,6 +117,7 @@ describe('participant pending request limit', () => {
     await handler(socket, { payload: { songId: 99 } }, acknowledge)
 
     expect(add).toHaveBeenCalledOnce()
+    expect(countPending).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({ type: QUEUE_ADD + '_SUCCESS' })
   })
 })

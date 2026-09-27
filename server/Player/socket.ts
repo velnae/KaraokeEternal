@@ -1,4 +1,5 @@
 import Rooms from '../Rooms/Rooms.js'
+import Queue from '../Queue/Queue.js'
 
 import {
   PLAYER_CMD_NEXT,
@@ -17,6 +18,7 @@ import {
   PLAYER_EMIT_LEAVE,
   PLAYER_STATUS,
   PLAYER_LEAVE,
+  QUEUE_PUSH,
 } from '../../shared/actionTypes.js'
 
 // ------------------------------------
@@ -63,6 +65,17 @@ const ACTION_HANDLERS = {
     })
   },
   [PLAYER_EMIT_STATUS]: (sock, { payload }) => {
+    if (!sock.user.isAdmin) {
+      throw new Error('Only administrators can publish player status')
+    }
+
+    if (Queue.syncPlayerLifecycle(sock.user.roomId, payload)) {
+      sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {
+        type: QUEUE_PUSH,
+        payload: Queue.get(sock.user.roomId),
+      })
+    }
+
     // so we can tell the room when players leave and
     // relay last known player status on client join
     sock._lastPlayerStatus = payload
@@ -77,6 +90,13 @@ const ACTION_HANDLERS = {
 
     // any players left in room?
     if (!Rooms.isPlayerPresent(sock.server, sock.user.roomId)) {
+      if (Queue.requeuePlaying(sock.user.roomId)) {
+        sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {
+          type: QUEUE_PUSH,
+          payload: Queue.get(sock.user.roomId),
+        })
+      }
+
       sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {
         type: PLAYER_LEAVE,
         payload: { socketId: sock.id },

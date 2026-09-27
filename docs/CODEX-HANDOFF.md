@@ -48,13 +48,14 @@ Already present at the time of this handoff:
 - Backend validation and normalization for room creation, update and realtime preference preview.
 - Room persistence, preference socket and pending-limit tests.
 - `Rooms.getPlayerStatus()`.
-- Initial backend enforcement of `maxPendingPerParticipant` using player status/history.
-
-The initial limit implementation is transitional. `IMPLEMENTATION-PLAN.md` Phase 2 requires replacing player-history-based pending counting with persisted lifecycle status.
+- SQLite queue lifecycle/source migration with metadata snapshots.
+- Shared queue origin, source, status and transition rules.
+- Persisted pending-count enforcement independent of player history.
+- Idempotent player lifecycle synchronization and interrupted-player recovery.
+- Client history reconstruction from persisted terminal states.
 
 Not yet implemented:
 
-- Persisted request lifecycle.
 - Manual approval.
 - FAIR parameter/FIFO selection.
 - House/operator items.
@@ -66,7 +67,7 @@ Always inspect the current diff because this section may become stale as impleme
 
 ## First task
 
-Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 and 1 are complete in the current working tree. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 2.
+Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 2 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 3.
 
 ## Non-negotiable behavioral rules
 

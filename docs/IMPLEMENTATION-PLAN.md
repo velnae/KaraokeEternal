@@ -9,8 +9,9 @@ This file is the only authoritative implementation sequence. `HANDOFF.md` and `C
 ## Current progress
 
 - Phase 0: completed on 2026-09-26. See `docs/BASELINE.md`.
-- Phase 1: completed locally; not yet committed or pushed.
-- Next phase: Phase 2 — Queue item model and persistent lifecycle.
+- Phase 1: completed in commit `1c725248`.
+- Phase 2: completed on 2026-09-26.
+- Next phase: Phase 3 — Automatic and manual approval.
 
 ## 2. Delivery rules
 

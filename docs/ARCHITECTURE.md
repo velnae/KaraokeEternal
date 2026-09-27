@@ -97,6 +97,7 @@ PENDING_APPROVAL -> APPROVED -> PLAYING -> PLAYED
 PENDING_APPROVAL -> REJECTED
 APPROVED         -> REMOVED
 PLAYING          -> FAILED | PLAYED
+PLAYING          -> APPROVED (only when the active player leaves unexpectedly)
 ```
 
 - `AUTO` creates the item directly as `APPROVED`.
@@ -106,6 +107,7 @@ PLAYING          -> FAILED | PLAYED
 - `PLAYING`, `PLAYED`, `REJECTED`, `REMOVED` and `FAILED` do not count toward that limit.
 - Status transitions are persisted by the backend and broadcast through Socket.IO.
 - Player reports must be idempotent: repeating the same transition must not duplicate history or counters.
+- If the last active player disconnects while an item is `PLAYING`, the backend returns that item to `APPROVED`; terminal items are never revived.
 
 Persisting lifecycle state removes the pending-limit dependency on the browser player's ephemeral `historyJSON`. The player may continue to use its history for presentation and round-robin continuity, but it is not the authoritative source for whether a request is pending.
 

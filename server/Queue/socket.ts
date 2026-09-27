@@ -3,33 +3,6 @@ import Rooms from '../Rooms/Rooms.js'
 import { QUEUE_ADD, QUEUE_MOVE, QUEUE_REMOVE, QUEUE_PUSH } from '../../shared/actionTypes.js'
 import { normalizeQueuePrefs } from '../../shared/queueRules.js'
 
-const getPendingCount = (sock, roomId: number, userId: number): number => {
-  const queue = Queue.get(roomId)
-  const playerStatus = Rooms.getPlayerStatus(sock.server, roomId)
-  const alreadyPlayed = new Set<number>()
-
-  if (playerStatus?.historyJSON) {
-    try {
-      const history = JSON.parse(playerStatus.historyJSON)
-      if (Array.isArray(history)) {
-        for (const queueId of history) {
-          if (Number.isInteger(queueId)) alreadyPlayed.add(queueId)
-        }
-      }
-    } catch {
-      // Ignore malformed player history and conservatively treat all queue items as pending.
-    }
-  }
-
-  if (Number.isInteger(playerStatus?.queueId) && playerStatus.queueId >= 0) {
-    alreadyPlayed.add(playerStatus.queueId)
-  }
-
-  return queue.result.filter((queueId) => {
-    return !alreadyPlayed.has(queueId) && queue.entities[queueId].userId === userId
-  }).length
-}
-
 // ------------------------------------
 // Action Handlers
 // ------------------------------------
@@ -51,7 +24,7 @@ const ACTION_HANDLERS = {
     const maxPending = normalizeQueuePrefs(room?.prefs?.queue).maxPendingPerParticipant
 
     if (!sock.user.isAdmin) {
-      const pendingCount = getPendingCount(sock, roomId, sock.user.userId)
+      const pendingCount = Queue.countPending(roomId, sock.user.userId)
 
       if (pendingCount >= maxPending) {
         return acknowledge({
@@ -122,7 +95,7 @@ const ACTION_HANDLERS = {
     }
 
     for (const id of ids) {
-      Queue.remove(id)
+      Queue.remove(id, sock.user.roomId)
     }
 
     // success

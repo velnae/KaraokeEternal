@@ -20,7 +20,11 @@ const PlayerController = (props: PlayerControllerProps) => {
   const prefs = useAppSelector(state => state.prefs)
   const roomPrefs = useAppSelector(getRoomPrefs)
   const queueItem = queue.entities[player.queueId]
-  const nextQueueItem = queue.entities[queue.result[queue.result.indexOf(player.queueId) + 1]]
+  const currentIndex = queue.result.indexOf(player.queueId)
+  const nextQueueItem = queue.result
+    .slice(currentIndex === -1 ? 0 : currentIndex + 1)
+    .map(queueId => queue.entities[queueId])
+    .find(item => item.status === 'APPROVED')
 
   const dispatch = useAppDispatch()
   const handleStatus = useCallback((status?: Partial<PlayerState>) => dispatch(playerStatus(status)), [dispatch])

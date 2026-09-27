@@ -1,0 +1,94 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { close, db, open } from '../lib/Database.js'
+import Queue from './Queue.js'
+
+describe('Queue lifecycle persistence', () => {
+  let tempDir: string
+
+  beforeAll(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'karaoke-eternal-queue-'))
+    open({ file: path.join(tempDir, 'database.sqlite3'), ro: false })
+    db.run('INSERT INTO artists (artistId, name, nameNorm) VALUES (1, \'Artist\', \'artist\')')
+    db.run('INSERT INTO songs (songId, artistId, title, titleNorm) VALUES (1, 1, \'First\', \'first\'), (2, 1, \'Second\', \'second\'), (3, 1, \'Third\', \'third\')')
+    db.run('INSERT INTO paths (pathId, path, priority, data) VALUES (1, \'/music\', 1, \'{"prefs":{}}\')')
+    db.run('INSERT INTO media (mediaId, songId, pathId, relPath, duration, isPreferred) VALUES (1, 1, 1, \'first.mp4\', 181, 1), (2, 2, 1, \'second.mp4\', 202, 1), (3, 3, 1, \'third.mp4\', 223, 1)')
+    db.run('INSERT INTO rooms (roomId, name, status, data) VALUES (1, \'Room\', \'open\', \'{}\')')
+    db.run('INSERT INTO users (userId, username, password, name, roleId) VALUES (1, \'singer\', \'\', \'Singer\', 3)')
+  })
+
+  afterAll(() => {
+    close()
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it('stores snapshots and counts only participant requests still pending', () => {
+    Queue.add({ roomId: 1, songId: 1, userId: 1 })
+    Queue.add({ roomId: 1, songId: 2, userId: 1 })
+    const queue = Queue.get(1)
+
+    expect(queue.result).toHaveLength(2)
+    expect(queue.entities[queue.result[0]]).toMatchObject({
+      origin: 'PARTICIPANT',
+      source: 'LOCAL',
+      status: 'APPROVED',
+      title: 'First',
+      artistOrChannel: 'Artist',
+      durationSeconds: 181,
+    })
+    expect(Queue.countPending(1, 1)).toBe(2)
+
+    expect(Queue.transition(1, queue.result[0], 'PLAYING')).toBe(true)
+    expect(Queue.countPending(1, 1)).toBe(1)
+  })
+
+  it('counts PENDING_APPROVAL and APPROVED only, excluding every terminal status and operator items', () => {
+    db.run('INSERT INTO rooms (roomId, name, status, data) VALUES (2, \'Other room\', \'open\', \'{}\')')
+    db.run('INSERT INTO users (userId, username, password, name, roleId) VALUES (2, \'other\', \'\', \'Other\', 3)')
+    const statuses = ['PENDING_APPROVAL', 'APPROVED', 'PLAYING', 'PLAYED', 'REJECTED', 'REMOVED', 'FAILED']
+
+    statuses.forEach((status, index) => {
+      db.run(`INSERT INTO queue (roomId, songId, userId, origin, source, status, title, artistOrChannel) VALUES (2, 1, 2, 'PARTICIPANT', 'LOCAL', ?, ?, 'Artist')`, [status, `Song ${index}`])
+    })
+    db.run('INSERT INTO queue (roomId, songId, userId, origin, source, status, title, artistOrChannel) VALUES (2, 1, 2, \'OPERATOR\', \'LOCAL\', \'APPROVED\', \'Operator song\', \'Artist\')')
+
+    expect(Queue.countPending(2, 2)).toBe(2)
+  })
+
+  it('applies valid transitions idempotently and rejects terminal transitions', () => {
+    const queueId = Queue.get(1).result[0]
+
+    expect(Queue.transition(1, queueId, 'PLAYING')).toBe(false)
+    expect(Queue.transition(1, queueId, 'PLAYED')).toBe(true)
+    expect(Queue.transition(1, queueId, 'PLAYED')).toBe(false)
+    expect(Queue.transition(1, queueId, 'APPROVED')).toBe(false)
+  })
+
+  it('syncs reported playback and safely recovers interrupted playback', () => {
+    const queue = Queue.get(1)
+    const currentId = queue.result.find(queueId => queue.entities[queueId].status === 'APPROVED') as number
+
+    expect(Queue.syncPlayerLifecycle(1, { historyJSON: '[]', queueId: currentId, isErrored: false })).toBe(true)
+    expect(Queue.get(1).entities[currentId].status).toBe('PLAYING')
+    expect(Queue.requeuePlaying(1)).toBe(true)
+    expect(Queue.get(1).entities[currentId].status).toBe('APPROVED')
+    expect(db.get<{ status: string }>('SELECT status FROM queue WHERE roomId = 1 AND status = \'PLAYED\'')?.status).toBe('PLAYED')
+  })
+
+  it('soft-removes an item and closes the linked-list gap', () => {
+    Queue.add({ roomId: 1, songId: 3, userId: 1 })
+    const before = Queue.get(1)
+    const removedId = before.result[before.result.length - 2]
+    const childId = before.result[before.result.length - 1]
+    const expectedParentId = before.entities[removedId].prevQueueId
+
+    Queue.remove(removedId, 1)
+
+    const after = Queue.get(1)
+    expect(after.result).not.toContain(removedId)
+    expect(after.entities[childId].prevQueueId).toBe(expectedParentId)
+    expect(db.get<{ status: string }>('SELECT status FROM queue WHERE queueId = ?', [removedId])?.status).toBe('REMOVED')
+  })
+})

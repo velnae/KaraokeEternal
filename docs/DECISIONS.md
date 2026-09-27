@@ -58,6 +58,8 @@ Required states:
 
 Player-reported transitions must be idempotent.
 
+The only recovery transition is `PLAYING -> APPROVED`, performed by the backend when the last active player leaves. Reconnect recovery must never change `PLAYED`, `FAILED`, `REJECTED` or `REMOVED` back to a pending state.
+
 ## ADR-009 — Scheduling remains in the player
 
 Do not move the canonical upcoming-order algorithm to the backend during the MVP.

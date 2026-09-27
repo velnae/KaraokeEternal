@@ -1,4 +1,5 @@
 import type { QueuePrefs } from './queueRules.js'
+import type { QueueItemOrigin, QueueItemStatus, SongSource } from './queueLifecycle.js'
 
 export interface Artist {
   artistId: number
@@ -18,15 +19,25 @@ export interface QueueItem {
   queueId: number
   songId: number
   userId: number
-  prevQueueId: number
-  mediaId: number
-  rgTrackGain: number
-  rgTrackPeak: number
+  prevQueueId: number | null
+  mediaId: number | null
+  rgTrackGain: number | null
+  rgTrackPeak: number | null
   userDateUpdated: number
   userDisplayName: string
-  mediaType: 'cdg' | 'mp4'
+  mediaType: 'cdg' | 'mp4' | 'youtube'
   isOptimistic?: false
   isVideoKeyingEnabled: boolean
+  origin: QueueItemOrigin
+  source: SongSource
+  status: QueueItemStatus
+  externalId: string | null
+  title: string
+  artistOrChannel: string
+  durationSeconds: number | null
+  thumbnailUrl: string | null
+  dateCreated: number
+  dateUpdated: number
 }
 
 export interface OptimisticQueueItem {
@@ -105,7 +116,7 @@ export interface PlaybackOptions {
   }
 }
 
-export type MediaType = 'cdg' | 'mp4' | ''
+export type MediaType = 'cdg' | 'mp4' | 'youtube' | ''
 
 export interface Media {
   songId: number

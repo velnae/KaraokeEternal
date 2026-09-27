@@ -200,6 +200,8 @@ class User {
       Queue.remove(row.queueId)
     }
 
+    Queue.purgeByUser(userId)
+
     // remove user's song stars
     const songStarsQuery = sql`
       DELETE FROM songStars

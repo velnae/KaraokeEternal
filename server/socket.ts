@@ -73,6 +73,13 @@ export default function (io, jwtKey) {
 
       // any players left in room?
       if (!Rooms.isPlayerPresent(io, sock.user.roomId)) {
+        if (sock._lastPlayerStatus && Queue.requeuePlaying(sock.user.roomId)) {
+          io.to(Rooms.prefix(sock.user.roomId)).emit('action', {
+            type: QUEUE_PUSH,
+            payload: Queue.get(sock.user.roomId),
+          })
+        }
+
         io.to(Rooms.prefix(sock.user.roomId)).emit('action', {
           type: PLAYER_LEAVE,
           payload: { socketId: sock.id },

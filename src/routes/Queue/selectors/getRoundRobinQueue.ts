@@ -23,7 +23,11 @@ const getRoundRobinQueue = createSelector(
     // "lock in" next user's item (don't re-order it)
     if (nextUserId !== null) {
       for (const queueId of result) {
-        if (!history.includes(queueId) && entities[queueId].isOptimistic !== true && entities[queueId].userId === nextUserId) {
+        if (!history.includes(queueId)
+          && entities[queueId].isOptimistic !== true
+          && entities[queueId].status === 'APPROVED'
+          && entities[queueId].userId === nextUserId
+        ) {
           history.push(queueId)
           break
         }
@@ -37,6 +41,7 @@ const getRoundRobinQueue = createSelector(
     result.forEach((queueId) => {
       if (history.includes(queueId) // only concerned with upcoming songs
         || entities[queueId].isOptimistic === true // ignore optimistic items
+        || entities[queueId].status !== 'APPROVED'
       ) return
 
       const userId = entities[queueId].userId
