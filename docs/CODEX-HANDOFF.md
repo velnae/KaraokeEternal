@@ -56,10 +56,11 @@ Already present at the time of this handoff:
 - AUTO/MANUAL initial request status based on current room settings.
 - Admin-only approve/reject Socket.IO actions.
 - Operator pending-request filter and participant realtime status feedback.
+- Configurable participant ordering: FAIR batches of 1–5 songs and FIFO by creation order.
+- Immediate-next participant locking across queue and preference changes.
 
 Not yet implemented:
 
-- FAIR parameter/FIFO selection.
 - House/operator items.
 - Song-source abstraction.
 - YouTube search/playback.
@@ -69,7 +70,7 @@ Always inspect the current diff because this section may become stale as impleme
 
 ## First task
 
-Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 3 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 4.
+Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 4 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 5.
 
 ## Non-negotiable behavioral rules
 

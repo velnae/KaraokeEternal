@@ -157,11 +157,11 @@ The backend does not become a canonical scheduler during the MVP. It is authorit
 - Choose the participant who has waited the longest since their last played turn.
 - Play up to `maxSongsPerParticipantRound` consecutive songs for that participant.
 - A newly joined participant is eligible for the next unlocked turn, preserving inherited Karaoke Eternal behavior.
-- Once the player locks the next participant, new requests must not replace that already announced turn.
+- The player locks the participant for the immediately upcoming item. New requests or preference changes must not replace that already announced turn; only later items are recalculated.
 
 ### 8.2 FIFO
 
-- Play approved participant requests by `dateCreated`/`queueId` order.
+- Play approved participant requests by `dateCreated`, using `queueId` as the deterministic tie-breaker.
 - `maxSongsPerParticipantRound` does not apply in FIFO because FIFO intentionally does not group or rotate participants.
 
 ### 8.3 House tracks

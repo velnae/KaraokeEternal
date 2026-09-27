@@ -1,4 +1,5 @@
 import type { OptimisticQueueItem, QueueItem } from '../../../../shared/types.js'
+import type { QueuePrefs } from '../../../../shared/queueRules.js'
 
 export const buildRoundRobinQueue = (
   result: number[],
@@ -6,6 +7,7 @@ export const buildRoundRobinQueue = (
   history: number[],
   curId: number,
   nextUserId: number | null,
+  prefs: Pick<QueuePrefs, 'maxSongsPerParticipantRound' | 'rotationMode'>,
 ) => {
   // in case history references non-existent items or queue is still loading
   history = history.filter(queueId => result.includes(queueId))
@@ -15,13 +17,19 @@ export const buildRoundRobinQueue = (
     history.push(curId)
   }
 
-  // "lock in" next user's item (don't re-order it)
+  const isEligible = (queueId: number): boolean => {
+    const item = entities[queueId]
+    return item.isOptimistic !== true
+      && item.origin === 'PARTICIPANT'
+      && item.status === 'APPROVED'
+  }
+
+  // "lock in" the next participant item (don't re-order it)
   if (nextUserId !== null) {
     for (const queueId of result) {
       if (!history.includes(queueId)
-        && entities[queueId].isOptimistic !== true
-        && entities[queueId].status === 'APPROVED'
-        && entities[queueId].userId === nextUserId
+        && isEligible(queueId)
+        && (entities[queueId] as QueueItem).userId === nextUserId
       ) {
         history.push(queueId)
         break
@@ -29,19 +37,51 @@ export const buildRoundRobinQueue = (
     }
   }
 
-  const map = new Map()
-  const upcoming = []
-  const resultByUser = history.map(queueId => (entities[queueId] as QueueItem).userId)
+  const eligible = result.filter(queueId => !history.includes(queueId) && isEligible(queueId))
 
-  result.forEach((queueId) => {
-    if (history.includes(queueId)
-      || entities[queueId].isOptimistic === true
-      || entities[queueId].status !== 'APPROVED'
-    ) return
+  if (prefs.rotationMode === 'FIFO') {
+    const upcoming = eligible.sort((leftId, rightId) => {
+      const left = entities[leftId] as QueueItem
+      const right = entities[rightId] as QueueItem
+      return left.dateCreated - right.dateCreated || left.queueId - right.queueId
+    })
 
-    const userId = entities[queueId].userId
+    return {
+      result: history.concat(upcoming),
+      entities: entities as Record<number, QueueItem>,
+    }
+  }
+
+  const map = new Map<number, number[]>()
+  const upcoming: number[] = []
+  const resultByUser = history
+    .filter(queueId => entities[queueId]?.isOptimistic !== true && entities[queueId]?.origin === 'PARTICIPANT')
+    .map(queueId => (entities[queueId] as QueueItem).userId)
+
+  eligible.forEach((queueId) => {
+    const userId = (entities[queueId] as QueueItem).userId
     map.set(userId, map.has(userId) ? [...map.get(userId), queueId] : [queueId])
   })
+
+  const appendTurn = (userId: number, limit: number) => {
+    const userItems = map.get(userId) ?? []
+    const turnItems = userItems.splice(0, limit)
+
+    if (userItems.length) map.set(userId, userItems)
+    else map.delete(userId)
+
+    resultByUser.push(...turnItems.map(() => userId))
+    upcoming.push(...turnItems)
+  }
+
+  const trailingUserId = resultByUser[resultByUser.length - 1]
+  if (typeof trailingUserId === 'number' && map.has(trailingUserId)) {
+    let consecutive = 0
+    for (let i = resultByUser.length - 1; i >= 0 && resultByUser[i] === trailingUserId; i--) consecutive++
+
+    const remainingInTurn = prefs.maxSongsPerParticipantRound - consecutive
+    if (remainingInTurn > 0) appendTurn(trailingUserId, remainingInTurn)
+  }
 
   while (map.size) {
     let max = -1
@@ -57,17 +97,7 @@ export const buildRoundRobinQueue = (
       }
     }
 
-    const userItems = map.get(maxUserId)
-    const queueId = userItems.shift()
-
-    if (userItems.length) {
-      map.set(maxUserId, userItems)
-    } else {
-      map.delete(maxUserId)
-    }
-
-    resultByUser.push(maxUserId)
-    upcoming.push(queueId)
+    appendTurn(maxUserId, prefs.maxSongsPerParticipantRound)
   }
 
   return {

@@ -94,17 +94,17 @@ const PlayerController = (props: PlayerControllerProps) => {
     })
   }, [handleStatus, nextQueueItem, player.historyJSON, queueItem])
 
-  // "lock in" the next user that isn't the currently up user, if possible
+  // Lock the participant for the immediately upcoming item. This prevents
+  // realtime queue/settings changes from replacing an already announced turn.
   useEffect(() => {
-    if (!player.nextUserId || queueItem?.userId === nextQueueItem?.userId) {
-      for (let i = queue.result.indexOf(queueItem?.queueId) + 1; i < queue.result.length; i++) {
-        if (queueItem?.userId !== queue.entities[queue.result[i]].userId) {
-          handleStatus({ nextUserId: queue.entities[queue.result[i]].userId })
-          return
-        }
-      }
+    const upcomingUserId = nextQueueItem?.origin === 'PARTICIPANT'
+      ? nextQueueItem.userId
+      : null
+
+    if (player.nextUserId !== upcomingUserId) {
+      handleStatus({ nextUserId: upcomingUserId })
     }
-  }, [handleStatus, nextQueueItem, player.nextUserId, queue, queueItem])
+  }, [handleStatus, nextQueueItem, player.nextUserId])
 
   // always emit status when any of these change
   useEffect(() => handleStatus({ isVideoKeyingEnabled: queueItem?.isVideoKeyingEnabled }), [

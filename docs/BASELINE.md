@@ -70,3 +70,14 @@ Phase 2 adds migration, lifecycle transition, pending-status, player authorizati
 | Production build | Passed with the inherited size/license warnings |
 
 Phase 3 adds AUTO/MANUAL creation, admin authorization, idempotent approve/reject, mode-change isolation and playable-eligibility coverage. The operator can filter pending requests while participants receive realtime status for their own requests.
+
+## Results after Phase 4
+
+| Check | Result |
+| --- | --- |
+| Lint | 29 inherited errors remain; no Phase 4 regression |
+| Typecheck | Only the inherited `Player.tsx` TS2604 failure remains |
+| Automated tests | 94 passed across 11 files |
+| Production build | Passed with the inherited size/license warnings |
+
+Phase 4 adds deterministic selector coverage for FAIR turns of one or multiple songs, FIFO creation order, late participants, immediate-next locking, mode changes and exclusion of ineligible origins/statuses. Scheduling remains in the frontend/player.

@@ -11,8 +11,9 @@ This file is the only authoritative implementation sequence. `HANDOFF.md` and `C
 - Phase 0: completed on 2026-09-26. See `docs/BASELINE.md`.
 - Phase 1: completed in commit `2cba71f9`.
 - Phase 2: completed in commit `125c0092`.
-- Phase 3: completed on 2026-09-26.
-- Next phase: Phase 4 — Configurable participant ordering.
+- Phase 3: completed in commit `8fa984d8`.
+- Phase 4: completed on 2026-09-26.
+- Next phase: Phase 5 — House and operator items.
 
 ## 2. Delivery rules
 
