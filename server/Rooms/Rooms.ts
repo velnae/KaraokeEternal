@@ -2,6 +2,7 @@ import crypto from '../lib/crypto.js'
 import sql from 'sqlate'
 import { db } from '../lib/Database.js'
 import { ValidationError } from '../lib/Errors.js'
+import { getQueuePrefsValidationError, normalizeQueuePrefs } from '../../shared/queueRules.js'
 
 const NAME_MIN_LENGTH = 1
 const NAME_MAX_LENGTH = 50
@@ -59,7 +60,13 @@ class Rooms {
 
     res.forEach((row) => {
       const data = JSON.parse(row.data)
-      row.prefs = data.prefs ?? {}
+      const prefs = data.prefs && typeof data.prefs === 'object' && !Array.isArray(data.prefs)
+        ? data.prefs
+        : {}
+      row.prefs = {
+        ...prefs,
+        queue: normalizeQueuePrefs(prefs.queue),
+      }
       delete row.data
 
       row.hasPassword = !!row.password
@@ -77,6 +84,18 @@ class Rooms {
   static async set (roomId, room) {
     const { name, password, status, prefs } = room
     let query
+
+    if (typeof prefs !== 'undefined' && (typeof prefs !== 'object' || prefs === null || Array.isArray(prefs))) {
+      throw new ValidationError('Room preferences must be an object')
+    }
+
+    const queuePrefsError = getQueuePrefsValidationError(prefs?.queue)
+    if (queuePrefsError) throw new ValidationError(queuePrefsError)
+
+    const normalizedPrefs = {
+      ...(prefs ?? {}),
+      queue: normalizeQueuePrefs(prefs?.queue),
+    }
 
     if (!name || !name.trim() || name.length < NAME_MIN_LENGTH || name.length > NAME_MAX_LENGTH) {
       throw new ValidationError(`Room name must have ${NAME_MIN_LENGTH}-${NAME_MAX_LENGTH} characters`)
@@ -102,7 +121,7 @@ class Rooms {
         SET name = ${name},
             ${passwordSql}
             status = ${status},
-            data = json_set(data, '$.prefs', json(${JSON.stringify(prefs)}))
+            data = json_set(data, '$.prefs', json(${JSON.stringify(normalizedPrefs)}))
         WHERE roomId = ${roomId}
       `
     } else {
@@ -113,7 +132,7 @@ class Rooms {
           ${typeof password === 'undefined' ? null : await crypto.hash(password)},
           ${status},
           ${Math.floor(Date.now() / 1000)},
-          json_set('{}', '$.prefs', json(${JSON.stringify(prefs)}))
+          json_set('{}', '$.prefs', json(${JSON.stringify(normalizedPrefs)}))
         )
       `
     }
@@ -209,7 +228,7 @@ class Rooms {
   /**
    * Get the last player status reported for a room.
    */
-  static getPlayerStatus (io: any, roomId: number): any | null {
+  static getPlayerStatus (io, roomId: number) {
     for (const sock of io.of('/').sockets.values()) {
       if (sock.user && sock.user.roomId === roomId && sock._lastPlayerStatus) {
         return sock._lastPlayerStatus

@@ -1,3 +1,5 @@
+import type { QueuePrefs } from './queueRules.js'
+
 export interface Artist {
   artistId: number
   name: string
@@ -48,13 +50,7 @@ export interface IRoomPrefs {
   roles?: Record<number, {
     allowNew: boolean
   }>
-  queue?: {
-    maxPendingPerParticipant?: number
-    maxSongsPerParticipantRound?: number
-    houseTracksBeforeParticipant?: number
-    approvalMode?: 'AUTO' | 'MANUAL'
-    rotationMode?: 'FAIR' | 'FIFO'
-  }
+  queue?: QueuePrefs
 }
 
 export interface Room {

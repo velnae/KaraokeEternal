@@ -1,8 +1,7 @@
 import Queue from './Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import { QUEUE_ADD, QUEUE_MOVE, QUEUE_REMOVE, QUEUE_PUSH } from '../../shared/actionTypes.js'
-
-const DEFAULT_MAX_PENDING_PER_PARTICIPANT = 2
+import { normalizeQueuePrefs } from '../../shared/queueRules.js'
 
 const getPendingCount = (sock, roomId: number, userId: number): number => {
   const queue = Queue.get(roomId)
@@ -49,10 +48,7 @@ const ACTION_HANDLERS = {
     }
 
     const room = Rooms.get(roomId).entities[roomId]
-    const configuredMax = room?.prefs?.queue?.maxPendingPerParticipant
-    const maxPending = Number.isInteger(configuredMax) && configuredMax > 0
-      ? configuredMax
-      : DEFAULT_MAX_PENDING_PER_PARTICIPANT
+    const maxPending = normalizeQueuePrefs(room?.prefs?.queue).maxPendingPerParticipant
 
     if (!sock.user.isAdmin) {
       const pendingCount = getPendingCount(sock, roomId, sock.user.userId)

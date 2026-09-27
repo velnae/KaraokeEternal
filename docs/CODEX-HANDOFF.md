@@ -1,143 +1,93 @@
 # Codex Handoff — Karaoke MVP
 
-This is the primary entrypoint for continuing the Karaoke MVP implementation in Codex.
+This is the primary implementation entrypoint for Codex or another coding agent.
 
 ## Repository and branch
 
-- Repository: `velnae/KaraokeEternal`
-- Working branch: `feature/karaoke-mvp`
-- Base branch: `main`
-- Do not switch back to `main` for implementation work.
+- Repository: `velnae/KaraokeEternal`.
+- Working branch: `feature/karaoke-mvp`.
+- Base branch: `main`.
+- Upstream project: `bhj/KaraokeEternal`.
 
-At the time of this handoff, `feature/karaoke-mvp` is 9 commits ahead of `main` and 0 commits behind.
+Do not implement MVP work on `main`. Determine the live ahead/behind count with Git instead of copying a potentially stale number into documentation.
 
-## Read these documents first, in this order
+## Required reading order
 
-1. `docs/ARCHITECTURE.md`
-2. `docs/PRD-MVP.md`
-3. `docs/DECISIONS.md`
-4. `docs/IMPLEMENTATION-PLAN.md`
+Read completely before changing code:
 
-These documents define the intended architecture, product scope, fixed decisions, and implementation sequence. Do not reopen documented decisions unless a concrete technical blocker is found.
+1. `docs/PRD-MVP.md` — product behavior and acceptance scenarios.
+2. `docs/ARCHITECTURE.md` — domain model and responsibility boundaries.
+3. `docs/DECISIONS.md` — fixed MVP decisions.
+4. `docs/IMPLEMENTATION-PLAN.md` — sole authoritative work sequence.
 
-## Current implementation state
+If code and documentation conflict, do not silently redesign the product. Record the blocker and update the relevant decision/requirement before implementing a different behavior.
 
-Documentation already added:
+## Reuse-first constraint
 
-- `docs/ARCHITECTURE.md`
-- `docs/PRD-MVP.md`
-- `docs/DECISIONS.md`
-- `docs/IMPLEMENTATION-PLAN.md`
+Preserve and extend:
 
-Code already changed:
+- rooms and room preferences;
+- guest access and QR flow;
+- roles and permissions;
+- mobile web UI;
+- Socket.IO transport;
+- existing local library/scanner;
+- queue UI and persistence;
+- fair round-robin selector;
+- CDG/MP4 player;
+- SQLite migrations.
 
-- `shared/types.ts`
-  - Added `IRoomPrefs.queue` with:
-    - `maxPendingPerParticipant`
-    - `maxSongsPerParticipantRound`
-    - `houseTracksBeforeParticipant`
-    - `approvalMode: 'AUTO' | 'MANUAL'`
-    - `rotationMode: 'FAIR' | 'FIFO'`
+Do not introduce multi-tenancy, offline mode, Laravel, MariaDB/PostgreSQL, Redis, microservices, native apps or a backend canonical scheduler during the MVP.
 
-- `server/Rooms/Rooms.ts`
-  - Added `Rooms.getPlayerStatus(io, roomId)`.
-  - `Rooms.isPlayerPresent()` now reuses that method.
+## Current branch implementation state
 
-- `server/Queue/socket.ts`
-  - Added backend validation for `maxPendingPerParticipant`.
-  - Default is `2` when no valid room preference is configured.
-  - Admin users are not restricted by this limit.
-  - Pending count excludes queue items already present in the player's `historyJSON` and excludes the currently playing `queueId`.
-  - This intentionally reuses the existing player state instead of creating a new canonical scheduler in the backend.
+Already present at the time of this handoff:
 
-## Important architectural constraint
+- Shared queue defaults, ranges, types, normalization and validation in `shared/queueRules.ts`.
+- Queue Settings UI integrated into the existing room editor.
+- Backend validation and normalization for room creation, update and realtime preference preview.
+- Room persistence, preference socket and pending-limit tests.
+- `Rooms.getPlayerStatus()`.
+- Initial backend enforcement of `maxPendingPerParticipant` using player status/history.
 
-For the MVP, keep Karaoke Eternal's existing round-robin/fair ordering in the frontend/player.
+The initial limit implementation is transitional. `IMPLEMENTATION-PLAN.md` Phase 2 requires replacing player-history-based pending counting with persisted lifecycle status.
 
-Do **not** move round-robin scheduling to the backend during this MVP unless an actual blocker is demonstrated.
+Not yet implemented:
 
-Backend responsibilities for MVP:
+- Persisted request lifecycle.
+- Manual approval.
+- FAIR parameter/FIFO selection.
+- House/operator items.
+- Song-source abstraction.
+- YouTube search/playback.
+- Business-rule tests.
 
-- permissions
-- validation
-- participant limits
-- room configuration
-- approval rules
+Always inspect the current diff because this section may become stale as implementation advances.
 
-Frontend/player responsibilities for MVP:
+## First task
 
-- existing fair round-robin ordering
-- selecting the next item using existing Karaoke Eternal behavior
-- playback
+Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 and 1 are complete in the current working tree. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 2.
 
-## Current code has NOT been validated yet
+## Non-negotiable behavioral rules
 
-The changes above were written through GitHub but have not yet been executed in a development environment.
+- Participant identity is `userId`.
+- Pending means `PENDING_APPROVAL` plus `APPROVED`.
+- Lifecycle state is persisted; `historyJSON` is not authoritative for limits.
+- `FAIR` stays in the frontend/player and supports configurable songs per turn.
+- `FIFO` uses approved creation order.
+- House availability never blocks participant playback.
+- YouTube stays separate from the scanned local library.
+- Only official YouTube APIs are used.
+- One authoritative player is supported per room.
+- New business rules require tests.
 
-Before adding more functionality, establish the baseline using the project's required versions:
+## Completion protocol for each phase
 
-- Node.js `>=24`
-- npm `>=11`
+For every phase:
 
-Then run:
-
-```bash
-npm install
-npm run lint
-npm run typecheck
-npm test
-npm run build
-```
-
-If the repository has a valid lockfile suitable for the environment, prefer `npm ci` over `npm install`.
-
-### First Codex task
-
-1. Check out `feature/karaoke-mvp`.
-2. Read all four documents listed above.
-3. Review the current diff against `main`.
-4. Run lint, typecheck, tests and build.
-5. Fix only regressions or type/test/build failures introduced by the current MVP changes.
-6. Do not expand scope while stabilizing the baseline.
-7. Report the exact baseline results before continuing to the next feature.
-
-## Next feature after baseline is green
-
-Implement the room-level **Queue Settings** UI by extending the existing room preferences mechanism used by `EditRoom`.
-
-Expose at least:
-
-- Maximum pending requests per participant
-- Maximum songs per participant round
-- House tracks before participant track(s)
-- Approval mode: `AUTO` / `MANUAL`
-- Rotation mode: `FAIR` / `FIFO`
-
-Prefer extending the existing room preferences UI and persistence path. Do not create a new settings subsystem.
-
-After Queue Settings is working and tested, continue in the sequence defined in `docs/IMPLEMENTATION-PLAN.md`:
-
-1. Approval mode behavior
-2. House-track behavior
-3. YouTube source/search integration
-4. YouTube player integration
-5. End-to-end pilot flow
-
-## Explicit MVP exclusions
-
-Do not introduce these during MVP unless required by a proven blocker:
-
-- multi-tenancy
-- offline mode
-- Laravel
-- MariaDB/PostgreSQL migration
-- Redis
-- microservices
-- native Android/iOS apps
-- backend rewrite of the round-robin scheduler
-
-## Implementation principle
-
-Extend Karaoke Eternal with the smallest practical set of changes required for the MVP. Reuse existing rooms, guest users, QR flow, Socket.IO, queue UI, player and SQLite persistence wherever possible.
-
-When a current implementation can be extended safely, prefer that over replacing it.
+1. List files changed.
+2. Describe schema/API/UI behavior added.
+3. List automated tests added.
+4. Report lint, typecheck, test and build results.
+5. Call out inherited failures separately.
+6. Confirm exit criteria before starting the next phase.

@@ -72,9 +72,13 @@ router.put('/:roomId', async (ctx) => {
 
   for (const s of sockets) {
     if (s?.user.isAdmin) {
+      const room = Rooms.get(roomId).entities[roomId]
       ctx.io.to(s.id).emit('action', {
         type: ROOM_PREFS_PUSH,
-        payload: Rooms.get(roomId),
+        payload: {
+          roomId,
+          prefs: room.prefs,
+        },
       })
     }
   }

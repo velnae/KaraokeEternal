@@ -1,0 +1,55 @@
+.heading {
+  button {
+    display: flex;
+    align-items: center;
+    gap: var(--space-s);
+    padding: var(--space-s);
+    font-size: var(--font-size-s);
+  }
+
+  svg {
+    height: var(--icon-size-m);
+  }
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-l);
+  padding: var(--space-m) var(--container-padding);
+}
+
+.field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-xs) var(--space-m);
+
+  label {
+    font-weight: bold;
+  }
+
+  input[type='number'] {
+    width: 5rem;
+    padding: var(--space-s);
+    font-size: var(--font-size-s);
+    color: var(--input-color);
+    background-color: var(--input-bg-color);
+    border: none;
+    border-radius: var(--border-radius);
+
+    &:focus-visible {
+      outline: var(--focus-outline);
+    }
+  }
+
+  select {
+    max-width: 12rem;
+  }
+
+  small {
+    grid-column: 1 / -1;
+    color: var(--color-gray-6);
+    font-size: var(--font-size-xs);
+  }
+}

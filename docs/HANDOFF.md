@@ -1,189 +1,90 @@
-# Karaoke MVP — Codex Handoff
+# Karaoke MVP — General Handoff
 
 ## Purpose
-This document is the entry point for continuing implementation of the karaoke MVP on top of Karaoke Eternal.
 
-Before changing code, read:
+This file gives a short orientation for a developer taking over the Karaoke MVP. It intentionally does not duplicate the implementation sequence.
 
-1. `docs/ARCHITECTURE.md`
-2. `docs/PRD-MVP.md`
-3. `docs/DECISIONS.md`
-4. `docs/IMPLEMENTATION-PLAN.md`
+For an agent-specific checklist, use `docs/CODEX-HANDOFF.md`.
 
-## Repository and branch
-- Repository: `velnae/KaraokeEternal`
-- Working branch: `feature/karaoke-mvp`
-- Upstream/base project: `bhj/KaraokeEternal`
+## Repository context
 
-## Product direction
-The MVP is a single-venue karaoke system where customers join from their phones through a QR code, search karaoke tracks, request songs and enter a fair queue. The main karaoke PC runs the player and sends video to the venue TVs through the venue's existing HDMI/display setup.
+- Product repository: `velnae/KaraokeEternal`.
+- Working branch: `feature/karaoke-mvp`.
+- Base branch: `main`.
+- Original project: `bhj/KaraokeEternal`.
 
-The MVP is intentionally **not multi-tenant** and **not offline-first**.
+## Read before implementation
 
-## Reuse-first principle
-Do not rewrite working Karaoke Eternal functionality unless a concrete blocker requires it.
+1. `docs/PRD-MVP.md`.
+2. `docs/ARCHITECTURE.md`.
+3. `docs/DECISIONS.md`.
+4. `docs/IMPLEMENTATION-PLAN.md`.
 
-Prefer to reuse:
-- rooms
-- guest access
-- QR access
-- roles
-- mobile web UI
-- Socket.IO realtime transport
-- queue UI
-- browser player
-- SQLite persistence
-- local media library
+`IMPLEMENTATION-PLAN.md` is the sole authority for phase order.
 
-## Stack to preserve for MVP
-- Node.js >= 24
-- npm >= 11
-- TypeScript
-- Koa
-- React
-- Redux / Redux Toolkit
-- Socket.IO
-- SQLite
-- Vitest
-- Webpack
+## Product summary
 
-Do not migrate to Laravel, MariaDB/PostgreSQL, Redis, microservices or another frontend stack during the MVP.
+The product is a single-venue karaoke MVP built by extending Karaoke Eternal. Participants join a room by QR, use a guest alias, search local or YouTube tracks and submit requests. The operator controls approval, queue settings, house content and playback. One browser player per room outputs the content through the venue's existing setup.
 
-## Queue model
-The current Karaoke Eternal fair round-robin algorithm stays in the frontend/player for the MVP.
+The MVP is not a multi-tenant SaaS and is not offline-first.
 
-Do **not** move the canonical rotation algorithm to the backend yet.
+## Core configurable rules
 
-Backend responsibilities:
-- validate room state
-- validate permissions
-- enforce participant request limits
-- persist queue/request state
-- broadcast changes
+| Setting | Default | Values |
+| --- | ---: | --- |
+| Maximum pending participant requests | 2 | 1–20 |
+| Songs per participant FAIR turn | 1 | 1–5 |
+| House tracks between participant turns | 2 | 0–10 |
+| Approval | AUTO | AUTO / MANUAL |
+| Rotation | FAIR | FAIR / FIFO |
 
-Frontend/player responsibilities:
-- use the existing round-robin calculation
-- determine the fair upcoming playback order
-- control media playback
+The exact semantics, fallbacks and change behavior are defined in `PRD-MVP.md` and `ARCHITECTURE.md`.
 
-## Initial room rules
-These values must be configurable per room.
+## Essential model
 
-Defaults:
-- `maxPendingPerParticipant = 2`
-- `maxSongsPerParticipantRound = 1`
-- `houseTracksBeforeParticipant = 2`
-- `approvalMode = 'AUTO'`
-- `rotationMode = 'FAIR'`
+Queue items have:
 
-Participants may continue adding songs during an active session whenever they are below the pending-request limit.
+- origin: `PARTICIPANT`, `HOUSE` or `OPERATOR`;
+- source: `LOCAL` or `YOUTUBE`;
+- persisted lifecycle status;
+- a local song ID or external YouTube video ID;
+- a metadata snapshot for display/history.
 
-The participant/singer is the scheduling identity. A table is not the primary queue identity.
+Only `PENDING_APPROVAL` and `APPROVED` participant items count toward the pending limit. Only `APPROVED` items are eligible for upcoming playback.
 
-## Approval
-Support:
-- `AUTO`: valid requests enter the queue immediately.
-- `MANUAL`: requests require operator approval.
+## Responsibility boundary
 
-Default is `AUTO`.
+Backend:
 
-## Track origins
-The implementation must be able to distinguish at least:
-- `PARTICIPANT`
-- `HOUSE`
-- `OPERATOR`
+- validates rooms, permissions and settings;
+- persists queue items and lifecycle;
+- enforces limits and approval;
+- broadcasts authoritative state.
 
-House tracks are venue-selected tracks that can be interleaved with participant requests according to room configuration.
+Active player:
 
-## Song sources
-Keep the existing local media library.
+- calculates FAIR/FIFO upcoming order;
+- applies house interleaving;
+- plays CDG, MP4 or YouTube;
+- reports idempotent state transitions.
 
-Add YouTube as another source rather than replacing local media.
+Do not move the full scheduler to the backend during MVP.
 
-Target abstraction:
+## Current code caveat
 
-```text
-SongSource
-├── LocalSongSource
-└── YouTubeSongSource
-```
+Queue Settings, shared validation/defaults and Phase 1 tests are implemented in the current working tree.
 
-YouTube integration:
-- search: YouTube Data API
-- playback: YouTube IFrame Player API
+The branch currently contains an initial pending-limit implementation based on the connected player's `historyJSON`. This is temporary. Phase 2 replaces it with persisted lifecycle counting so player refresh/reconnect cannot revive old requests.
 
-Do not implement downloading, audio extraction or offline caching of YouTube media.
+Inspect the live branch before relying on this summary.
 
-## Player extension
-Keep existing:
-- CDG player
-- MP4 player
+## Definition of done
 
-Add:
-- YouTube player
-
-Conceptually:
-
-```text
-mediaType=cdg      -> CDGPlayer
-mediaType=mp4      -> MP4Player
-mediaType=youtube  -> YouTubePlayer
-```
-
-## MVP acceptance flow
-A complete pilot is successful when:
-
-1. Operator opens a room.
-2. QR is displayed.
-3. Customer scans QR and joins as guest with an alias.
-4. Customer searches for a karaoke track.
-5. Customer submits a request.
-6. Backend rejects the request if the participant is already at the configured pending limit.
-7. Multiple participants are fairly rotated using the existing round-robin behavior.
-8. Venue/house tracks can be interleaved according to configuration.
-9. The main PC player reproduces the selected track.
-10. Operator can pause, resume, skip, remove and manage requests.
-11. Manual approval can be enabled when configured.
-
-## Explicitly out of scope
-Do not add during this MVP:
-- SaaS multi-tenancy
-- centralized multi-venue management
-- offline mode
-- native Android/iOS applications
-- payments
-- reservations
-- WhatsApp login
-- singer scoring
-- microphone/audio analysis
-- AI singer evaluation
-
-## Development baseline
-Before functional modifications are considered complete, use the existing project scripts:
-
-```bash
-npm install
-npm run lint
-npm run test
-npm run typecheck
-npm run build
-```
-
-Use `npm run dev` for local development.
-
-## Implementation order
-Follow `docs/IMPLEMENTATION-PLAN.md`.
-
-Priority:
-1. room-rule configuration
-2. backend pending-request enforcement
-3. approval behavior
-4. song-source abstraction
-5. YouTube search
-6. YouTube player
-7. house-track interleaving
-8. operator UX
-9. end-to-end pilot validation
-
-## Implementation constraint
-If an implementation choice conflicts with the documentation, do not silently redesign the architecture. Update the relevant ADR/decision document first or document the blocker explicitly.
+- Acceptance scenarios in `PRD-MVP.md` pass.
+- Phase exit criteria in `IMPLEMENTATION-PLAN.md` pass.
+- Local karaoke remains usable without YouTube.
+- A YouTube failure does not break local playback.
+- Room settings are validated and persisted.
+- Player reconnect preserves played/pending states.
+- New business rules have automated tests.
+- No undocumented stack or scope expansion is introduced.
