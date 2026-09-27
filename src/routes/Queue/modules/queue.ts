@@ -28,6 +28,10 @@ export const queueSong = createAction(QUEUE_ADD, (songId: number, origin: QueueI
   meta: { isOptimistic: true },
 }))
 
+export const queueYouTubeSong = createAction(QUEUE_ADD, (sourceId: string, origin: QueueItemOrigin = 'PARTICIPANT') => ({
+  payload: { source: 'YOUTUBE' as const, sourceId, origin },
+}))
+
 export const removeUpcomingItems = (userId: number): AppThunk => (dispatch: AppDispatch, getState: () => RootState) => {
   const upcomingQueueIds = getUpcoming(getState(), userId)
   dispatch(removeItem({ queueId: upcomingQueueIds }))

@@ -103,3 +103,14 @@ Phase 5 adds authorized local `HOUSE`/`OPERATOR` creation, origin labels, a mana
 | Production build | Passed with the inherited size/license warnings |
 
 Phase 6 adds shared normalized source contracts, `LocalSongSource` search/resolution, source invariants and queue creation from immutable resolved metadata. The scanner, local tables and client-visible library behavior remain unchanged.
+
+## Results after Phase 7
+
+| Check | Result |
+| --- | --- |
+| Lint | Inherited baseline errors remain; no Phase 7 regression |
+| Typecheck | Only the inherited `Player.tsx` TS2604 failure remains |
+| Automated tests | 127 passed across 14 files |
+| Production build | Passed with the inherited size/license warnings |
+
+Phase 7 adds server-only YouTube Data API configuration, two-step search and resolution, embeddability/availability checks, isolated UI error states, and YouTube queue snapshots without local-library insertion. Participant requests follow the same AUTO/MANUAL approval rules as local songs; playback remains Phase 8.

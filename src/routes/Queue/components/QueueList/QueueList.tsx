@@ -76,7 +76,8 @@ const QueueList = () => {
     const item = rawQueue.entities[qId]
     if (item.isOptimistic === true) return null
 
-    const duration = songs.entities[item.songId].duration
+    const localSong = typeof item.songId === 'number' ? songs.entities[item.songId] : undefined
+    const duration = item.durationSeconds ?? localSong?.duration ?? 0
     const isCurrent = (qId === queueId) && !isAtQueueEnd
     const isUpcoming = item.status === 'APPROVED'
       && queue.result.includes(qId)
@@ -92,12 +93,13 @@ const QueueList = () => {
     return (
       <QueueItem
         {...item}
-        artist={artists.entities[songs.entities[item.songId].artistId].name}
+        artist={item.artistOrChannel || (localSong ? artists.entities[localSong.artistId]?.name : '')}
         errorMessage={isCurrent && errorMessage ? errorMessage : ''}
         isCurrent={isCurrent}
         key={qId}
+        isAdmin={user.isAdmin}
         isErrored={isCurrent && isErrored}
-        isInfoable={user.isAdmin}
+        isInfoable={user.isAdmin && item.source === 'LOCAL' && typeof item.songId === 'number'}
         isMovable={isUpcoming && (isOwner || user.isAdmin)}
         isOwner={isOwner}
         isPlayed={isTerminal && !isCurrent}
@@ -105,13 +107,13 @@ const QueueList = () => {
         isRemovable={isRemovable}
         isReplayable={(isTerminal || isCurrent) && user.isAdmin}
         isSkippable={isCurrent && (isOwner || user.isAdmin)}
-        isStarred={starredSongs.includes(item.songId)}
+        isStarred={typeof item.songId === 'number' && starredSongs.includes(item.songId)}
         isUpcoming={isUpcoming}
-        pctPlayed={isCurrent ? position / duration * 100 : 0}
-        starCount={starCounts.songs[item.songId] || 0}
-        title={songs.entities[item.songId].title}
+        pctPlayed={isCurrent && duration > 0 ? position / duration * 100 : 0}
+        starCount={typeof item.songId === 'number' ? starCounts.songs[item.songId] || 0 : 0}
+        title={item.title || localSong?.title || ''}
         status={item.status}
-        wait={formatSeconds(waits[qId], true)} // fuzzy
+        wait={typeof waits[qId] === 'number' ? formatSeconds(waits[qId], true) : undefined} // fuzzy
         // actions
         onMoveClick={handleMoveClick}
         onRemoveUpcoming={handleRemoveUpcoming}

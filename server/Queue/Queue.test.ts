@@ -20,6 +20,20 @@ const resolvedSong = (songId: number): ResolvedSong => ({
   isPlayable: true,
 })
 
+const resolvedYouTubeSong = (): ResolvedSong => ({
+  source: 'YOUTUBE',
+  sourceId: 'AAAAAAAAAAA',
+  localSongId: null,
+  externalId: 'AAAAAAAAAAA',
+  mediaId: null,
+  mediaType: 'youtube',
+  title: 'External song',
+  artistOrChannel: 'External channel',
+  durationSeconds: 245,
+  thumbnailUrl: 'https://img.youtube.com/example.jpg',
+  isPlayable: true,
+})
+
 describe('Queue lifecycle persistence', () => {
   let tempDir: string
 
@@ -107,6 +121,26 @@ describe('Queue lifecycle persistence', () => {
       durationSeconds: 321,
       thumbnailUrl: null,
     })
+  })
+
+  it('persists a YouTube snapshot without inserting it into the local library', () => {
+    const songsBefore = db.get<{ count: number }>('SELECT COUNT(*) AS count FROM songs')?.count
+
+    Queue.add({ roomId: 4, song: resolvedYouTubeSong(), userId: 4 })
+    const queue = Queue.get(4)
+    const queued = queue.entities[queue.result[queue.result.length - 1]]
+
+    expect(queued).toMatchObject({
+      songId: null,
+      source: 'YOUTUBE',
+      externalId: 'AAAAAAAAAAA',
+      mediaId: null,
+      mediaType: 'youtube',
+      title: 'External song',
+      artistOrChannel: 'External channel',
+      durationSeconds: 245,
+    })
+    expect(db.get<{ count: number }>('SELECT COUNT(*) AS count FROM songs')?.count).toBe(songsBefore)
   })
 
   it('rejects invalid or unplayable normalized songs', () => {

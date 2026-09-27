@@ -17,7 +17,7 @@ export interface Song {
 
 export interface QueueItem {
   queueId: number
-  songId: number
+  songId: number | null
   userId: number
   prevQueueId: number | null
   mediaId: number | null

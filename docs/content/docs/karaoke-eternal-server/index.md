@@ -188,6 +188,9 @@ Karaoke Eternal Server supports the following CLI options and environment variab
 | <span style="white-space: nowrap;">`--serverConsoleLevel <number>`</span>| <span style="white-space: nowrap;">`KES_SERVER_CONSOLE_LEVEL`</span> | Web server console output level | 4 |
 | <span style="white-space: nowrap;">`--serverLogLevel <number>`</span>| <span style="white-space: nowrap;">`KES_SERVER_LOG_LEVEL`</span> | Web server log file level | 3 |
 | <span style="white-space: nowrap;">`--urlPath <string>`</span>| <span style="white-space: nowrap;">`KES_URL_PATH`</span> | Web server base URL path (must begin with a forward slash) | / |
+| | `KES_YOUTUBE_API_KEY` | Server-only YouTube Data API key. Leave unset to disable YouTube search without affecting local songs. | |
+| | `KES_YOUTUBE_REGION` | ISO 3166-1 alpha-2 region used for YouTube availability checks. | PE |
+| | `KES_YOUTUBE_MAX_RESULTS` | Maximum YouTube candidates requested per search (clamped to 1–50). | 10 |
 | <span style="white-space: nowrap;">`-v, --version`</span>| | Show version and exit | |
 
 ## File Locations

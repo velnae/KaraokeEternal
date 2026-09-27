@@ -20,14 +20,18 @@ const getSongsStatus: Selector<RootState, SongsStatus> = createSelector(
     const upcoming: number[] = []
 
     queue.result.forEach((queueId) => {
+      const songId = queue.entities[queueId].songId
+      if (typeof songId !== 'number') return
+
       if (history.includes(queueId)) {
-        played.push(queue.entities[queueId].songId)
+        played.push(songId)
       } else if (queueId !== curId) {
-        upcoming.push(queue.entities[queueId].songId)
+        upcoming.push(songId)
       }
     })
 
-    return { played, upcoming, current: queue.entities[curId]?.songId }
+    const currentSongId = queue.entities[curId]?.songId
+    return { played, upcoming, current: typeof currentSongId === 'number' ? currentSongId : undefined }
   },
 )
 

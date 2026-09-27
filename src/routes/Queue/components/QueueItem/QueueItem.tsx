@@ -11,8 +11,8 @@ import { requestPlayNext, requestReplay } from 'store/modules/status'
 import { showSongInfo } from 'store/modules/songInfo'
 import { toggleSongStarred } from 'store/modules/userStars'
 import { showErrorMessage } from 'store/modules/ui'
-import { approveRequest, queueSong, rejectRequest, removeItem } from '../../modules/queue'
-import type { QueueItemOrigin, QueueItemStatus } from 'shared/queueLifecycle'
+import { approveRequest, queueSong, queueYouTubeSong, rejectRequest, removeItem } from '../../modules/queue'
+import type { QueueItemOrigin, QueueItemStatus, SongSource } from 'shared/queueLifecycle'
 import styles from './QueueItem.css'
 
 const LONG_PRESS_THRESHOLD_MS = 700
@@ -20,6 +20,7 @@ const LONG_PRESS_THRESHOLD_MS = 700
 interface QueueItemProps {
   artist: string
   errorMessage: string
+  isAdmin: boolean
   isCurrent: boolean
   isErrored: boolean
   isInfoable: boolean
@@ -35,7 +36,9 @@ interface QueueItemProps {
   pctPlayed: number
   origin: QueueItemOrigin
   queueId: number
-  songId: number
+  songId: number | null
+  source: SongSource
+  externalId: string | null
   starCount: number
   status: QueueItemStatus
   title: string
@@ -51,6 +54,7 @@ interface QueueItemProps {
 const QueueItem = ({
   artist,
   errorMessage,
+  isAdmin,
   isCurrent,
   isErrored,
   isInfoable,
@@ -69,6 +73,8 @@ const QueueItem = ({
   pctPlayed,
   queueId,
   songId,
+  source,
+  externalId,
   starCount,
   status,
   title,
@@ -82,7 +88,11 @@ const QueueItem = ({
   const dispatch = useAppDispatch()
 
   const handleErrorInfoClick = () => dispatch(showErrorMessage(errorMessage))
-  const handleInfoClick = () => dispatch(showSongInfo(songId))
+  const isLocal = source === 'LOCAL' && typeof songId === 'number'
+  const canModerate = isAdmin && status === 'PENDING_APPROVAL'
+  const handleInfoClick = () => {
+    if (typeof songId === 'number') dispatch(showSongInfo(songId))
+  }
   const handleMoveClick = () => {
     onMoveClick(queueId)
     setExpanded(false)
@@ -92,7 +102,8 @@ const QueueItem = ({
     setExpanded(false)
   }
   const handleRequeueClick = () => {
-    dispatch(queueSong(songId, origin))
+    if (isLocal) dispatch(queueSong(songId, origin))
+    else if (source === 'YOUTUBE' && externalId) dispatch(queueYouTubeSong(externalId, origin))
     setExpanded(false)
   }
   const handleSkipClick = () => {
@@ -100,7 +111,9 @@ const QueueItem = ({
     setExpanded(false)
   }
   const handleRemoveClick = () => dispatch(removeItem({ queueId }))
-  const handleStarClick = () => dispatch(toggleSongStarred(songId))
+  const handleStarClick = () => {
+    if (typeof songId === 'number') dispatch(toggleSongStarred(songId))
+  }
   const handleApproveClick = () => dispatch(approveRequest({ queueId }))
   const handleRejectClick = () => dispatch(rejectRequest({ queueId }))
 
@@ -112,7 +125,7 @@ const QueueItem = ({
 
   const swipeHandlers = useSwipeable({
     onSwipedLeft: () => {
-      setExpanded(isErrored || isInfoable || isRemovable || isSkippable)
+      setExpanded(isErrored || isInfoable || isRemovable || isSkippable || canModerate)
     },
     onSwipedRight: () => setExpanded(false),
     preventScrollOnSwipe: true,
@@ -186,12 +199,14 @@ const QueueItem = ({
               onClick={handleErrorInfoClick}
             />
           )}
-          <ButtonStar
-            className={styles.btnStar}
-            isStarred={isStarred}
-            onClick={handleStarClick}
-            count={starCount}
-          />
+          {isLocal && (
+            <ButtonStar
+              className={styles.btnStar}
+              isStarred={isStarred}
+              onClick={handleStarClick}
+              count={starCount}
+            />
+          )}
           {isInfoable && (
             <Button
               className={styles.active}
@@ -200,7 +215,7 @@ const QueueItem = ({
               onClick={handleInfoClick}
             />
           )}
-          {status === 'PENDING_APPROVAL' && isInfoable && (
+          {canModerate && (
             <Button
               aria-label='Approve request'
               className={clsx(styles.btnApprove, styles.active)}
@@ -208,7 +223,7 @@ const QueueItem = ({
               onClick={handleApproveClick}
             />
           )}
-          {status === 'PENDING_APPROVAL' && isInfoable && (
+          {canModerate && (
             <Button
               aria-label='Reject request'
               className={clsx(styles.btnReject, styles.danger)}

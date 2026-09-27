@@ -11,6 +11,7 @@ import ACTION_HANDLERS from './socket.js'
 import type { QueueItem } from '../../shared/types.js'
 import type { ResolvedSong } from '../../shared/songSource.js'
 import { localSongSource } from '../SongSources/LocalSongSource.js'
+import { youtubeSongSource } from '../SongSources/YouTubeSongSource.js'
 
 const handler = ACTION_HANDLERS[QUEUE_ADD]
 
@@ -26,6 +27,20 @@ const resolvedSong = (songId: number): ResolvedSong => ({
   durationSeconds: 180,
   thumbnailUrl: null,
   isPlayable: true,
+})
+
+const resolvedYouTubeSong = (isPlayable = true): ResolvedSong => ({
+  source: 'YOUTUBE',
+  sourceId: 'AAAAAAAAAAA',
+  localSongId: null,
+  externalId: 'AAAAAAAAAAA',
+  mediaId: null,
+  mediaType: 'youtube',
+  title: 'YouTube song',
+  artistOrChannel: 'YouTube channel',
+  durationSeconds: 180,
+  thumbnailUrl: null,
+  isPlayable,
 })
 
 const createSocket = ({ isAdmin = false } = {}) => {
@@ -273,6 +288,57 @@ describe('house and operator creation', () => {
       type: QUEUE_ADD + '_ERROR',
       error: 'Song is unavailable or not playable',
     })
+  })
+})
+
+describe('YouTube request creation', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it.each([
+    ['AUTO', 'APPROVED'],
+    ['MANUAL', 'PENDING_APPROVAL'],
+  ] as const)('resolves and creates a YouTube request in %s mode', async (approvalMode, status) => {
+    vi.spyOn(youtubeSongSource, 'resolve').mockResolvedValue(resolvedYouTubeSong())
+    vi.spyOn(Rooms, 'validate').mockResolvedValue(true)
+    vi.spyOn(Rooms, 'get').mockReturnValue({ result: [1], entities: { 1: { prefs: { queue: { approvalMode } } } } })
+    vi.spyOn(Queue, 'countPending').mockReturnValue(0)
+    vi.spyOn(Queue, 'get').mockReturnValue(mockQueue([]))
+    const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
+    const acknowledge = vi.fn()
+    const { socket } = createSocket()
+
+    await handler(socket, { payload: { source: 'YOUTUBE', sourceId: 'AAAAAAAAAAA' } }, acknowledge)
+
+    expect(youtubeSongSource.resolve).toHaveBeenCalledWith('AAAAAAAAAAA', { roomId: 1 })
+    expect(add).toHaveBeenCalledWith({
+      roomId: 1,
+      song: resolvedYouTubeSong(),
+      userId: 10,
+      origin: 'PARTICIPANT',
+      status,
+    })
+    expect(acknowledge).toHaveBeenCalledWith({ type: QUEUE_ADD + '_SUCCESS' })
+  })
+
+  it('rejects an unresolvable or non-embeddable YouTube video', async () => {
+    vi.spyOn(youtubeSongSource, 'resolve')
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(resolvedYouTubeSong(false))
+    vi.spyOn(Rooms, 'validate').mockResolvedValue(true)
+    vi.spyOn(Rooms, 'get').mockReturnValue({ result: [1], entities: { 1: { prefs: {} } } })
+    vi.spyOn(Queue, 'countPending').mockReturnValue(0)
+    const add = vi.spyOn(Queue, 'add')
+    const { socket } = createSocket()
+
+    for (const sourceId of ['BBBBBBBBBBB', 'CCCCCCCCCCC']) {
+      const acknowledge = vi.fn()
+      await handler(socket, { payload: { source: 'YOUTUBE', sourceId } }, acknowledge)
+      expect(acknowledge).toHaveBeenCalledWith({
+        type: QUEUE_ADD + '_ERROR',
+        error: 'Song is unavailable or not playable',
+      })
+    }
+    expect(add).not.toHaveBeenCalled()
   })
 })
 

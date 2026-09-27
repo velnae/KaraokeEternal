@@ -13,6 +13,10 @@ export const SONG_UNSTARRED = 'library/SONG_UNSTARRED'
 export const STAR_COUNTS_PUSH = 'library/STAR_COUNTS_PUSH'
 export const LIBRARY_PUSH = 'library/PUSH'
 export const LIBRARY_PUSH_SONG = 'library/PUSH_SONG'
+export const SONG_SOURCE_SEARCH = 'server/SONG_SOURCE_SEARCH'
+export const SONG_SOURCE_SEARCH_SUCCESS = 'library/SONG_SOURCE_SEARCH_SUCCESS'
+export const SONG_SOURCE_SEARCH_ERROR = 'library/SONG_SOURCE_SEARCH_ERROR'
+export const SONG_SOURCE_SEARCH_CLEAR = 'library/SONG_SOURCE_SEARCH_CLEAR'
 
 // Queue
 export const QUEUE_ADD = 'server/QUEUE_ADD'

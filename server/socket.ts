@@ -10,6 +10,7 @@ import Rooms from './Rooms/Rooms.js'
 import RoomsSocket from './Rooms/socket.js'
 import Queue from './Queue/Queue.js'
 import QueueSocket from './Queue/socket.js'
+import SongSourcesSocket from './SongSources/socket.js'
 
 import {
   LIBRARY_PUSH,
@@ -30,6 +31,7 @@ const handlers = {
   ...PlayerSocket,
   ...PrefsSocket,
   ...RoomsSocket,
+  ...SongSourcesSocket,
 }
 
 const { verify: jwtVerify } = jsonWebToken

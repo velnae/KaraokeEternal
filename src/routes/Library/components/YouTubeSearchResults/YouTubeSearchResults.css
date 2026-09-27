@@ -1,0 +1,78 @@
+.results {
+  padding: 0 var(--space-xs);
+}
+
+.result {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: 72px;
+  margin-bottom: var(--space-xs);
+  padding-left: var(--space-xs);
+  overflow: hidden;
+  background: hsl(var(--hue-blue), 40%, 6%);
+  border-left: var(--space-xs) solid hsl(0, 75%, 52%);
+}
+
+.thumbnail {
+  flex: 0 0 84px;
+  height: 48px;
+  overflow: hidden;
+  background: hsl(var(--hue-blue), 25%, 12%);
+}
+
+.thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.primary {
+  flex: 1;
+  min-width: 0;
+}
+
+.title,
+.channel {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.title {
+  color: var(--color-gray-9);
+  font-size: 17px;
+}
+
+.channel,
+.meta {
+  color: var(--color-gray-6);
+  font-size: 13px;
+}
+
+.meta {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: 2px;
+}
+
+.source {
+  color: hsl(0, 78%, 68%);
+  font-weight: 700;
+}
+
+.add {
+  align-self: stretch;
+  flex: 0 0 56px;
+  color: var(--song-item-btn-active-bg-color);
+}
+
+.message {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-sm);
+  color: var(--color-gray-7);
+  text-align: center;
+}

@@ -100,7 +100,7 @@ class Queue {
     `
     const rows = db.all<{
       queueId: number
-      songId: number
+      songId: number | null
       userId: number
       prevQueueId: number | null
       origin: QueueItemOrigin

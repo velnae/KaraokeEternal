@@ -211,10 +211,13 @@ The shared contract lives in `shared/songSource.ts`. Queue creation accepts a va
 ### YouTube source
 
 - Search runs on the backend so the API key is not exposed to clients.
+- Backend configuration uses `KES_YOUTUBE_API_KEY`, `KES_YOUTUBE_REGION` (default `PE`) and `KES_YOUTUBE_MAX_RESULTS` (default `10`, clamped to `1–50`).
 - Uses YouTube Data API for search and metadata resolution.
+- Searches candidate video IDs first, then resolves `snippet`, `contentDetails` and `status` before returning playable results.
 - Accepts only video results that are embeddable and usable by the IFrame Player API when that information is available.
 - Stores only identifiers and metadata needed for the queue/history.
 - Does not download, extract audio or cache YouTube media.
+- Missing configuration, quota exhaustion and API failures are returned as YouTube-only UI states; local search and playback remain available.
 - If a video becomes unavailable, mark the item `FAILED`, notify clients and continue safely to the next item.
 
 ## 10. Playback selection
