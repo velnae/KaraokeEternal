@@ -1,12 +1,18 @@
-import React, { useEffect, useCallback } from 'react'
+import React, { useEffect, useCallback, useRef } from 'react'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import Player from '../Player/Player'
 import PlayerTextOverlay from '../PlayerTextOverlay/PlayerTextOverlay'
 import PlayerQR from '../PlayerQR/PlayerQR'
 import getRoundRobinQueue from 'routes/Queue/selectors/getRoundRobinQueue'
-import { playerLeave, playerError, playerLoad, playerPlay, playerStatus, type PlayerState } from '../../modules/player'
+import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, type PlayerState } from '../../modules/player'
 import getRoomPrefs from '../../selectors/getRoomPrefs'
 import type { QueueItem } from 'shared/types'
+import {
+  appendCompletedToHistory,
+  playbackToken,
+  settlePlayback,
+  type PlaybackSettlementState,
+} from './playbackSettlement'
 
 interface PlayerControllerProps {
   width: number
@@ -25,15 +31,12 @@ const PlayerController = (props: PlayerControllerProps) => {
     .slice(currentIndex === -1 ? 0 : currentIndex + 1)
     .map(queueId => queue.entities[queueId])
     .find(item => item.status === 'APPROVED')
+  const settlement = useRef<PlaybackSettlementState>({ token: null, outcome: null })
 
   const dispatch = useAppDispatch()
   const handleStatus = useCallback((status?: Partial<PlayerState>) => dispatch(playerStatus(status)), [dispatch])
   const handleLoad = () => dispatch(playerLoad())
   const handlePlay = () => dispatch(playerPlay())
-  const handleError = (msg: string) => {
-    dispatch(playerError(msg))
-    handleStatus()
-  }
 
   const handleReplay = useCallback((queueId: number) => {
     const nextItem = queue.entities[queueId]
@@ -60,19 +63,18 @@ const PlayerController = (props: PlayerControllerProps) => {
     })
   }, [handleStatus, player.historyJSON, player.queueId, queue.entities])
 
-  const handleLoadNext = useCallback(() => {
-    const history = JSON.parse(player.historyJSON)
-
-    // add current item to history (once)
-    if (queueItem && history.lastIndexOf(queueItem.queueId) === -1) {
-      history.push(queueItem.queueId)
-    }
+  const handleLoadNext = useCallback((includeCurrentInHistory = true) => {
+    const historyJSON = appendCompletedToHistory(
+      player.historyJSON,
+      includeCurrentInHistory ? queueItem?.queueId : undefined,
+    )
 
     // queue exhausted?
     if (!nextQueueItem) {
       handleStatus({
-        historyJSON: JSON.stringify(history),
+        historyJSON,
         isAtQueueEnd: true,
+        isErrored: false,
         mediaType: null,
         _isPlayingNext: false,
       })
@@ -82,8 +84,10 @@ const PlayerController = (props: PlayerControllerProps) => {
 
     // play next
     handleStatus({
-      historyJSON: JSON.stringify(history),
+      errorMessage: '',
+      historyJSON,
       isAtQueueEnd: false,
+      isErrored: false,
       isPlaying: true,
       isVideoKeyingEnabled: nextQueueItem.isVideoKeyingEnabled,
       mediaType: nextQueueItem.mediaType,
@@ -93,6 +97,26 @@ const PlayerController = (props: PlayerControllerProps) => {
       _isPlayingNext: false,
     })
   }, [handleStatus, nextQueueItem, player.historyJSON, queueItem])
+
+  const handleEnd = useCallback(() => {
+    if (!queueItem) return
+    const token = playbackToken(queueItem.queueId, player._lastReplayTime)
+    settlePlayback(settlement.current, token, 'ENDED', { onAdvance: handleLoadNext })
+  }, [handleLoadNext, player._lastReplayTime, queueItem])
+
+  const handleError = useCallback((msg: string) => {
+    if (!queueItem || queueItem.source !== 'YOUTUBE') {
+      dispatch(playerError(msg))
+      handleStatus()
+      return
+    }
+
+    const token = playbackToken(queueItem.queueId, player._lastReplayTime)
+    settlePlayback(settlement.current, token, 'FAILED', {
+      onFailure: () => dispatch(playerFailure({ queueId: queueItem.queueId, error: msg })),
+      onAdvance: handleLoadNext,
+    })
+  }, [dispatch, handleLoadNext, handleStatus, player._lastReplayTime, queueItem])
 
   // Lock the participant for the next participant turn. House/operator items
   // may play before it without allowing realtime changes to replace that turn.
@@ -163,18 +187,20 @@ const PlayerController = (props: PlayerControllerProps) => {
         isReplayGainEnabled={prefs.isReplayGainEnabled}
         isVideoKeyingEnabled={!!queueItem?.isVideoKeyingEnabled}
         isWebGLSupported={player.isWebGLSupported}
+        externalId={queueItem ? queueItem.externalId : null}
         mediaId={queueItem ? queueItem.mediaId : null}
         mediaKey={queueItem ? queueItem.queueId : null}
         mediaReplayKey={player._lastReplayTime}
         mediaType={queueItem ? queueItem.mediaType : null}
         mp4Alpha={player.mp4Alpha}
-        onEnd={handleLoadNext}
+        onEnd={handleEnd}
         onError={handleError}
         onLoad={handleLoad}
         onPlay={handlePlay}
         onStatus={handleStatus}
         rgTrackGain={queueItem ? queueItem.rgTrackGain : null}
         rgTrackPeak={queueItem ? queueItem.rgTrackPeak : null}
+        source={queueItem?.source}
         visualizer={playerVisualizer}
         volume={player.volume}
         width={props.width}

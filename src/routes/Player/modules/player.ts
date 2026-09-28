@@ -10,6 +10,7 @@ import {
   PLAYER_CMD_REPLAY,
   PLAYER_CMD_VOLUME,
   PLAYER_EMIT_LEAVE,
+  PLAYER_EMIT_FAILURE,
   PLAYER_EMIT_STATUS,
   PLAYER_ERROR,
   PLAYER_LOAD,
@@ -26,6 +27,7 @@ export const playerError = createAction<string>(PLAYER_ERROR)
 export const playerLoad = createAction(PLAYER_LOAD)
 export const playerPlay = createAction(PLAYER_PLAY)
 export const playerCmdNext = createAction(PLAYER_CMD_NEXT)
+export const playerFailure = createAction<{ queueId: number, error: string }>(PLAYER_EMIT_FAILURE)
 
 // triggered by clients
 const playerCmdPause = createAction(PLAYER_CMD_PAUSE)

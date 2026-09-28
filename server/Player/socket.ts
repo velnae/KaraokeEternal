@@ -16,6 +16,7 @@ import {
   PLAYER_REQ_VOLUME,
   PLAYER_EMIT_STATUS,
   PLAYER_EMIT_LEAVE,
+  PLAYER_EMIT_FAILURE,
   PLAYER_STATUS,
   PLAYER_LEAVE,
   QUEUE_PUSH,
@@ -25,6 +26,29 @@ import {
 // Action Handlers
 // ------------------------------------
 const ACTION_HANDLERS = {
+  [PLAYER_EMIT_FAILURE]: (sock, { payload }, acknowledge) => {
+    if (!sock.user.isAdmin) {
+      throw new Error('Only administrators can report player failures')
+    }
+
+    const queueId = payload?.queueId
+    if (!Number.isInteger(queueId) || queueId < 0) {
+      return acknowledge?.({
+        type: PLAYER_EMIT_FAILURE + '_ERROR',
+        error: 'Invalid failed queue item',
+      })
+    }
+
+    const changed = Queue.transition(sock.user.roomId, queueId, 'FAILED')
+    acknowledge?.({ type: PLAYER_EMIT_FAILURE + '_SUCCESS' })
+
+    if (changed) {
+      sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {
+        type: QUEUE_PUSH,
+        payload: Queue.get(sock.user.roomId),
+      })
+    }
+  },
   [PLAYER_REQ_OPTIONS]: (sock, { payload }) => {
     // @todo: emit to players only
     sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {

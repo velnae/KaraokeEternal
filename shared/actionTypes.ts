@@ -45,6 +45,7 @@ export const PLAYER_REQ_REPLAY = 'server/PLAYER_REQ_REPLAY'
 export const PLAYER_REQ_VOLUME = 'server/PLAYER_REQ_VOLUME'
 export const PLAYER_EMIT_STATUS = 'server/PLAYER_EMIT_STATUS'
 export const PLAYER_EMIT_LEAVE = 'server/PLAYER_EMIT_LEAVE'
+export const PLAYER_EMIT_FAILURE = 'server/PLAYER_EMIT_FAILURE'
 
 // Player events
 export const PLAYER_STATUS = 'status/PLAYER_STATUS'

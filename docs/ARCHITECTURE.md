@@ -228,7 +228,11 @@ source=LOCAL, mediaType=mp4 -> MP4Player
 source=YOUTUBE              -> YouTubePlayer
 ```
 
-The YouTube player must implement the same operational contract needed by `PlayerController`: load, play, pause, resume, end, error and status reporting. Browser autoplay restrictions still apply; the operator starts playback from the player at least once.
+`YouTubePlayer` loads the official IFrame Player API asynchronously and implements the same operational contract used by `PlayerController`: load, play, pause, resume, replay, end, error, volume and position reporting. The embed includes the page `origin`, uses inline playback and retains native controls as a recovery path.
+
+End and error callbacks are settled once per `queueId` plus replay token. A YouTube error is reported through an admin-only backend action, persisted as `FAILED`, pushed to room clients and excluded from played history before the player advances to the next approved item. Repeated or late callbacks are no-ops. Local playback keeps its existing stop-on-error behavior.
+
+Browser autoplay restrictions still apply. The operator starts playback from the player controls at least once or configures the dedicated venue browser to allow audio/video autoplay as described in the existing autoplay guide.
 
 ## 11. Realtime and authority rules
 

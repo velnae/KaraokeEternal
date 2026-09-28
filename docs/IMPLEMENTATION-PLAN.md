@@ -16,7 +16,8 @@ This file is the only authoritative implementation sequence. `HANDOFF.md` and `C
 - Phase 5: completed on 2026-09-26.
 - Phase 6: completed on 2026-09-27.
 - Phase 7: completed on 2026-09-27.
-- Next phase: Phase 8 — YouTube playback.
+- Phase 8: completed on 2026-09-28.
+- Next phase: Phase 9 — Operator UX and authorization audit.
 
 ## 2. Delivery rules
 

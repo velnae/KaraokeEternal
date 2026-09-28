@@ -114,3 +114,14 @@ Phase 6 adds shared normalized source contracts, `LocalSongSource` search/resolu
 | Production build | Passed with the inherited size/license warnings |
 
 Phase 7 adds server-only YouTube Data API configuration, two-step search and resolution, embeddability/availability checks, isolated UI error states, and YouTube queue snapshots without local-library insertion. Participant requests follow the same AUTO/MANUAL approval rules as local songs; playback remains Phase 8.
+
+## Results after Phase 8
+
+| Check | Result |
+| --- | --- |
+| Lint | Inherited baseline errors remain; no Phase 8 regression |
+| Typecheck | Only the inherited `Player.tsx` TS2604 failure remains |
+| Automated tests | 137 passed across 16 files |
+| Production build | Passed with the inherited size/license warnings |
+
+Phase 8 adds official YouTube IFrame playback with play/pause/replay, volume and position synchronization; source-aware CDG/MP4/YouTube selection; and idempotent end/error settlement. YouTube playback failures persist as `FAILED`, notify room clients and advance without adding the failed item to played history.

@@ -121,7 +121,9 @@ const QueueItem = ({
     ? 'Waiting for approval'
     : status === 'REJECTED'
       ? 'Request rejected'
-      : null
+      : status === 'FAILED'
+        ? 'Playback failed'
+        : null
 
   const swipeHandlers = useSwipeable({
     onSwipedLeft: () => {
@@ -185,7 +187,7 @@ const QueueItem = ({
             {origin === 'PARTICIPANT' ? 'Participant' : origin === 'HOUSE' ? 'House' : 'Operator'}
           </div>
           {statusLabel && (
-            <div className={clsx(styles.status, status === 'REJECTED' && styles.rejected)}>
+            <div className={clsx(styles.status, (status === 'REJECTED' || status === 'FAILED') && styles.rejected)}>
               {statusLabel}
             </div>
           )}

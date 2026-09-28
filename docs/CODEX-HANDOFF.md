@@ -66,14 +66,14 @@ Already present at the time of this handoff:
 
 Not yet implemented:
 
-- YouTube playback through the IFrame Player API.
+- Operator UX and authorization audit.
 - Remaining business-rule tests for later phases.
 
 Always inspect the current diff because this section may become stale as implementation advances.
 
 ## First task
 
-Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 7 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 8.
+Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 8 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 9.
 
 ## Non-negotiable behavioral rules
 

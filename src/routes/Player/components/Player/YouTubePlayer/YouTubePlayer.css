@@ -1,0 +1,9 @@
+.container,
+.container iframe {
+  display: block;
+  border: 0;
+}
+
+.container {
+  background: #000;
+}

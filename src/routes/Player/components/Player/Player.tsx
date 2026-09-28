@@ -2,8 +2,12 @@ import React from 'react'
 import CDGPlayer from './CDGPlayer/CDGPlayer'
 import MP4Player from './MP4Player/MP4Player'
 import MP4AlphaPlayer from './MP4Player/MP4AlphaPlayer'
+import YouTubePlayer from './YouTubePlayer/YouTubePlayer'
+import { selectPlayerKind } from './playerSelection'
 import { type PlayerState } from '../../modules/player'
 import { type PlayerVisualizerState } from '../../modules/playerVisualizer'
+import type { MediaType } from 'shared/types'
+import type { SongSource } from 'shared/queueLifecycle'
 
 const PlayerVisualizer = React.lazy(() => import('./PlayerVisualizer/PlayerVisualizer'))
 
@@ -15,13 +19,15 @@ interface PlayerProps {
   isReplayGainEnabled: boolean
   isVideoKeyingEnabled: boolean
   isWebGLSupported: boolean
-  mediaId: number
-  mediaKey: number
+  externalId: string | null
+  mediaId: number | null
+  mediaKey: number | null
   mediaReplayKey?: number
-  mediaType?: string
+  mediaType?: MediaType | null
   mp4Alpha: number
   rgTrackGain?: number
   rgTrackPeak?: number
+  source?: SongSource
   visualizer: PlayerVisualizerState
   volume: number
   width: number
@@ -115,19 +121,49 @@ class Player extends React.Component<PlayerProps> {
   }
 
   render () {
-    if (!this.props.isVisible || typeof this.props.mediaId !== 'number') return null
+    if (!this.props.isVisible || typeof this.props.mediaKey !== 'number') return null
+
+    const playerKind = selectPlayerKind(
+      this.props.source,
+      this.props.mediaType,
+      this.props.isVideoKeyingEnabled,
+    )
+
+    if (playerKind === 'youtube') {
+      if (!this.props.externalId) return null
+
+      return (
+        <YouTubePlayer
+          height={this.props.height}
+          isPlaying={this.props.isPlaying}
+          mediaKey={this.props.mediaKey}
+          mediaReplayKey={this.props.mediaReplayKey}
+          onEnd={this.props.onEnd}
+          onError={this.props.onError}
+          onLoad={this.props.onLoad}
+          onPlay={this.handlePlay}
+          onStatus={this.props.onStatus}
+          videoId={this.props.externalId}
+          volume={this.props.volume}
+          width={this.props.width}
+        />
+      )
+    }
+
+    if (typeof this.props.mediaId !== 'number') return null
 
     let PlayerComponent
 
-    if (this.props.mediaType === 'cdg') PlayerComponent = CDGPlayer
-    else if (this.props.mediaType === 'mp4') PlayerComponent = this.props.isVideoKeyingEnabled ? MP4AlphaPlayer : MP4Player
+    if (playerKind === 'cdg') PlayerComponent = CDGPlayer
+    else if (playerKind === 'mp4') PlayerComponent = MP4Player
+    else if (playerKind === 'mp4-alpha') PlayerComponent = MP4AlphaPlayer
 
     if (typeof PlayerComponent === 'undefined') {
       this.props.onError(`No player for mediaType: ${this.props.mediaType}`)
       return null
     }
 
-    const isVisualizerActive = (this.props.mediaType === 'cdg' || this.props.isVideoKeyingEnabled)
+    const isVisualizerActive = (playerKind === 'cdg' || playerKind === 'mp4-alpha')
       && this.props.isWebGLSupported
       && this.props.visualizer.isEnabled
       && this.state.visualizerAudioSourceNode

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PLAYER_EMIT_LEAVE, PLAYER_EMIT_STATUS, PLAYER_LEAVE, PLAYER_STATUS, QUEUE_PUSH } from '../../shared/actionTypes.js'
+import {
+  PLAYER_EMIT_FAILURE,
+  PLAYER_EMIT_LEAVE,
+  PLAYER_EMIT_STATUS,
+  PLAYER_LEAVE,
+  PLAYER_STATUS,
+  QUEUE_PUSH,
+} from '../../shared/actionTypes.js'
 import Queue from '../Queue/Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import ACTION_HANDLERS from './socket.js'
@@ -57,5 +64,34 @@ describe('player queue lifecycle', () => {
       type: PLAYER_LEAVE,
       payload: { socketId: 'socket-1' },
     })
+  })
+
+  it('marks a failed item once and notifies the room with the persisted queue', () => {
+    const queue = { result: [4, 5], entities: {} }
+    const { socket, emit } = createSocket()
+    const transition = vi.spyOn(Queue, 'transition')
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false)
+    vi.spyOn(Queue, 'get').mockReturnValue(queue)
+    const acknowledge = vi.fn()
+
+    ACTION_HANDLERS[PLAYER_EMIT_FAILURE](socket, { payload: { queueId: 4, error: 'Unavailable' } }, acknowledge)
+    ACTION_HANDLERS[PLAYER_EMIT_FAILURE](socket, { payload: { queueId: 4, error: 'Unavailable' } }, acknowledge)
+
+    expect(transition).toHaveBeenCalledTimes(2)
+    expect(transition).toHaveBeenCalledWith(1, 4, 'FAILED')
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledWith('action', { type: QUEUE_PUSH, payload: queue })
+    expect(acknowledge).toHaveBeenCalledWith({ type: PLAYER_EMIT_FAILURE + '_SUCCESS' })
+  })
+
+  it('rejects failure reports from non-admin sockets', () => {
+    const { socket } = createSocket({ isAdmin: false })
+
+    expect(() => ACTION_HANDLERS[PLAYER_EMIT_FAILURE](
+      socket,
+      { payload: { queueId: 4 } },
+      vi.fn(),
+    )).toThrow('Only administrators')
   })
 })
