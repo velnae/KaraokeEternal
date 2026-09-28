@@ -1,0 +1,16 @@
+.authorityNotice {
+  box-sizing: border-box;
+  max-width: 42rem;
+  padding: 2rem;
+  text-align: center;
+  color: var(--color-gray-9);
+}
+
+.authorityNotice h1 {
+  margin: 0 0 1rem;
+}
+
+.authorityNotice p {
+  margin: 0.5rem 0;
+  color: var(--color-gray-7);
+}

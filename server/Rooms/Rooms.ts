@@ -230,7 +230,7 @@ class Rooms {
    */
   static getPlayerStatus (io, roomId: number) {
     for (const sock of io.of('/').sockets.values()) {
-      if (sock.user && sock.user.roomId === roomId && sock._lastPlayerStatus) {
+      if (sock.user && sock.user.roomId === roomId && sock._isPlayerAuthoritative && sock._lastPlayerStatus) {
         return sock._lastPlayerStatus
       }
     }
@@ -243,6 +243,26 @@ class Rooms {
    */
   static isPlayerPresent (io: any, roomId: number): boolean {
     return Rooms.getPlayerStatus(io, roomId) !== null
+  }
+
+  /**
+   * Claim the single authoritative player slot for a room.
+   */
+  static claimPlayer (io, sock, roomId: number): boolean {
+    for (const candidate of io.of('/').sockets.values()) {
+      if (candidate.id !== sock.id
+        && candidate.user?.roomId === roomId
+        && candidate._isPlayerAuthoritative) {
+        return false
+      }
+    }
+
+    sock._isPlayerAuthoritative = true
+    return true
+  }
+
+  static isAuthoritativePlayer (sock): boolean {
+    return sock._isPlayerAuthoritative === true
   }
 
   /**

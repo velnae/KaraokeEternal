@@ -7,6 +7,7 @@ import getRoundRobinQueue from 'routes/Queue/selectors/getRoundRobinQueue'
 import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, type PlayerState } from '../../modules/player'
 import getRoomPrefs from '../../selectors/getRoomPrefs'
 import type { QueueItem } from 'shared/types'
+import styles from './PlayerController.css'
 import {
   appendCompletedToHistory,
   playbackToken,
@@ -34,7 +35,10 @@ const PlayerController = (props: PlayerControllerProps) => {
   const settlement = useRef<PlaybackSettlementState>({ token: null, outcome: null })
 
   const dispatch = useAppDispatch()
-  const handleStatus = useCallback((status?: Partial<PlayerState>) => dispatch(playerStatus(status)), [dispatch])
+  const handleStatus = useCallback((status?: Partial<PlayerState>) => {
+    if (player._authority === 'DENIED') return
+    dispatch(playerStatus(status))
+  }, [dispatch, player._authority])
   const handleLoad = () => dispatch(playerLoad())
   const handlePlay = () => dispatch(playerPlay())
 
@@ -143,6 +147,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     player.mp4Alpha,
     player.volume,
     playerVisualizer,
+    player._authority,
     queueItem?.isVideoKeyingEnabled,
   ])
 
@@ -176,6 +181,21 @@ const PlayerController = (props: PlayerControllerProps) => {
       handleStatus({ isErrored: false })
     }
   }, [handleStatus, player.isErrored, player.isPlaying])
+
+  if (player._authority !== 'GRANTED') {
+    const denied = player._authority === 'DENIED'
+    return (
+      <div className={styles.authorityNotice} role='status'>
+        <h1>{denied ? 'Player already active' : 'Connecting player…'}</h1>
+        <p>
+          {denied
+            ? player._authorityMessage
+            : 'Requesting the authoritative player slot for this room.'}
+        </p>
+        {denied && <p>This screen will take over automatically if the active player disconnects.</p>}
+      </div>
+    )
+  }
 
   return (
     <>

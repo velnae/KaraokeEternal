@@ -117,13 +117,15 @@ const QueueItem = ({
   const handleApproveClick = () => dispatch(approveRequest({ queueId }))
   const handleRejectClick = () => dispatch(rejectRequest({ queueId }))
 
-  const statusLabel = status === 'PENDING_APPROVAL'
-    ? 'Waiting for approval'
-    : status === 'REJECTED'
-      ? 'Request rejected'
-      : status === 'FAILED'
-        ? 'Playback failed'
-        : null
+  const statusLabel: Record<QueueItemStatus, string> = {
+    PENDING_APPROVAL: 'Waiting for approval',
+    APPROVED: 'Approved',
+    PLAYING: 'Playing',
+    PLAYED: 'Played',
+    REJECTED: 'Request rejected',
+    REMOVED: 'Removed',
+    FAILED: 'Playback failed',
+  }
 
   const swipeHandlers = useSwipeable({
     onSwipedLeft: () => {
@@ -183,14 +185,17 @@ const QueueItem = ({
           <div className={clsx(styles.user, isOwner && styles.isOwner)}>
             {userDisplayName}
           </div>
-          <div className={clsx(styles.origin, styles[origin.toLowerCase()])}>
-            {origin === 'PARTICIPANT' ? 'Participant' : origin === 'HOUSE' ? 'House' : 'Operator'}
-          </div>
-          {statusLabel && (
-            <div className={clsx(styles.status, (status === 'REJECTED' || status === 'FAILED') && styles.rejected)}>
-              {statusLabel}
+          <div className={styles.badges}>
+            <div className={clsx(styles.origin, styles[origin.toLowerCase()])}>
+              {origin === 'PARTICIPANT' ? 'Participant' : origin === 'HOUSE' ? 'House' : 'Operator'}
             </div>
-          )}
+            <div className={clsx(styles.source, source === 'YOUTUBE' && styles.youtube)}>
+              {source === 'YOUTUBE' ? 'YouTube' : 'Local'}
+            </div>
+          </div>
+          <div className={clsx(styles.status, (status === 'REJECTED' || status === 'FAILED') && styles.rejected)}>
+            {statusLabel[status]}
+          </div>
         </div>
 
         <Buttons btnWidth={56} isExpanded={isExpanded} className={styles.btnContainer}>

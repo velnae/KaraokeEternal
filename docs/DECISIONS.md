@@ -134,13 +134,14 @@ Only admins may:
 - Change room settings.
 - Approve/reject requests.
 - Create `HOUSE` or `OPERATOR` items.
+- Reorder the queue and control playback.
 - Manage another participant's items.
 
 Participants may create and remove their own eligible requests. Backend acknowledgements are authoritative.
 
 ## ADR-018 — Single authoritative player per room
 
-The MVP supports one authoritative player socket per room. A second player must be rejected or treated as a non-authoritative display; it cannot independently advance lifecycle state.
+The MVP supports one authoritative player socket per room. The first admin player to publish status claims the room slot. A second player remains in visible standby, cannot independently advance lifecycle state and may claim the slot only after the authoritative player leaves.
 
 ## ADR-019 — No premature SaaS refactor
 

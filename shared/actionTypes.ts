@@ -46,6 +46,9 @@ export const PLAYER_REQ_VOLUME = 'server/PLAYER_REQ_VOLUME'
 export const PLAYER_EMIT_STATUS = 'server/PLAYER_EMIT_STATUS'
 export const PLAYER_EMIT_LEAVE = 'server/PLAYER_EMIT_LEAVE'
 export const PLAYER_EMIT_FAILURE = 'server/PLAYER_EMIT_FAILURE'
+export const PLAYER_AUTHORITY_GRANTED = 'player/AUTHORITY_GRANTED'
+export const PLAYER_AUTHORITY_DENIED = 'player/AUTHORITY_DENIED'
+export const PLAYER_AUTHORITY_AVAILABLE = 'player/AUTHORITY_AVAILABLE'
 
 // Player events
 export const PLAYER_STATUS = 'status/PLAYER_STATUS'

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   QUEUE_ADD,
   QUEUE_APPROVE,
+  QUEUE_MOVE,
+  QUEUE_REMOVE,
   QUEUE_PUSH,
   QUEUE_REJECT,
 } from '../../shared/actionTypes.js'
@@ -374,5 +376,81 @@ describe('request moderation', () => {
     expect(moderate).toHaveBeenCalledWith(1, 4, status)
     expect(acknowledge).toHaveBeenCalledWith({ type: actionType + '_SUCCESS' })
     expect(emit).toHaveBeenCalledWith('action', { type: QUEUE_PUSH, payload: queue })
+  })
+})
+
+describe('queue ordering permissions', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('does not allow a participant to move even their own item', async () => {
+    vi.spyOn(Rooms, 'validate').mockResolvedValue(true)
+    const move = vi.spyOn(Queue, 'move')
+    const acknowledge = vi.fn()
+    const { socket } = createSocket()
+
+    await ACTION_HANDLERS[QUEUE_MOVE](
+      socket,
+      { payload: { queueId: 4, prevQueueId: 3 } },
+      acknowledge,
+    )
+
+    expect(move).not.toHaveBeenCalled()
+    expect(acknowledge).toHaveBeenCalledWith({
+      type: QUEUE_MOVE + '_ERROR',
+      error: 'Only administrators can move queue items',
+    })
+  })
+
+  it('allows an administrator to move an approved item', async () => {
+    const queue = mockQueue([10, 20])
+    vi.spyOn(Rooms, 'validate').mockResolvedValue(true)
+    const move = vi.spyOn(Queue, 'move').mockImplementation(() => {})
+    vi.spyOn(Queue, 'get').mockReturnValue(queue)
+    const acknowledge = vi.fn()
+    const { socket, emit } = createSocket({ isAdmin: true })
+
+    await ACTION_HANDLERS[QUEUE_MOVE](
+      socket,
+      { payload: { queueId: 2, prevQueueId: -1 } },
+      acknowledge,
+    )
+
+    expect(move).toHaveBeenCalledWith({ queueId: 2, prevQueueId: -1, roomId: 1 })
+    expect(acknowledge).toHaveBeenCalledWith({ type: QUEUE_MOVE + '_SUCCESS' })
+    expect(emit).toHaveBeenCalledWith('action', { type: QUEUE_PUSH, payload: queue })
+  })
+})
+
+describe('queue removal permissions', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('allows a participant to remove their own eligible request', () => {
+    const queue = mockQueue([])
+    vi.spyOn(Queue, 'isOwner').mockReturnValue(true)
+    const remove = vi.spyOn(Queue, 'remove').mockImplementation(() => {})
+    vi.spyOn(Queue, 'get').mockReturnValue(queue)
+    const acknowledge = vi.fn()
+    const { socket, emit } = createSocket()
+
+    ACTION_HANDLERS[QUEUE_REMOVE](socket, { payload: { queueId: 4 } }, acknowledge)
+
+    expect(remove).toHaveBeenCalledWith(4, 1)
+    expect(acknowledge).toHaveBeenCalledWith({ type: QUEUE_REMOVE + '_SUCCESS' })
+    expect(emit).toHaveBeenCalledWith('action', { type: QUEUE_PUSH, payload: queue })
+  })
+
+  it('does not allow a participant to remove another participant request', () => {
+    vi.spyOn(Queue, 'isOwner').mockReturnValue(false)
+    const remove = vi.spyOn(Queue, 'remove')
+    const acknowledge = vi.fn()
+    const { socket } = createSocket()
+
+    ACTION_HANDLERS[QUEUE_REMOVE](socket, { payload: { queueId: 4 } }, acknowledge)
+
+    expect(remove).not.toHaveBeenCalled()
+    expect(acknowledge).toHaveBeenCalledWith({
+      type: QUEUE_REMOVE + '_ERROR',
+      error: 'Cannot remove another user\'s song',
+    })
   })
 })

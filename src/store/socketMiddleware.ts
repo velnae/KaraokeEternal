@@ -19,6 +19,7 @@ export default function createSocketMiddleware (socket: Socket, prefix: string):
 
       const hasMeta = 'meta' in action
       const isOptimistic = hasMeta && (action.meta?.isOptimistic ?? false)
+      const optimisticTransactionID = isOptimistic ? ++transactionID : null
 
       socket.emit('action', action, (cbAction: UnknownAction) => {
         // make sure callback response is an action
@@ -29,7 +30,9 @@ export default function createSocketMiddleware (socket: Socket, prefix: string):
         if (isOptimistic) {
           cbAction.meta = {
             ...('meta' in cbAction && typeof cbAction.meta === 'object' ? cbAction.meta : {}),
-            optimistic: cbAction.error ? { type: REVERT, id: transactionID } : { type: COMMIT, id: transactionID },
+            optimistic: cbAction.error
+              ? { type: REVERT, id: optimisticTransactionID }
+              : { type: COMMIT, id: optimisticTransactionID },
           }
         }
 
@@ -41,15 +44,13 @@ export default function createSocketMiddleware (socket: Socket, prefix: string):
       }
 
       // dispatch optimistically?
-      transactionID++
-
       // don't mutate action because we don't need to
       // emit this meta info to the server
       next({
         ...action,
         meta: {
           ...action.meta,
-          optimistic: { type: BEGIN, id: transactionID },
+          optimistic: { type: BEGIN, id: optimisticTransactionID },
         },
       })
     }

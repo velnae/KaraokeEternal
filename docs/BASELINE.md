@@ -125,3 +125,14 @@ Phase 7 adds server-only YouTube Data API configuration, two-step search and res
 | Production build | Passed with the inherited size/license warnings |
 
 Phase 8 adds official YouTube IFrame playback with play/pause/replay, volume and position synchronization; source-aware CDG/MP4/YouTube selection; and idempotent end/error settlement. YouTube playback failures persist as `FAILED`, notify room clients and advance without adding the failed item to played history.
+
+## Results after Phase 9
+
+| Check | Result |
+| --- | --- |
+| Lint | Inherited baseline errors remain; focused lint found no Phase 9 regression |
+| Typecheck | Only the inherited `Player.tsx` TS2604 failure remains |
+| Automated tests | 160 passed across 18 files |
+| Production build | Passed with the inherited size/license warnings |
+
+Phase 9 makes queue ordering and playback commands operator-only in both UI and backend, fixes unauthorized preference mutation/broadcast paths, and enforces a single authoritative player socket with explicit standby and automatic takeover. Queue rows expose source, origin and lifecycle status; failed items can be requeued without database work. Optimistic socket transactions now retain their own IDs so rejected concurrent actions reliably roll back the matching change.

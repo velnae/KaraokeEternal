@@ -63,17 +63,23 @@ Already present at the time of this handoff:
 - Shared normalized song-source contracts and source registry.
 - `LocalSongSource` search/resolve adapter over the inherited library and media persistence.
 - Queue creation through validated resolved metadata snapshots.
+- Official YouTube playback with idempotent end/failure settlement.
+- Backend-enforced operator-only queue ordering and playback controls.
+- One authoritative player lease per room with explicit standby/takeover behavior.
+- Queue source/origin/status badges and failed-item requeue recovery.
+- Stable optimistic transaction rollback for concurrent socket actions.
+- Admin-only preference mutation and preference broadcasts.
 
 Not yet implemented:
 
-- Operator UX and authorization audit.
-- Remaining business-rule tests for later phases.
+- Phase 10 end-to-end pilot validation.
+- Remaining pilot acceptance and migration validation scenarios.
 
 Always inspect the current diff because this section may become stale as implementation advances.
 
 ## First task
 
-Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 8 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 9.
+Start at the first incomplete phase in `docs/IMPLEMENTATION-PLAN.md`. Phases 0 through 9 are implemented. Review `docs/BASELINE.md`, confirm the working tree and verification results, then continue with Phase 10.
 
 ## Non-negotiable behavioral rules
 

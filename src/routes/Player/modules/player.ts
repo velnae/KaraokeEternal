@@ -9,6 +9,9 @@ import {
   PLAYER_CMD_PLAY,
   PLAYER_CMD_REPLAY,
   PLAYER_CMD_VOLUME,
+  PLAYER_AUTHORITY_AVAILABLE,
+  PLAYER_AUTHORITY_DENIED,
+  PLAYER_AUTHORITY_GRANTED,
   PLAYER_EMIT_LEAVE,
   PLAYER_EMIT_FAILURE,
   PLAYER_EMIT_STATUS,
@@ -39,6 +42,9 @@ const playerCmdOptions = createAction<{
   cdgSize: number
   mp4Alpha: number
 }>(PLAYER_CMD_OPTIONS)
+const playerAuthorityGranted = createAction(PLAYER_AUTHORITY_GRANTED)
+const playerAuthorityDenied = createAction<{ message: string }>(PLAYER_AUTHORITY_DENIED)
+const playerAuthorityAvailable = createAction(PLAYER_AUTHORITY_AVAILABLE)
 
 // ------------------------------------
 // Actions for emitting to room
@@ -114,6 +120,8 @@ export interface PlayerState {
   rgTrackGain: number | null
   rgTrackPeak: number | null
   volume: number
+  _authority: 'PENDING' | 'GRANTED' | 'DENIED'
+  _authorityMessage: string
   _isFetching: boolean
   _isPlayingNext: boolean
   _isReplayingQueueId: number | null
@@ -139,6 +147,8 @@ const initialState: PlayerState = {
   rgTrackPeak: null,
   volume: 1,
   // "private" internal state that shouldn't be emitted
+  _authority: 'PENDING',
+  _authorityMessage: '',
   _isFetching: false,
   _isPlayingNext: false,
   _isReplayingQueueId: null,
@@ -147,6 +157,18 @@ const initialState: PlayerState = {
 
 const playerReducer = createReducer(initialState, (builder) => {
   builder
+    .addCase(playerAuthorityGranted, (state) => {
+      state._authority = 'GRANTED'
+      state._authorityMessage = ''
+    })
+    .addCase(playerAuthorityDenied, (state, { payload }) => {
+      state._authority = 'DENIED'
+      state._authorityMessage = payload.message
+    })
+    .addCase(playerAuthorityAvailable, (state) => {
+      state._authority = 'PENDING'
+      state._authorityMessage = ''
+    })
     .addCase(playerCmdNext, (state) => {
       state._isPlayingNext = true
     })

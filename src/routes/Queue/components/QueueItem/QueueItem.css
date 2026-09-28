@@ -94,7 +94,6 @@
 }
 
 .origin {
-  align-self: flex-start;
   border: 1px solid currentColor;
   border-radius: var(--border-radius);
   color: var(--color-gray-5);
@@ -103,6 +102,27 @@
   margin-bottom: 0.25rem;
   padding: 0.15rem 0.35rem;
   text-transform: uppercase;
+}
+
+.badges {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.source {
+  border: 1px solid currentColor;
+  border-radius: var(--border-radius);
+  color: hsl(205, 70%, 65%);
+  font-size: 0.6875rem;
+  line-height: 1;
+  margin-bottom: 0.25rem;
+  padding: 0.15rem 0.35rem;
+  text-transform: uppercase;
+}
+
+.source.youtube {
+  color: hsl(0, 80%, 67%);
 }
 
 .origin.house {

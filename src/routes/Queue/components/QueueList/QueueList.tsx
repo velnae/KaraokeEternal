@@ -100,13 +100,13 @@ const QueueList = () => {
         isAdmin={user.isAdmin}
         isErrored={isCurrent && isErrored}
         isInfoable={user.isAdmin && item.source === 'LOCAL' && typeof item.songId === 'number'}
-        isMovable={isUpcoming && (isOwner || user.isAdmin)}
+        isMovable={isUpcoming && user.isAdmin}
         isOwner={isOwner}
         isPlayed={isTerminal && !isCurrent}
         isPlaying={isCurrent && isPlaying}
         isRemovable={isRemovable}
-        isReplayable={(isTerminal || isCurrent) && user.isAdmin}
-        isSkippable={isCurrent && (isOwner || user.isAdmin)}
+        isReplayable={(item.status === 'PLAYED' || isCurrent) && user.isAdmin}
+        isSkippable={isCurrent && user.isAdmin}
         isStarred={typeof item.songId === 'number' && starredSongs.includes(item.songId)}
         isUpcoming={isUpcoming}
         pctPlayed={isCurrent && duration > 0 ? position / duration * 100 : 0}

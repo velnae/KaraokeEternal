@@ -17,7 +17,8 @@ This file is the only authoritative implementation sequence. `HANDOFF.md` and `C
 - Phase 6: completed on 2026-09-27.
 - Phase 7: completed on 2026-09-27.
 - Phase 8: completed on 2026-09-28.
-- Next phase: Phase 9 — Operator UX and authorization audit.
+- Phase 9: completed on 2026-09-28.
+- Next phase: Phase 10 — End-to-end pilot validation.
 
 ## 2. Delivery rules
 

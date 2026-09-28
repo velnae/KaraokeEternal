@@ -121,10 +121,10 @@ const ACTION_HANDLERS = {
       })
     }
 
-    if (!sock.user.isAdmin && !(Queue.isOwner(sock.user.userId, queueId))) {
+    if (!sock.user.isAdmin) {
       return acknowledge({
         type: QUEUE_MOVE + '_ERROR',
-        error: 'Cannot move another user\'s song',
+        error: 'Only administrators can move queue items',
       })
     }
 

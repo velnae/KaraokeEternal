@@ -238,9 +238,10 @@ Browser autoplay restrictions still apply. The operator starts playback from the
 
 - Backend acknowledgements are authoritative for add, approve, reject, remove and move operations.
 - Optimistic UI must roll back when the backend rejects an action.
-- Only admins may configure rooms, approve/reject requests, create `HOUSE`/`OPERATOR` items or manage another participant's requests.
+- Only admins may configure rooms, approve/reject requests, create `HOUSE`/`OPERATOR` items, reorder the queue or control playback.
 - Participants may create and remove their own eligible requests.
-- One active player is supported per room in the MVP. A second player must not silently become authoritative; it should be rejected or shown as a non-authoritative display.
+- The first admin player socket that reports status claims the authoritative slot for its room. A second player is shown in standby, cannot report lifecycle changes and automatically attempts takeover after the authoritative player leaves.
+- Global preferences and room preference previews are pushed only to authenticated admin sockets.
 
 ## 12. Explicit exclusions
 

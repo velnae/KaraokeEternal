@@ -19,6 +19,7 @@ import {
   STAR_COUNTS_PUSH,
   PLAYER_STATUS,
   PLAYER_LEAVE,
+  PLAYER_AUTHORITY_AVAILABLE,
   PREFS_PUSH,
   SOCKET_AUTH_ERROR,
   _ERROR,
@@ -73,8 +74,11 @@ export default function (io, jwtKey) {
         sock.user.name, sock.id, sock.user.roomId, reason, sock.adapter.rooms.size,
       )
 
-      // any players left in room?
-      if (!Rooms.isPlayerPresent(io, sock.user.roomId)) {
+      const wasAuthoritativePlayer = Rooms.isAuthoritativePlayer(sock)
+      sock._isPlayerAuthoritative = false
+
+      // Only the authoritative player ending its session can interrupt playback.
+      if (wasAuthoritativePlayer && !Rooms.isPlayerPresent(io, sock.user.roomId)) {
         if (sock._lastPlayerStatus && Queue.requeuePlaying(sock.user.roomId)) {
           io.to(Rooms.prefix(sock.user.roomId)).emit('action', {
             type: QUEUE_PUSH,
@@ -85,6 +89,9 @@ export default function (io, jwtKey) {
         io.to(Rooms.prefix(sock.user.roomId)).emit('action', {
           type: PLAYER_LEAVE,
           payload: { socketId: sock.id },
+        })
+        io.to(Rooms.prefix(sock.user.roomId)).emit('action', {
+          type: PLAYER_AUTHORITY_AVAILABLE,
         })
       }
     })
@@ -162,17 +169,13 @@ export default function (io, jwtKey) {
     sock.join(Rooms.prefix(sock.user.roomId))
     Rooms.trackUser(sock.user.roomId, sock.user.userId)
 
-    // if there's a player in room, emit its last known status
-    // @todo this just emits the first status found
-    for (const s of io.of('/').sockets.values()) {
-      if (s.user && s.user.roomId === sock.user.roomId && s._lastPlayerStatus) {
-        io.to(sock.id).emit('action', {
-          type: PLAYER_STATUS,
-          payload: s._lastPlayerStatus,
-        })
-
-        break
-      }
+    // If there is an authoritative player, relay its last known status.
+    const playerStatus = Rooms.getPlayerStatus(io, sock.user.roomId)
+    if (playerStatus) {
+      io.to(sock.id).emit('action', {
+        type: PLAYER_STATUS,
+        payload: playerStatus,
+      })
     }
 
     log.verbose('%s (%s) joined room %s (%s in room)',
