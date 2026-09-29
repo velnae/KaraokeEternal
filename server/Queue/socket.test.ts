@@ -113,7 +113,7 @@ describe('participant pending request limit', () => {
     expect(add).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: QUEUE_ADD + '_ERROR',
-      error: 'Maximum pending song requests reached (2)',
+      error: 'Se alcanzó el máximo de solicitudes de canciones pendientes (2)',
     })
   })
 
@@ -243,7 +243,7 @@ describe('house and operator creation', () => {
     expect(add).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: QUEUE_ADD + '_ERROR',
-      error: 'Only administrators can create house or operator items',
+      error: 'Solo los administradores pueden agregar canciones de la casa o del operador',
     })
   })
 
@@ -257,7 +257,7 @@ describe('house and operator creation', () => {
     expect(add).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: QUEUE_ADD + '_ERROR',
-      error: 'Invalid queue item origin',
+      error: 'El origen de la canción no es válido',
     })
   })
 
@@ -271,7 +271,7 @@ describe('house and operator creation', () => {
     expect(add).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: QUEUE_ADD + '_ERROR',
-      error: 'Invalid song source',
+      error: 'La fuente de la canción no es válida',
     })
   })
 
@@ -288,7 +288,7 @@ describe('house and operator creation', () => {
     expect(add).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: QUEUE_ADD + '_ERROR',
-      error: 'Song is unavailable or not playable',
+      error: 'La canción no está disponible o no se puede reproducir',
     })
   })
 })
@@ -337,7 +337,7 @@ describe('YouTube request creation', () => {
       await handler(socket, { payload: { source: 'YOUTUBE', sourceId } }, acknowledge)
       expect(acknowledge).toHaveBeenCalledWith({
         type: QUEUE_ADD + '_ERROR',
-        error: 'Song is unavailable or not playable',
+        error: 'La canción no está disponible o no se puede reproducir',
       })
     }
     expect(add).not.toHaveBeenCalled()
@@ -357,7 +357,7 @@ describe('request moderation', () => {
     expect(moderate).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: actionType + '_ERROR',
-      error: 'Only administrators can moderate requests',
+      error: 'Solo los administradores pueden aprobar o rechazar solicitudes',
     })
   })
 
@@ -397,7 +397,7 @@ describe('queue ordering permissions', () => {
     expect(move).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: QUEUE_MOVE + '_ERROR',
-      error: 'Only administrators can move queue items',
+      error: 'Solo los administradores pueden mover canciones en la cola de reproducción',
     })
   })
 
@@ -450,7 +450,7 @@ describe('queue removal permissions', () => {
     expect(remove).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: QUEUE_REMOVE + '_ERROR',
-      error: 'Cannot remove another user\'s song',
+      error: 'No puede quitar la canción de otro usuario',
     })
   })
 })

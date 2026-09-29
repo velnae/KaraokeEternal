@@ -30,7 +30,7 @@ const ACTION_HANDLERS = {
         payload: {
           query,
           code: err instanceof YouTubeApiError ? err.code : 'YOUTUBE_API',
-          error: err instanceof Error ? err.message : 'YouTube search failed',
+          error: err instanceof Error ? err.message : 'No se pudo buscar en YouTube',
         },
       })
     }

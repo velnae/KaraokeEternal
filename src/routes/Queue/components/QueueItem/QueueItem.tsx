@@ -118,13 +118,13 @@ const QueueItem = ({
   const handleRejectClick = () => dispatch(rejectRequest({ queueId }))
 
   const statusLabel: Record<QueueItemStatus, string> = {
-    PENDING_APPROVAL: 'Waiting for approval',
-    APPROVED: 'Approved',
-    PLAYING: 'Playing',
-    PLAYED: 'Played',
-    REJECTED: 'Request rejected',
-    REMOVED: 'Removed',
-    FAILED: 'Playback failed',
+    PENDING_APPROVAL: 'Pendiente de aprobación',
+    APPROVED: 'Aprobada',
+    PLAYING: 'En reproducción',
+    PLAYED: 'Reproducida',
+    REJECTED: 'Solicitud rechazada',
+    REMOVED: 'Quitada',
+    FAILED: 'No se pudo reproducir',
   }
 
   const swipeHandlers = useSwipeable({
@@ -137,7 +137,7 @@ const QueueItem = ({
   })
 
   const bindRemovePressHandlers = useLongPress(() => {
-    const confirmText = isOwner ? 'Remove all your upcoming songs?' : `Remove all upcoming songs for "${userDisplayName}"?`
+    const confirmText = isOwner ? '¿Quitar todas sus próximas canciones?' : `¿Quitar todas las próximas canciones de "${userDisplayName}"?`
     longPressActiveRef.current = true
 
     if (confirm(confirmText)) {
@@ -146,7 +146,7 @@ const QueueItem = ({
   }, { threshold: LONG_PRESS_THRESHOLD_MS, cancelOnMovement: true })
 
   const bindSkipPressHandlers = useLongPress(() => {
-    const confirmText = isOwner ? 'Skip and remove all your upcoming songs?' : `Skip and remove all upcoming songs for "${userDisplayName}"?`
+    const confirmText = isOwner ? '¿Saltar esta canción y quitar todas sus próximas canciones?' : `¿Saltar esta canción y quitar todas las próximas canciones de "${userDisplayName}"?`
     longPressActiveRef.current = true
 
     if (confirm(confirmText)) {
@@ -187,7 +187,7 @@ const QueueItem = ({
           </div>
           <div className={styles.badges}>
             <div className={clsx(styles.origin, styles[origin.toLowerCase()])}>
-              {origin === 'PARTICIPANT' ? 'Participant' : origin === 'HOUSE' ? 'House' : 'Operator'}
+              {origin === 'PARTICIPANT' ? 'Participante' : origin === 'HOUSE' ? 'De la casa' : 'Operador'}
             </div>
             <div className={clsx(styles.source, source === 'YOUTUBE' && styles.youtube)}>
               {source === 'YOUTUBE' ? 'YouTube' : 'Local'}
@@ -203,6 +203,7 @@ const QueueItem = ({
             <Button
               className={styles.danger}
               icon='INFO_OUTLINE'
+              aria-label='Ver error de reproducción'
               onClick={handleErrorInfoClick}
             />
           )}
@@ -219,12 +220,13 @@ const QueueItem = ({
               className={styles.active}
               data-hide
               icon='INFO_OUTLINE'
+              aria-label='Información de la canción'
               onClick={handleInfoClick}
             />
           )}
           {canModerate && (
             <Button
-              aria-label='Approve request'
+              aria-label='Aprobar solicitud'
               className={clsx(styles.btnApprove, styles.active)}
               icon='PLUS'
               onClick={handleApproveClick}
@@ -232,7 +234,7 @@ const QueueItem = ({
           )}
           {canModerate && (
             <Button
-              aria-label='Reject request'
+              aria-label='Rechazar solicitud'
               className={clsx(styles.btnReject, styles.danger)}
               icon='CLEAR'
               onClick={handleRejectClick}
@@ -243,6 +245,7 @@ const QueueItem = ({
               className={clsx(styles.btnMove, styles.active)}
               data-hide
               icon='MOVE_TOP'
+              aria-label='Mover canción al inicio'
               onClick={handleMoveClick}
             />
           )}
@@ -251,6 +254,7 @@ const QueueItem = ({
               className={clsx(styles.btnAdd, styles.active)}
               data-hide
               icon='PLUS'
+              aria-label='Volver a agregar a la cola de reproducción'
               onClick={handleRequeueClick}
             />
           )}
@@ -259,6 +263,7 @@ const QueueItem = ({
               className={clsx(styles.active, styles.danger)}
               data-hide
               icon='REPLAY'
+              aria-label='Volver a reproducir canción'
               onClick={handleReplayClick}
             />
           )}
@@ -267,6 +272,7 @@ const QueueItem = ({
               className={clsx(styles.btnRemove, styles.danger)}
               data-hide
               icon='DELETE'
+              aria-label='Quitar canción de la cola de reproducción'
               onTouchEnd={(e: React.TouchEvent<HTMLButtonElement>) => {
                 if (longPressActiveRef.current) {
                   e.preventDefault()
@@ -290,6 +296,7 @@ const QueueItem = ({
               className={clsx(styles.btnPlayNext, styles.danger)}
               data-hide
               icon='PLAY_NEXT'
+              aria-label='Reproducir siguiente canción'
               onTouchEnd={(e: React.TouchEvent<HTMLButtonElement>) => {
                 if (longPressActiveRef.current) {
                   e.preventDefault()

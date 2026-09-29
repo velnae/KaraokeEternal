@@ -36,12 +36,12 @@ const LibraryView = () => {
 
       {!isLoading && songsResult.length === 0 && (
         <TextOverlay className={styles.empty}>
-          <h1>Library Empty</h1>
+          <h1>La biblioteca está vacía</h1>
           {isAdmin && (
             <p>
-              <Link to='/account'>Add media folders</Link>
+              <Link to='/account'>Agregue carpetas de archivos multimedia</Link>
               {' '}
-              to get started.
+              para comenzar.
             </p>
           )}
         </TextOverlay>

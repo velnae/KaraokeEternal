@@ -148,13 +148,13 @@ describe('Queue lifecycle persistence', () => {
       roomId: 1,
       song: { ...resolvedSong(1), mediaId: null },
       userId: 1,
-    })).toThrow('Local songs require a valid mediaId')
+    })).toThrow('La canción local debe tener un archivo multimedia válido')
 
     expect(() => Queue.add({
       roomId: 1,
       song: { ...resolvedSong(1), isPlayable: false },
       userId: 1,
-    })).toThrow('Song is not playable')
+    })).toThrow('La canción no se puede reproducir')
   })
 
   it('applies valid transitions idempotently and rejects terminal transitions', () => {
@@ -211,6 +211,6 @@ describe('Queue lifecycle persistence', () => {
     expect(after.entities[rejectedId].status).toBe('REJECTED')
     expect(after.entities[remainingId].prevQueueId).toBe(approvedId)
     expect(after.result.indexOf(rejectedId)).toBeGreaterThan(after.result.indexOf(remainingId))
-    expect(() => Queue.moderate(3, approvedId, 'REJECTED')).toThrow('Only pending requests')
+    expect(() => Queue.moderate(3, approvedId, 'REJECTED')).toThrow('Solo se pueden aprobar o rechazar solicitudes pendientes')
   })
 })

@@ -30,28 +30,28 @@ export interface SongSourceAdapter {
 
 export const getResolvedSongValidationError = (song: ResolvedSong): string | null => {
   if (!song.sourceId.trim() || !song.title.trim() || !song.artistOrChannel.trim()) {
-    return 'Resolved song metadata is incomplete'
+    return 'Faltan datos de la canción'
   }
 
   if (song.durationSeconds !== null
     && (!Number.isInteger(song.durationSeconds) || song.durationSeconds < 0)
   ) {
-    return 'Resolved song duration is invalid'
+    return 'La duración de la canción no es válida'
   }
 
   if (song.source === 'LOCAL') {
     if (!Number.isInteger(song.localSongId) || (song.localSongId ?? 0) <= 0) {
-      return 'Local songs require a valid localSongId'
+      return 'La canción local debe tener un identificador válido'
     }
     if (!Number.isInteger(song.mediaId) || (song.mediaId ?? 0) <= 0) {
-      return 'Local songs require a valid mediaId'
+      return 'La canción local debe tener un archivo multimedia válido'
     }
     if (song.externalId !== null || (song.mediaType !== 'cdg' && song.mediaType !== 'mp4')) {
-      return 'Local song identifiers or media type are invalid'
+      return 'Los datos o el formato de la canción local no son válidos'
     }
   } else if (song.source === 'YOUTUBE') {
     if (!song.externalId || song.localSongId !== null || song.mediaId !== null || song.mediaType !== 'youtube') {
-      return 'YouTube song identifiers or media type are invalid'
+      return 'Los datos o el formato de la canción de YouTube no son válidos'
     }
   }
 

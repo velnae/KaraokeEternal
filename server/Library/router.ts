@@ -12,7 +12,7 @@ router.get('/song/:songId', async (ctx) => {
   const songId = parseInt(ctx.params.songId, 10)
 
   if (Number.isNaN(songId)) {
-    ctx.throw(401, 'Invalid songId')
+    ctx.throw(401, 'El identificador de la canción no es válido')
   }
 
   const res = Media.search({ songId })

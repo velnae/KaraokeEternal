@@ -17,26 +17,26 @@ interface YouTubeSearchResultsProps {
 const YouTubeSearchResults = ({ code, error, isLoading, query, results }: YouTubeSearchResultsProps) => {
   const dispatch = useAppDispatch()
 
-  if (isLoading) return <div className={styles.message}>Searching YouTube…</div>
+  if (isLoading) return <div className={styles.message}>Buscando en YouTube…</div>
 
   if (error) {
     const message = code === 'YOUTUBE_UNCONFIGURED'
-      ? 'YouTube search is not configured.'
+      ? 'La búsqueda en YouTube no está configurada.'
       : code === 'YOUTUBE_QUOTA'
-        ? 'The YouTube search quota has been exceeded.'
-        : 'YouTube search is temporarily unavailable.'
+        ? 'Se agotó la cuota de búsqueda de YouTube.'
+        : 'La búsqueda en YouTube no está disponible temporalmente.'
 
     return (
       <div className={styles.message}>
         {message}
         <br />
-        Local songs remain available.
+        Las canciones locales siguen disponibles.
       </div>
     )
   }
 
   if (query && results.length === 0) {
-    return <div className={styles.message}>No playable YouTube results found.</div>
+    return <div className={styles.message}>No se encontraron videos de YouTube que se puedan reproducir.</div>
   }
 
   return (
@@ -55,11 +55,11 @@ const YouTubeSearchResults = ({ code, error, isLoading, query, results }: YouTub
             </div>
           </div>
           <Button
-            aria-label={`Request ${result.title} from YouTube`}
+            aria-label={`Solicitar ${result.title} de YouTube`}
             className={styles.add}
             icon='PLUS'
             onClick={() => dispatch(queueYouTubeSong(result.sourceId))}
-            title='Request YouTube song'
+            title='Solicitar canción de YouTube'
           />
         </div>
       ))}

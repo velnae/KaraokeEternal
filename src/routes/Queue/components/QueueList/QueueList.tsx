@@ -47,8 +47,8 @@ const QueueList = () => {
     : user.isAdmin && filter === 'house'
       ? houseIds
       : [...ownerFeedbackIds, ...queue.result.filter(queueId => !ownerFeedbackIds.includes(queueId))]
-  const pendingLabel = `Pending approval (${pendingIds.length})`
-  const houseLabel = `House pool (${houseIds.length})`
+  const pendingLabel = `${pendingIds.length === 1 ? 'Pendiente de aprobación' : 'Pendientes de aprobación'} (${pendingIds.length})`
+  const houseLabel = `${houseIds.length === 1 ? 'Canción de la casa' : 'Canciones de la casa'} (${houseIds.length})`
 
   // actions
   const dispatch = useAppDispatch()
@@ -129,7 +129,7 @@ const QueueList = () => {
             className={clsx(styles.filter, filter === 'queue' && styles.active)}
             onClick={() => setFilter('queue')}
           >
-            Queue
+            Cola de reproducción
           </Button>
           <Button
             className={clsx(styles.filter, filter === 'pending' && styles.active)}
@@ -146,10 +146,10 @@ const QueueList = () => {
         </div>
       )}
       {user.isAdmin && filter === 'pending' && pendingIds.length === 0 && (
-        <div className={styles.empty}>No requests are waiting for approval.</div>
+        <div className={styles.empty}>No hay solicitudes pendientes de aprobación.</div>
       )}
       {user.isAdmin && filter === 'house' && houseIds.length === 0 && (
-        <div className={styles.empty}>No approved house tracks are available.</div>
+        <div className={styles.empty}>No hay canciones de la casa aprobadas.</div>
       )}
       <QueueListAnimator queueItems={items.filter(item => item !== null)} />
     </>

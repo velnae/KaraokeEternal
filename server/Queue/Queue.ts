@@ -31,7 +31,7 @@ class Queue {
   }): void {
     const validationError = getResolvedSongValidationError(song)
     if (validationError) throw new Error(validationError)
-    if (!song.isPlayable) throw new Error('Song is not playable')
+    if (!song.isPlayable) throw new Error('La canción no se puede reproducir')
 
     const fields = new Map()
     const now = Math.floor(Date.now() / 1000)
@@ -67,7 +67,7 @@ class Queue {
     const res = db.run(String(query), query.parameters)
 
     if (res.changes !== 1) {
-      throw new Error('Could not add song to queue')
+      throw new Error('No se pudo agregar la canción a la cola de reproducción')
     }
   }
 
@@ -183,7 +183,7 @@ class Queue {
    */
   static move ({ prevQueueId, queueId, roomId }: { prevQueueId: number | null, queueId: number, roomId: number }): void {
     if (queueId === prevQueueId) {
-      throw new Error('Invalid prevQueueId')
+      throw new Error('La posición anterior en la cola de reproducción no es válida')
     }
 
     if (prevQueueId === -1) prevQueueId = null
@@ -194,7 +194,7 @@ class Queue {
       WHERE queueId = ${queueId} AND roomId = ${roomId} AND status = 'APPROVED'
     `
     if (!db.get(String(itemQuery), itemQuery.parameters)) {
-      throw new Error('Only approved queue items can be moved')
+      throw new Error('Solo se pueden mover las canciones aprobadas')
     }
 
     if (prevQueueId !== null) {
@@ -206,7 +206,7 @@ class Queue {
           AND status NOT IN ${sql.tuple(HIDDEN_QUEUE_STATUSES)}
       `
       if (!db.get(String(previousQuery), previousQuery.parameters)) {
-        throw new Error('Invalid prevQueueId')
+        throw new Error('La posición anterior en la cola de reproducción no es válida')
       }
     }
 
@@ -364,10 +364,10 @@ class Queue {
       currentQuery.parameters,
     )
 
-    if (!current) throw new Error('Queue item not found')
+    if (!current) throw new Error('No se encontró la canción en la cola de reproducción')
     if (current.status === status) return false
     if (current.status !== 'PENDING_APPROVAL') {
-      throw new Error('Only pending requests can be moderated')
+      throw new Error('Solo se pueden aprobar o rechazar solicitudes pendientes')
     }
 
     if (status === 'APPROVED') {

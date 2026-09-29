@@ -73,7 +73,7 @@ export const createYouTubeSongSource = ({
 }: YouTubeSongSourceOptions = {}): SongSourceAdapter => {
   const request = async <T>(resource: string, params: Record<string, string>): Promise<YouTubeApiResponse<T>> => {
     if (!apiKey) {
-      throw new YouTubeApiError('YouTube search is not configured', 'YOUTUBE_UNCONFIGURED')
+      throw new YouTubeApiError('La búsqueda en YouTube no está configurada', 'YOUTUBE_UNCONFIGURED')
     }
 
     const url = new URL(`${YOUTUBE_API_BASE}/${resource}`)
@@ -83,7 +83,7 @@ export const createYouTubeSongSource = ({
     try {
       response = await fetchImpl(url)
     } catch {
-      throw new YouTubeApiError('YouTube is temporarily unavailable', 'YOUTUBE_API')
+      throw new YouTubeApiError('YouTube no está disponible temporalmente', 'YOUTUBE_API')
     }
 
     const data = await response.json() as YouTubeApiResponse<T>
@@ -91,7 +91,7 @@ export const createYouTubeSongSource = ({
       const reason = data.error?.errors?.[0]?.reason
       const isQuota = reason === 'quotaExceeded' || reason === 'dailyLimitExceeded'
       throw new YouTubeApiError(
-        isQuota ? 'YouTube search quota has been exceeded' : 'YouTube API request failed',
+        isQuota ? 'Se agotó la cuota de búsqueda de YouTube' : 'No se pudo consultar YouTube',
         isQuota ? 'YOUTUBE_QUOTA' : 'YOUTUBE_API',
       )
     }

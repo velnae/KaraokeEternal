@@ -41,11 +41,11 @@ const QueueView = () => {
     >
       {!isInRoom && (
         <TextOverlay>
-          <h1>Get a Room!</h1>
+          <h1>Entre a una sala</h1>
           <p>
-            <Link to='/account'>Sign in to a room</Link>
+            <Link to='/account'>Inicie sesión en una sala</Link>
             {' '}
-            to start queueing songs.
+            para agregar canciones a la cola de reproducción.
           </p>
         </TextOverlay>
       )}
@@ -60,13 +60,13 @@ const QueueView = () => {
         )
       }) && (
         <TextOverlay>
-          <h1>Queue Empty</h1>
+          <h1>La cola de reproducción está vacía</h1>
           <p>
-            Tap a song in the
+            Seleccione una canción de la
             {' '}
-            <Link to='/library'>library</Link>
+            <Link to='/library'>biblioteca</Link>
             {' '}
-            to queue it.
+            para agregarla a la cola de reproducción.
           </p>
         </TextOverlay>
       )}

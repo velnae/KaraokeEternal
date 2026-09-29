@@ -107,21 +107,21 @@ const SongItem = ({
       <Buttons btnWidth={56} isExpanded={isExpanded}>
         {isAdmin && (
           <Button
-            aria-label='Add as house track'
+            aria-label='Agregar como canción de la casa'
             className={clsx(styles.btn, styles.originButton, styles.house)}
             onClick={() => handleAdminQueue('HOUSE')}
-            title='Add as house track'
+            title='Agregar como canción de la casa'
             data-hide
           >
-            H
+            C
           </Button>
         )}
         {isAdmin && (
           <Button
-            aria-label='Add as operator item'
+            aria-label='Agregar como canción del operador'
             className={clsx(styles.btn, styles.originButton, styles.operator)}
             onClick={() => handleAdminQueue('OPERATOR')}
-            title='Add as operator item'
+            title='Agregar como canción del operador'
             data-hide
           >
             O
@@ -133,7 +133,7 @@ const SongItem = ({
           isStarred={isStarred}
           count={numStars}
         />
-        <Button onClick={handleInfoClick} className={clsx(styles.btn, styles.info)} data-hide>
+        <Button onClick={handleInfoClick} className={clsx(styles.btn, styles.info)} aria-label='Información de la canción' data-hide>
           <Icon icon='INFO_OUTLINE' />
         </Button>
       </Buttons>

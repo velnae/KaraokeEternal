@@ -10,6 +10,6 @@ const sources: Partial<Record<SongSource, SongSourceAdapter>> = {
 
 export const getSongSource = (source: SongSource): SongSourceAdapter => {
   const adapter = sources[source]
-  if (!adapter) throw new Error(`Song source is not configured: ${source}`)
+  if (!adapter) throw new Error(`La fuente de canciones no está configurada: ${source}`)
   return adapter
 }

@@ -60,8 +60,7 @@ const RowComponent = ({
       <div key='artistsHeading' style={style} className={styles.artistsHeading}>
         {artistsResult.length}
         {' '}
-        {filterStarred ? 'starred ' : ''}
-        {artistsResult.length === 1 ? 'artist' : 'artists'}
+        {filterStarred ? (artistsResult.length === 1 ? 'artista favorito' : 'artistas favoritos') : (artistsResult.length === 1 ? 'artista' : 'artistas')}
       </div>
     )
   }
@@ -94,8 +93,7 @@ const RowComponent = ({
       <div key='songsHeading' style={style} className={styles.songsHeading}>
         {songsResult.length}
         {' '}
-        {filterStarred ? 'starred ' : ''}
-        {songsResult.length === 1 ? 'song' : 'songs'}
+        {filterStarred ? (songsResult.length === 1 ? 'canción favorita' : 'canciones favoritas') : (songsResult.length === 1 ? 'canción' : 'canciones')}
       </div>
     )
   }
@@ -114,7 +112,7 @@ const RowComponent = ({
   }
 
   if (showYouTube && index === artistsResult.length + 3) {
-    return <div style={style} className={styles.youtubeHeading}>YouTube results</div>
+    return <div style={style} className={styles.youtubeHeading}>Resultados de YouTube</div>
   }
 
   return (

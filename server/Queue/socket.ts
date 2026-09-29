@@ -31,21 +31,21 @@ const ACTION_HANDLERS = {
     if (!QUEUE_ITEM_ORIGINS.includes(origin)) {
       return acknowledge({
         type: QUEUE_ADD + '_ERROR',
-        error: 'Invalid queue item origin',
+        error: 'El origen de la canción no es válido',
       })
     }
 
     if (origin !== 'PARTICIPANT' && !sock.user.isAdmin) {
       return acknowledge({
         type: QUEUE_ADD + '_ERROR',
-        error: 'Only administrators can create house or operator items',
+        error: 'Solo los administradores pueden agregar canciones de la casa o del operador',
       })
     }
 
     if (!SONG_SOURCES.includes(source)) {
       return acknowledge({
         type: QUEUE_ADD + '_ERROR',
-        error: 'Invalid song source',
+        error: 'La fuente de la canción no es válida',
       })
     }
 
@@ -68,7 +68,7 @@ const ACTION_HANDLERS = {
       if (pendingCount >= maxPending) {
         return acknowledge({
           type: QUEUE_ADD + '_ERROR',
-          error: `Maximum pending song requests reached (${maxPending})`,
+          error: `Se alcanzó el máximo de solicitudes de canciones pendientes (${maxPending})`,
         })
       }
     }
@@ -76,7 +76,7 @@ const ACTION_HANDLERS = {
     let song
     try {
       song = await getSongSource(source).resolve(sourceId, { roomId })
-      if (!song || !song.isPlayable) throw new Error('Song is unavailable or not playable')
+      if (!song || !song.isPlayable) throw new Error('La canción no está disponible o no se puede reproducir')
     } catch (err) {
       return acknowledge({
         type: QUEUE_ADD + '_ERROR',
@@ -124,7 +124,7 @@ const ACTION_HANDLERS = {
     if (!sock.user.isAdmin) {
       return acknowledge({
         type: QUEUE_MOVE + '_ERROR',
-        error: 'Only administrators can move queue items',
+        error: 'Solo los administradores pueden mover canciones en la cola de reproducción',
       })
     }
 
@@ -150,7 +150,7 @@ const ACTION_HANDLERS = {
     if (!sock.user.isAdmin && !(Queue.isOwner(sock.user.userId, ids))) {
       return acknowledge({
         type: QUEUE_REMOVE + '_ERROR',
-        error: 'Cannot remove another user\'s song',
+        error: 'No puede quitar la canción de otro usuario',
       })
     }
 
@@ -180,7 +180,7 @@ const moderateRequest = (
   if (!sock.user.isAdmin) {
     return acknowledge({
       type: actionType + '_ERROR',
-      error: 'Only administrators can moderate requests',
+      error: 'Solo los administradores pueden aprobar o rechazar solicitudes',
     })
   }
 

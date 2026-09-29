@@ -70,7 +70,10 @@ describe('YouTubeSongSource', () => {
 
   it('classifies unconfigured, quota, and transport failures without leaking credentials', async () => {
     const unconfigured = createYouTubeSongSource({ apiKey: '' })
-    await expect(unconfigured.search('song', { roomId: 1 })).rejects.toMatchObject({ code: 'YOUTUBE_UNCONFIGURED' })
+    await expect(unconfigured.search('song', { roomId: 1 })).rejects.toMatchObject({
+      code: 'YOUTUBE_UNCONFIGURED',
+      message: 'La búsqueda en YouTube no está configurada',
+    })
 
     const quotaFetch = vi.fn().mockResolvedValue(jsonResponse({
       error: { message: 'Quota exhausted', errors: [{ reason: 'quotaExceeded' }] },
@@ -78,14 +81,17 @@ describe('YouTubeSongSource', () => {
     const quota = createYouTubeSongSource({ apiKey: 'quota-secret', fetchImpl: quotaFetch })
     const quotaError = await quota.search('song', { roomId: 1 }).catch(error => error)
     expect(quotaError).toBeInstanceOf(YouTubeApiError)
-    expect(quotaError).toMatchObject({ code: 'YOUTUBE_QUOTA' })
+    expect(quotaError).toMatchObject({ code: 'YOUTUBE_QUOTA', message: 'Se agotó la cuota de búsqueda de YouTube' })
     expect(JSON.stringify(quotaError)).not.toContain('quota-secret')
 
     const unavailable = createYouTubeSongSource({
       apiKey: 'transport-secret',
       fetchImpl: vi.fn().mockRejectedValue(new Error('offline')),
     })
-    await expect(unavailable.search('song', { roomId: 1 })).rejects.toMatchObject({ code: 'YOUTUBE_API' })
+    await expect(unavailable.search('song', { roomId: 1 })).rejects.toMatchObject({
+      code: 'YOUTUBE_API',
+      message: 'YouTube no está disponible temporalmente',
+    })
   })
 
   it('parses ISO 8601 durations used by YouTube', () => {

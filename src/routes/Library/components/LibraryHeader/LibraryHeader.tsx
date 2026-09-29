@@ -32,12 +32,14 @@ const LibraryHeader = () => {
       <Button
         className={clsx(styles.btnMagnifier, filterStr && styles.active)}
         icon='MAGNIFIER'
+        aria-label={value.trim() ? 'Borrar búsqueda' : 'Buscar canciones'}
         onClick={handleMagnifierClick}
       />
       <input
         type='search'
         className={styles.searchInput}
-        placeholder='search'
+        placeholder='buscar canciones'
+        aria-label='buscar canciones'
         value={value}
         onChange={handleChange}
         ref={searchInput}
@@ -45,6 +47,7 @@ const LibraryHeader = () => {
       {filterStr && (
         <Button
           icon='CLEAR'
+          aria-label='Borrar búsqueda'
           onClick={clearSearch}
           className={clsx(styles.btnClear, styles.active)}
         />
@@ -52,6 +55,7 @@ const LibraryHeader = () => {
       <Button
         className={clsx(styles.btnStar, filterStarred && styles.active)}
         icon='STAR_FULL'
+        aria-label={filterStarred ? 'Mostrar todas las canciones' : 'Mostrar favoritas'}
         onClick={() => dispatch(toggleFilterStarred())}
       />
     </div>

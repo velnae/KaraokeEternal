@@ -20,6 +20,7 @@ const ButtonStar = ({
 }: ButtonStarProps) => {
   return (
     <Button
+      aria-label={isStarred ? 'Quitar de favoritas' : 'Agregar a favoritas'}
       onClick={onClick}
       className={clsx(styles.container, isStarred && styles.starred, className)}
     >
