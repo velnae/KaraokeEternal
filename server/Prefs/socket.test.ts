@@ -46,7 +46,7 @@ describe('preference mutation authorization', () => {
     expect(set).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: PREFS_SET + '_ERROR',
-      error: 'Unauthorized',
+      error: 'No tiene autorización',
     })
   })
 
@@ -65,7 +65,7 @@ describe('preference mutation authorization', () => {
     expect(Library.cache.version).toBe(originalVersion)
     expect(acknowledge).toHaveBeenCalledWith({
       type: PREFS_PATH_SET_PRIORITY + '_ERROR',
-      error: 'Unauthorized',
+      error: 'No tiene autorización',
     })
   })
 

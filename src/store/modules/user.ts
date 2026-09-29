@@ -117,7 +117,7 @@ export const updateAccount = createAsyncThunk<void, FormData, { state: RootState
     })
 
     thunkAPI.dispatch(receiveAccount(user))
-    alert('Account updated successfully.')
+    alert('La cuenta se actualizó correctamente.')
   },
 )
 

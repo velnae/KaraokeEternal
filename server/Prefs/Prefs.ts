@@ -89,7 +89,7 @@ class Prefs {
 
     // is it a subfolder of an already-added folder?
     if (result.some(pathId => (dir + path.sep).indexOf(entities[pathId].path + path.sep) === 0)) {
-      throw new Error('Folder has already been added')
+      throw new Error('La carpeta ya se agregó')
     }
 
     const fields = new Map()

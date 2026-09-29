@@ -112,7 +112,7 @@ const AccountForm = ({
           autoComplete='off'
           autoFocus={autoFocus}
           onChange={updateDirty}
-          placeholder={user && user.userId !== null ? 'change username (optional)' : 'username or email'}
+          placeholder={user && user.userId !== null ? 'cambiar nombre de usuario (opcional)' : 'nombre de usuario o correo electrónico'}
           // https://github.com/facebook/react/issues/23301
           ref={(r) => {
             if (r) username.current = r
@@ -126,7 +126,7 @@ const AccountForm = ({
           type='password'
           autoComplete='new-password'
           onChange={updateDirty}
-          placeholder={user && user.userId !== null ? 'change password (optional)' : 'password'}
+          placeholder={user && user.userId !== null ? 'cambiar contraseña (opcional)' : 'contraseña'}
           ref={newPassword}
         />
       )}
@@ -135,7 +135,7 @@ const AccountForm = ({
         <input
           type='password'
           autoComplete='new-password'
-          placeholder={user && user.userId !== null ? 'new password confirm' : 'confirm password'}
+          placeholder={user && user.userId !== null ? 'confirmar nueva contraseña' : 'confirmar contraseña'}
           ref={newPasswordConfirm}
         />
       )}
@@ -149,7 +149,7 @@ const AccountForm = ({
           type='text'
           defaultValue={user?.name ?? ''}
           onChange={updateDirty}
-          placeholder='display name'
+          placeholder='nombre para mostrar'
           ref={name}
         />
       </div>
@@ -160,10 +160,10 @@ const AccountForm = ({
           onChange={updateDirty}
           ref={role}
         >
-          <option key='choose' value='' disabled>select role...</option>
-          {user?.role === 'guest' && <option key='guest' value='guest'>Guest</option>}
-          <option key='standard' value='standard'>Standard</option>
-          <option key='admin' value='admin'>Administrator</option>
+          <option key='choose' value='' disabled>seleccione un rol...</option>
+          {user?.role === 'guest' && <option key='guest' value='guest'>Invitado</option>}
+          <option key='standard' value='standard'>Usuario</option>
+          <option key='admin' value='admin'>Administrador</option>
         </select>
       )}
 

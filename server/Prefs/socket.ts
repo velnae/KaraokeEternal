@@ -9,7 +9,7 @@ const ACTION_HANDLERS = {
     if (!sock.user.isAdmin) {
       return acknowledge({
         type: PREFS_SET + _ERROR,
-        error: 'Unauthorized',
+        error: 'No tiene autorización',
       })
     }
 
@@ -23,7 +23,7 @@ const ACTION_HANDLERS = {
     if (!sock.user.isAdmin) {
       return acknowledge({
         type: PREFS_PATH_SET_PRIORITY + _ERROR,
-        error: 'Unauthorized',
+        error: 'No tiene autorización',
       })
     }
 

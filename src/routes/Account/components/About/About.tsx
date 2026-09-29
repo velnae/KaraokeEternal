@@ -16,7 +16,7 @@ const About = () => {
   const toggleChangelog = () => setChangelogOpen(prevState => !prevState)
 
   return (
-    <Panel title='About' contentClassName={styles.content}>
+    <Panel title='Acerca de' contentClassName={styles.content}>
       <>
         {/* @ts-expect-error: global via Webpack */}
         <a href={__KE_URL_HOME__} target='_blank' rel='noreferrer'>
@@ -33,11 +33,11 @@ const About = () => {
           {__KE_VERSION__}
         </p>
         <p>
-          <a className={styles.pseudolink} onClick={toggleChangelog}>Changelog &amp; Sponsors</a>
+          <a className={styles.pseudolink} onClick={toggleChangelog}>Cambios y patrocinadores</a>
           {' '}
           |
           {' '}
-          <a href='/licenses.txt' target='_blank'>Licenses</a>
+          <a href='/licenses.txt' target='_blank'>Licencias</a>
         </p>
 
         <div className={styles.ghButtonContainer}>
@@ -52,7 +52,7 @@ const About = () => {
             {/* @ts-expect-error: global via Webpack */}
             <a href={__KE_URL_REPO__} target='_blank' rel='noreferrer'>
               <Icon icon='GITHUB_STAR' size={16} />
-              Star
+              Dar estrella
             </a>
           </div>
 
@@ -60,20 +60,20 @@ const About = () => {
             {/* @ts-expect-error: global via Webpack */}
             <a href={__KE_URL_SPONSOR__} target='_blank' rel='noreferrer'>
               <Icon icon='GITHUB_SPONSOR' size={16} />
-              Sponsor
+              Patrocinar
             </a>
           </div>
         </div>
 
         {isChangelogOpen && (
           <Modal
-            title='Changelog & Sponsors'
+            title='Cambios y patrocinadores'
             className={styles.changelog}
             onClose={toggleChangelog}
             scrollable
             buttons={(
               <Button variant='primary' onClick={toggleChangelog}>
-                Done
+                Listo
               </Button>
             )}
           >

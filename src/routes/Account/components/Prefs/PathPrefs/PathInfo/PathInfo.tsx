@@ -22,11 +22,11 @@ const PathInfo = ({ onClose, onRemove, onUpdate, path }: PathInfoProps) => {
   return (
     <Modal
       onClose={onClose}
-      title='Media Folder'
+      title='Carpeta de archivos multimedia'
       buttons={(
         <>
-          <Button onClick={handleRemove} variant='danger'>Remove Folder</Button>
-          <Button onClick={onClose} variant='primary'>Done</Button>
+          <Button onClick={handleRemove} variant='danger'>Quitar carpeta</Button>
+          <Button onClick={onClose} variant='primary'>Listo</Button>
         </>
       )}
     >
@@ -34,18 +34,18 @@ const PathInfo = ({ onClose, onRemove, onUpdate, path }: PathInfoProps) => {
         <p className={styles.path}>
           {path?.path}
           <br />
-          <span className={styles.label}>pathId: </span>
+          <span className={styles.label}>ID de carpeta: </span>
           {path?.pathId}
         </p>
 
         <form className={styles.form}>
           <InputCheckbox
-            label='Watch folder'
+            label='Vigilar carpeta'
             defaultChecked={path?.prefs?.isWatchingEnabled}
             onChange={event => handleChange({ isWatchingEnabled: event.currentTarget.checked })}
           />
           <InputCheckbox
-            label='Allow video background keying'
+            label='Permitir eliminar el fondo del video'
             defaultChecked={path?.prefs?.isVideoKeyingEnabled}
             onChange={event => handleChange({ isVideoKeyingEnabled: event.currentTarget.checked })}
           />

@@ -85,31 +85,31 @@ class User {
 
     if (role !== 'guest') {
       if (!username) {
-        throw new Error('Username or email is required')
+        throw new Error('El nombre de usuario o correo electrónico es obligatorio')
       }
 
       if (username.length < USERNAME_MIN_LENGTH || username.length > USERNAME_MAX_LENGTH) {
-        throw new Error(`Username or email must have ${USERNAME_MIN_LENGTH}-${USERNAME_MAX_LENGTH} characters`)
+        throw new Error(`El nombre de usuario o correo electrónico debe tener entre ${USERNAME_MIN_LENGTH} y ${USERNAME_MAX_LENGTH} caracteres`)
       }
 
       if (!newPassword) {
-        throw new Error('Password is required')
+        throw new Error('La contraseña es obligatoria')
       }
 
       if (newPassword.length < PASSWORD_MIN_LENGTH) {
-        throw new Error(`Password must have at least ${PASSWORD_MIN_LENGTH} characters`)
+        throw new Error(`La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres`)
       }
 
       if (!newPasswordConfirm) {
-        throw new Error('Password confirmation is required')
+        throw new Error('Debe confirmar la contraseña')
       }
 
       if (newPassword !== newPasswordConfirm) {
-        throw new Error('New passwords do not match')
+        throw new Error('Las contraseñas nuevas no coinciden')
       }
 
       if (User.getByUsername(username)) {
-        throw new Error('Username or email is not available')
+        throw new Error('El nombre de usuario o correo electrónico no está disponible')
       }
 
       fields.set('username', username)
@@ -133,11 +133,11 @@ class User {
     }
 
     if (!name) {
-      throw new Error('Display name is required')
+      throw new Error('El nombre para mostrar es obligatorio')
     }
 
     if (name.length < NAME_MIN_LENGTH || name.length > NAME_MAX_LENGTH) {
-      throw new Error(`Display name must have ${NAME_MIN_LENGTH}-${NAME_MAX_LENGTH} characters`)
+      throw new Error(`El nombre para mostrar debe tener entre ${NAME_MIN_LENGTH} y ${NAME_MAX_LENGTH} caracteres`)
     }
 
     fields.set('name', name)
@@ -147,7 +147,7 @@ class User {
     // user image?
     if (image) {
       if (image.length > IMG_MAX_LENGTH) {
-        throw new Error('Invalid image')
+        throw new Error('La imagen no es válida')
       }
 
       fields.set('image', image)
@@ -160,7 +160,7 @@ class User {
     const res = db.run(String(query), query.parameters)
 
     if (typeof res.lastID !== 'number') {
-      throw new Error('Unable to create user')
+      throw new Error('No se pudo crear el usuario')
     }
 
     return res.lastID
@@ -168,13 +168,13 @@ class User {
 
   static async validate ({ username, password }) {
     if (!username || !password) {
-      throw new Error('Username/email and password are required')
+      throw new Error('El nombre de usuario o correo electrónico y la contraseña son obligatorios')
     }
 
     const user = User.getByUsername(username, true) as ServerUser
 
     if (!user || !(await crypto.compare(password, user.password))) {
-      throw new Error('Incorrect username/email or password')
+      throw new Error('El nombre de usuario, correo electrónico o contraseña es incorrecto')
     }
 
     return user

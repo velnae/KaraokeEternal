@@ -19,7 +19,7 @@ const PlayerPrefs = () => {
       headingComponent={(
         <div className={styles.heading}>
           <Icon icon='TELEVISION_PLAY' size={32} className={styles.icon} />
-          <div className={styles.title}>Player</div>
+          <div className={styles.title}>Reproductor</div>
         </div>
       )}
     >
@@ -32,7 +32,7 @@ const PlayerPrefs = () => {
             name='isReplayGainEnabled'
           />
           {' '}
-          ReplayGain (clip-safe)
+          ReplayGain (sin saturación)
         </label>
       </div>
     </Accordion>

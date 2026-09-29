@@ -21,7 +21,7 @@ const EditUser = ({ user, onClose }: EditUserProps) => {
   }
 
   const handleRemoveClick = () => {
-    if (user && confirm(`Remove user "${user.username}"?\n\nTheir queued songs will also be removed.`)) {
+    if (user && confirm(`¿Eliminar al usuario "${user.username}"?\n\nTambién se quitarán sus canciones de la cola de reproducción.`)) {
       dispatch(removeUser(user.userId))
     }
   }
@@ -30,30 +30,30 @@ const EditUser = ({ user, onClose }: EditUserProps) => {
     <Modal
       className={styles.modal}
       onClose={onClose}
-      title={user ? user.username : 'Create User'}
+      title={user ? user.username : 'Crear usuario'}
     >
       <AccountForm user={user} onSubmit={handleSubmit} showRole autoFocus={!user}>
         <div className={styles.btnContainer}>
           {!user && (
             <Button type='submit' className={styles.btn} variant='primary'>
-              Create User
+              Crear usuario
             </Button>
           )}
 
           {user && (
             <Button type='submit' className={styles.btn} variant='primary'>
-              Update User
+              Actualizar usuario
             </Button>
           )}
 
           {user && (
             <Button onClick={handleRemoveClick} className={styles.btn} variant='danger'>
-              Remove User
+              Eliminar usuario
             </Button>
           )}
 
           <Button onClick={onClose} variant='default'>
-            Cancel
+            Cancelar
           </Button>
         </div>
       </AccountForm>

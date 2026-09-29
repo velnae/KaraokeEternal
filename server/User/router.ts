@@ -65,7 +65,7 @@ router.post('/login', async (ctx) => {
         validatePassword: true,
       })
     } else if (user.role !== 'admin') {
-      ctx.throw(401, 'Please select a room')
+      ctx.throw(401, 'Seleccione una sala')
     }
   } catch (err) {
     ctx.throw(401, err.message)
@@ -203,11 +203,11 @@ router.put('/user/:userId', async (ctx) => {
   // validate current password if updating own account
   if (targetId === user.userId && !ctx.user.isGuest) {
     if (!password) {
-      ctx.throw(422, 'Current password is required')
+      ctx.throw(422, 'La contraseña actual es obligatoria')
     }
 
     if (!(await crypto.compare(password, user.password))) {
-      ctx.throw(401, 'Incorrect current password')
+      ctx.throw(401, 'La contraseña actual es incorrecta')
     }
   }
 
@@ -219,12 +219,12 @@ router.put('/user/:userId', async (ctx) => {
     username = username.trim()
 
     if (username.length < USERNAME_MIN_LENGTH || username.length > USERNAME_MAX_LENGTH) {
-      ctx.throw(400, `Username or email must have ${USERNAME_MIN_LENGTH}-${USERNAME_MAX_LENGTH} characters`)
+      ctx.throw(400, `El nombre de usuario o correo electrónico debe tener entre ${USERNAME_MIN_LENGTH} y ${USERNAME_MAX_LENGTH} caracteres`)
     }
 
     // check for duplicate
     if (User.getByUsername(username)) {
-      ctx.throw(409, 'Username or email is not available')
+      ctx.throw(409, 'El nombre de usuario o correo electrónico no está disponible')
     }
 
     fields.set('username', username)
@@ -235,7 +235,7 @@ router.put('/user/:userId', async (ctx) => {
     name = name.trim()
 
     if (name.length < NAME_MIN_LENGTH || name.length > NAME_MAX_LENGTH) {
-      ctx.throw(400, `Display name must have ${NAME_MIN_LENGTH}-${NAME_MAX_LENGTH} characters`)
+      ctx.throw(400, `El nombre para mostrar debe tener entre ${NAME_MIN_LENGTH} y ${NAME_MAX_LENGTH} caracteres`)
     }
 
     fields.set('name', name)
@@ -244,11 +244,11 @@ router.put('/user/:userId', async (ctx) => {
   // changing password?
   if (newPassword && !ctx.user.isGuest) {
     if (newPassword.length < PASSWORD_MIN_LENGTH) {
-      ctx.throw(400, `Password must have at least ${PASSWORD_MIN_LENGTH} characters`)
+      ctx.throw(400, `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres`)
     }
 
     if (newPassword !== newPasswordConfirm) {
-      ctx.throw(422, 'New passwords do not match')
+      ctx.throw(422, 'Las contraseñas nuevas no coinciden')
     }
 
     fields.set('password', await crypto.hash(newPassword))
@@ -260,7 +260,7 @@ router.put('/user/:userId', async (ctx) => {
 
     if (imageFile.size > IMG_MAX_LENGTH) {
       await deleteFile(imageFile.filepath)
-      ctx.throw(413, `Image must not exceed ${Math.floor(IMG_MAX_LENGTH / 1024)}KB`)
+      ctx.throw(413, `La imagen no debe superar los ${Math.floor(IMG_MAX_LENGTH / 1024)} KB`)
     }
 
     fields.set('image', await readFile(imageFile.filepath))
@@ -290,7 +290,7 @@ router.put('/user/:userId', async (ctx) => {
   const res = db.run(String(query), query.parameters)
 
   if (!res.changes) {
-    ctx.throw(404, `userId ${targetId} not found`)
+    ctx.throw(404, `No se encontró el usuario ${targetId}`)
   }
 
   // emit (potentially) updated queues to each room
@@ -351,12 +351,12 @@ router.post('/user', async (ctx) => {
   if (!ctx.user.isAdmin) {
     // already signed in?
     if (ctx.user.userId !== null) {
-      ctx.throw(401, 'You are already signed in')
+      ctx.throw(401, 'Ya inició sesión')
     }
 
     // only possible roles; further validated per-room below
     if (!['guest', 'standard'].includes(req.body.role)) {
-      ctx.throw(401, 'Invalid role')
+      ctx.throw(401, 'El rol no es válido')
     }
 
     // new users must choose a room at the same time
@@ -376,7 +376,7 @@ router.post('/user', async (ctx) => {
 
     if (imageFile.size > IMG_MAX_LENGTH) {
       await deleteFile(imageFile.filepath)
-      ctx.throw(413, `Image must not exceed ${Math.floor(IMG_MAX_LENGTH / 1024)}KB`)
+      ctx.throw(413, `La imagen no debe superar los ${Math.floor(IMG_MAX_LENGTH / 1024)} KB`)
     }
 
     image = await readFile(imageFile.filepath)
@@ -397,7 +397,7 @@ router.post('/user', async (ctx) => {
     const user = User.getById(userId, true)
 
     if (!user) {
-      throw new Error('User not found')
+      throw new Error('No se encontró el usuario')
     }
 
     const userCtx = createUserCtx(user, req.body.roomId || null)
@@ -434,12 +434,12 @@ router.post('/setup', async (ctx) => {
     const user = User.getById(userId, true)
 
     if (!user) {
-      throw new Error('User not found')
+      throw new Error('No se encontró el usuario')
     }
 
     // create default room
     const fields = new Map()
-    fields.set('name', 'Room 1')
+    fields.set('name', 'Sala 1')
     fields.set('status', 'open')
     fields.set('dateCreated', Math.floor(Date.now() / 1000))
 
@@ -450,7 +450,7 @@ router.post('/setup', async (ctx) => {
     const roomRes = db.run(String(roomQuery), roomQuery.parameters)
 
     if (typeof roomRes.lastID !== 'number') {
-      ctx.throw(500, 'Invalid default room lastID')
+      ctx.throw(500, 'No se pudo crear la sala predeterminada')
     }
 
     // create JWT

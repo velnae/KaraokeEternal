@@ -44,7 +44,7 @@ const Create = ({
             autoComplete='off'
             value={username}
             onChange={e => onUsernameChange(e.target.value)}
-            placeholder='username or email'
+            placeholder='nombre de usuario o correo electrónico'
             ref={onFirstFieldRef}
           />
           <input
@@ -52,12 +52,12 @@ const Create = ({
             autoComplete='new-password'
             value={password}
             onChange={e => onPasswordChange(e.target.value)}
-            placeholder='password'
+            placeholder='contraseña'
           />
           <input
             type='password'
             autoComplete='new-password'
-            placeholder='confirm password'
+            placeholder='confirmar contraseña'
             value={passwordConfirm}
             onChange={e => setPasswordConfirm(e.target.value)}
           />
@@ -68,7 +68,7 @@ const Create = ({
         <InputImage onSelect={setImage} />
         <input
           type='text'
-          placeholder='display name'
+          placeholder='nombre para mostrar'
           value={name}
           onChange={e => setName(e.target.value)}
           ref={guest ? onFirstFieldRef : undefined}
@@ -76,7 +76,7 @@ const Create = ({
       </div>
 
       <Button type='submit' variant='primary'>
-        Join
+        Entrar
       </Button>
     </form>
   )

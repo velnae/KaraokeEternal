@@ -55,7 +55,7 @@ const PathPrefs = () => {
   }
 
   const handleRemove = (pathId: number) => {
-    if (!confirm(`Remove folder from library?\n\n${paths.entities[pathId].path}`)) {
+    if (!confirm(`¿Quitar la carpeta de la biblioteca?\n\n${paths.entities[pathId].path}`)) {
       return
     }
 
@@ -84,13 +84,13 @@ const PathPrefs = () => {
     <Accordion headingComponent={(
       <div className={styles.heading}>
         <Icon icon='FOLDER_MUSIC' />
-        <div className={styles.title}>Media Folders</div>
+        <div className={styles.title}>Carpetas de archivos multimedia</div>
       </div>
     )}
     >
       <div className={styles.content}>
         {paths.result.length === 0
-          && <p style={{ marginTop: 0 }}>Add a media folder to get started.</p>}
+          && <p style={{ marginTop: 0 }}>Agregue una carpeta de archivos multimedia para comenzar.</p>}
         <DragDropContext onDragEnd={handleDragEnd}>
           <Droppable droppableId='droppable'>
             {provided => (
@@ -114,11 +114,11 @@ const PathPrefs = () => {
         <div className={styles.btnContainer}>
           {paths.result.length > 0 && (
             <Button onClick={handleRefreshAll} variant='default'>
-              Scan Folders
+              Analizar carpetas
             </Button>
           )}
           <Button onClick={handleOpenChooser} variant='primary'>
-            Add Folder
+            Agregar carpeta
           </Button>
         </div>
 

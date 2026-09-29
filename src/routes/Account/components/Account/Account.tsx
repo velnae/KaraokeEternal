@@ -22,11 +22,11 @@ const Account = () => {
       let message = ''
 
       if (user.isGuest && hasUpcomingSongs) {
-        message = `Are you sure you want to sign out?\n\nYour upcoming songs will be removed from the queue, and as a guest, you won't be able to sign back into this account.`
+        message = '¿Desea cerrar sesión?\n\nSe quitarán sus próximas canciones de la cola de reproducción y no podrá volver a entrar con esta cuenta de invitado.'
       } else if (user.isGuest) {
-        message = `Are you sure you want to sign out?\n\nAs a guest, you won't be able to sign back into this account.`
+        message = '¿Desea cerrar sesión?\n\nNo podrá volver a entrar con esta cuenta de invitado.'
       } else if (hasUpcomingSongs) {
-        message = `Are you sure you want to sign out?\n\nYour upcoming songs will be removed from the queue.`
+        message = '¿Desea cerrar sesión?\n\nSe quitarán sus próximas canciones de la cola de reproducción.'
       }
 
       if (message && !confirm(message)) return
@@ -42,7 +42,7 @@ const Account = () => {
   const handleSubmit = (data: FormData) => {
     if (!user.isGuest) {
       if (!curPassword.current.value.trim()) {
-        alert('Please enter your current password to make changes.')
+        alert('Ingrese su contraseña actual para guardar los cambios.')
         curPassword.current.focus()
         return
       }
@@ -54,11 +54,11 @@ const Account = () => {
   }
 
   return (
-    <Panel title='My Account' contentClassName={styles.content}>
+    <Panel title='Mi cuenta' contentClassName={styles.content}>
       <>
         <p>
-          Signed in as&nbsp;
-          <strong>{user.isGuest ? 'guest' : user.username}</strong>
+          Sesión iniciada como&nbsp;
+          <strong>{user.isGuest ? 'invitado' : user.username}</strong>
         </p>
 
         <AccountForm
@@ -72,7 +72,7 @@ const Account = () => {
             <input
               type='password'
               autoComplete='current-password'
-              placeholder='current password'
+              placeholder='contraseña actual'
               ref={curPassword}
             />
 
@@ -81,11 +81,11 @@ const Account = () => {
           <div className={styles.btnContainer}>
             {isDirty && (
               <Button type='submit' variant='primary'>
-                Update Account
+                Actualizar cuenta
               </Button>
             )}
             <Button onClick={handleSignOut} variant='default'>
-              Sign Out
+              Cerrar sesión
             </Button>
           </div>
         </AccountForm>

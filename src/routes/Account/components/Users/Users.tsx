@@ -57,7 +57,7 @@ const Users = () => {
             )
           </td>
         )}
-        <td>{user.role}</td>
+        <td>{user.role === 'guest' ? 'Invitado' : user.role === 'standard' ? 'Usuario' : user.role === 'admin' ? 'Administrador' : user.role}</td>
         <td>{formatDateTime(new Date(user.dateCreated * 1000))}</td>
       </tr>
     )
@@ -69,9 +69,9 @@ const Users = () => {
 
   const userFilter = (
     <select className={styles.usersFilter} onChange={handleFilterChange} value={filterOnline ? 'online' : filterRoomId || 'all'}>
-      <option key='all' value='all'>All</option>
-      <option key='online' value='online'>Online</option>
-      <optgroup label='Online in...'>
+      <option key='all' value='all'>Todos</option>
+      <option key='online' value='online'>Conectados</option>
+      <optgroup label='Conectados en...'>
         {roomOpts}
       </optgroup>
     </select>
@@ -79,16 +79,16 @@ const Users = () => {
 
   return (
     <Panel
-      title='Users'
+      title='Usuarios'
       titleComponent={userFilter}
     >
       <>
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Username</th>
-              <th>Role</th>
-              <th>Joined</th>
+              <th>Nombre de usuario</th>
+              <th>Rol</th>
+              <th>Fecha de registro</th>
             </tr>
           </thead>
           <tbody>
@@ -98,7 +98,7 @@ const Users = () => {
 
         <br />
         <Button onClick={handleOpen} variant='primary'>
-          Create User
+          Crear usuario
         </Button>
 
         {isEditorOpen && (

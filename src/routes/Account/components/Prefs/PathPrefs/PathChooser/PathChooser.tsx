@@ -57,17 +57,17 @@ const PathChooser = ({ onCancel, onChoose }: PathChooserProps) => {
 
   return (
     <Modal
-      title='Add Folder'
+      title='Agregar carpeta'
       className={styles.modal}
       onClose={onCancel}
       scrollable
       buttons={(
         <div className={styles.btnContainer}>
           <Button onClick={onCancel} variant='default'>
-            Cancel
+            Cancelar
           </Button>
           <Button onClick={handleChoose} variant='primary'>
-            Add Folder
+            Agregar carpeta
           </Button>
         </div>
       )}

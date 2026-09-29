@@ -86,7 +86,7 @@ class Rooms {
     let query
 
     if (typeof prefs !== 'undefined' && (typeof prefs !== 'object' || prefs === null || Array.isArray(prefs))) {
-      throw new ValidationError('Room preferences must be an object')
+      throw new ValidationError('Las preferencias de la sala deben ser un objeto')
     }
 
     const queuePrefsError = getQueuePrefsValidationError(prefs?.queue)
@@ -98,15 +98,15 @@ class Rooms {
     }
 
     if (!name || !name.trim() || name.length < NAME_MIN_LENGTH || name.length > NAME_MAX_LENGTH) {
-      throw new ValidationError(`Room name must have ${NAME_MIN_LENGTH}-${NAME_MAX_LENGTH} characters`)
+      throw new ValidationError(`El nombre de la sala debe tener entre ${NAME_MIN_LENGTH} y ${NAME_MAX_LENGTH} caracteres`)
     }
 
     if (password && password.length < PASSWORD_MIN_LENGTH) {
-      throw new ValidationError(`Room password must have at least ${PASSWORD_MIN_LENGTH} characters`)
+      throw new ValidationError(`La contraseña de la sala debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres`)
     }
 
     if (!status || !STATUSES.includes(status)) {
-      throw new ValidationError('Invalid room status')
+      throw new ValidationError('El estado de la sala no es válido')
     }
 
     if (typeof roomId === 'number') {
@@ -160,20 +160,20 @@ class Rooms {
     const room = res.entities[roomId]
 
     if (!room) {
-      throw new Error('Room not found')
+      throw new Error('No se encontró la sala')
     }
 
     if (isOpen && room.status !== 'open') {
-      throw new Error('Room is no longer open')
+      throw new Error('La sala ya no está abierta')
     }
 
     if (validatePassword && room.password) {
       if (!password) {
-        throw new Error('Room password is required')
+        throw new Error('La contraseña de la sala es obligatoria')
       }
 
       if (!(await crypto.compare(password, room.password))) {
-        throw new Error('Incorrect room password')
+        throw new Error('La contraseña de la sala es incorrecta')
       }
 
       if (crypto.isLegacy(room.password)) {
@@ -193,11 +193,11 @@ class Rooms {
       const roleId = row?.roleId
 
       if (!roleId) {
-        throw new Error('Role not found')
+        throw new Error('No se encontró el rol')
       }
 
       if (!room.prefs?.roles?.[roleId]?.allowNew) {
-        throw new Error(`New "${role}" accounts are not allowed in this room`)
+        throw new Error(`No se permiten nuevas cuentas de ${role === 'guest' ? 'invitado' : role === 'standard' ? 'usuario' : role} en esta sala`)
       }
     }
 

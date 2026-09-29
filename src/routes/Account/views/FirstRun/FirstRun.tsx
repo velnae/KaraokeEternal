@@ -17,17 +17,17 @@ const FirstRun = () => {
   return (
     <div className={styles.container} style={{ maxWidth: Math.max(340, ui.contentWidth * 0.66) }}>
       <Logo className={styles.logo} />
-      <h1>Welcome</h1>
+      <h1>Bienvenido</h1>
       <p>
-        Create your
+        Cree su cuenta de
         {' '}
-        <b>admin</b>
+        <b>administrador</b>
         {' '}
-        account to get started. All data is locally stored and never shared.
+        para comenzar. Todos los datos se guardan localmente y nunca se comparten.
       </p>
       <AccountForm onSubmit={handleCreate} autoFocus>
         <Button variant='primary' type='submit'>
-          Create Account
+          Crear cuenta
         </Button>
       </AccountForm>
     </div>

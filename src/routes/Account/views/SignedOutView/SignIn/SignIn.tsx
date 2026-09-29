@@ -24,7 +24,7 @@ const SignIn = ({
       <input
         type='email'
         autoComplete='username'
-        placeholder='username or email'
+        placeholder='nombre de usuario o correo electrónico'
         value={username}
         onChange={e => onUsernameChange(e.target.value)}
         ref={onFirstFieldRef}
@@ -32,12 +32,12 @@ const SignIn = ({
       <input
         type='password'
         autoComplete='current-password'
-        placeholder='password'
+        placeholder='contraseña'
         value={password}
         onChange={e => onPasswordChange(e.target.value)}
       />
       <Button type='submit' variant='primary'>
-        Sign In
+        Iniciar sesión
       </Button>
     </form>
   )

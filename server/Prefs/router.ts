@@ -42,7 +42,7 @@ router.post('/path', (ctx) => {
 
   // required
   if (!dir) {
-    ctx.throw(422, 'Invalid path')
+    ctx.throw(422, 'La ruta de la carpeta no es válida')
   }
 
   const pathId = Prefs.addPath(dir, {
@@ -68,7 +68,7 @@ router.put('/path/:pathId', (ctx) => {
   const pathId = parseInt(ctx.params.pathId, 10)
 
   if (isNaN(pathId)) {
-    ctx.throw(422, 'Invalid pathId')
+    ctx.throw(422, 'El identificador de la carpeta no es válido')
   }
 
   Prefs.setPathData(pathId, 'prefs.', (ctx.request as unknown as RequestWithBody).body)
@@ -102,7 +102,7 @@ router.delete('/path/:pathId', (ctx) => {
   const pathId = parseInt(ctx.params.pathId, 10)
 
   if (isNaN(pathId)) {
-    ctx.throw(422, 'Invalid pathId')
+    ctx.throw(422, 'El identificador de la carpeta no es válido')
   }
 
   ctx.stopScanner()
@@ -130,7 +130,7 @@ router.get('/path/:pathId/scan', async (ctx) => {
   const pathId = parseInt(ctx.params.pathId, 10)
 
   if (isNaN(pathId)) {
-    ctx.throw(422, 'Invalid pathId')
+    ctx.throw(422, 'El identificador de la carpeta no es válido')
   }
 
   ctx.status = 200
