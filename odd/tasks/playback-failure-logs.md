@@ -22,3 +22,5 @@
 ## Delivery and risk
 
 Route: single-writer direct ODD T1. Touched only player diagnostics, server failure handler, tests, and this document; no shared queue schema or unrelated behavior. Authored additions plus deletions including new test and document remain below the 400-line review heuristic. Delivery strategy: **ask-on-risk** for later scope expansion. No SDD, RDD enablement/review, PR, push, or live-service interference. Native review was not run; independent functional verification was completed. Runtime deployment and real-room validation are **not** part of this closure.
+
+Behavior work-unit commit: `583f2caabc3dd6b002a5834f5c0e1ecaaf36cf63` (`fix: log structured YouTube playback failures`), 263 authored changed lines (+251/-12) across nine intended files. This evidence-only follow-up records that immutable behavior commit without changing verified source. The active service still uses old bytes; deployment remains pending.
