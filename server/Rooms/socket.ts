@@ -14,14 +14,14 @@ const ACTION_HANDLERS = {
     if (!sock.user.isAdmin || !roomId) {
       return acknowledge({
         type: ROOM_PREFS_PUSH_REQUEST + _ERROR,
-        error: 'Unauthorized',
+        error: 'No tiene autorización',
       })
     }
 
     if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) {
       return acknowledge({
         type: ROOM_PREFS_PUSH_REQUEST + _ERROR,
-        error: 'Room preferences must be an object',
+        error: 'Las preferencias de la sala deben ser un objeto',
       })
     }
 

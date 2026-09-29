@@ -96,7 +96,7 @@ router.delete('/:roomId', (ctx) => {
   const roomId = parseInt(ctx.params.roomId, 10)
 
   if (typeof roomId !== 'number') {
-    ctx.throw(422, 'Invalid roomId')
+    ctx.throw(422, 'El identificador de la sala no es válido')
   }
 
   // remove room's queue first

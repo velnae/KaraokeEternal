@@ -38,7 +38,7 @@ const Rooms = () => {
       <tr key={String(roomId)}>
         <td translate='no'><a data-room-id={roomId} onClick={handleOpen}>{room.name}</a></td>
         <td>
-          {room.status}
+          {room.status === 'open' ? 'Abierta' : room.status === 'closed' ? 'Cerrada' : room.status}
           {room.numUsers > 0 && (
             <>
 &nbsp;
@@ -57,21 +57,21 @@ const Rooms = () => {
 
   const roomsFilter = (
     <select className={styles.roomsFilter} onChange={handleFilterChange} value={filterStatus === false ? 'all' : filterStatus as string}>
-      <option key='all' value='all'>All</option>
-      <option key='open' value='open'>Open</option>
-      <option key='closed' value='closed'>Closed</option>
+      <option key='all' value='all'>Todas</option>
+      <option key='open' value='open'>Abiertas</option>
+      <option key='closed' value='closed'>Cerradas</option>
     </select>
   )
 
   return (
-    <Panel title='Rooms' titleComponent={roomsFilter}>
+    <Panel title='Salas' titleComponent={roomsFilter}>
       <>
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Status</th>
-              <th>Created</th>
+              <th>Nombre</th>
+              <th>Estado</th>
+              <th>Fecha de creación</th>
             </tr>
           </thead>
           <tbody>
@@ -81,7 +81,7 @@ const Rooms = () => {
 
         <br />
         <Button onClick={handleOpen} variant='primary'>
-          Create Room
+          Crear sala
         </Button>
 
         {isEditorOpen && <EditRoom onClose={handleClose} room={editorRoom} />}

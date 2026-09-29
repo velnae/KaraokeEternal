@@ -69,15 +69,15 @@ const QueuePrefs = ({ onChange, prefs = {} }: QueuePrefsProps) => {
       headingComponent={(
         <div className={styles.heading}>
           <Icon icon='TUNE' />
-          <div className={styles.title}>Queue Settings</div>
+          <div className={styles.title}>Configuración de la cola de reproducción</div>
         </div>
       )}
     >
       <div className={styles.content}>
         <NumberField
           id='queue-max-pending'
-          label='Maximum pending requests per participant'
-          description='Includes requests awaiting approval and approved upcoming requests.'
+          label='Máximo de solicitudes pendientes por participante'
+          description='Incluye las solicitudes por aprobar y las próximas canciones aprobadas.'
           {...QUEUE_PREF_LIMITS.maxPendingPerParticipant}
           value={queue.maxPendingPerParticipant}
           onChange={value => handleSetQueuePrefs({ maxPendingPerParticipant: value })}
@@ -85,8 +85,8 @@ const QueuePrefs = ({ onChange, prefs = {} }: QueuePrefsProps) => {
 
         <NumberField
           id='queue-max-songs-round'
-          label='Songs per participant turn'
-          description='Applies to Fair rotation. FIFO always follows request order.'
+          label='Canciones por turno de participante'
+          description='Se aplica a los turnos equitativos. El orden de llegada sigue el orden de las solicitudes.'
           {...QUEUE_PREF_LIMITS.maxSongsPerParticipantRound}
           value={queue.maxSongsPerParticipantRound}
           onChange={value => handleSetQueuePrefs({ maxSongsPerParticipantRound: value })}
@@ -94,35 +94,35 @@ const QueuePrefs = ({ onChange, prefs = {} }: QueuePrefsProps) => {
 
         <NumberField
           id='queue-house-tracks'
-          label='House tracks between participant turns'
-          description='Set to 0 to disable automatic house-track interleaving.'
+          label='Canciones de la casa entre turnos de participantes'
+          description='Use 0 para desactivar la inserción automática de canciones de la casa.'
           {...QUEUE_PREF_LIMITS.houseTracksBeforeParticipant}
           value={queue.houseTracksBeforeParticipant}
           onChange={value => handleSetQueuePrefs({ houseTracksBeforeParticipant: value })}
         />
 
         <div className={styles.field}>
-          <label htmlFor='queue-approval-mode'>Approval mode</label>
+          <label htmlFor='queue-approval-mode'>Modo de aprobación</label>
           <select
             id='queue-approval-mode'
             value={queue.approvalMode}
             onChange={event => handleSetQueuePrefs({ approvalMode: event.currentTarget.value as ApprovalMode })}
           >
-            {APPROVAL_MODES.map(mode => <option value={mode} key={mode}>{mode === 'AUTO' ? 'Automatic' : 'Manual'}</option>)}
+            {APPROVAL_MODES.map(mode => <option value={mode} key={mode}>{mode === 'AUTO' ? 'Automática' : 'Manual'}</option>)}
           </select>
-          <small>Manual requests must be approved by an operator before playback.</small>
+          <small>En modo manual, un operador debe aprobar cada solicitud antes de reproducirla.</small>
         </div>
 
         <div className={styles.field}>
-          <label htmlFor='queue-rotation-mode'>Rotation mode</label>
+          <label htmlFor='queue-rotation-mode'>Orden de reproducción</label>
           <select
             id='queue-rotation-mode'
             value={queue.rotationMode}
             onChange={event => handleSetQueuePrefs({ rotationMode: event.currentTarget.value as RotationMode })}
           >
-            {ROTATION_MODES.map(mode => <option value={mode} key={mode}>{mode === 'FAIR' ? 'Fair rotation' : 'First in, first out'}</option>)}
+            {ROTATION_MODES.map(mode => <option value={mode} key={mode}>{mode === 'FAIR' ? 'Turnos equitativos' : 'Orden de llegada'}</option>)}
           </select>
-          <small>Fair rotation alternates participants; FIFO follows request creation order.</small>
+          <small>Los turnos equitativos alternan participantes; el orden de llegada sigue las solicitudes recibidas.</small>
         </div>
       </div>
     </Accordion>

@@ -25,22 +25,22 @@ describe('queue room preferences', () => {
   })
 
   it.each([
-    ['maxPendingPerParticipant', 0, 'maxPendingPerParticipant must be an integer between 1 and 20'],
-    ['maxPendingPerParticipant', 21, 'maxPendingPerParticipant must be an integer between 1 and 20'],
-    ['maxSongsPerParticipantRound', 0, 'maxSongsPerParticipantRound must be an integer between 1 and 5'],
-    ['maxSongsPerParticipantRound', 6, 'maxSongsPerParticipantRound must be an integer between 1 and 5'],
-    ['houseTracksBeforeParticipant', -1, 'houseTracksBeforeParticipant must be an integer between 0 and 10'],
-    ['houseTracksBeforeParticipant', 11, 'houseTracksBeforeParticipant must be an integer between 0 and 10'],
-    ['houseTracksBeforeParticipant', 1.5, 'houseTracksBeforeParticipant must be an integer between 0 and 10'],
+    ['maxPendingPerParticipant', 0, 'El máximo de solicitudes pendientes por participante debe ser un número entero entre 1 y 20'],
+    ['maxPendingPerParticipant', 21, 'El máximo de solicitudes pendientes por participante debe ser un número entero entre 1 y 20'],
+    ['maxSongsPerParticipantRound', 0, 'El número de canciones por turno de participante debe ser un número entero entre 1 y 5'],
+    ['maxSongsPerParticipantRound', 6, 'El número de canciones por turno de participante debe ser un número entero entre 1 y 5'],
+    ['houseTracksBeforeParticipant', -1, 'El número de canciones de la casa entre turnos de participantes debe ser un número entero entre 0 y 10'],
+    ['houseTracksBeforeParticipant', 11, 'El número de canciones de la casa entre turnos de participantes debe ser un número entero entre 0 y 10'],
+    ['houseTracksBeforeParticipant', 1.5, 'El número de canciones de la casa entre turnos de participantes debe ser un número entero entre 0 y 10'],
   ])('rejects an invalid %s value', (key, value, expectedError) => {
     expect(getQueuePrefsValidationError({ [key]: value })).toBe(expectedError)
   })
 
   it('rejects invalid enum values', () => {
     expect(getQueuePrefsValidationError({ approvalMode: 'SOMETIMES' }))
-      .toBe('approvalMode must be one of: AUTO, MANUAL')
+      .toBe('El modo de aprobación debe ser uno de: AUTO, MANUAL')
     expect(getQueuePrefsValidationError({ rotationMode: 'RANDOM' }))
-      .toBe('rotationMode must be one of: FAIR, FIFO')
+      .toBe('El orden de reproducción debe ser uno de: FAIR, FIFO')
   })
 
   it('normalizes invalid stored values without leaking them to clients', () => {

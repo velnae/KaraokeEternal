@@ -44,7 +44,7 @@ const EditRoom = ({ onClose, room }: EditRoomProps) => {
   }
 
   const handleRemoveClick = () => {
-    if (room && confirm(`Remove room "${room.name}" and its queue?`)) {
+    if (room && confirm(`¿Eliminar la sala "${room.name}" y su cola de reproducción?`)) {
       dispatch(removeRoom(room.roomId))
     }
   }
@@ -73,7 +73,7 @@ const EditRoom = ({ onClose, room }: EditRoomProps) => {
     <Modal
       className={styles.modal}
       onClose={handleClose}
-      title={room ? 'Edit Room' : 'Create Room'}
+      title={room ? 'Editar sala' : 'Crear sala'}
     >
       <form onSubmit={handleSubmit} ref={formRef} className={styles.form}>
         <div className={styles.fieldContainer}>
@@ -82,7 +82,7 @@ const EditRoom = ({ onClose, room }: EditRoomProps) => {
             autoComplete='off'
             defaultValue={room ? room.name : ''}
             name='name'
-            placeholder='room name'
+            placeholder='nombre de la sala'
             // https://github.com/facebook/react/issues/23301
             ref={r => typeof room === 'undefined' ? r?.setAttribute('autofocus', 'true') : undefined}
           />
@@ -94,15 +94,15 @@ const EditRoom = ({ onClose, room }: EditRoomProps) => {
             name='password'
             onChange={handlePasswordChange}
             onFocus={e => e.target.select()}
-            placeholder='room password (optional)'
+            placeholder='contraseña de la sala (opcional)'
           />
 
           <select
             name='status'
             defaultValue={room?.status ?? 'open'}
           >
-            <option value='open'>Open</option>
-            <option value='closed'>Closed</option>
+            <option value='open'>Abierta</option>
+            <option value='closed'>Cerrada</option>
           </select>
         </div>
 
@@ -114,15 +114,15 @@ const EditRoom = ({ onClose, room }: EditRoomProps) => {
 
         <div className={styles.btnContainer}>
           <Button type='submit' variant='primary' className={styles.btn}>
-            {room ? 'Update Room' : 'Create Room'}
+            {room ? 'Actualizar sala' : 'Crear sala'}
           </Button>
           {room && (
             <Button onClick={handleRemoveClick} className={styles.btn} variant='danger'>
-              Remove Room
+              Eliminar sala
             </Button>
           )}
           <Button onClick={handleClose} variant='default'>
-            Cancel
+            Cancelar
           </Button>
         </div>
       </form>

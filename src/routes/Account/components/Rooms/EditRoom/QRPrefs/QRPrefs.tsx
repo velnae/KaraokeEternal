@@ -32,14 +32,14 @@ const QRPrefs = ({ onChange, prefs = {}, roomPassword, roomPasswordDirty }: QRPr
       headingComponent={(
         <div className={styles.heading}>
           <Icon icon='QR_CODE' />
-          <div className={styles.title}>QR Code</div>
+          <div className={styles.title}>Código QR</div>
         </div>
       )}
     >
       <div className={styles.content}>
         <div className={styles.field}>
           <InputCheckbox
-            label='Show QR code'
+            label='Mostrar código QR'
             checked={prefs?.qr?.isEnabled ?? false}
             onChange={event => handleSetPref({ qr: { ...prefs.qr, isEnabled: event.currentTarget.checked } })}
           />
@@ -47,7 +47,7 @@ const QRPrefs = ({ onChange, prefs = {}, roomPassword, roomPasswordDirty }: QRPr
         {prefs?.qr?.isEnabled && roomPassword && (
           <div className={styles.field}>
             <InputCheckbox
-              label='Include room password'
+              label='Incluir contraseña de la sala'
               checked={isQRPasswordEnabled}
               onChange={(event) => {
                 const checked = event.currentTarget.checked
@@ -65,12 +65,12 @@ const QRPrefs = ({ onChange, prefs = {}, roomPassword, roomPasswordDirty }: QRPr
               value={prefs?.qr?.password ?? ''}
               onChange={e => handleSetPref({ qr: { ...prefs.qr, password: e.target.value } })}
               onFocus={e => e.target.select()}
-              placeholder='re-enter room password'
+              placeholder='vuelva a ingresar la contraseña de la sala'
             />
           </div>
         )}
         <div className={clsx(styles.field)}>
-          <label id='label-qr-size'>Size</label>
+          <label id='label-qr-size'>Tamaño</label>
           <Slider
             className={styles.slider}
             min={0}
@@ -82,7 +82,7 @@ const QRPrefs = ({ onChange, prefs = {}, roomPassword, roomPasswordDirty }: QRPr
           />
         </div>
         <div className={clsx(styles.field)}>
-          <label id='label-qr-opacity'>Opacity</label>
+          <label id='label-qr-opacity'>Opacidad</label>
           <Slider
             className={styles.slider}
             min={0.25}

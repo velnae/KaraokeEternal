@@ -44,7 +44,7 @@ const isRotationMode = (value: unknown): value is RotationMode => {
 
 export const getQueuePrefsValidationError = (value: unknown): string | null => {
   if (typeof value === 'undefined' || value === null) return null
-  if (!isRecord(value)) return 'Queue preferences must be an object'
+  if (!isRecord(value)) return 'Las preferencias de la cola de reproducción deben ser un objeto'
 
   for (const key of Object.keys(QUEUE_PREF_LIMITS) as Array<keyof typeof QUEUE_PREF_LIMITS>) {
     const candidate = value[key]
@@ -52,16 +52,21 @@ export const getQueuePrefsValidationError = (value: unknown): string | null => {
 
     const { min, max } = QUEUE_PREF_LIMITS[key]
     if (!isIntegerInRange(candidate, min, max)) {
-      return `${key} must be an integer between ${min} and ${max}`
+      const label = key === 'maxPendingPerParticipant'
+        ? 'El máximo de solicitudes pendientes por participante'
+        : key === 'maxSongsPerParticipantRound'
+          ? 'El número de canciones por turno de participante'
+          : 'El número de canciones de la casa entre turnos de participantes'
+      return `${label} debe ser un número entero entre ${min} y ${max}`
     }
   }
 
   if (typeof value.approvalMode !== 'undefined' && !isApprovalMode(value.approvalMode)) {
-    return `approvalMode must be one of: ${APPROVAL_MODES.join(', ')}`
+    return `El modo de aprobación debe ser uno de: ${APPROVAL_MODES.join(', ')}`
   }
 
   if (typeof value.rotationMode !== 'undefined' && !isRotationMode(value.rotationMode)) {
-    return `rotationMode must be one of: ${ROTATION_MODES.join(', ')}`
+    return `El orden de reproducción debe ser uno de: ${ROTATION_MODES.join(', ')}`
   }
 
   return null

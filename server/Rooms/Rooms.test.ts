@@ -75,7 +75,22 @@ describe('Rooms queue preferences', () => {
         },
       },
     })).rejects.toThrowError(new ValidationError(
-      'maxPendingPerParticipant must be an integer between 1 and 20',
+      'El máximo de solicitudes pendientes por participante debe ser un número entero entre 1 y 20',
     ))
+  })
+
+  it('reports invalid room names in Spanish without changing stored room status values', async () => {
+    await expect(Rooms.set(undefined, {
+      name: '',
+      status: 'open',
+      prefs: {},
+    })).rejects.toThrow('El nombre de la sala debe tener entre 1 y 50 caracteres')
+
+    const result = await Rooms.set(undefined, {
+      name: 'Singer room',
+      status: 'closed',
+      prefs: {},
+    })
+    expect(Rooms.get(result.lastID, { status: ['open', 'closed'] }).entities[result.lastID].status).toBe('closed')
   })
 })

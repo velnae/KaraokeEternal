@@ -17,7 +17,7 @@ describe('room preference socket actions', () => {
 
     expect(acknowledge).toHaveBeenCalledWith({
       type: ROOM_PREFS_PUSH_REQUEST + '_ERROR',
-      error: 'Unauthorized',
+      error: 'No tiene autorización',
     })
     expect(fetchSockets).not.toHaveBeenCalled()
   })
@@ -39,7 +39,7 @@ describe('room preference socket actions', () => {
 
     expect(acknowledge).toHaveBeenCalledWith({
       type: ROOM_PREFS_PUSH_REQUEST + '_ERROR',
-      error: 'houseTracksBeforeParticipant must be an integer between 0 and 10',
+      error: 'El número de canciones de la casa entre turnos de participantes debe ser un número entero entre 0 y 10',
     })
     expect(fetchSockets).not.toHaveBeenCalled()
   })
