@@ -34,7 +34,7 @@ interface PlayerProps {
   height: number
   // media events
   onEnd(): void
-  onError(error: string): void
+  onError(error: string, diagnostic?: { category: 'iframe' | 'api-load', code?: number }): void
   onLoad(): void
   onPlay(): void
   onStatus(status: Partial<PlayerState>): void

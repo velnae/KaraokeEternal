@@ -108,7 +108,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     settlePlayback(settlement.current, token, 'ENDED', { onAdvance: handleLoadNext })
   }, [handleLoadNext, player._lastReplayTime, queueItem])
 
-  const handleError = useCallback((msg: string) => {
+  const handleError = useCallback((msg: string, diagnostic?: { category: 'iframe' | 'api-load', code?: number }) => {
     if (!queueItem || queueItem.source !== 'YOUTUBE') {
       dispatch(playerError(msg))
       handleStatus()
@@ -117,7 +117,7 @@ const PlayerController = (props: PlayerControllerProps) => {
 
     const token = playbackToken(queueItem.queueId, player._lastReplayTime)
     settlePlayback(settlement.current, token, 'FAILED', {
-      onFailure: () => dispatch(playerFailure({ queueId: queueItem.queueId, error: msg })),
+      onFailure: () => dispatch(playerFailure({ queueId: queueItem.queueId, error: msg, ...diagnostic })),
       onAdvance: handleLoadNext,
     })
   }, [dispatch, handleLoadNext, handleStatus, player._lastReplayTime, queueItem])

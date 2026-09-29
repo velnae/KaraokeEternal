@@ -137,4 +137,26 @@ describe('YouTube player transitions', () => {
     expect(player.props.isPlaying).toBe(true)
     player.componentWillUnmount()
   })
+
+  it.each([100, 153])('passes iframe code %s separately from the display message', (code) => {
+    const { player, iframe } = setup()
+    player.handleError({ data: code, target: iframe })
+    expect(player.props.onError).toHaveBeenCalledWith(expect.any(String), { category: 'iframe', code })
+  })
+
+  it('reports API loader failures as a fixed category without forwarding exception text', async () => {
+    const { player } = setup()
+    vi.stubGlobal('window', { YT: undefined })
+    vi.stubGlobal('document', {
+      querySelector: (): null => null,
+      createElement: () => ({}),
+      head: { appendChild: (script: { onerror(): void }) => script.onerror() },
+    })
+
+    player.componentDidMount()
+    await vi.waitFor(() => expect(player.props.onError).toHaveBeenCalledWith(
+      expect.any(String), { category: 'api-load' },
+    ))
+    player.componentWillUnmount()
+  })
 })

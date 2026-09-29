@@ -83,7 +83,7 @@ interface YouTubePlayerProps {
   mediaKey: number
   mediaReplayKey?: number
   onEnd(): void
-  onError(error: string): void
+  onError(error: string, diagnostic?: { category: 'iframe' | 'api-load', code?: number }): void
   onLoad(): void
   onPlay(): void
   onStatus(status: { isPlaying?: boolean, position?: number }): void
@@ -105,7 +105,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
     loadYouTubeIframeApi()
       .then(this.createPlayer)
       .catch((error) => {
-        if (this.isMounted) this.props.onError(error.message)
+        if (this.isMounted) this.props.onError(error.message, { category: 'api-load' })
       })
   }
 
@@ -193,7 +193,10 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
       150: 'YouTube video owner does not allow embedded playback',
     }
     this.stopStatusUpdates()
-    this.props.onError(`${messages[event.data] ?? 'YouTube playback failed'} (code ${event.data})`)
+    this.props.onError(`${messages[event.data] ?? 'YouTube playback failed'} (code ${event.data})`, {
+      category: 'iframe',
+      code: event.data,
+    })
   }
 
   updateIsPlaying = () => {

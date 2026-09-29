@@ -26,6 +26,17 @@ import Queue from '../Queue/Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import ACTION_HANDLERS from './socket.js'
 
+const failureInfo = vi.hoisted(() => vi.fn())
+vi.mock('../lib/Log.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../lib/Log.js')>()
+  return {
+    ...original,
+    default: (scope: string) => scope === 'player-failure' ? { info: failureInfo } : original.default(scope),
+  }
+})
+
+const loggedFailure = () => JSON.parse(failureInfo.mock.calls[0][1])
+
 const createSocket = ({ isAdmin = true } = {}) => {
   const emit = vi.fn()
   const sockets = new Map()
@@ -50,7 +61,10 @@ const createSocket = ({ isAdmin = true } = {}) => {
 }
 
 describe('player queue lifecycle', () => {
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    failureInfo.mockClear()
+  })
 
   it('rejects status reports from non-admin sockets', () => {
     const { socket } = createSocket({ isAdmin: false })
@@ -167,7 +181,7 @@ describe('player queue lifecycle', () => {
   })
 
   it('marks a failed item once and notifies the room with the persisted queue', () => {
-    const queue = { result: [4, 5], entities: {} }
+    const queue = { result: [4, 5], entities: { 4: { source: 'YOUTUBE', externalId: 'abcdefghijk' } } } as unknown as ReturnType<typeof Queue.get>
     const { socket, emit } = createSocket()
     socket._isPlayerAuthoritative = true
     const transition = vi.spyOn(Queue, 'transition')
@@ -176,14 +190,84 @@ describe('player queue lifecycle', () => {
     vi.spyOn(Queue, 'get').mockReturnValue(queue)
     const acknowledge = vi.fn()
 
-    ACTION_HANDLERS[PLAYER_EMIT_FAILURE](socket, { payload: { queueId: 4, error: 'Unavailable' } }, acknowledge)
-    ACTION_HANDLERS[PLAYER_EMIT_FAILURE](socket, { payload: { queueId: 4, error: 'Unavailable' } }, acknowledge)
+    const payload = {
+      queueId: 4, error: 'client text must not be logged', category: 'iframe', code: 153,
+      videoId: 'forged-client-id', title: 'forged title',
+    }
+    ACTION_HANDLERS[PLAYER_EMIT_FAILURE](socket, { payload }, acknowledge)
+    ACTION_HANDLERS[PLAYER_EMIT_FAILURE](socket, { payload }, acknowledge)
 
     expect(transition).toHaveBeenCalledTimes(2)
     expect(transition).toHaveBeenCalledWith(1, 4, 'FAILED')
     expect(emit).toHaveBeenCalledTimes(1)
     expect(emit).toHaveBeenCalledWith('action', { type: QUEUE_PUSH, payload: queue })
     expect(acknowledge).toHaveBeenCalledWith({ type: PLAYER_EMIT_FAILURE + '_SUCCESS' })
+    expect(failureInfo).toHaveBeenCalledTimes(1)
+    expect(loggedFailure()).toEqual({
+      timestamp: expect.any(String), roomId: 1, queueId: 4, source: 'YOUTUBE',
+      videoId: 'abcdefghijk', category: 'iframe', code: 153,
+      message: 'YouTube playback failed',
+    })
+    expect(Number.isNaN(Date.parse(loggedFailure().timestamp))).toBe(false)
+    expect(JSON.stringify(failureInfo.mock.calls)).not.toMatch(/client text|forged/)
+  })
+
+  it.each([
+    { queueId: 4, error: 'SECRET\nhttps://example.invalid/key' },
+    { queueId: 4, category: 'iframe', code: '100', error: 'SECRET' },
+    { queueId: 4, category: 'iframe', code: 9999999, error: 'SECRET' },
+    { queueId: 4, category: 'arbitrary', code: 100, error: 'SECRET' },
+  ])('uses a safe fallback for legacy or malformed diagnostics', (payload) => {
+    const { socket } = createSocket()
+    socket._isPlayerAuthoritative = true
+    vi.spyOn(Queue, 'transition').mockReturnValue(true)
+    vi.spyOn(Queue, 'get').mockReturnValue({ result: [4], entities: {
+      4: { source: 'YOUTUBE', externalId: 'BAD\nSECRET' },
+    } } as unknown as ReturnType<typeof Queue.get>)
+    ACTION_HANDLERS[PLAYER_EMIT_FAILURE](socket, { payload }, vi.fn())
+    expect(loggedFailure()).toMatchObject({
+      roomId: 1, queueId: 4, videoId: null, category: 'unknown', code: null,
+      message: 'Playback failure reported',
+    })
+    expect(JSON.stringify(failureInfo.mock.calls)).not.toMatch(/SECRET|https:/)
+  })
+
+  it('does not log failed transitions that did not change the queue', () => {
+    const { socket } = createSocket()
+    socket._isPlayerAuthoritative = true
+    vi.spyOn(Queue, 'transition').mockReturnValue(false)
+    ACTION_HANDLERS[PLAYER_EMIT_FAILURE](socket, {
+      payload: { queueId: 4, category: 'iframe', code: 100 },
+    }, vi.fn())
+    expect(failureInfo).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [{ category: 'iframe', code: 100 }, 'iframe', 100, 'YouTube video is unavailable or has been removed'],
+    [{ category: 'api-load' }, 'api-load', null, 'YouTube IFrame Player API failed to load'],
+  ])('uses canonical diagnostics for recognized failure kinds', (diagnostic, category, code, message) => {
+    const { socket } = createSocket()
+    socket._isPlayerAuthoritative = true
+    vi.spyOn(Queue, 'transition').mockReturnValue(true)
+    vi.spyOn(Queue, 'get').mockReturnValue({ result: [4], entities: {} })
+    ACTION_HANDLERS[PLAYER_EMIT_FAILURE](socket, {
+      payload: { queueId: 4, ...diagnostic, error: 'SECRET' },
+    }, vi.fn())
+    expect(loggedFailure()).toMatchObject({ category, code, message, videoId: null, source: null })
+    expect(JSON.stringify(failureInfo.mock.calls)).not.toContain('SECRET')
+  })
+
+  it('rejects malformed queue IDs before transition and logging', () => {
+    const { socket } = createSocket()
+    socket._isPlayerAuthoritative = true
+    const transition = vi.spyOn(Queue, 'transition')
+    const acknowledge = vi.fn()
+    ACTION_HANDLERS[PLAYER_EMIT_FAILURE](socket, { payload: { queueId: '4' } }, acknowledge)
+    expect(transition).not.toHaveBeenCalled()
+    expect(failureInfo).not.toHaveBeenCalled()
+    expect(acknowledge).toHaveBeenCalledWith({
+      type: PLAYER_EMIT_FAILURE + '_ERROR', error: 'Invalid failed queue item',
+    })
   })
 
   it('rejects failure reports from non-admin sockets', () => {
@@ -200,6 +284,7 @@ describe('player queue lifecycle', () => {
       type: PLAYER_EMIT_FAILURE + '_ERROR',
       error: 'Only administrators can control playback',
     })
+    expect(failureInfo).not.toHaveBeenCalled()
   })
 
   it('rejects failure reports from a non-authoritative admin player', () => {
@@ -216,5 +301,6 @@ describe('player queue lifecycle', () => {
       type: PLAYER_AUTHORITY_DENIED,
       payload: { message: 'Another player is already active in this room.' },
     })
+    expect(failureInfo).not.toHaveBeenCalled()
   })
 })

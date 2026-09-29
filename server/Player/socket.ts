@@ -1,5 +1,6 @@
 import Rooms from '../Rooms/Rooms.js'
 import Queue from '../Queue/Queue.js'
+import getLogger from '../lib/Log.js'
 
 import {
   PLAYER_CMD_NEXT,
@@ -24,6 +25,15 @@ import {
   PLAYER_LEAVE,
   QUEUE_PUSH,
 } from '../../shared/actionTypes.js'
+
+const log = getLogger('player-failure')
+const youtubeMessages: Record<number, string> = {
+  2: 'Invalid YouTube video ID',
+  5: 'YouTube HTML5 playback failed',
+  100: 'YouTube video is unavailable or has been removed',
+  101: 'YouTube video owner does not allow embedded playback',
+  150: 'YouTube video owner does not allow embedded playback',
+}
 
 const adminOnly = (sock, actionType, acknowledge): boolean => {
   if (sock.user.isAdmin) return true
@@ -92,9 +102,40 @@ const ACTION_HANDLERS = {
     acknowledge?.({ type: PLAYER_EMIT_FAILURE + '_SUCCESS' })
 
     if (changed) {
+      const queue = Queue.get(sock.user.roomId)
+      const item = queue.entities[queueId]
+      let code: number | null = null
+      let category = 'unknown'
+      let message = 'Playback failure reported'
+      if (payload?.category === 'iframe'
+        && Number.isInteger(payload.code) && payload.code >= 0 && payload.code <= 9999) {
+        code = payload.code
+        category = 'iframe'
+        message = youtubeMessages[code] ?? 'YouTube playback failed'
+      } else if (payload?.category === 'api-load') {
+        category = 'api-load'
+        message = 'YouTube IFrame Player API failed to load'
+      }
+      let videoId: string | null = null
+      if (item?.source === 'YOUTUBE' && typeof item.externalId === 'string'
+        && /^[A-Za-z0-9_-]{11}$/.test(item.externalId)) {
+        videoId = item.externalId
+      }
+      const source = item?.source === 'YOUTUBE' || item?.source === 'LOCAL' ? item.source : null
+
+      log.info('Playback failure %s', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        roomId: sock.user.roomId,
+        queueId,
+        source,
+        videoId,
+        category,
+        code,
+        message,
+      }))
       sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {
         type: QUEUE_PUSH,
-        payload: Queue.get(sock.user.roomId),
+        payload: queue,
       })
     }
   },

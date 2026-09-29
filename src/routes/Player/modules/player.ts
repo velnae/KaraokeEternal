@@ -30,7 +30,12 @@ export const playerError = createAction<string>(PLAYER_ERROR)
 export const playerLoad = createAction(PLAYER_LOAD)
 export const playerPlay = createAction(PLAYER_PLAY)
 export const playerCmdNext = createAction(PLAYER_CMD_NEXT)
-export const playerFailure = createAction<{ queueId: number, error: string }>(PLAYER_EMIT_FAILURE)
+export const playerFailure = createAction<{
+  queueId: number
+  error: string
+  category?: 'iframe' | 'api-load'
+  code?: number
+}>(PLAYER_EMIT_FAILURE)
 
 // triggered by clients
 const playerCmdPause = createAction(PLAYER_CMD_PAUSE)
