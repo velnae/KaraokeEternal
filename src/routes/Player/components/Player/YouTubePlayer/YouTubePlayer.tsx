@@ -97,6 +97,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
   player: YouTubePlayerInstance | null = null
   statusTimer: ReturnType<typeof setInterval> | null = null
   isMounted = false
+  awaitingPlayback = false
 
   componentDidMount () {
     this.isMounted = true
@@ -113,12 +114,14 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
 
     if (prevProps.mediaKey !== this.props.mediaKey || prevProps.videoId !== this.props.videoId) {
       this.props.onLoad()
+      this.awaitingPlayback = this.props.isPlaying
       if (this.props.isPlaying) this.player.loadVideoById(this.props.videoId)
       else this.player.cueVideoById(this.props.videoId)
     } else if (prevProps.mediaReplayKey !== this.props.mediaReplayKey) {
       this.player.seekTo(0, true)
       if (this.props.isPlaying) this.player.playVideo()
     } else if (prevProps.isPlaying !== this.props.isPlaying) {
+      this.awaitingPlayback = this.props.isPlaying
       this.updateIsPlaying()
     }
 
@@ -166,11 +169,13 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
 
   handleStateChange = (event: YouTubePlayerEvent) => {
     if (event.data === window.YT?.PlayerState.PLAYING) {
+      this.awaitingPlayback = false
       this.props.onPlay()
       this.props.onStatus({ isPlaying: true })
       this.startStatusUpdates()
     } else if (event.data === window.YT?.PlayerState.PAUSED) {
-      this.props.onStatus({ isPlaying: false })
+      // A previous video's pause can arrive while loadVideoById starts the next one.
+      if (!this.awaitingPlayback) this.props.onStatus({ isPlaying: false })
       this.stopStatusUpdates()
     } else {
       this.stopStatusUpdates()
