@@ -186,13 +186,13 @@ const PlayerController = (props: PlayerControllerProps) => {
     const denied = player._authority === 'DENIED'
     return (
       <div className={styles.authorityNotice} role='status'>
-        <h1>{denied ? 'Player already active' : 'Connecting player…'}</h1>
+        <h1>{denied ? 'Ya hay un reproductor activo' : 'Conectando el reproductor…'}</h1>
         <p>
           {denied
             ? player._authorityMessage
-            : 'Requesting the authoritative player slot for this room.'}
+            : 'Solicitando el control de reproducción de esta sala.'}
         </p>
-        {denied && <p>This screen will take over automatically if the active player disconnects.</p>}
+        {denied && <p>Esta pantalla tomará el control automáticamente si el reproductor activo se desconecta.</p>}
       </div>
     )
   }

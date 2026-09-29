@@ -40,7 +40,7 @@ class FileScanner extends Scanner {
     }
 
     log.info('Searching: %s', dir)
-    this.emitStatus(`Searching: ${dir}`, 0)
+    this.emitStatus(`Buscando: ${dir}`, 0)
 
     try {
       files = getFiles(dir, file => searchExts.includes(getExt(file)))
@@ -66,7 +66,7 @@ class FileScanner extends Scanner {
       }
 
       log.info('[%s/%s] %s', i + 1, files.length, files[i].file)
-      this.emitStatus(`Scanning (${i + 1} of ${files.length})`, (i + 1) / files.length)
+      this.emitStatus(`Analizando (${i + 1} de ${files.length})`, (i + 1) / files.length)
 
       // process file
       try {
@@ -80,7 +80,7 @@ class FileScanner extends Scanner {
       }
 
       if (this.isCanceling) {
-        this.emitStatus('Stopped', 100, false)
+        this.emitStatus('Análisis detenido', 100, false)
         return stats
       }
     } // end for

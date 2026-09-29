@@ -30,14 +30,14 @@ router.get('/:mediaId', async (ctx) => {
   const mediaId = parseInt(ctx.params.mediaId, 10)
 
   if (Number.isNaN(mediaId) || !type) {
-    ctx.throw(422, 'invalid mediaId or type')
+    ctx.throw(422, 'El identificador o tipo de archivo multimedia no es válido')
   }
 
   // get media info
   const res = Media.search({ mediaId })
 
   if (!res.result.length) {
-    ctx.throw(404, 'mediaId not found')
+    ctx.throw(404, 'No se encontró el archivo multimedia')
   }
 
   const { pathId, relPath } = res.entities[mediaId]
@@ -55,10 +55,10 @@ router.get('/:mediaId', async (ctx) => {
 
     if (type === 'cdg') {
       entry = Object.keys(entries).find(f => !f.includes('/') && getExt(f) === '.cdg')
-      if (!entry) ctx.throw(404, 'No .cdg file found in archive')
+      if (!entry) ctx.throw(404, 'No se encontró un archivo .cdg en el archivo comprimido')
     } else {
       entry = Object.keys(entries).find(f => !f.includes('/') && audioExts.includes(getExt(f)))
-      if (!entry) ctx.throw(404, 'No valid audio file found in archive')
+      if (!entry) ctx.throw(404, 'No se encontró un archivo de audio válido en el archivo comprimido')
     }
 
     ctx.length = entries[entry].size
@@ -67,7 +67,7 @@ router.get('/:mediaId', async (ctx) => {
   } else {
     if (type === 'cdg') {
       file = getCdgName(file)
-      if (!file) ctx.throw(404, 'The .cdg file could not be found')
+      if (!file) ctx.throw(404, 'No se encontró el archivo .cdg')
     }
 
     const stats = await fsPromises.stat(file)
@@ -75,7 +75,7 @@ router.get('/:mediaId', async (ctx) => {
     ctx.type = fileTypes[getExt(file)]?.mimeType
   }
 
-  if (!ctx.type) ctx.throw(404, `Unknown MIME type: ${file}`)
+  if (!ctx.type) ctx.throw(404, `No se reconoce el tipo de archivo multimedia: ${file}`)
 
   log.verbose('streaming %s (%sMB): %s', ctx.type, (ctx.length / 1000000).toFixed(2), file)
   ctx.body = buffer ? Readable.from(buffer) : fs.createReadStream(file)

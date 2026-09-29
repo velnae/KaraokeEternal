@@ -24,7 +24,7 @@ const handle = (node: React.ReactElement<HandleProps>, { value }: { value: numbe
 
   // rc-slider passes a node (div) to which we add style and children
   return React.cloneElement(node, {
-    'aria-label': 'Volume',
+    'aria-label': 'Volumen',
     'className': styles.handle,
   }, (
     <Icon icon={icon} />

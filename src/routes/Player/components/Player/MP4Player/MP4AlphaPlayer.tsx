@@ -151,7 +151,7 @@ class MP4AlphaPlayer extends React.Component<MP4AlphaPlayerProps> {
   updateIsPlaying = () => {
     if (this.props.isPlaying) {
       this.video.play()
-        .catch(err => this.props.onError(err.message))
+        .catch(err => this.props.onError(`No se pudo iniciar el video: ${err.message}`))
     } else {
       this.video.pause()
       this.stopChroma()
@@ -180,7 +180,7 @@ class MP4AlphaPlayer extends React.Component<MP4AlphaPlayerProps> {
 
   handleError = () => {
     const { message, code } = this.video.error
-    this.props.onError(`${message} (code ${code})`)
+    this.props.onError(`Error de video: ${message} (código ${code})`)
   }
 
   handlePlay = () => {

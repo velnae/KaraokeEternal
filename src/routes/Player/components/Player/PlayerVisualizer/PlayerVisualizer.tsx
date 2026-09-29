@@ -29,7 +29,7 @@ class PlayerVisualizer extends React.Component<PlayerVisualizerProps> {
 
       this.visualizer.loadExtraImages(imageData)
     } catch (err) {
-      this.props.onError(err.message) // @todo pass error object instead of msg only
+      this.props.onError(`No se pudo iniciar el visualizador: ${err.message}`) // @todo pass error object instead of msg only
       return
     }
 

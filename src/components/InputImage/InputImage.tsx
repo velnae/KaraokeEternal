@@ -48,7 +48,7 @@ const InputImage = ({ user, onSelect }: UserImageProps) => {
       file,
       (canvas) => {
         if (canvas instanceof Event) {
-          alert('The image could not be loaded.')
+          alert('No se pudo cargar la imagen.')
           return
         }
 
@@ -88,7 +88,7 @@ const InputImage = ({ user, onSelect }: UserImageProps) => {
           height={72}
           onLoad={handleImgLoad}
           onError={handleImgError}
-          alt='User Profile'
+          alt='Foto de perfil del usuario'
         />
       )}
 
@@ -96,6 +96,7 @@ const InputImage = ({ user, onSelect }: UserImageProps) => {
         <Button
           className={styles.btnClear}
           icon='CLEAR'
+          aria-label='Quitar foto de perfil'
           onClick={handleImgClear}
           size={32}
         />
@@ -103,6 +104,7 @@ const InputImage = ({ user, onSelect }: UserImageProps) => {
 
       <input
         type='file'
+        aria-label='Seleccionar foto de perfil'
         accept='image/*'
         onChange={handleChoose}
         className={styles.fileInput}

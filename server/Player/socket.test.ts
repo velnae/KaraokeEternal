@@ -74,7 +74,7 @@ describe('player queue lifecycle', () => {
 
     expect(acknowledge).toHaveBeenCalledWith({
       type: PLAYER_EMIT_STATUS + '_ERROR',
-      error: 'Only administrators can control playback',
+      error: 'Solo los administradores pueden controlar la reproducción',
     })
     expect(socket._lastPlayerStatus).toBeNull()
   })
@@ -114,7 +114,7 @@ describe('player queue lifecycle', () => {
 
     expect(acknowledge).toHaveBeenCalledWith({
       type: PLAYER_AUTHORITY_DENIED,
-      payload: { message: 'Another player is already active in this room.' },
+      payload: { message: 'Ya hay otro reproductor activo en esta sala.' },
     })
     expect(sync).not.toHaveBeenCalled()
     expect(second._isPlayerAuthoritative).toBe(false)
@@ -136,7 +136,7 @@ describe('player queue lifecycle', () => {
     expect(emit).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: actionType + '_ERROR',
-      error: 'Only administrators can control playback',
+      error: 'Solo los administradores pueden controlar la reproducción',
     })
   })
 
@@ -266,7 +266,7 @@ describe('player queue lifecycle', () => {
     expect(transition).not.toHaveBeenCalled()
     expect(failureInfo).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
-      type: PLAYER_EMIT_FAILURE + '_ERROR', error: 'Invalid failed queue item',
+      type: PLAYER_EMIT_FAILURE + '_ERROR', error: 'La canción de la cola con error no es válida',
     })
   })
 
@@ -282,7 +282,7 @@ describe('player queue lifecycle', () => {
 
     expect(acknowledge).toHaveBeenCalledWith({
       type: PLAYER_EMIT_FAILURE + '_ERROR',
-      error: 'Only administrators can control playback',
+      error: 'Solo los administradores pueden controlar la reproducción',
     })
     expect(failureInfo).not.toHaveBeenCalled()
   })
@@ -299,7 +299,7 @@ describe('player queue lifecycle', () => {
 
     expect(acknowledge).toHaveBeenCalledWith({
       type: PLAYER_AUTHORITY_DENIED,
-      payload: { message: 'Another player is already active in this room.' },
+      payload: { message: 'Ya hay otro reproductor activo en esta sala.' },
     })
     expect(failureInfo).not.toHaveBeenCalled()
   })

@@ -141,7 +141,10 @@ describe('YouTube player transitions', () => {
   it.each([100, 153])('passes iframe code %s separately from the display message', (code) => {
     const { player, iframe } = setup()
     player.handleError({ data: code, target: iframe })
-    expect(player.props.onError).toHaveBeenCalledWith(expect.any(String), { category: 'iframe', code })
+    expect(player.props.onError).toHaveBeenCalledWith(
+      code === 100 ? 'El video de YouTube no está disponible o fue eliminado (código 100)' : 'No se pudo reproducir el video de YouTube (código 153)',
+      { category: 'iframe', code },
+    )
   })
 
   it('reports API loader failures as a fixed category without forwarding exception text', async () => {
@@ -155,7 +158,7 @@ describe('YouTube player transitions', () => {
 
     player.componentDidMount()
     await vi.waitFor(() => expect(player.props.onError).toHaveBeenCalledWith(
-      expect.any(String), { category: 'api-load' },
+      'No se pudo cargar el reproductor de YouTube', { category: 'api-load' },
     ))
     player.componentWillUnmount()
   })

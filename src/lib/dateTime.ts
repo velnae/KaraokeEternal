@@ -1,21 +1,6 @@
-// formats a javascript Date object into a 12h AM/PM time string
-// based on https://gist.github.com/hjst/1326755
+// Formats a local time using an unambiguous 24-hour clock.
 export function formatTime (dateObj: Date) {
-  let hour: number | string = dateObj.getHours()
-  let minute: number | string = dateObj.getMinutes()
-  const ap = (hour > 11) ? 'p' : 'a'
-
-  if (hour > 12) {
-    hour -= 12
-  } else if (hour === 0) {
-    hour = '12'
-  }
-
-  if (minute < 10) {
-    minute = '0' + minute
-  }
-
-  return hour + ':' + minute + ap
+  return `${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`
 }
 
 export function formatDate (dateObj: Date) {

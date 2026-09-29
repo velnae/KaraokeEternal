@@ -14,9 +14,9 @@ const UpNext = (props: UpNextProps) => {
     return (
       <div className={clsx(styles.container, styles.upNow)}>
         <p className={styles.msg}>
-          You&rsquo;re up
+          Es su turno
           {' '}
-          <strong>now</strong>
+          <strong>ahora</strong>
         </p>
       </div>
     )
@@ -26,10 +26,10 @@ const UpNext = (props: UpNextProps) => {
     return (
       <div className={clsx(styles.container, styles.upNext)}>
         <p className={styles.msg}>
-          You&rsquo;re up
+          Su turno es el
           {' '}
-          <strong>next</strong>
-          {props.wait ? ` in ${formatSeconds(props.wait, true)}` : ''}
+          <strong>siguiente</strong>
+          {props.wait ? ` en ${formatSeconds(props.wait, true)}` : ''}
         </p>
       </div>
     )
@@ -39,7 +39,7 @@ const UpNext = (props: UpNextProps) => {
     return (
       <div className={clsx(styles.container, styles.inQueue)}>
         <p className={styles.msg}>
-          You&rsquo;re up in
+          Su turno es en
           {' '}
           {formatSeconds(props.wait, true)}
         </p>

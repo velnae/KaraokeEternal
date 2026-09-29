@@ -75,7 +75,7 @@ function onDone () {
     payload: {
       isScanning: false,
       pct: 100,
-      text: `Scan finished (${totals.new} new, ${totals.removed} removed)`,
+      text: `Análisis terminado (${totals.new} ${totals.new === 1 ? 'archivo nuevo' : 'archivos nuevos'}, ${totals.removed} ${totals.removed === 1 ? 'archivo eliminado' : 'archivos eliminados'})`,
     },
   })
 

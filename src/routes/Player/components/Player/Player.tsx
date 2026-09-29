@@ -159,7 +159,7 @@ class Player extends React.Component<PlayerProps> {
     else if (playerKind === 'mp4-alpha') PlayerComponent = MP4AlphaPlayer
 
     if (typeof PlayerComponent === 'undefined') {
-      this.props.onError(`No player for mediaType: ${this.props.mediaType}`)
+      this.props.onError(`No hay reproductor para el tipo de archivo multimedia: ${this.props.mediaType}`)
       return null
     }
 

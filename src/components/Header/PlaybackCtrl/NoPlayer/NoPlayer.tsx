@@ -5,8 +5,8 @@ import styles from './NoPlayer.css'
 const NoPlayer = () => (
   <div className={styles.container}>
     <p className={styles.msg}>
-      No player in room (
-      <Link to='/player' target='_blank' replace>Launch Player</Link>
+      No hay un reproductor en la sala (
+      <Link to='/player' target='_blank' replace>Iniciar reproductor</Link>
       )
     </p>
   </div>

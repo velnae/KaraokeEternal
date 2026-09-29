@@ -34,7 +34,7 @@ export const fetchCurrentRoom = createAsyncThunk<object, void, { state: RootStat
     const roomId = thunkAPI.getState().user.roomId
 
     if (typeof roomId !== 'number') {
-      return Promise.reject('Please sign into a room')
+      return Promise.reject('Inicie sesión en una sala')
     }
 
     return await api.get(`/${roomId}`)

@@ -44,9 +44,9 @@ const CoreLayout = () => {
 
       {ui.isErrored && (
         <Modal
-          title='Oops...'
+          title='Ocurrió un error'
           onClose={closeError}
-          buttons={<Button variant='primary' onClick={closeError}>OK</Button>}
+          buttons={<Button variant='primary' onClick={closeError}>Aceptar</Button>}
         >
           <p style={{ WebkitUserSelect: 'text', userSelect: 'text' }}>
             {ui.errorMessage}

@@ -118,7 +118,7 @@ export default function (io, jwtKey) {
 
         return acknowledge({
           type: type + _ERROR,
-          error: `Error in ${type}: ${err.message}`,
+          error: `No se pudo completar la acción ${type}: ${err.message}`,
         })
       }
     })

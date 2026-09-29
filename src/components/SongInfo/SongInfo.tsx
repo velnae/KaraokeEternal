@@ -22,26 +22,26 @@ const SongInfo = () => {
       <div key={item.mediaId} className={styles.media}>
         {item.path + (item.path.indexOf('/') === 0 ? '/' : '\\') + item.relPath}
         <br />
-        <span className={styles.label}>Duration: </span>
+        <span className={styles.label}>Duración: </span>
         {formatDuration(item.duration)}
         <br />
-        <span className={styles.label}>Media ID: </span>
+        <span className={styles.label}>ID del archivo multimedia: </span>
         {mediaId}
         <br />
-        <span className={styles.label}>Preferred: </span>
+        <span className={styles.label}>Preferido: </span>
         {isPreferred
           && (
             <span>
-              <strong>Yes</strong>
+              <strong>Sí</strong>
 &nbsp;
-              <a onClick={() => handleRemovePrefer(mediaId)}>(Unset)</a>
+              <a onClick={() => handleRemovePrefer(mediaId)}>(Quitar preferencia)</a>
             </span>
           )}
         {!isPreferred
           && (
             <span>
               No&nbsp;
-              <a onClick={() => handlePrefer(mediaId)}>(Set)</a>
+              <a onClick={() => handlePrefer(mediaId)}>(Marcar como preferido)</a>
             </span>
           )}
       </div>
@@ -52,7 +52,7 @@ const SongInfo = () => {
     <Modal
       visible={isVisible}
       onClose={handleCloseSongInfo}
-      title='Song Info'
+      title='Información de la canción'
       // style={{
       //   width: '90%',
       //   height: '90%',
@@ -60,20 +60,20 @@ const SongInfo = () => {
     >
       <div className={styles.container}>
         <p>
-          <span className={styles.label}>Song ID: </span>
+          <span className={styles.label}>ID de la canción: </span>
           {songId}
           <br />
-          <span className={styles.label}>Media Files: </span>
+          <span className={styles.label}>Archivos multimedia: </span>
           {isLoading ? '?' : media.result.length}
         </p>
 
         <div className={styles.mediaContainer}>
-          {isLoading ? <p>Loading...</p> : mediaDetails}
+          {isLoading ? <p>Cargando...</p> : mediaDetails}
         </div>
 
         <div>
           <Button variant='primary' onClick={handleCloseSongInfo}>
-            Done
+            Listo
           </Button>
         </div>
       </div>

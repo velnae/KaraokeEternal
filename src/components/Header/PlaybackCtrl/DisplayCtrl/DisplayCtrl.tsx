@@ -69,15 +69,15 @@ const DisplayCtrl = ({
     <Modal
       className={styles.modal}
       onClose={onClose}
-      title='Display'
-      buttons={<Button variant='primary' onClick={onClose}>Done</Button>}
+      title='Pantalla'
+      buttons={<Button variant='primary' onClick={onClose}>Listo</Button>}
     >
       <div className={styles.container}>
         <div className={clsx(styles.section, styles.visualizer)}>
           <fieldset>
             <legend>
               <InputCheckbox
-                label='Visualizer'
+                label='Visualizador'
                 checked={isVisualizerEnabled}
                 disabled={!isWebGLSupported}
                 onChange={handleToggleVisualizer}
@@ -90,21 +90,21 @@ const DisplayCtrl = ({
                   <div className={styles.presetButtons}>
                     <Button
                       onClick={handlePresetPrev}
-                      aria-label='Previous preset'
+                      aria-label='Ajuste anterior'
                       aria-controls='visualizer-preset-name'
                     >
                       <Icon icon='CHEVRON_LEFT' />
                     </Button>
                     <Button
                       onClick={handlePresetRandom}
-                      aria-label='Random preset'
+                      aria-label='Ajuste aleatorio'
                       aria-controls='visualizer-preset-name'
                     >
                       <Icon icon='DICE' />
                     </Button>
                     <Button
                       onClick={handlePresetNext}
-                      aria-label='Next preset'
+                      aria-label='Ajuste siguiente'
                       aria-controls='visualizer-preset-name'
                     >
                       <Icon icon='CHEVRON_RIGHT' />
@@ -121,7 +121,7 @@ const DisplayCtrl = ({
                 </div>
 
                 <div className={styles.field}>
-                  <label id='label-visualizer-sensitivity'>Sensitivity</label>
+                  <label id='label-visualizer-sensitivity'>Sensibilidad</label>
                   <Slider
                     min={0}
                     max={2}
@@ -136,22 +136,22 @@ const DisplayCtrl = ({
             )}
 
             {isWebGLSupported && mediaType !== 'cdg' && !isVideoKeyingEnabled
-              && <p className={styles.unsupported}>Not available for this media type</p>}
+              && <p className={styles.unsupported}>No disponible para este tipo de archivo multimedia</p>}
 
             {!isWebGLSupported
-              && <p className={styles.unsupported}>WebGL not supported</p>}
+              && <p className={styles.unsupported}>WebGL no es compatible</p>}
           </fieldset>
         </div>
 
         <div className={clsx(styles.section, styles.lyrics)}>
           <fieldset>
             <legend>
-              <label>Lyrics</label>
+              <label>Letra</label>
             </legend>
 
             {mediaType === 'cdg' && (
               <div className={styles.field}>
-                <label id='label-lyrics-size'>Size</label>
+                <label id='label-lyrics-size'>Tamaño</label>
                 <Slider
                   min={0.4}
                   max={0.9}
@@ -166,7 +166,7 @@ const DisplayCtrl = ({
 
             {(mediaType === 'cdg' || isVideoKeyingEnabled) && (
               <div className={styles.field}>
-                <label id='label-lyrics-background'>Background</label>
+                <label id='label-lyrics-background'>Fondo</label>
                 <Slider
                   min={0}
                   max={1}
@@ -180,7 +180,7 @@ const DisplayCtrl = ({
             )}
 
             {mediaType !== 'cdg' && !isVideoKeyingEnabled && (
-              <p className={styles.unsupported}>No options available</p>
+              <p className={styles.unsupported}>No hay opciones disponibles</p>
             )}
           </fieldset>
         </div>

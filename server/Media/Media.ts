@@ -161,7 +161,7 @@ class Media {
     const res = Media.search({ mediaId })
 
     if (!res.result.length) {
-      throw new Error(`mediaId not found: ${mediaId}`)
+      throw new Error(`No se encontró el archivo multimedia ${mediaId}`)
     }
 
     const songId = res.entities[mediaId].songId

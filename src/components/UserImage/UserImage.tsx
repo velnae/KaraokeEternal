@@ -29,6 +29,7 @@ const UserImageContent = ({ dateUpdated, userId }: { dateUpdated: number, userId
       {!isErrored && (
         <img
           src={`${document.baseURI}api/user/${userId}/image?v=${dateUpdated}`}
+          alt='Foto de perfil'
           onLoad={handleLoaded}
           onError={handleError}
           style={{

@@ -40,7 +40,7 @@ const adminOnly = (sock, actionType, acknowledge): boolean => {
 
   acknowledge?.({
     type: actionType + '_ERROR',
-    error: 'Only administrators can control playback',
+    error: 'Solo los administradores pueden controlar la reproducción',
   })
   return false
 }
@@ -51,7 +51,7 @@ const authoritativeOnly = (sock, actionType, acknowledge): boolean => {
 
   acknowledge?.({
     type: PLAYER_AUTHORITY_DENIED,
-    payload: { message: 'Another player is already active in this room.' },
+    payload: { message: 'Ya hay otro reproductor activo en esta sala.' },
   })
   return false
 }
@@ -94,7 +94,7 @@ const ACTION_HANDLERS = {
     if (!Number.isInteger(queueId) || queueId < 0) {
       return acknowledge?.({
         type: PLAYER_EMIT_FAILURE + '_ERROR',
-        error: 'Invalid failed queue item',
+        error: 'La canción de la cola con error no es válida',
       })
     }
 
@@ -163,7 +163,7 @@ const ACTION_HANDLERS = {
     if (!Rooms.claimPlayer(sock.server, sock, sock.user.roomId)) {
       return acknowledge?.({
         type: PLAYER_AUTHORITY_DENIED,
-        payload: { message: 'Another player is already active in this room.' },
+        payload: { message: 'Ya hay otro reproductor activo en esta sala.' },
       })
     }
 

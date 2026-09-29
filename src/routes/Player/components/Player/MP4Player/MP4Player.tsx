@@ -72,7 +72,7 @@ class MP4Player extends React.Component<MP4PlayerProps> {
 
     if (this.props.isPlaying) {
       this.video.current.play()
-        .catch(err => this.props.onError(err.message))
+        .catch(err => this.props.onError(`No se pudo iniciar el video: ${err.message}`))
     } else {
       this.video.current.pause()
     }
@@ -83,7 +83,7 @@ class MP4Player extends React.Component<MP4PlayerProps> {
   */
   handleError = () => {
     const { message, code } = this.video.current.error
-    this.props.onError(`${message} (code ${code})`)
+    this.props.onError(`Error de video: ${message} (código ${code})`)
   }
 
   handlePlay = () => this.props.onPlay()

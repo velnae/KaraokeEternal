@@ -58,7 +58,7 @@ const loadYouTubeIframeApi = (): Promise<YouTubeApi> => {
     window.onYouTubeIframeAPIReady = () => {
       previousReady?.()
       if (window.YT?.Player) resolve(window.YT)
-      else reject(new Error('YouTube IFrame Player API did not initialize'))
+      else reject(new Error('No se pudo iniciar el reproductor de YouTube'))
     }
 
     const existing = document.querySelector<HTMLScriptElement>(`script[src="${IFRAME_API_URL}"]`)
@@ -69,7 +69,7 @@ const loadYouTubeIframeApi = (): Promise<YouTubeApi> => {
     script.async = true
     script.onerror = () => {
       apiPromise = null
-      reject(new Error('Could not load the YouTube IFrame Player API'))
+      reject(new Error('No se pudo cargar el reproductor de YouTube'))
     }
     document.head.appendChild(script)
   })
@@ -186,14 +186,14 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
 
   handleError = (event: YouTubePlayerEvent) => {
     const messages: Record<number, string> = {
-      2: 'Invalid YouTube video ID',
-      5: 'YouTube HTML5 playback failed',
-      100: 'YouTube video is unavailable or has been removed',
-      101: 'YouTube video owner does not allow embedded playback',
-      150: 'YouTube video owner does not allow embedded playback',
+      2: 'El identificador del video de YouTube no es válido',
+      5: 'No se pudo reproducir el video de YouTube en HTML5',
+      100: 'El video de YouTube no está disponible o fue eliminado',
+      101: 'El propietario del video no permite reproducirlo aquí',
+      150: 'El propietario del video no permite reproducirlo aquí',
     }
     this.stopStatusUpdates()
-    this.props.onError(`${messages[event.data] ?? 'YouTube playback failed'} (code ${event.data})`, {
+    this.props.onError(`${messages[event.data] ?? 'No se pudo reproducir el video de YouTube'} (código ${event.data})`, {
       category: 'iframe',
       code: event.data,
     })

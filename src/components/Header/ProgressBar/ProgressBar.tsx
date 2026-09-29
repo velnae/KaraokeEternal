@@ -39,10 +39,11 @@ export default class ProgressBar extends React.Component<ProgressBarProps> {
 
     return (
       <div className={styles.container} style={{ backgroundSize: props.pct + '% 100%' }}>
-        <p className={styles.text}>{state.isCanceling ? 'Stopping...' : props.text}</p>
+        <p className={styles.text}>{state.isCanceling ? 'Deteniendo análisis...' : props.text}</p>
         <Button
           className={props.isActive ? styles.cancel : styles.close}
           icon='CLEAR'
+          aria-label={props.isActive ? 'Detener análisis' : 'Cerrar progreso del análisis'}
           onClick={this.handleCancelClick}
           size={40}
         />

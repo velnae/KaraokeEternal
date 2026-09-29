@@ -150,7 +150,7 @@ class CDGPlayer extends React.Component<CDGPlayerProps> {
 
     if (this.props.isPlaying) {
       this.audio.current.play()
-        .catch(err => this.props.onError(err.message))
+        .catch(err => this.props.onError(`No se pudo iniciar el audio: ${err.message}`))
     } else {
       this.audio.current.pause()
       this.stopCDG()
@@ -167,7 +167,7 @@ class CDGPlayer extends React.Component<CDGPlayerProps> {
 
   handleError = (el: React.SyntheticEvent<HTMLAudioElement>) => {
     const { message, code } = el.currentTarget.error
-    this.props.onError(`${message} (code ${code})`)
+    this.props.onError(`Error de audio: ${message} (código ${code})`)
   }
 
   handlePlay = () => {
@@ -219,7 +219,7 @@ class CDGPlayer extends React.Component<CDGPlayerProps> {
         this.paintCDG(bitmap)
         return
       })
-      .catch(err => this.props.onError(err.message))
+      .catch(err => this.props.onError(`No se pudieron mostrar las letras: ${err.message}`))
   }
 
   stopCDG = () => cancelAnimationFrame(this.frameId)

@@ -118,7 +118,7 @@ const QueueItem = ({
   const handleRejectClick = () => dispatch(rejectRequest({ queueId }))
 
   const statusLabel: Record<QueueItemStatus, string> = {
-    PENDING_APPROVAL: 'Pendiente de aprobación',
+    PENDING_APPROVAL: 'Por aprobar',
     APPROVED: 'Aprobada',
     PLAYING: 'En reproducción',
     PLAYED: 'Reproducida',

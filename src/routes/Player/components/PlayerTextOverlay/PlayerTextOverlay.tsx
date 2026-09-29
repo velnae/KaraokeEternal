@@ -33,7 +33,7 @@ const PlayerTextOverlay = ({
   let Component
 
   if (isQueueEmpty || (isAtQueueEnd && !nextQueueItem)) {
-    Component = <ColorCycle text='CAN HAZ MOAR SONGZ?' className={styles.backdrop} />
+    Component = <ColorCycle text='AGREGUE MÁS CANCIONES' className={styles.backdrop} />
   } else if (!queueItem || (isAtQueueEnd && nextQueueItem)) {
     Component = (
       <>
@@ -45,7 +45,7 @@ const PlayerTextOverlay = ({
             </linearGradient>
           </defs>
         </svg>
-        <button className={styles.playButton} onClick={handlePlay} aria-label='Play'>
+        <button className={styles.playButton} onClick={handlePlay} aria-label='Reproducir'>
           <Icon icon='PLAY' />
         </button>
       </>
@@ -53,8 +53,8 @@ const PlayerTextOverlay = ({
   } else if (isErrored) {
     Component = (
       <>
-        <ColorCycle text='OOPS...' offset={errorOffset} className={styles.backdrop} />
-        <ColorCycle text='SEE QUEUE FOR DETAILS' offset={errorOffset} className={styles.backdrop} />
+        <ColorCycle text='OCURRIÓ UN ERROR' offset={errorOffset} className={styles.backdrop} />
+        <ColorCycle text='VEA LA COLA PARA MÁS DETALLES' offset={errorOffset} className={styles.backdrop} />
       </>
     )
   } else {

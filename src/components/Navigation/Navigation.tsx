@@ -6,7 +6,7 @@ import styles from './Navigation.css'
 
 const Navigation = React.forwardRef<HTMLDivElement>((_, ref) => (
   <div className={clsx(styles.container, 'bg-blur')} ref={ref}>
-    <NavLink to='/library' replace className={({ isActive }) => clsx(isActive && styles.active)}>
+    <NavLink to='/library' replace aria-label='Biblioteca' title='Biblioteca' className={({ isActive }) => clsx(isActive && styles.active)}>
       {({ isActive }) => (
         <Button
           icon='NAV_LIBRARY'
@@ -16,7 +16,7 @@ const Navigation = React.forwardRef<HTMLDivElement>((_, ref) => (
         />
       )}
     </NavLink>
-    <NavLink to='/queue' replace className={({ isActive }) => clsx(isActive && styles.active)}>
+    <NavLink to='/queue' replace aria-label='Cola de reproducción' title='Cola de reproducción' className={({ isActive }) => clsx(isActive && styles.active)}>
       {({ isActive }) => (
         <Button
           icon='NAV_SUBSCRIPTIONS'
@@ -26,7 +26,7 @@ const Navigation = React.forwardRef<HTMLDivElement>((_, ref) => (
         />
       )}
     </NavLink>
-    <NavLink to='/account' replace className={({ isActive }) => clsx(isActive && styles.active)}>
+    <NavLink to='/account' replace aria-label='Cuenta' title='Cuenta' className={({ isActive }) => clsx(isActive && styles.active)}>
       {({ isActive }) => (
         <Button
           icon={isActive ? 'NAV_ACCOUNT_ACTIVE' : 'NAV_ACCOUNT'}
