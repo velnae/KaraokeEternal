@@ -3,6 +3,8 @@ dockerfiles/
 docs/public/
 docs/resources/
 node_modules/
+/.atl/
+/.codegraph/
 
 .DS_Store
 *.log
