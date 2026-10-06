@@ -5,6 +5,7 @@ docs/resources/
 node_modules/
 /.atl/
 /.codegraph/
+/.playwright-mcp/
 .env
 .env.*
 !.env.example
