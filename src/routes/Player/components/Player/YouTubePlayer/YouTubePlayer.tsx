@@ -97,20 +97,28 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
   player: YouTubePlayerInstance | null = null
   statusTimer: ReturnType<typeof setInterval> | null = null
   isMounted = false
+  isReady = false
+  mountGeneration = 0
   awaitingPlayback = false
 
   componentDidMount () {
     this.isMounted = true
+    const generation = ++this.mountGeneration
     this.props.onLoad()
     loadYouTubeIframeApi()
-      .then(this.createPlayer)
+      .then((api): void => {
+        if (this.isMounted && generation === this.mountGeneration) this.createPlayer(api)
+        return undefined
+      })
       .catch((error) => {
-        if (this.isMounted) this.props.onError(error.message, { category: 'api-load' })
+        if (this.isMounted && generation === this.mountGeneration) {
+          this.props.onError(error.message, { category: 'api-load' })
+        }
       })
   }
 
   componentDidUpdate (prevProps: YouTubePlayerProps) {
-    if (!this.player) return
+    if (!this.player || !this.isReady) return
 
     if (prevProps.mediaKey !== this.props.mediaKey || prevProps.videoId !== this.props.videoId) {
       this.props.onLoad()
@@ -133,15 +141,22 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
 
   componentWillUnmount () {
     this.isMounted = false
+    this.isReady = false
+    ++this.mountGeneration
     this.stopStatusUpdates()
-    this.player?.destroy()
+    const player = this.player
     this.player = null
+    player?.destroy()
   }
 
   createPlayer = (api: YouTubeApi) => {
-    if (!this.isMounted || !this.container.current) return
+    if (!this.isMounted || !this.container.current || this.player) return
 
-    this.player = new api.Player(this.container.current, {
+    // YouTube replaces its target node; keep React's container intact for remounts.
+    const target = document.createElement('div')
+    this.container.current.replaceChildren(target)
+    this.isReady = false
+    this.player = new api.Player(target, {
       width: this.props.width,
       height: this.props.height,
       videoId: this.props.videoId,
@@ -162,12 +177,19 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
     })
   }
 
-  handleReady = () => {
+  handleReady = (event: Pick<YouTubePlayerEvent, 'target'>) => {
+    if (!this.isMounted || event.target !== this.player || this.isReady) return
+    this.isReady = true
+    this.awaitingPlayback = this.props.isPlaying
+    this.player.setSize(this.props.width, this.props.height)
     this.updateVolume()
-    this.updateIsPlaying()
+    // Props may have changed while the iframe was initializing.
+    if (this.props.isPlaying) this.player.loadVideoById(this.props.videoId)
+    else this.player.cueVideoById(this.props.videoId)
   }
 
   handleStateChange = (event: YouTubePlayerEvent) => {
+    if (!this.isMounted || !this.isReady || event.target !== this.player) return
     if (event.data === window.YT?.PlayerState.PLAYING) {
       this.awaitingPlayback = false
       this.props.onPlay()
@@ -185,6 +207,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
   }
 
   handleError = (event: YouTubePlayerEvent) => {
+    if (!this.isMounted || event.target !== this.player) return
     const messages: Record<number, string> = {
       2: 'El identificador del video de YouTube no es válido',
       5: 'No se pudo reproducir el video de YouTube en HTML5',
@@ -200,12 +223,15 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
   }
 
   updateIsPlaying = () => {
-    if (!this.player) return
+    if (!this.player || !this.isReady) return
     if (this.props.isPlaying) this.player.playVideo()
     else this.player.pauseVideo()
   }
 
-  updateVolume = () => this.player?.setVolume(Math.round(Math.min(Math.max(this.props.volume, 0), 1) * 100))
+  updateVolume = () => {
+    if (!this.isReady) return
+    this.player?.setVolume(Math.round(Math.min(Math.max(this.props.volume, 0), 1) * 100))
+  }
 
   startStatusUpdates = () => {
     this.stopStatusUpdates()

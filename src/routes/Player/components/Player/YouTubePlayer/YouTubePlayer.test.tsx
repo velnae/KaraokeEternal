@@ -69,6 +69,8 @@ describe('YouTube player transitions', () => {
     })
     const player = new YouTubePlayer(makeProps())
     player.player = iframe as unknown as NonNullable<typeof player.player>
+    player.isMounted = true
+    player.isReady = true
 
     const update = (changes: Partial<Props>) => {
       const previous = player.props
@@ -95,6 +97,56 @@ describe('YouTube player transitions', () => {
     event(PLAYING)
     expect(player.props.isPlaying).toBe(true)
     player.componentWillUnmount()
+  })
+
+  it('creates only one iframe when StrictMode remounts before API loading resolves', async () => {
+    const { player, iframe } = setup()
+    const elements: HTMLElement[] = []
+    const Player = vi.fn(function (element: HTMLElement) {
+      elements.push(element)
+      return iframe
+    })
+    vi.stubGlobal('window', {
+      location: { origin: 'http://localhost:3000' },
+      YT: { Player, PlayerState: { PLAYING, PAUSED, ENDED } },
+    })
+    const host = { replaceChildren: vi.fn() }
+    vi.stubGlobal('document', { createElement: () => ({}) })
+    Object.defineProperty(player.container, 'current', { value: host })
+    player.player = null
+
+    player.componentDidMount()
+    player.componentWillUnmount()
+    player.componentDidMount()
+    await Promise.resolve()
+
+    expect(Player).toHaveBeenCalledTimes(1)
+    expect(elements[0]).not.toBe(host)
+    expect(host.replaceChildren).toHaveBeenCalledWith(elements[0])
+    player.componentWillUnmount()
+  })
+
+  it('waits for the current iframe readiness and applies props changed while loading', () => {
+    const { player, iframe, update } = setup()
+    player.isReady = false
+    const staleIframe = { ...iframe }
+
+    update({ volume: 0.4, videoId: 'second', mediaKey: 2, width: 640 })
+    expect(iframe.setVolume).not.toHaveBeenCalled()
+    expect(iframe.loadVideoById).not.toHaveBeenCalled()
+    expect(iframe.setSize).not.toHaveBeenCalled()
+
+    player.handleReady({ target: staleIframe })
+    expect(iframe.setVolume).not.toHaveBeenCalled()
+    player.handleReady({ target: iframe })
+    expect(iframe.setVolume).toHaveBeenCalledWith(40)
+    expect(iframe.loadVideoById).toHaveBeenCalledWith('second')
+    expect(iframe.setSize).toHaveBeenCalledWith(640, 720)
+
+    player.componentWillUnmount()
+    iframe.setVolume.mockClear()
+    player.handleReady({ target: iframe })
+    expect(iframe.setVolume).not.toHaveBeenCalled()
   })
 
   it('still honors explicit Pause/Play and iframe pause after the new video starts', () => {
