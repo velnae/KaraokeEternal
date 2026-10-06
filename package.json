@@ -22,7 +22,7 @@
   },
   "scripts": {
     "docs:serve": "hugo serve --source docs -b http://localhost:1313 --bind 0.0.0.0",
-    "dev": "NODE_ENV=development tsx watch server/main.ts -p 3000",
+    "dev": "NODE_ENV=development tsx watch --env-file-if-exists=.env server/main.ts -p 3000",
     "lint": "eslint .",
     "lint:fix": "npm run lint -- --fix",
     "test": "vitest run --config config/vitest.config.ts",
@@ -30,7 +30,7 @@
     "build": "npm run build:server ; npm run build:client",
     "build:client": "webpack --config config/webpack.config.js",
     "build:server": "rm -rf build/server ; tsc -p config/tsconfig.server.json --noEmitOnError false ; mkdir -p build/server/lib ; cp -R server/lib/schemas build/server/lib/",
-    "serve": "node build/server/main.js",
+    "serve": "node --env-file-if-exists=.env build/server/main.js",
     "server": "npm run serve"
   },
   "files": [

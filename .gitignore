@@ -5,6 +5,9 @@ docs/resources/
 node_modules/
 /.atl/
 /.codegraph/
+.env
+.env.*
+!.env.example
 
 .DS_Store
 *.log
