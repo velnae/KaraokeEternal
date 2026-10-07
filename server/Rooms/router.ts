@@ -4,6 +4,7 @@ import { db } from '../lib/Database.js'
 import getLogger from '../lib/Log.js'
 import Rooms, { STATUSES } from '../Rooms/Rooms.js'
 import { ValidationError } from '../lib/Errors.js'
+import { participantPrefs } from './participantPrefs.js'
 
 interface RequestWithBody {
   body: Record<string, unknown>
@@ -17,7 +18,7 @@ import { ROOM_PREFS_PUSH } from '../../shared/actionTypes.js'
 // list rooms
 router.get(['/', '/:roomId'], (ctx) => {
   const roomId = ctx.params.roomId ? parseInt(ctx.params.roomId, 10) : undefined
-  const status = ctx.user.isAdmin ? STATUSES : undefined
+  const status = ctx.user.isAdmin || (typeof roomId === 'number' && roomId === ctx.user.roomId) ? STATUSES : undefined
   const res = Rooms.get(roomId, { status })
 
   res.result.forEach((roomId) => {
@@ -25,8 +26,7 @@ router.get(['/', '/:roomId'], (ctx) => {
       const room = ctx.io.sockets.adapter.rooms.get(Rooms.prefix(roomId))
       res.entities[roomId].numUsers = room ? room.size : 0
     } else {
-      // only pass the 'roles' prefs key
-      res.entities[roomId].prefs = res.entities[roomId].prefs?.roles ? { roles: res.entities[roomId].prefs.roles } : {}
+      res.entities[roomId].prefs = participantPrefs(res.entities[roomId].prefs)
     }
   })
 
@@ -71,13 +71,14 @@ router.put('/:roomId', async (ctx) => {
   const sockets = await ctx.io.in(Rooms.prefix(roomId)).fetchSockets()
 
   for (const s of sockets) {
-    if (s?.user.isAdmin) {
-      const room = Rooms.get(roomId).entities[roomId]
+    if (s?.user) {
+      const room = Rooms.get(roomId, { status: STATUSES }).entities[roomId]
       ctx.io.to(s.id).emit('action', {
         type: ROOM_PREFS_PUSH,
         payload: {
           roomId,
-          prefs: room.prefs,
+          prefs: s.user.isAdmin ? room.prefs : participantPrefs(room.prefs),
+          status: room.status,
         },
       })
     }

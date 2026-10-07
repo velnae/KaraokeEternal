@@ -22,12 +22,14 @@ class Queue {
     userId,
     origin = 'PARTICIPANT',
     status = 'APPROVED',
+    requestId,
   }: {
     roomId: number
     song: ResolvedSong
     userId: number
     origin?: QueueItemOrigin
     status?: 'PENDING_APPROVAL' | 'APPROVED'
+    requestId?: string
   }): void {
     const validationError = getResolvedSongValidationError(song)
     if (validationError) throw new Error(validationError)
@@ -59,6 +61,7 @@ class Queue {
     fields.set('thumbnailUrl', song.thumbnailUrl)
     fields.set('dateCreated', now)
     fields.set('dateUpdated', now)
+    fields.set('requestId', requestId ?? null)
 
     const query = sql`
       INSERT INTO queue ${sql.tuple(Array.from(fields.keys()).map(sql.column))}
@@ -69,6 +72,14 @@ class Queue {
     if (res.changes !== 1) {
       throw new Error('No se pudo agregar la canción a la cola de reproducción')
     }
+  }
+
+  static getRequest (roomId: number, userId: number, requestId: string) {
+    const query = sql`
+      SELECT queueId, status, source, externalId, songId, origin
+      FROM queue WHERE roomId = ${roomId} AND userId = ${userId} AND requestId = ${requestId}
+    `
+    return db.get<Pick<QueueItem, 'queueId' | 'status' | 'source' | 'externalId' | 'songId' | 'origin'>>(String(query), query.parameters)
   }
 
   /**

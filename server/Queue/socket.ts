@@ -27,6 +27,23 @@ const ACTION_HANDLERS = {
     const source: SongSource = payload.source ?? 'LOCAL'
     const sourceId = String(payload.sourceId ?? songId ?? '')
     const roomId = sock.user.roomId
+    const requestId = payload.requestId
+
+    if (requestId !== undefined && (typeof requestId !== 'string' || !/^[a-zA-Z0-9-]{16,64}$/.test(requestId))) {
+      return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'El identificador del pedido no es válido' })
+    }
+
+    const acknowledgeExisting = () => {
+      if (!requestId) return false
+      const receipt = Queue.getRequest(roomId, sock.user.userId, requestId)
+      if (!receipt) return false
+      const matches = receipt.source === source && receipt.origin === origin
+        && (source === 'YOUTUBE' ? receipt.externalId : String(receipt.songId)) === sourceId
+      acknowledge(matches
+        ? { type: QUEUE_ADD + '_SUCCESS', payload: { requestId, queueId: receipt.queueId, status: receipt.status, queue: Queue.get(roomId) } }
+        : { type: QUEUE_ADD + '_ERROR', error: 'El identificador ya pertenece a otro pedido' })
+      return true
+    }
 
     if (!QUEUE_ITEM_ORIGINS.includes(origin)) {
       return acknowledge({
@@ -49,6 +66,8 @@ const ACTION_HANDLERS = {
       })
     }
 
+    if (acknowledgeExisting()) return
+
     try {
       await Rooms.validate(roomId, null, { validatePassword: false })
     } catch (err) {
@@ -58,8 +77,8 @@ const ACTION_HANDLERS = {
       })
     }
 
-    const room = Rooms.get(roomId).entities[roomId]
-    const queuePrefs = normalizeQueuePrefs(room?.prefs?.queue)
+    let room = Rooms.get(roomId).entities[roomId]
+    let queuePrefs = normalizeQueuePrefs(room?.prefs?.queue)
     const maxPending = queuePrefs.maxPendingPerParticipant
 
     if (!sock.user.isAdmin) {
@@ -84,18 +103,29 @@ const ACTION_HANDLERS = {
       })
     }
 
+    // Resolution is asynchronous: another request may have filled the last slot.
+    // Receipt lookup, final validation and insert below run without an await.
+    if (acknowledgeExisting()) return
+    room = Rooms.get(roomId).entities[roomId]
+    if (!room) return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'La sala ya no está abierta' })
+    queuePrefs = normalizeQueuePrefs(room.prefs?.queue)
+    if (!sock.user.isAdmin && Queue.countPending(roomId, sock.user.userId) >= queuePrefs.maxPendingPerParticipant) {
+      return acknowledge({ type: QUEUE_ADD + '_ERROR', error: `Se alcanzó el máximo de solicitudes de canciones pendientes (${queuePrefs.maxPendingPerParticipant})` })
+    }
+
     Queue.add({
       roomId,
       song,
       userId: sock.user.userId,
       origin,
+      ...(requestId ? { requestId } : {}),
       status: origin === 'PARTICIPANT' && !sock.user.isAdmin && queuePrefs.approvalMode === 'MANUAL'
         ? 'PENDING_APPROVAL'
         : 'APPROVED',
     })
 
     // success
-    acknowledge({ type: QUEUE_ADD + '_SUCCESS' })
+    if (!acknowledgeExisting()) acknowledge({ type: QUEUE_ADD + '_SUCCESS' })
 
     // to all in room
     sock.server.to(Rooms.prefix(roomId)).emit('action', {
@@ -154,12 +184,19 @@ const ACTION_HANDLERS = {
       })
     }
 
+    if (payload.withReceipt) {
+      const queue = Queue.get(sock.user.roomId)
+      if (ids.some(id => queue.entities[id] && !['PENDING_APPROVAL', 'APPROVED'].includes(queue.entities[id].status))) {
+        return acknowledge({ type: QUEUE_REMOVE + '_ERROR', error: 'El pedido ya no se puede cancelar. Actualiza tus pedidos.' })
+      }
+    }
+
     for (const id of ids) {
       Queue.remove(id, sock.user.roomId)
     }
 
     // success
-    acknowledge({ type: QUEUE_REMOVE + '_SUCCESS' })
+    acknowledge({ type: QUEUE_REMOVE + '_SUCCESS', ...(payload.withReceipt ? { payload: Queue.get(sock.user.roomId) } : {}) })
 
     // tell room
     sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {

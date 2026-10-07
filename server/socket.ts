@@ -8,6 +8,7 @@ import Prefs from './Prefs/Prefs.js'
 import PrefsSocket from './Prefs/socket.js'
 import Rooms from './Rooms/Rooms.js'
 import RoomsSocket from './Rooms/socket.js'
+import { participantPrefs } from './Rooms/participantPrefs.js'
 import Queue from './Queue/Queue.js'
 import QueueSocket from './Queue/socket.js'
 import SongSourcesSocket from './SongSources/socket.js'
@@ -23,6 +24,7 @@ import {
   PREFS_PUSH,
   SOCKET_AUTH_ERROR,
   _ERROR,
+  ROOM_PREFS_PUSH,
 } from '../shared/actionTypes.js'
 const log = getLogger('server')
 
@@ -169,6 +171,12 @@ export default function (io, jwtKey) {
     sock.join(Rooms.prefix(sock.user.roomId))
     Rooms.trackUser(sock.user.roomId, sock.user.userId)
 
+    const room = Rooms.get(sock.user.roomId, { status: ['open', 'closed'] }).entities[sock.user.roomId]
+    if (room) io.to(sock.id).emit('action', {
+      type: ROOM_PREFS_PUSH,
+      payload: { roomId: room.roomId, name: room.name, status: room.status, prefs: sock.user.isAdmin ? room.prefs : participantPrefs(room.prefs) },
+    })
+
     // If there is an authoritative player, relay its last known status.
     const playerStatus = Rooms.getPlayerStatus(io, sock.user.roomId)
     if (playerStatus) {
@@ -176,6 +184,8 @@ export default function (io, jwtKey) {
         type: PLAYER_STATUS,
         payload: playerStatus,
       })
+    } else {
+      io.to(sock.id).emit('action', { type: PLAYER_LEAVE })
     }
 
     log.verbose('%s (%s) joined room %s (%s in room)',

@@ -193,7 +193,8 @@ describe('participant pending request limit', () => {
     vi.spyOn(Rooms, 'validate').mockResolvedValue(true)
     const getRoom = vi.spyOn(Rooms, 'get')
       .mockReturnValueOnce({ result: [1], entities: { 1: { prefs: { queue: { approvalMode: 'MANUAL' } } } } })
-      .mockReturnValueOnce({ result: [1], entities: { 1: { prefs: { queue: { approvalMode: 'AUTO' } } } } })
+      .mockReturnValueOnce({ result: [1], entities: { 1: { prefs: { queue: { approvalMode: 'MANUAL' } } } } })
+      .mockReturnValue({ result: [1], entities: { 1: { prefs: { queue: { approvalMode: 'AUTO' } } } } })
     vi.spyOn(Queue, 'countPending').mockReturnValue(0)
     vi.spyOn(Queue, 'get').mockReturnValue(mockQueue([]))
     const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
@@ -203,7 +204,7 @@ describe('participant pending request limit', () => {
     await handler(socket, { payload: { songId: 98 } }, vi.fn())
     await handler(socket, { payload: { songId: 99 } }, vi.fn())
 
-    expect(getRoom).toHaveBeenCalledTimes(2)
+    expect(getRoom).toHaveBeenCalledTimes(4)
     expect(add.mock.calls.map(([request]) => request.status)).toEqual(['PENDING_APPROVAL', 'APPROVED'])
     expect(moderate).not.toHaveBeenCalled()
   })

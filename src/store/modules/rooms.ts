@@ -84,7 +84,7 @@ export const removeRoom = createAsyncThunk(
 export const openRoomEditor = createAction(ROOM_EDITOR_OPEN)
 export const closeRoomEditor = createAction(ROOM_EDITOR_CLOSE)
 export const filterByStatus = createAction<boolean | string>(ROOM_FILTER_STATUS)
-const roomPrefsPush = createAction<{ roomId: number, prefs: IRoomPrefs }>(ROOM_PREFS_PUSH)
+const roomPrefsPush = createAction<{ roomId: number, prefs: IRoomPrefs, name?: string, status?: Room['status'] }>(ROOM_PREFS_PUSH)
 
 export function requestPrefsPush (roomId: number, prefs: IRoomPrefs): AppThunk {
   return (dispatch) => {
@@ -146,6 +146,8 @@ const roomsReducer = createReducer(initialState, (builder) => {
 
       if (state.entities[roomId]) {
         state.entities[roomId].prefs = payload.prefs
+        if (payload.status) state.entities[roomId].status = payload.status
+        if (payload.name) state.entities[roomId].name = payload.name
       }
     })
     .addCase(LOGOUT, () => ({
