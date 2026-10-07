@@ -8,8 +8,6 @@ import Spinner from 'components/Spinner/Spinner'
 import TextOverlay from 'components/TextOverlay/TextOverlay'
 import styles from './QueueView.css'
 
-const QUEUE_ITEM_HEIGHT = 92
-
 const QueueView = () => {
   const { innerWidth, innerHeight, headerHeight, footerHeight } = useAppSelector(state => state.ui)
   const isInRoom = useAppSelector(state => !!state.user.roomId)
@@ -19,14 +17,16 @@ const QueueView = () => {
   const queueId = useAppSelector(state => state.status.queueId)
   const user = useAppSelector(state => state.user)
   const containerRef = useRef<HTMLDivElement>(null)
+  const initialScrollDone = useRef(false)
 
   // ensure current song is in view on first mount only
   useEffect(() => {
-    if (containerRef.current) {
-      const i = queue.result.indexOf(queueId)
-      containerRef.current.scrollTop = QUEUE_ITEM_HEIGHT * i
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    if (initialScrollDone.current || isLoading) return
+    const current = containerRef.current?.querySelector<HTMLElement>(`[data-queue-id="${queueId}"]`)
+    if (!current) return
+    current.scrollIntoView({ block: 'nearest' })
+    initialScrollDone.current = true
+  }, [queueId, isLoading])
 
   return (
     <div
@@ -34,7 +34,9 @@ const QueueView = () => {
       ref={containerRef}
       style={{
         paddingTop: headerHeight,
-        paddingBottom: footerHeight,
+        paddingBottom: footerHeight + 32,
+        scrollPaddingTop: headerHeight + 16,
+        scrollPaddingBottom: footerHeight + 32,
         width: innerWidth,
         height: innerHeight,
       }}

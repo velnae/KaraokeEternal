@@ -41,20 +41,14 @@ const Users = () => {
       <tr key={userId}>
         {userId === curUserId && (
           <td translate='no'>
-            <strong>{user.username}</strong>
-            {' '}
-            (
-            {user.name}
-            )
+            <strong>{user.username || user.name}</strong>
+            {user.username && user.name !== user.username && <small className={styles.displayName}>{user.name}</small>}
           </td>
         )}
         {userId !== curUserId && (
           <td>
-            <a data-user-id={userId} onClick={handleOpen}>{user.username}</a>
-            {' '}
-            (
-            {user.name}
-            )
+            <Button className={styles.nameButton} data-user-id={userId} onClick={handleOpen}>{user.username || user.name}</Button>
+            {user.username && user.name !== user.username && <small className={styles.displayName}>{user.name}</small>}
           </td>
         )}
         <td>{user.role === 'guest' ? 'Invitado' : user.role === 'standard' ? 'Usuario' : user.role === 'admin' ? 'Administrador' : user.role}</td>
@@ -68,7 +62,7 @@ const Users = () => {
     .map(roomId => <option key={roomId} value={roomId}>{rooms.entities[roomId].name}</option>)
 
   const userFilter = (
-    <select className={styles.usersFilter} onChange={handleFilterChange} value={filterOnline ? 'online' : filterRoomId || 'all'}>
+    <select aria-label='Filtrar usuarios' className={styles.usersFilter} onChange={handleFilterChange} value={filterOnline ? 'online' : filterRoomId || 'all'}>
       <option key='all' value='all'>Todos</option>
       <option key='online' value='online'>Conectados</option>
       <optgroup label='Conectados en...'>

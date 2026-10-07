@@ -1,25 +1,26 @@
 .container {
-  background-color: var(--panel-bg-color);
-  border-radius: 12px;
-  overflow: hidden;
+  background: var(--equipment);
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  min-width: 0;
 }
 
 .titleContainer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-s) var(--container-padding);
-  color: hsl(var(--hue-blue), 10%, 80%);
-  background-color: hsl(var(--hue-blue), 20%, 20%);
-  background-image: linear-gradient(135deg, hsl(209,20%,20%) 0%, hsl(209,20%,10%) 100%);
+  gap: 12px;
+  padding: 18px;
+  color: var(--lyrics);
+  border-bottom: 1px solid var(--edge);
 
-  h1 {
+  h2 {
     margin: 0;
-    font-size: var(--font-size-l);
+    font-size: 20px;
     font-weight: var(--font-weight-bold);
   }
 }
 
 .content {
-  padding: var(--container-padding);
+  padding: 18px;
 }

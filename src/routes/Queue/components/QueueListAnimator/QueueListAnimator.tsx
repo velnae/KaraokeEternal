@@ -4,12 +4,20 @@ import { useAppSelector } from 'store/hooks'
 import styles from './QueueListAnimator.css'
 
 const handleEnter = (el: HTMLDivElement) => {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.style.removeProperty('opacity')
+    return
+  }
   el.addEventListener('animationend', e => (e.currentTarget as HTMLDivElement).classList.remove(styles.itemEnter))
   el.classList.add(styles.itemEnter)
   el.style.removeProperty('opacity')
 }
 
 const handleExit = (el: HTMLDivElement, _i: number, removeEl: () => void) => {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    removeEl()
+    return
+  }
   el.addEventListener('animationend', removeEl)
   el.classList.add(styles.itemExit)
 }

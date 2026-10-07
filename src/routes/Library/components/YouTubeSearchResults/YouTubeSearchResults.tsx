@@ -1,5 +1,6 @@
 import React from 'react'
 import Button from 'components/Button/Button'
+import SongArtwork from 'components/SongArtwork/SongArtwork'
 import { formatDuration } from 'lib/dateTime'
 import { useAppDispatch } from 'store/hooks'
 import { queueYouTubeSong } from 'routes/Queue/modules/queue'
@@ -44,10 +45,10 @@ const YouTubeSearchResults = ({ code, error, isLoading, query, results }: YouTub
       {results.map(result => (
         <div className={styles.result} key={result.sourceId}>
           <div className={styles.thumbnail}>
-            {result.thumbnailUrl && <img src={result.thumbnailUrl} alt='' loading='lazy' />}
+            <SongArtwork thumbnailUrl={result.thumbnailUrl} />
           </div>
           <div className={styles.primary} translate='no'>
-            <div className={styles.title}>{result.title}</div>
+            <div className={styles.title} title={result.title}>{result.title}</div>
             <div className={styles.channel}>{result.artistOrChannel}</div>
             <div className={styles.meta}>
               <span className={styles.source}>YouTube</span>

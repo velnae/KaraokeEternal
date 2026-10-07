@@ -158,6 +158,8 @@ const QueueItem = ({
   return (
     <div
       {...swipeHandlers}
+      data-queue-id={queueId}
+      data-status={status}
       className={clsx(
         styles.container,
         isCurrent && styles.current,
@@ -179,26 +181,33 @@ const QueueItem = ({
 
         <div className={clsx(styles.primary, isPlayed && styles.greyed)} translate='no'>
           <div className={styles.innerPrimary}>
-            <div className={styles.title}>{title}</div>
+            <h2 id={`queue-title-${queueId}`} className={styles.title}>{title}</h2>
             <div className={styles.artist}>{artist}</div>
           </div>
           <div className={clsx(styles.user, isOwner && styles.isOwner)}>
             {userDisplayName}
           </div>
           <div className={styles.badges}>
-            <div className={clsx(styles.origin, styles[origin.toLowerCase()])}>
-              {origin === 'PARTICIPANT' ? 'Participante' : origin === 'HOUSE' ? 'De la casa' : 'Operador'}
+            <div className={clsx(styles.status, (status === 'REJECTED' || status === 'FAILED') && styles.rejected)}>
+              {statusLabel[status]}
             </div>
+            {origin !== 'PARTICIPANT' && <div className={clsx(styles.origin, styles[origin.toLowerCase()])}>{origin === 'HOUSE' ? 'De la casa' : 'Operador'}</div>}
             <div className={clsx(styles.source, source === 'YOUTUBE' && styles.youtube)}>
               {source === 'YOUTUBE' ? 'YouTube' : 'Local'}
             </div>
           </div>
-          <div className={clsx(styles.status, (status === 'REJECTED' || status === 'FAILED') && styles.rejected)}>
-            {statusLabel[status]}
-          </div>
         </div>
 
         <Buttons btnWidth={56} isExpanded={isExpanded} className={styles.btnContainer}>
+          {(isInfoable || isMovable || isPlayed || isReplayable || isRemovable || isSkippable) && (
+            <Button
+              icon={isExpanded ? 'CHEVRON_UP' : 'MORE_HORIZ'}
+              aria-label={isExpanded ? 'Menos acciones' : 'Más acciones'}
+              aria-describedby={`queue-title-${queueId}`}
+              aria-expanded={isExpanded}
+              onClick={() => setExpanded(!isExpanded)}
+            />
+          )}
           {isErrored && (
             <Button
               className={styles.danger}
@@ -228,9 +237,11 @@ const QueueItem = ({
             <Button
               aria-label='Aprobar solicitud'
               className={clsx(styles.btnApprove, styles.active)}
-              icon='PLUS'
+              icon='CHECK'
               onClick={handleApproveClick}
-            />
+            >
+              Aprobar
+            </Button>
           )}
           {canModerate && (
             <Button
@@ -238,7 +249,9 @@ const QueueItem = ({
               className={clsx(styles.btnReject, styles.danger)}
               icon='CLEAR'
               onClick={handleRejectClick}
-            />
+            >
+              Rechazar
+            </Button>
           )}
           {isMovable && (
             <Button

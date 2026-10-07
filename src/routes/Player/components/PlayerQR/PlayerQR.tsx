@@ -89,40 +89,27 @@ const PlayerQR = ({ height, prefs, queueItem }: PlayerQRProps) => {
     <CSSTransition
       in={show}
       nodeRef={ref}
+      timeout={300}
+      onExited={handleTransitionEnd}
       classNames={{
         enterActive: styles.enterActive,
         exitActive: styles.exitActive,
-      }}
-      addEndListener={(done: () => void) => {
-        const node = ref.current
-        if (!node) return
-
-        const onTransitionEnd = (e: Event) => {
-          if (e.target !== node) return // ignore bubbling from children
-          node.removeEventListener('transitionend', onTransitionEnd)
-          done() // required for react-transition-group
-          handleTransitionEnd()
-        }
-
-        node.addEventListener('transitionend', onTransitionEnd, false)
       }}
     >
       <div
         className={clsx(styles.container, alternate && styles.alternate)}
         ref={ref}
+        aria-label='Código QR para entrar a la sala'
       >
         <QRCode
           value={url.href}
-          ecLevel='L'
+          ecLevel='M'
           size={size}
           quietZone={quietZoneSize}
           style={{ opacity: prefs.opacity ?? 0.625 }}
-          logoImage={`${document.baseURI}assets/app.png`}
-          logoWidth={size * 0.5}
-          logoHeight={size * 0.5}
-          logoOpacity={0.5}
           qrStyle='dots'
         />
+        <span className={styles.label}>Entrar a la sala</span>
       </div>
     </CSSTransition>
   )

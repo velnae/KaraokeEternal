@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import screenfull from 'screenfull'
 import combinedReducer from 'store/reducers'
 import { useAppSelector, useAppDispatch } from 'store/hooks'
@@ -9,8 +9,10 @@ import { fetchCurrentRoom } from 'store/modules/rooms'
 import styles from './PlayerView.css'
 
 const PlayerView = () => {
-  const { innerWidth, innerHeight, headerHeight, footerHeight } = useAppSelector(state => state.ui)
-  const viewportHeight = innerHeight - headerHeight - footerHeight
+  const { innerWidth, innerHeight, headerHeight } = useAppSelector(state => state.ui)
+  const [isFullscreen, setFullscreen] = useState(screenfull.isFullscreen)
+  const viewportHeight = Math.max(0, innerHeight - headerHeight)
+  const playerHeight = isFullscreen ? innerHeight : viewportHeight
   const dispatch = useAppDispatch()
 
   // @todo: find better place for this?
@@ -27,7 +29,19 @@ const PlayerView = () => {
 
   // set page title
   useEffect(() => {
+    const fullscreen = screenfull
+    if (!fullscreen.isEnabled) return
+    const onChange = () => setFullscreen(fullscreen.isFullscreen)
+    fullscreen.on('change', onChange)
+    return () => fullscreen.off('change', onChange)
+  }, [])
+
+  useEffect(() => {
+    const previousTitle = document.title
     document.title = 'Karaoke Eternal | Reproductor'
+    return () => {
+      document.title = previousTitle
+    }
   }, [])
 
   return (
@@ -36,15 +50,15 @@ const PlayerView = () => {
         id='player-fs-container'
         className={styles.container}
         style={{
-          top: screenfull.isFullscreen ? 0 : headerHeight,
+          top: isFullscreen ? 0 : headerHeight,
           width: innerWidth,
-          height: screenfull.isFullscreen ? innerHeight : viewportHeight,
+          height: playerHeight,
           overflow: 'hidden',
         }}
       >
         <PlayerController
           width={innerWidth}
-          height={screenfull.isFullscreen ? innerHeight : viewportHeight}
+          height={playerHeight}
         />
       </div>
     </div>

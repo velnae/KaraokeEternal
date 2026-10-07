@@ -1,75 +1,40 @@
 .container {
-  display: flex;
+  display: none;
   flex-direction: column;
-  opacity: 0;
-  color: var(--text-color);
-  background: transparent;
-  padding: var(--space-m);
-  border: 1.5px solid hsl(var(--hue-blue), 20%, 30%);
-  border-radius: 16px;
-  max-width: min(800px, 90vw);
-  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0);
-  backdrop-filter: blur(30px) brightness(50%) saturate(100%);
-  -webkit-backdrop-filter: blur(30px) brightness(50%) saturate(100%);
-  
-  &[open] {
-    animation: fadeIn 0.15s forwards;
-    box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.5);
-  }
-}
+  gap: 16px;
+  color: var(--lyrics);
+  background: var(--equipment);
+  padding: 20px;
+  width: min(640px, calc(100% - 24px));
+  max-width: calc(100% - 24px);
+  max-height: calc(100dvh - 24px);
+  border: 1px solid var(--edge);
+  border-radius: 18px;
 
+  &[open] { display: flex; }
+  &::backdrop { background: #000b; }
+}
 .titleContainer {
   display: flex;
-  font-family: var(--font-family-custom);
-  margin: 0 0 var(--space-s) 0;
-
-  h1 {
-    flex: 1;
-    margin: 0;
-    font-size: var(--font-size-xl);
-    line-height: 1em;
-  }
-
+  align-items: center;
+  gap: 16px;
+  h1 { flex: 1; min-width: 0; margin: 0; font-size: 24px; line-height: 1.2; overflow-wrap: anywhere; }
 }
-
 .btnClose {
-  position: relative;
-  top: calc(var(--space-s) * -1);
-  right: calc(var(--space-s) * -1);
-  align-self: flex-start;
-  color: var(--btn-active-bg-color);
-  padding: var(--space-s);
-  line-height: 1em;
-
-  &:focus-visible {
-    outline: none;
-  }
-
-  svg {
-    height: var(--icon-size-l);
-    line-height: 1em;
-  }
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  color: var(--secondary);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  svg { width: 24px; height: 24px; }
 }
-
-.content {
-  flex: 1;
-
-  &.scrollable {
-    overflow: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-}
-
-.buttons {
-  display: flex;
-  flex-direction: column;
-  row-gap: var(--space-s);
-  column-gap: var(--space-m);
-  margin-top: var(--container-padding);
-}
-
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.content, .scrollable { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.buttons > button { width: auto; min-width: 110px; }
+@media (max-width: 480px) {
+  .container { padding: 14px; }
+  .buttons > button { flex: 1; }
 }

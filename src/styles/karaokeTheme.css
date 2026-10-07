@@ -1,0 +1,61 @@
+.theme {
+  --stage: #030509;
+  --equipment: #111a28;
+  --lyrics: #f4f7ff;
+  --secondary: #a6b2c7;
+  --cyan: #76e0ec;
+  --amber: #edc47c;
+  --edge: #283447;
+  --link-color: var(--cyan);
+  --text-color: var(--lyrics);
+  --panel-bg-color: var(--equipment);
+  --chrome-bg-color: var(--stage);
+  --chrome-border-color: var(--edge);
+  --input-color: var(--lyrics);
+  --input-bg-color: var(--equipment);
+  --input-placeholder-color: var(--secondary);
+  --btn-active-bg-color: var(--cyan);
+  --btn-active-filter: none;
+  --btn-danger-bg-color: #f29dad;
+  --btn-danger-filter: none;
+  --transport-btn-bg-color: var(--cyan);
+  --transport-btn-filter: none;
+  --transport-volume-track-color: var(--edge);
+  --transport-volume-track-active-color: var(--cyan);
+  --transport-volume-track-active-filter: none;
+  --song-item-btn-active-bg-color: var(--cyan);
+  --song-item-btn-active-filter: none;
+  --focus-outline: 2px solid var(--cyan);
+  color: var(--lyrics);
+  color-scheme: dark;
+
+  :is(a, button, input):focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 4px;
+  }
+}
+
+.forms {
+  input:is([type='text'], [type='search'], [type='email'], [type='password'], [type='number']), select {
+    min-height: 44px;
+    min-width: 0;
+    border: 1px solid var(--edge);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background-color: var(--stage);
+    color: var(--lyrics);
+    box-shadow: none;
+    font-size: 16px;
+  }
+  select { padding-right: 32px; }
+  input:focus { box-shadow: none; border-color: var(--cyan); }
+  fieldset { min-width: 0; border-color: var(--edge); border-radius: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Accessibility preferences take precedence over component transitions. */
+  .theme *, .theme *::before, .theme *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

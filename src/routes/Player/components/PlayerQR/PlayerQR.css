@@ -4,6 +4,10 @@
   left: 3vh;
   opacity: 1;
   transition: opacity 0.3s ease;
+  pointer-events: none;
+  padding: 8px;
+  background: #fff;
+  border-radius: 12px;
 
   &.alternate {
     left: unset;
@@ -14,6 +18,8 @@
     border-radius: var(--border-radius);
   }
 }
+
+.label { display: block; margin-top: 4px; text-align: center; font-size: 12px; color: #111a28; }
 
 .enterActive {
   opacity: 1;

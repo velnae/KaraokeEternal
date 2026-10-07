@@ -5,6 +5,7 @@ import useResizeObserver from 'use-resize-observer'
 // global stylesheets should be imported before any
 // components that will import their own modular css
 import '../../../styles/global.css'
+import theme from 'styles/karaokeTheme.css'
 import Button from 'components/Button/Button'
 import Header from 'components/Header/Header'
 import Navigation from 'components/Navigation/Navigation'
@@ -33,7 +34,7 @@ const CoreLayout = () => {
   const closeError = () => dispatch(clearErrorMessage())
 
   return (
-    <>
+    <div className={theme.theme}>
       <Header ref={headerRef} />
 
       <Routes />
@@ -53,7 +54,7 @@ const CoreLayout = () => {
           </p>
         </Modal>
       )}
-    </>
+    </div>
   )
 }
 

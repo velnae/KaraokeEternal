@@ -3,4 +3,5 @@
   position: absolute;
   align-items: center;
   justify-content: center;
+  background: var(--stage);
 }

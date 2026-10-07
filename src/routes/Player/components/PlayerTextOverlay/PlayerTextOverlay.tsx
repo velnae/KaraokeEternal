@@ -1,9 +1,10 @@
-import React, { useState } from 'react'
+import React from 'react'
+import { Link } from 'react-router'
 import { useAppDispatch } from 'store/hooks'
-import { requestPlay } from 'store/modules/status'
-import ColorCycle from './ColorCycle/ColorCycle'
+import { requestPlay, requestPlayNext } from 'store/modules/status'
 import UpNow from './UpNow/UpNow'
 import Icon from 'components/Icon/Icon'
+import Button from 'components/Button/Button'
 import type { QueueItem } from 'shared/types'
 import styles from './PlayerTextOverlay.css'
 
@@ -17,55 +18,42 @@ interface PlayerTextOverlayProps {
   height: number
 }
 
-const PlayerTextOverlay = ({
-  isQueueEmpty,
-  isAtQueueEnd,
-  isErrored,
-  nextQueueItem,
-  queueItem,
-  width,
-  height,
-}: PlayerTextOverlayProps) => {
+const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueItem, queueItem, width, height }: PlayerTextOverlayProps) => {
   const dispatch = useAppDispatch()
-  const handlePlay = () => dispatch(requestPlay())
-  const [errorOffset] = useState(() => Math.random() * -300)
-
-  let Component
+  let content
 
   if (isQueueEmpty || (isAtQueueEnd && !nextQueueItem)) {
-    Component = <ColorCycle text='AGREGUE MÁS CANCIONES' className={styles.backdrop} />
+    content = (
+      <section className={styles.panel} role='status'>
+        <Icon icon='MICROPHONE' size={48} />
+        <h1>Sin canciones</h1>
+        <Link to='/library' target='_blank' rel='noopener'>Buscar canciones</Link>
+      </section>
+    )
   } else if (!queueItem || (isAtQueueEnd && nextQueueItem)) {
-    Component = (
-      <>
-        <svg width='0' height='0' style={{ position: 'absolute' }}>
-          <defs>
-            <linearGradient id='play-icon-gradient' x1='0%' y1='0%' x2='100%' y2='100%'>
-              <stop offset='0%' className={styles.gradientStop1} />
-              <stop offset='100%' className={styles.gradientStop2} />
-            </linearGradient>
-          </defs>
-        </svg>
-        <button className={styles.playButton} onClick={handlePlay} aria-label='Reproducir'>
-          <Icon icon='PLAY' />
-        </button>
-      </>
+    content = (
+      <section className={styles.panel}>
+        <p className={styles.singer} translate='no'>{nextQueueItem?.userDisplayName}</p>
+        <h1 translate='no'>{nextQueueItem?.title || 'Listo para cantar'}</h1>
+        <Button className={styles.playButton} icon='PLAY' onClick={() => dispatch(requestPlay())}>Reproducir</Button>
+      </section>
     )
   } else if (isErrored) {
-    Component = (
-      <>
-        <ColorCycle text='OCURRIÓ UN ERROR' offset={errorOffset} className={styles.backdrop} />
-        <ColorCycle text='VEA LA COLA PARA MÁS DETALLES' offset={errorOffset} className={styles.backdrop} />
-      </>
+    content = (
+      <section className={styles.panel} role='alert'>
+        <Icon icon='ALERT_OUTLINE' size={44} />
+        <h1>No se pudo reproducir</h1>
+        <div className={styles.actions}>
+          <Link to='/queue' target='_blank' rel='noopener'>Ver cola</Link>
+          <Button className={styles.playButton} onClick={() => dispatch(requestPlayNext())}>Siguiente canción</Button>
+        </div>
+      </section>
     )
   } else {
-    Component = <UpNow queueItem={queueItem} />
+    content = <UpNow queueItem={queueItem} />
   }
 
-  return (
-    <div style={{ width, height }} className={styles.container}>
-      {Component}
-    </div>
-  )
+  return <div style={{ width, height }} className={styles.container}>{content}</div>
 }
 
 export default PlayerTextOverlay

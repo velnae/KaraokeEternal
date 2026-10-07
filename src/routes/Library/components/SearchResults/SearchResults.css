@@ -3,12 +3,12 @@
 .youtubeHeading {
   display: flex;
   align-items: center;
-  justify-content: center;
-  color: var(--text-color);
-  background-color: hsl(var(--hue-blue), 90%, 25%);
-  font-size: 18px;
+  justify-content: flex-start;
+  padding-inline: 12px;
+  color: var(--secondary);
+  background: var(--stage);
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.youtubeHeading {
-  background-color: hsl(0, 55%, 27%);
-}
+.empty { padding: 16px; color: var(--secondary); text-align: center; }

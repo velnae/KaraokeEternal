@@ -1,16 +1,22 @@
 .authorityNotice {
   box-sizing: border-box;
-  max-width: 42rem;
+  width: min(520px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  overflow: auto;
   padding: 2rem;
   text-align: center;
-  color: var(--color-gray-9);
+  color: var(--lyrics);
+  background: var(--equipment);
+  border: 1px solid var(--edge);
+  border-radius: 18px;
 }
 
 .authorityNotice h1 {
   margin: 0 0 1rem;
+  font-size: clamp(24px, 4vw, 36px);
 }
 
 .authorityNotice p {
   margin: 0.5rem 0;
-  color: var(--color-gray-7);
+  color: var(--secondary);
 }

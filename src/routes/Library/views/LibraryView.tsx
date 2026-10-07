@@ -5,6 +5,7 @@ import ArtistList from '../components/ArtistList/ArtistList'
 import SearchResults from '../components/SearchResults/SearchResults'
 import TextOverlay from 'components/TextOverlay/TextOverlay'
 import Spinner from 'components/Spinner/Spinner'
+import Button from 'components/Button/Button'
 import styles from './LibraryView.css'
 
 const LibraryView = () => {
@@ -34,14 +35,13 @@ const LibraryView = () => {
 
       {isLoading && <Spinner />}
 
-      {!isLoading && songsResult.length === 0 && (
+      {!isSearching && !isLoading && songsResult.length === 0 && (
         <TextOverlay className={styles.empty}>
-          <h1>La biblioteca está vacía</h1>
+          <h1>Busca una canción</h1>
+          <Button variant='primary' onClick={() => document.getElementById('library-search')?.focus()}>Buscar en YouTube</Button>
           {isAdmin && (
             <p>
-              <Link to='/account'>Agregue carpetas de archivos multimedia</Link>
-              {' '}
-              para comenzar.
+              <Link to='/account#admin-prefs'>Carpetas locales</Link>
             </p>
           )}
         </TextOverlay>

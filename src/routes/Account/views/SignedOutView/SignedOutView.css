@@ -1,36 +1,54 @@
 .container {
+  width: 100%;
+  max-width: 440px;
   margin: 0 auto;
-  overflow: hidden;
-  padding: var(--container-padding);
+  padding: 32px 18px 48px;
 
   h1 {
-    margin: var(--space-l) 0 var(--space-m) 0;
-    font-family: var(--font-family-custom);
-    font-size: var(--font-size-l);
-    color: hsl(var(--hue-blue), 10%, 60%);
+    margin: 0 0 24px;
+    font-size: 24px;
+    letter-spacing: -.025em;
+    color: var(--lyrics);
+    overflow-wrap: anywhere;
   }
+
+  label { color: var(--secondary); font-size: 14px; }
+  input:is([type='text'], [type='password'], [type='email']) { min-height: 52px; padding: 12px 14px; border: 1px solid var(--edge); border-radius: 12px; background: var(--stage); color: var(--lyrics); box-shadow: none; font-size: 16px; }
+  input::placeholder { color: var(--secondary); }
+  input:is([type='text'], [type='password'], [type='email']):focus { box-shadow: none; border-color: var(--cyan); }
+  button[type='submit'] { min-height: 52px; border-radius: 12px; background: var(--cyan); color: var(--stage); text-shadow: none; box-shadow: none; font-weight: 700; }
+  button[type='submit']:disabled { background: var(--edge); color: var(--secondary); cursor: not-allowed; }
+  small[role='status'] { color: var(--amber); }
 }
 
 .logo {
-  margin-bottom: var(--space-xl);
+  margin: 16px auto 40px;
   text-align: center;
-  font-size: 30px;
+  font-size: clamp(20px, 6vw, 28px);
 
   @media (min-width: 42em) {
-    margin-top: var(--space-xl);
-    margin-bottom: calc(var(--space-xl) * 2);
-    font-size: 36px;
+    margin-top: 36px;
+    margin-bottom: 48px;
   }
 }
+
+.panel { padding: 24px; background: var(--equipment); border: 1px solid var(--edge); border-radius: 22px; }
 
 .radioContainer {
   display: flex;
   flex-direction: column;
   gap: var(--space-s);
-  white-space: nowrap;
+  white-space: normal;
   margin-bottom: var(--space-m);
 }
 
 .hidden {
   display: none;
+}
+
+.secondary {
+  margin-top: 20px;
+  text-align: center;
+
+  button { white-space: normal; min-height: 44px; color: var(--secondary); padding: 8px; font-size: 14px; }
 }

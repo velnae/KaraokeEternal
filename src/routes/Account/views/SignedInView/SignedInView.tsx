@@ -8,6 +8,8 @@ import Account from '../../components/Account/Account'
 import Prefs from '../../components/Prefs/Prefs'
 import Rooms from '../../components/Rooms/Rooms'
 import Users from '../../components/Users/Users'
+import theme from 'styles/karaokeTheme.css'
+import styles from './SignedInView.css'
 
 const SignedInView = () => {
   const { isAdmin } = useAppSelector(state => state.user)
@@ -25,20 +27,24 @@ const SignedInView = () => {
   }, [dispatch])
 
   return (
-    <>
-      {isAdmin
-        && <Rooms />}
-
-      {isAdmin
-        && <Users />}
-
-      {isAdmin
-        && <Prefs />}
-
-      <Account />
-
+    <div className={`${theme.forms} ${styles.container}`}>
+      {isAdmin && (
+        <>
+          <h1>Administración</h1>
+          <nav className={styles.shortcuts} aria-label='Secciones de administración'>
+            <a href='#admin-rooms'>Salas</a>
+            <a href='#admin-users'>Usuarios</a>
+            <a href='#admin-prefs'>Ajustes</a>
+            <a href='#admin-account'>Mi cuenta</a>
+          </nav>
+          <section id='admin-rooms'><Rooms /></section>
+          <section id='admin-users'><Users /></section>
+          <section id='admin-prefs'><Prefs /></section>
+        </>
+      )}
+      <section id='admin-account'><Account /></section>
       <About />
-    </>
+    </div>
   )
 }
 

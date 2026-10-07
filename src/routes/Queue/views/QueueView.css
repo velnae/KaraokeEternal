@@ -1,7 +1,12 @@
 .container {
+  max-width: min(100%, 1000px);
+  margin: 0 auto;
+  padding-inline: 12px;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge) transparent;
 }
 
 .container h1 {

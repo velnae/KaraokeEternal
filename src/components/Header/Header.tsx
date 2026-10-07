@@ -63,8 +63,8 @@ const Header = React.forwardRef<HTMLDivElement>((_, ref) => {
   const cancelScan = () => dispatch(requestScanStop())
 
   return (
-    <div className={clsx(styles.container, 'bg-blur')} ref={ref}>
-      {!isPlayer && isPlayerPresent
+    <div className={clsx(styles.container)} ref={ref}>
+      {isAdmin && !isPlayer && isPlayerPresent
         && <UpNext isUpNext={isUpNext} isUpNow={isUpNow} wait={wait} />}
 
       {isAdmin
@@ -80,9 +80,11 @@ const Header = React.forwardRef<HTMLDivElement>((_, ref) => {
           />
         )}
 
-      <Routes>
-        <Route path='/library' element={<LibraryHeader />} />
-      </Routes>
+      {isAdmin && (
+        <Routes>
+          <Route path='/library' element={<LibraryHeader />} />
+        </Routes>
+      )}
     </div>
   )
 })

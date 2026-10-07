@@ -1,12 +1,20 @@
 .slider {
   width: 100%;
-  margin: 0 34px 0 30px;
+  margin: 0 22px;
+  min-width: 0;
 }
 
 .handle {
   cursor: pointer;
-  color: var(--transport-btn-bg-color);
-  filter: var(--transport-btn-filter);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: var(--cyan);
+  top: 2px;
+  background: var(--equipment);
+  border: 1px solid var(--cyan);
+  border-radius: 50%;
   position: absolute;
   touch-action: pan-x;
   outline: none;
@@ -16,6 +24,7 @@
   }
 
   svg {
-    height: var(--icon-size-xl);
+    height: 24px;
+    width: 24px;
   }
 }

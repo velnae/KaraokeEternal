@@ -23,9 +23,8 @@ const AccountView = () => {
       className={styles.container}
       style={{
         paddingTop: ui.headerHeight,
-        paddingBottom: ui.footerHeight,
-        width: ui.contentWidth,
-        height: ui.innerHeight,
+        paddingBottom: ui.footerHeight + 28,
+        scrollPaddingTop: ui.headerHeight + 12,
       }}
     >
       {isSignedIn

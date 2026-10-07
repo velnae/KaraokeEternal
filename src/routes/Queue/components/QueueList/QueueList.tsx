@@ -47,8 +47,8 @@ const QueueList = () => {
     : user.isAdmin && filter === 'house'
       ? houseIds
       : [...ownerFeedbackIds, ...queue.result.filter(queueId => !ownerFeedbackIds.includes(queueId))]
-  const pendingLabel = `${pendingIds.length === 1 ? 'Pendiente de aprobación' : 'Pendientes de aprobación'} (${pendingIds.length})`
-  const houseLabel = `${houseIds.length === 1 ? 'Canción de la casa' : 'Canciones de la casa'} (${houseIds.length})`
+  const pendingLabel = `Por aprobar (${pendingIds.length})`
+  const houseLabel = `De la casa (${houseIds.length})`
 
   // actions
   const dispatch = useAppDispatch()
@@ -127,18 +127,21 @@ const QueueList = () => {
         <div className={styles.filters}>
           <Button
             className={clsx(styles.filter, filter === 'queue' && styles.active)}
+            aria-pressed={filter === 'queue'}
             onClick={() => setFilter('queue')}
           >
-            Cola de reproducción
+            Cola
           </Button>
           <Button
             className={clsx(styles.filter, filter === 'pending' && styles.active)}
+            aria-pressed={filter === 'pending'}
             onClick={() => setFilter('pending')}
           >
             {pendingLabel}
           </Button>
           <Button
             className={clsx(styles.filter, filter === 'house' && styles.active)}
+            aria-pressed={filter === 'house'}
             onClick={() => setFilter('house')}
           >
             {houseLabel}

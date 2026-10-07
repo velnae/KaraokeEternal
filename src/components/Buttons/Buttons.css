@@ -12,5 +12,5 @@
 }
 
 .btnHide {
-  opacity: 0;
+  display: none !important;
 }

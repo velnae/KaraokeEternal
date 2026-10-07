@@ -1,40 +1,18 @@
-.roomsFilter {
-  max-width: 50%;
-}
-
-.showAll {
-  cursor: pointer;
-}
-
+.roomsFilter { max-width: 55%; }
 .table {
   width: 100%;
-}
-
-.table > * {
-  outline: none;
-}
-
-.table th {
-  color: hsl(var(--hue-blue), 10%, 60%);
-  font-weight: normal;
+  border-collapse: collapse;
   text-align: left;
+  th { padding: 0 8px 12px; color: var(--secondary); font-size: 12px; font-weight: 500; }
+  td { padding: 8px; border-top: 1px solid var(--edge); color: var(--secondary); font-size: 14px; }
+  td:first-child { width: 50%; overflow-wrap: anywhere; }
+  td:last-child { white-space: nowrap; font-size: 12px; }
 }
-
-.table th:first-child {
-  width: 100%;
-}
-
-.table th:nth-child(2) {
-  min-width: 70px;
-}
-
-.table td {
-  height: 25px;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.table td:first-child  {
-  text-overflow: ellipsis;
-  max-width: 0;
+.nameButton { min-height: 44px; text-align: left; color: var(--cyan); font-weight: 600; }
+.status { display: inline-block; padding: 4px 7px; border-radius: 6px; background: var(--stage); font-size: 12px; }
+.status[data-status='open'] { color: var(--cyan); }
+.userCount { min-width: 44px; min-height: 44px; color: var(--cyan); }
+@media (max-width: 600px) {
+  .table th:last-child, .table td:last-child { display: none; }
+  .table td:first-child { width: 60%; }
 }

@@ -98,7 +98,9 @@ export const createAccount = createAsyncThunk<void, FormData, { state: RootState
     // redirect in query string?
     const redirect = new URLSearchParams(window.location.search).get('redirect')
 
-    if (redirect) {
+    if (data.get('role') === 'guest') {
+      AppRouter.navigate('/library')
+    } else if (redirect) {
       AppRouter.navigate(basename.replace(/\/$/, '') + redirect)
     }
   },

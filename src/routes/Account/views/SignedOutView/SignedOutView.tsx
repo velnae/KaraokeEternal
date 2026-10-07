@@ -6,8 +6,10 @@ import { createAccount, login } from 'store/modules/user'
 import Logo from 'components/Logo/Logo'
 import SelectRoom from './SelectRoom/SelectRoom'
 import InputRadio from 'components/InputRadio/InputRadio'
+import Button from 'components/Button/Button'
 import Create from './Create/Create'
 import SignIn from './SignIn/SignIn'
+import theme from 'styles/karaokeTheme.css'
 import styles from './SignedOutView.css'
 
 const SignedOutView = () => {
@@ -16,10 +18,11 @@ const SignedOutView = () => {
 
   const prefs = useAppSelector(state => state.prefs)
   const rooms = useAppSelector(state => state.rooms)
-  const ui = useAppSelector(state => state.ui)
   const dispatch = useAppDispatch()
 
-  const [mode, setMode] = useState('returning')
+  const [mode, setMode] = useState('guest')
+  const [isLoadingRooms, setLoadingRooms] = useState(true)
+  const [isSubmitting, setSubmitting] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [roomId, setRoomId] = useState<number | null>(null)
@@ -31,7 +34,7 @@ const SignedOutView = () => {
 
   // once per mount
   useEffect(() => {
-    dispatch(fetchRooms())
+    void dispatch(fetchRooms()).finally(() => setLoadingRooms(false))
   }, [dispatch])
 
   // room selection visibility/defaults
@@ -68,7 +71,7 @@ const SignedOutView = () => {
 
   const handleRoomSelect = (id: number) => {
     setRoomId(id)
-    setMode('returning')
+    setMode('guest')
 
     if (!rooms.entities[id]?.hasPassword || !showRoomSection) {
       setFocusRequest(r => r + 1)
@@ -92,6 +95,7 @@ const SignedOutView = () => {
   }
 
   const handleCreate = ({ name, image, passwordConfirm }: { name: string, image: Blob | undefined, passwordConfirm: string }) => {
+    if (isSubmitting) return
     const data = new FormData()
 
     data.append('username', username.trim())
@@ -109,7 +113,8 @@ const SignedOutView = () => {
       data.append('role', mode)
     }
 
-    dispatch(createAccount(data))
+    setSubmitting(true)
+    void dispatch(createAccount(data)).finally(() => setSubmitting(false))
   }
 
   const getAllowed = (roleName: string) => {
@@ -126,7 +131,7 @@ const SignedOutView = () => {
   }, [focusRequest, mode])
 
   return (
-    <div className={styles.container} style={{ maxWidth: Math.max(340, ui.contentWidth * 0.66) }}>
+    <div className={clsx(theme.theme, styles.container)}>
       <Logo className={styles.logo} />
 
       {showRoomSection && (
@@ -143,8 +148,15 @@ const SignedOutView = () => {
         </>
       )}
 
-      <div ref={userSectionRef} className={clsx(rooms.result.length > 1 && roomId === null && styles.hidden)}>
-        {allowNew
+      <div ref={userSectionRef} className={clsx(styles.panel, rooms.result.length > 1 && roomId === null && styles.hidden)}>
+        {mode === 'guest' && (
+          <>
+            {!showRoomSection && <h1>{roomId ? rooms.entities[roomId]?.name : 'Entrar al karaoke'}</h1>}
+            {isLoadingRooms && <p role='status'>Buscando salas…</p>}
+            {!isLoadingRooms && !allowNewGuest && <p role='status'>{roomId ? 'Esta sala no admite invitados.' : 'No hay salas abiertas.'}</p>}
+          </>
+        )}
+        {mode !== 'guest' && (allowNew
           ? (
               <>
                 <h1>Entrar como...</h1>
@@ -155,9 +167,9 @@ const SignedOutView = () => {
                 </div>
               </>
             )
-          : <h1>Iniciar sesión</h1>}
+          : <h1>Iniciar sesión</h1>)}
 
-        {(mode === 'returning' || !allowNew) && (
+        {mode === 'returning' && (
           <SignIn
             username={username}
             password={password}
@@ -168,8 +180,9 @@ const SignedOutView = () => {
           />
         )}
 
-        {mode !== 'returning' && allowNew && (
+        {((mode === 'guest' && allowNewGuest) || (mode === 'standard' && allowNewStandard)) && (
           <Create
+            isSubmitting={isSubmitting}
             guest={mode === 'guest'}
             username={username}
             password={password}
@@ -179,6 +192,11 @@ const SignedOutView = () => {
             onFirstFieldRef={handleFirstFieldRef}
           />
         )}
+        <div className={styles.secondary}>
+          <Button onClick={() => setMode(mode === 'guest' ? 'returning' : 'guest')}>
+            {mode === 'guest' ? 'Tengo una cuenta' : 'Entrar como invitado'}
+          </Button>
+        </div>
       </div>
     </div>
   )

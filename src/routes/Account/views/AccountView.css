@@ -1,8 +1,13 @@
 .container {
+  width: 100%;
+  max-width: 768px;
+  height: 100dvh;
   margin: 0 auto;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge) transparent;
 
   & > div {
     margin: var(--space-m) auto;

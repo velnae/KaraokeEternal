@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useId, useRef } from 'react'
 import clsx from 'clsx'
 import Button from 'components/Button/Button'
 import styles from './Modal.css'
+import theme from 'styles/karaokeTheme.css'
 
 export type ModalProps = {
   buttons?: React.ReactNode
@@ -15,6 +16,7 @@ export type ModalProps = {
 
 const Modal = ({ buttons, className, children, visible = true, onClose, scrollable, title }: ModalProps) => {
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
   const isOutsideClick = useRef(false)
 
   useEffect(() => {
@@ -44,13 +46,14 @@ const Modal = ({ buttons, className, children, visible = true, onClose, scrollab
   return (
     <dialog
       ref={dialogRef}
-      className={clsx(styles.container, className)}
+      className={clsx(theme.theme, theme.forms, styles.container, className)}
+      aria-labelledby={titleId}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       onCancel={handleCancel}
     >
       <div className={styles.titleContainer}>
-        <h1>{title}</h1>
+        <h1 id={titleId}>{title}</h1>
         <Button icon='CLEAR' className={styles.btnClose} onClick={onClose} aria-label='Cerrar' />
       </div>
       <div className={clsx(styles.content, scrollable && styles.scrollable)}>{children}</div>

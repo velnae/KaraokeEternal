@@ -1,48 +1,6 @@
-.container {
-  display: flex;
-  align-items: center;
-  padding: var(--space-xs);
-
-  button {
-    cursor: pointer;
-    color: var(--btn-bg-color);
-  }
-
-  button.active {
-    color: var(--btn-active-bg-color);
-    filter: var(--btn-active-filter);
-  }
-}
-
-.searchInput {
-  align-self: stretch;
-  padding: var(--space-xs) var(--space-s) var(--space-xs) var(--space-xs) !important;
-  font-size: var(--font-size-m) !important;
-  color: var(--text-color) !important;
-  background-color: transparent !important;
-  box-shadow: none !important;
-}
-
-.searchInput::placeholder {
-  color: var(--btn-bg-color) !important;
-}
-
-.btnMagnifier svg {
-  height: 2.5rem;
-}
-
-.btnClear {
-  height: 2.75rem;
-
-  svg {
-    height: 3rem;
-  }
-}
-
-.btnStar {
-  margin-right: var(--space-s);
-
-  svg {
-    height: 3rem;
-  }
-}
+.container { display: flex; align-items: center; gap: 6px; max-width: 1000px; margin: 0 auto; padding: 6px 12px 12px; }
+.container button { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 10px; color: var(--secondary); }
+.container button.active { color: var(--cyan); background: var(--equipment); }
+.container button svg { width: 22px; height: 22px; }
+.searchInput { min-width: 0; min-height: 46px; border: 1px solid var(--edge) !important; border-radius: 12px; background: var(--equipment) !important; color: var(--lyrics) !important; padding: 10px 12px !important; box-shadow: none !important; font-size: 16px !important; }
+.searchInput::placeholder { color: var(--secondary) !important; }

@@ -36,9 +36,10 @@ const LibraryHeader = () => {
         onClick={handleMagnifierClick}
       />
       <input
+        id='library-search'
         type='search'
         className={styles.searchInput}
-        placeholder='buscar canciones'
+        placeholder='Canción o artista'
         aria-label='buscar canciones'
         value={value}
         onChange={handleChange}

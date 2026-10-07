@@ -56,6 +56,7 @@ const RowComponent = ({
 
   // # artist results heading
   if (index === 0) {
+    if (!artistsResult.length) return null
     return (
       <div key='artistsHeading' style={style} className={styles.artistsHeading}>
         {artistsResult.length}
@@ -89,6 +90,7 @@ const RowComponent = ({
 
   // # song results heading
   if (index === artistsResult.length + 1) {
+    if (!songsResult.length) return null
     return (
       <div key='songsHeading' style={style} className={styles.songsHeading}>
         {songsResult.length}
@@ -100,6 +102,9 @@ const RowComponent = ({
 
   // song results
   if (index === artistsResult.length + 2) {
+    if (!songsResult.length && !artistsResult.length && !showYouTube) {
+      return <div style={style} className={styles.empty}>Sin resultados</div>
+    }
     return (
       <div style={style} key='songs'>
         <SongList
@@ -112,7 +117,7 @@ const RowComponent = ({
   }
 
   if (showYouTube && index === artistsResult.length + 3) {
-    return <div style={style} className={styles.youtubeHeading}>Resultados de YouTube</div>
+    return <div style={style} className={styles.youtubeHeading}>YouTube</div>
   }
 
   return (
@@ -141,7 +146,7 @@ const SearchResults = ({ ui }: SearchResultsProps) => {
 
   const rowHeight = (index: number) => {
     // artists heading
-    if (index === 0) return ROW_HEIGHT_RESULT_HEADING
+    if (index === 0) return artistsResult.length ? ROW_HEIGHT_RESULT_HEADING : 0
 
     // artist results
     if (index > 0 && index < artistsResult.length + 1) {
@@ -156,14 +161,16 @@ const SearchResults = ({ ui }: SearchResultsProps) => {
     }
 
     // songs heading
-    if (index === artistsResult.length + 1) return ROW_HEIGHT_RESULT_HEADING
+    if (index === artistsResult.length + 1) return songsResult.length ? ROW_HEIGHT_RESULT_HEADING : 0
 
     // song results
-    if (index === artistsResult.length + 2) return songsResult.length * ROW_HEIGHT_SONG_WITH_ARTIST
+    if (index === artistsResult.length + 2) {
+      return !songsResult.length && !artistsResult.length && !showYouTube ? 56 : songsResult.length * ROW_HEIGHT_SONG_WITH_ARTIST
+    }
 
     // YouTube heading and result group
     if (index === artistsResult.length + 3) return ROW_HEIGHT_RESULT_HEADING
-    return youtubeSearch.results.length ? youtubeSearch.results.length * 76 : 56
+    return youtubeSearch.results.length ? youtubeSearch.results.length * 116 : 80
   }
 
   const handleRef = (ref: ListImperativeAPI) => {
@@ -191,7 +198,7 @@ const SearchResults = ({ ui }: SearchResultsProps) => {
       numRows={artistsResult.length + 3 + (showYouTube ? 2 : 0)}
       paddingTop={ui.headerHeight}
       paddingRight={4}
-      paddingBottom={ui.footerHeight}
+      paddingBottom={ui.footerHeight + 32}
       height={ui.innerHeight}
       onRef={handleRef}
     />
