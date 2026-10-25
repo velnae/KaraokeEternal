@@ -1,6 +1,7 @@
 import { createAction, createAsyncThunk, createReducer } from '@reduxjs/toolkit'
-import { RootState } from 'store/store'
+import type { AppThunk, RootState } from 'store/store'
 import type { Path, Role } from 'shared/types'
+import { defaultClientBranding, type ClientBranding } from 'shared/branding'
 import {
   PREFS_RECEIVE,
   PREFS_REQUEST,
@@ -58,6 +59,13 @@ export const fetchPrefs = createAsyncThunk<object, void, { state: RootState }>(
   },
 )
 
+// The editor owns loading/errors; avoid a rejected action opening the global error dialog as well.
+export const saveBranding = (branding: ClientBranding): AppThunk<Promise<ClientBranding>> => async (dispatch) => {
+  const response = await api.put<{ branding: ClientBranding }>('/branding', { body: branding })
+  dispatch(receivePrefs(response))
+  return response.branding
+}
+
 export const requestScan = createAsyncThunk(
   PREFS_REQ_SCANNER_START,
   async (pathId: number) => await api.get(`/path/${pathId}/scan`),
@@ -77,6 +85,7 @@ export const requestScanStop = createAsyncThunk(
 // Reducer
 // ------------------------------------
 interface PrefsState {
+  branding: ClientBranding
   isFirstRun?: boolean
   isScanning: boolean
   isReplayGainEnabled: boolean
@@ -93,6 +102,7 @@ interface PrefsState {
 }
 
 const initialState: PrefsState = {
+  branding: { ...defaultClientBranding },
   isScanning: false,
   isReplayGainEnabled: false,
   paths: {

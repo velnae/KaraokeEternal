@@ -3,3 +3,7 @@
   flex-direction: column;
   gap: 8px;
 }
+
+.branding {
+  scroll-margin-top: 100px;
+}

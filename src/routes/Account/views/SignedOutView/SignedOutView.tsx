@@ -3,7 +3,7 @@ import clsx from 'clsx'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { fetchRooms } from 'store/modules/rooms'
 import { createAccount, login } from 'store/modules/user'
-import Logo from 'components/Logo/Logo'
+import ClientBranding from 'components/ClientBranding/ClientBranding'
 import SelectRoom from './SelectRoom/SelectRoom'
 import InputRadio from 'components/InputRadio/InputRadio'
 import Button from 'components/Button/Button'
@@ -132,7 +132,7 @@ const SignedOutView = () => {
 
   return (
     <div className={clsx(theme.theme, styles.container)}>
-      <Logo className={styles.logo} />
+      <ClientBranding className={styles.logo} />
 
       {showRoomSection && (
         <>

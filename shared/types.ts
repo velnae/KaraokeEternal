@@ -128,6 +128,7 @@ export interface Media {
 }
 
 export interface Prefs {
+  branding: import('./branding.js').ClientBranding
   isFirstRun?: boolean
   isScanning: boolean
   isReplayGainEnabled: boolean

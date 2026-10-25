@@ -8,7 +8,9 @@ import Media from '../Media/Media.js'
 import pushQueuesAndLibrary from '../lib/pushQueuesAndLibrary.js'
 import Rooms from '../Rooms/Rooms.js'
 import Queue from '../Queue/Queue.js'
-import { PREFS_PATHS_CHANGED, QUEUE_PUSH } from '../../shared/actionTypes.js'
+import { PREFS_PATHS_CHANGED, PREFS_PUSH, QUEUE_PUSH } from '../../shared/actionTypes.js'
+import { validateBranding } from './branding.js'
+import type { ClientBranding } from '../../shared/branding.js'
 import type { Prefs as PrefsType } from '../../shared/types.js'
 
 interface RequestWithBody {
@@ -20,6 +22,7 @@ const router = new KoaRouter({ prefix: '/api/prefs' })
 
 // get all prefs (including media paths)
 router.get('/', (ctx) => {
+  ctx.set('Cache-Control', 'no-store')
   const prefs = Prefs.get() as unknown as PrefsType
 
   // must be admin or firstrun
@@ -28,8 +31,24 @@ router.get('/', (ctx) => {
     return
   }
 
-  // non-admins only get roles
-  ctx.body = { roles: prefs.roles }
+  // Only explicitly public preferences are exposed before login.
+  ctx.body = { roles: prefs.roles, branding: prefs.branding }
+})
+
+router.put('/branding', (ctx) => {
+  if (!ctx.user.isAdmin) ctx.throw(401, 'No tiene autorización')
+
+  let branding: ClientBranding
+  try {
+    branding = validateBranding((ctx.request as unknown as RequestWithBody).body)
+  } catch (error) {
+    ctx.throw(422, (error as Error).message)
+  }
+  if (!Prefs.set('branding', branding)) ctx.throw(500, 'No se pudo guardar la marca del cliente.')
+
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = { branding }
+  ctx.io.emit('action', { type: PREFS_PUSH, payload: { branding } })
 })
 
 // add a media path

@@ -3,6 +3,7 @@ import { PREFS_PATH_SET_PRIORITY, PREFS_PUSH, PREFS_SET } from '../../shared/act
 import Library from '../Library/Library.js'
 import Prefs from './Prefs.js'
 import ACTION_HANDLERS from './socket.js'
+import { defaultClientBranding } from '../../shared/branding.js'
 
 const createSocket = ({ isAdmin = false } = {}) => {
   const emittedTo = new Map<string, ReturnType<typeof vi.fn>>()
@@ -71,6 +72,7 @@ describe('preference mutation authorization', () => {
 
   it('acknowledges an admin change and pushes preferences only to admins', () => {
     const prefs = {
+      branding: defaultClientBranding,
       paths: { result: [], entities: {} },
       roles: { result: [], entities: {} },
     }
@@ -92,5 +94,17 @@ describe('preference mutation authorization', () => {
     })
     expect(emittedTo.has('participant-socket')).toBe(false)
     expect(server.emit).not.toHaveBeenCalled()
+  })
+
+  it('rejects branding writes through the generic preference socket action', () => {
+    const set = vi.spyOn(Prefs, 'set')
+    const acknowledge = vi.fn()
+    ACTION_HANDLERS[PREFS_SET](
+      createSocket({ isAdmin: true }).socket,
+      { payload: { key: 'branding', data: defaultClientBranding } },
+      acknowledge,
+    )
+    expect(set).not.toHaveBeenCalled()
+    expect(acknowledge).toHaveBeenCalledWith(expect.objectContaining({ type: PREFS_SET + '_ERROR' }))
   })
 })

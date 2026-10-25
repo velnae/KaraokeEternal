@@ -13,6 +13,13 @@ const ACTION_HANDLERS = {
       })
     }
 
+    // Branding has a validated HTTP update route with public change broadcasts.
+    if (payload.key === 'branding') {
+      return acknowledge({
+        type: PREFS_SET + _ERROR,
+        error: 'Use los ajustes de marca del cliente para guardar los cambios.',
+      })
+    }
     Prefs.set(payload.key, payload.data)
     log.info('%s (%s) set pref %s = %s', sock.user.name, sock.id, payload.key, payload.data)
 

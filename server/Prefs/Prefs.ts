@@ -3,6 +3,8 @@ import sql from 'sqlate'
 import crypto from 'crypto'
 import { db } from '../lib/Database.js'
 import getLogger from '../lib/Log.js'
+import { defaultClientBranding } from '../../shared/branding.js'
+import { validateBranding } from './branding.js'
 
 const log = getLogger('Prefs')
 
@@ -12,6 +14,7 @@ class Prefs {
    */
   static get () {
     const prefs = {
+      branding: { ...defaultClientBranding },
       paths: { result: [], entities: {} },
       roles: { result: [], entities: {} },
     }
@@ -68,7 +71,8 @@ class Prefs {
    * @param data - the value to be JSON-encoded
    * @return Success/fail boolean
    */
-  static set (key: string, data: any): boolean {
+  static set (key: string, data: unknown): boolean {
+    if (key === 'branding') data = validateBranding(data)
     const query = sql`
       REPLACE INTO prefs (key, data)
       VALUES (${key}, ${JSON.stringify(data)})

@@ -1,0 +1,43 @@
+.container {
+  --client-logo-growth: 50px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  width: 100%;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: max(0px, calc(.7em - 10px));
+  margin-inline: auto;
+  width: fit-content;
+  max-width: 100%;
+  font-size: min(1em, 9cqi);
+}
+
+.logo {
+  display: block;
+  flex-shrink: 0;
+  width: calc(3em + var(--client-logo-growth, 0px));
+  height: calc(4em + var(--client-logo-growth, 0px));
+  object-fit: contain;
+}
+
+.support {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}

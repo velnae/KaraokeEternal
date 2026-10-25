@@ -54,3 +54,26 @@
 .lastChar {
   letter-spacing: normal;
 }
+
+.customized {
+  flex: initial;
+  min-width: 0;
+  width: 10em;
+  text-align: center;
+
+  .title {
+    display: block;
+    line-height: 1.2;
+  }
+
+  .eternal {
+    letter-spacing: .35em;
+  }
+
+  .subtitleText {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

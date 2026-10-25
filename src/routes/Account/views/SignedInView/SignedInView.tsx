@@ -35,6 +35,7 @@ const SignedInView = () => {
             <a href='#admin-rooms'>Salas</a>
             <a href='#admin-users'>Usuarios</a>
             <a href='#admin-prefs'>Ajustes</a>
+            <a href='#admin-branding'>Marca del cliente</a>
             <a href='#admin-account'>Mi cuenta</a>
           </nav>
           <section id='admin-rooms'><Rooms /></section>
