@@ -1,6 +1,7 @@
 import getLogger from './lib/Log.js'
 import path from 'path'
 import getIPAddress from './lib/getIPAddress.js'
+import { createClientIndex, preventDevelopmentCaching } from './lib/clientAssets.js'
 import http from 'http'
 import fs from 'fs'
 import { promisify } from 'util'
@@ -121,6 +122,8 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   })
 
   // middleware error handler
+  if (env.NODE_ENV === 'development') app.use(preventDevelopmentCaching)
+
   app.use(async (ctx, next) => {
     try {
       await next()
@@ -185,33 +188,11 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(userRouter.routes())
   app.use(baseRouter.routes())
 
-  // serve index.html with dynamic base tag at the main SPA routes
-  const createIndexMiddleware = (content) => {
-    const indexRoutes = [
-      urlPath,
-      ...['account', 'library', 'queue', 'requests', 'player'].map(r => urlPath + r + '/'),
-    ]
-
-    content = content.replace('<base href="/">', `<base href="${urlPath}">`)
-
-    return async (ctx, next) => {
-      // use a trailing slash for matching purposes
-      const reqPath = ctx.request.path.replace(/\/?$/, '/')
-
-      if (!indexRoutes.includes(reqPath)) {
-        return next()
-      }
-
-      ctx.set('content-type', 'text/html')
-      ctx.body = content
-      ctx.status = 200
-    }
-  }
-
   if (env.NODE_ENV !== 'development') {
     // make sure we handle index.html before koaStatic,
     // otherwise it'll be served without dynamic base tag
-    app.use(createIndexMiddleware(await promisify(fs.readFile)(indexFile, 'utf8')))
+    const indexContent = await promisify(fs.readFile)(indexFile, 'utf8')
+    app.use(createClientIndex(urlPath, () => indexContent))
 
     // serve build and asset folders
     app.use(koaMount(urlPath, koaStatic(env.KES_PATH_WEBROOT)))
@@ -229,18 +210,18 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   // eslint-disable-next-line n/no-missing-import
   const { default: webpackConfig } = await import('../config/webpack.config.js')
   const compiler = webpack(webpackConfig)
+  let indexContent = ''
 
-  compiler.hooks.done.tap('indexPlugin', async () => {
-    const indexContent = await new Promise((resolve, reject) => {
+  compiler.hooks.done.tapPromise('indexPlugin', async () => {
+    indexContent = await new Promise<string>((resolve, reject) => {
       compiler.outputFileSystem.readFile(indexFile, 'utf8', (err, result) => {
         if (err) return reject(err)
-        return resolve(result)
+        return resolve(String(result))
       })
     })
 
-    // @todo make this less hacky
     if (!server) {
-      app.use(createIndexMiddleware(indexContent))
+      app.use(createClientIndex(urlPath, () => indexContent))
       createServer()
     }
   })

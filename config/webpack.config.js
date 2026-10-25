@@ -22,7 +22,7 @@ let config = {
     ].filter(Boolean),
   },
   output: {
-    filename: __DEV__ ? '[name].js' : '[name].[fullhash].js',
+    filename: '[name].[fullhash].js',
     path: path.join(baseDir, 'build', 'client'),
     clean: true,
   },
@@ -54,8 +54,8 @@ let config = {
     })),
     new CaseSensitivePathsPlugin(),
     new MiniCssExtractPlugin({
-      filename: __DEV__ ? '[name].css' : '[name].[fullhash].css',
-      chunkFilename: __DEV__ ? '[id].css' : '[id].[fullhash].css',
+      filename: '[name].[fullhash].css',
+      chunkFilename: '[id].[fullhash].css',
     }),
     __DEV__ && new webpack.HotModuleReplacementPlugin(),
     __DEV__ && new ReactRefreshWebpackPlugin({ overlay: { sockIntegration: 'whm' } }),
