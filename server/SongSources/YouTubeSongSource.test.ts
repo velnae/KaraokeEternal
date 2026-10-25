@@ -48,7 +48,58 @@ describe('YouTubeSongSource', () => {
       isPlayable: true,
     })
     expect(String(fetchImpl.mock.calls[0][0])).toContain('key=server-secret')
+    expect(Object.fromEntries(new URL(fetchImpl.mock.calls[0][0]).searchParams)).toMatchObject({
+      part: 'snippet',
+      type: 'video',
+      q: 'karaoke song',
+      regionCode: 'PE',
+      safeSearch: 'moderate',
+      videoEmbeddable: 'true',
+      videoSyndicated: 'true',
+    })
+    expect(new URL(fetchImpl.mock.calls[1][0]).searchParams.get('part')).toBe('snippet,contentDetails,status')
     expect(JSON.stringify(results)).not.toContain('server-secret')
+  })
+
+  it.each([
+    { name: 'age restricted', details: { contentRating: { ytRating: 'ytAgeRestricted' } }, eligible: false },
+    { name: 'missing content rating', details: {}, eligible: true },
+    { name: 'missing YouTube rating', details: { contentRating: {} }, eligible: true },
+    { name: 'empty YouTube rating', details: { contentRating: { ytRating: '' } }, eligible: true },
+    { name: 'allowed country', details: { regionRestriction: { allowed: ['PE'] } }, eligible: true },
+    { name: 'excluded country', details: { regionRestriction: { allowed: ['US'] } }, eligible: false },
+    { name: 'empty allowed countries', details: { regionRestriction: { allowed: [] } }, eligible: false },
+    { name: 'blocked country', details: { regionRestriction: { blocked: ['PE'] } }, eligible: false },
+    { name: 'other blocked country', details: { regionRestriction: { blocked: ['US'] } }, eligible: true },
+    { name: 'empty blocked countries', details: { regionRestriction: { blocked: [] } }, eligible: true },
+    { name: 'not embeddable', status: { embeddable: false }, eligible: false },
+    { name: 'private', status: { privacyStatus: 'private' }, eligible: false },
+    { name: 'not processed', status: { uploadStatus: 'uploaded' }, eligible: false },
+  ])('keeps search and resolution consistent for $name', async ({ details, status, eligible }) => {
+    const candidate = playableVideo('CCCCCCCCCCC')
+    const video = {
+      ...candidate,
+      contentDetails: { ...candidate.contentDetails, ...details },
+      status: { ...candidate.status, ...status },
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [
+        { id: { videoId: 'BBBBBBBBBBB' } },
+        { id: { videoId: video.id } },
+        { id: { videoId: 'AAAAAAAAAAA' } },
+      ] }))
+      .mockResolvedValueOnce(jsonResponse({ items: [playableVideo('AAAAAAAAAAA'), video, playableVideo('BBBBBBBBBBB')] }))
+      .mockResolvedValueOnce(jsonResponse({ items: [video] }))
+    const source = createYouTubeSongSource({ apiKey: 'server-secret', fetchImpl, regionCode: 'PE' })
+
+    const results = await source.search('song', { roomId: 1 })
+    expect(results.map(result => result.sourceId)).toEqual(eligible
+      ? ['BBBBBBBBBBB', video.id, 'AAAAAAAAAAA']
+      : ['BBBBBBBBBBB', 'AAAAAAAAAAA'])
+    const resolved = await source.resolve(video.id, { roomId: 1 })
+    expect(resolved).toMatchObject({ sourceId: video.id, isPlayable: eligible })
+    expect(JSON.stringify({ results, resolved })).not.toContain('server-secret')
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
   })
 
   it('resolves a video but marks non-embeddable and region-blocked videos unplayable', async () => {

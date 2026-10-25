@@ -24,6 +24,7 @@ interface YouTubeVideo {
   }
   contentDetails?: {
     duration?: string
+    contentRating?: { ytRating?: string }
     regionRestriction?: {
       allowed?: string[]
       blocked?: string[]
@@ -117,6 +118,7 @@ export const createYouTubeSongSource = ({
     const isPlayable = video.status?.embeddable === true
       && video.status.privacyStatus === 'public'
       && video.status.uploadStatus === 'processed'
+      && video.contentDetails?.contentRating?.ytRating !== 'ytAgeRestricted'
       && isRegionAllowed
       && !isRegionBlocked
 

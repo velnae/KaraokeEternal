@@ -323,7 +323,7 @@ describe('YouTube request creation', () => {
     expect(acknowledge).toHaveBeenCalledWith({ type: QUEUE_ADD + '_SUCCESS' })
   })
 
-  it('rejects an unresolvable or non-embeddable YouTube video', async () => {
+  it.each([false, true])('rejects an unresolvable or unplayable YouTube video (isAdmin=%s)', async (isAdmin) => {
     vi.spyOn(youtubeSongSource, 'resolve')
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(resolvedYouTubeSong(false))
@@ -331,7 +331,7 @@ describe('YouTube request creation', () => {
     vi.spyOn(Rooms, 'get').mockReturnValue({ result: [1], entities: { 1: { prefs: {} } } })
     vi.spyOn(Queue, 'countPending').mockReturnValue(0)
     const add = vi.spyOn(Queue, 'add')
-    const { socket } = createSocket()
+    const { socket } = createSocket({ isAdmin })
 
     for (const sourceId of ['BBBBBBBBBBB', 'CCCCCCCCCCC']) {
       const acknowledge = vi.fn()
