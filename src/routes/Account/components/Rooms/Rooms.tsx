@@ -8,9 +8,11 @@ import { closeRoomEditor, fetchRooms, filterByStatus, openRoomEditor } from 'sto
 import { filterByRoom } from '../../modules/users'
 import getRoomList from '../../selectors/getRoomList'
 import styles from './Rooms.css'
+import Tables from './Tables/Tables'
 
 const Rooms = () => {
   const [editorRoom, setEditorRoom] = useState(null)
+  const [tablesRoomId, setTablesRoomId] = useState<number | null>(null)
 
   const { isEditorOpen, filterStatus } = useAppSelector(state => state.rooms)
   const rooms = useAppSelector(getRoomList)
@@ -35,6 +37,10 @@ const Rooms = () => {
     dispatch(fetchRooms())
   }, [dispatch])
 
+  if (tablesRoomId && rooms.entities[tablesRoomId]) {
+    return <Tables key={tablesRoomId} room={rooms.entities[tablesRoomId]} onClose={() => setTablesRoomId(null)} />
+  }
+
   const rows = rooms.result.map((roomId) => {
     const room = rooms.entities[roomId]
     return (
@@ -54,6 +60,7 @@ const Rooms = () => {
           )}
         </td>
         <td>{formatDateTime(new Date(room.dateCreated * 1000))}</td>
+        <td><Button onClick={() => setTablesRoomId(roomId)}>Mesas</Button></td>
       </tr>
     )
   })
@@ -75,6 +82,7 @@ const Rooms = () => {
               <th>Nombre</th>
               <th>Estado</th>
               <th>Fecha de creación</th>
+              <th>Mesas</th>
             </tr>
           </thead>
           <tbody>

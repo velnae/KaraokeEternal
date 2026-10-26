@@ -27,6 +27,11 @@ const QueueList = () => {
   const user = useAppSelector(state => state.user)
   const waits = useAppSelector(getWaits)
   const [filter, setFilter] = useState<QueueFilter>('queue')
+  const [tableFilter, setTableFilter] = useState('all')
+  const tableOptions = new Map<number, string>()
+  for (const item of Object.values(rawQueue.entities)) {
+    if (item.isOptimistic !== true && item.tableId) tableOptions.set(item.tableId, item.tableLabelSnapshot || `Mesa ${item.tableId}`)
+  }
 
   const pendingIds = rawQueue.result.filter((queueId) => {
     const item = rawQueue.entities[queueId]
@@ -75,6 +80,7 @@ const QueueList = () => {
   const items = result.map((qId) => {
     const item = rawQueue.entities[qId]
     if (item.isOptimistic === true) return null
+    if (user.isAdmin && tableFilter !== 'all' && String(item.tableId ?? 'none') !== tableFilter) return null
 
     const localSong = typeof item.songId === 'number' ? songs.entities[item.songId] : undefined
     const duration = item.durationSeconds ?? localSong?.duration ?? 0
@@ -125,6 +131,11 @@ const QueueList = () => {
     <>
       {user.isAdmin && (
         <div className={styles.filters}>
+          <select aria-label='Filtrar por mesa' value={tableFilter} onChange={e => setTableFilter(e.target.value)}>
+            <option value='all'>Todas las mesas</option>
+            <option value='none'>Sin mesa</option>
+            {[...tableOptions].map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </select>
           <Button
             className={clsx(styles.filter, filter === 'queue' && styles.active)}
             aria-pressed={filter === 'queue'}

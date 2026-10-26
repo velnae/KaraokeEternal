@@ -8,6 +8,7 @@ import getRoundRobinQueue from 'routes/Queue/selectors/getRoundRobinQueue'
 import { queuePush } from 'routes/Queue/modules/queue'
 import { QUEUE_ADD, QUEUE_REMOVE } from 'shared/actionTypes'
 import type { QueueItem } from 'shared/types'
+import { tableMode } from 'shared/tableAccess'
 import { normalizeQueuePrefs } from 'shared/queueRules'
 import socket from 'lib/socket'
 import Button from 'components/Button/Button'
@@ -104,6 +105,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             <div>
               <h2 id={`request-title-${item.queueId}`} translate='no'>{item.title}</h2>
               <p translate='no'>{personal ? item.artistOrChannel : item.userDisplayName}</p>
+              {item.tableLabelSnapshot && <p>{item.tableLabelSnapshot}</p>}
             </div>
           </div>
           {personal && item.status === 'FAILED' && <Link className={styles.textAction} to='/library'>Buscar otra versión</Link>}
@@ -130,6 +132,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
         </Link>
       </div>
       {!connected && <p role='status' className={styles.notice}>Sin conexión · Reconectando…</p>}
+      {user.tableLabel && tableMode(room?.prefs) !== 'OFF' && <p className={styles.notice}>{user.tableLabel}</p>}
       {room?.status === 'closed' && <p role='status' className={styles.notice}>Sala cerrada</p>}
       {activePlayer && next?.userId === user.userId && <p role='status' className={styles.notice}>Tu turno sigue</p>}
 

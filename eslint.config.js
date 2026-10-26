@@ -60,6 +60,10 @@ export default defineConfig(
   },
   // server-only config
   {
+    files: ['config/*.e2e.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
     files: ['server/**/*.{ts,js}', 'config/**/*.{js,ts}', '*.js'],
     ...pluginNode.configs['flat/recommended-module'],
     rules: {

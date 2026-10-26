@@ -5,6 +5,7 @@ import getLogger from '../lib/Log.js'
 import Rooms, { STATUSES } from '../Rooms/Rooms.js'
 import { ValidationError } from '../lib/Errors.js'
 import { participantPrefs } from './participantPrefs.js'
+import { enforceConnectedParticipants } from '../Tables/admission.js'
 
 interface RequestWithBody {
   body: Record<string, unknown>
@@ -61,6 +62,7 @@ router.put('/:roomId', async (ctx) => {
 
   try {
     await Rooms.set(roomId, (ctx.request as unknown as RequestWithBody).body)
+    enforceConnectedParticipants(ctx.io)
   } catch (err) {
     if (err instanceof ValidationError) ctx.throw(422, err.message)
     throw err
@@ -113,6 +115,7 @@ router.delete('/:roomId', (ctx) => {
     WHERE roomId = ${roomId}
   `
   db.run(String(roomQuery), roomQuery.parameters)
+  enforceConnectedParticipants(ctx.io)
 
   log.verbose('%s deleted roomId %s', ctx.user.name, roomId)
 

@@ -6,6 +6,7 @@ import AccountView from 'routes/Account/views/AccountView'
 import LibraryView from 'routes/Library/views/LibraryView'
 import QueueView from 'routes/Queue/views/QueueView'
 import ParticipantView from 'routes/Participant/ParticipantView'
+import JoinView from 'routes/Account/views/JoinView'
 
 const PlayerView = React.lazy(() => import('routes/Player/views/PlayerView'))
 
@@ -13,6 +14,7 @@ const AppRoutes = () => {
   const isAdmin = useAppSelector(state => state.user.isAdmin)
   return (
     <Routes>
+      <Route path='/join' element={<JoinView />} />
       <Route path='/account' element={<AccountView />} />
       <Route
         path='/library'
@@ -75,8 +77,10 @@ const RequireAuth = ({
   path,
   redirectTo,
 }: RequireAuthProps) => {
-  const { isAdmin, userId } = useAppSelector(state => state.user)
+  const { isAdmin, userId, tableAccessError } = useAppSelector(state => state.user)
   const location = useLocation()
+
+  if (!isAdmin && tableAccessError) return <Navigate to='/join' replace />
 
   if (path === '/player' && !isAdmin) {
     return <Navigate to='/' replace />

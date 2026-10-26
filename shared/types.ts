@@ -16,6 +16,8 @@ export interface Song {
 }
 
 export interface QueueItem {
+  tableId?: number | null
+  tableLabelSnapshot?: string | null
   queueId: number
   songId: number | null
   userId: number
@@ -48,6 +50,7 @@ export interface OptimisticQueueItem {
 }
 
 export interface IRoomPrefs {
+  tables?: { mode: import('./tableAccess.js').TableMode }
   qr: {
     isEnabled: boolean
     opacity: number

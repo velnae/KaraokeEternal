@@ -4,7 +4,7 @@ import { RouterProvider } from 'react-router'
 import store from './store/store'
 import socket from 'lib/socket'
 import AppRouter from 'lib/AppRouter'
-import { connectSocket } from './store/modules/user'
+import { connectSocket, fetchAccount } from './store/modules/user'
 import Persistor from 'store/Persistor'
 
 Persistor.init(store, () => {
@@ -18,6 +18,12 @@ Persistor.init(store, () => {
 
 socket.on('reconnect_attempt', () => {
   store.dispatch(connectSocket())
+})
+
+// A different tab can change the cookie's participation without changing this
+// tab's persisted identity. Refresh display context after every authenticated connection.
+socket.on('connect', () => {
+  void store.dispatch(fetchAccount())
 })
 
 // ========================================================

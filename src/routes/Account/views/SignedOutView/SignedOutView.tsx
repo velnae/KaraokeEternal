@@ -11,8 +11,9 @@ import Create from './Create/Create'
 import SignIn from './SignIn/SignIn'
 import theme from 'styles/karaokeTheme.css'
 import styles from './SignedOutView.css'
+import { tableMode, type TableInvitation } from 'shared/tableAccess'
 
-const SignedOutView = () => {
+const SignedOutView = ({ invitation, destination }: { invitation?: string, destination?: TableInvitation }) => {
   const userSectionRef = useRef<HTMLDivElement | null>(null)
   const firstFieldRef = useRef<HTMLInputElement | null>(null)
 
@@ -42,7 +43,7 @@ const SignedOutView = () => {
   if (rooms !== prevRooms) {
     setPrevRooms(rooms)
     const searchParams = new URLSearchParams(location.search)
-    const roomIdParam = searchParams.get('roomId')
+    const roomIdParam = destination ? String(destination.roomId) : searchParams.get('roomId')
     const id = roomIdParam ? parseInt(roomIdParam, 10) : null
     const password = searchParams.get('password')
 
@@ -91,6 +92,7 @@ const SignedOutView = () => {
       password: password,
       roomId,
       roomPassword,
+      invitation,
     }))
   }
 
@@ -104,6 +106,7 @@ const SignedOutView = () => {
     data.append('roomId', String(roomId))
     data.append('roomPassword', roomPassword)
     data.append('name', name.trim())
+    if (invitation) data.append('invitation', invitation)
 
     if (typeof image !== 'undefined') {
       data.append('image', image)
@@ -122,8 +125,9 @@ const SignedOutView = () => {
     return !!rooms.entities[roomId]?.prefs?.roles?.[roleId]?.allowNew
   }
 
-  const allowNewGuest = getAllowed('guest')
-  const allowNewStandard = getAllowed('standard')
+  const requiresTable = !invitation && tableMode(rooms.entities[roomId]?.prefs) === 'REQUIRED_QR'
+  const allowNewGuest = getAllowed('guest') && !requiresTable
+  const allowNewStandard = getAllowed('standard') && !requiresTable
   const allowNew = allowNewStandard || allowNewGuest
 
   useEffect(() => {
@@ -133,6 +137,8 @@ const SignedOutView = () => {
   return (
     <div className={clsx(theme.theme, styles.container)}>
       <ClientBranding className={styles.logo} />
+      {destination && <h2>{destination.tableLabel}</h2>}
+      {requiresTable && <p role='status'>Escanee el QR de su mesa para entrar como cantante.</p>}
 
       {showRoomSection && (
         <>
@@ -153,7 +159,7 @@ const SignedOutView = () => {
           <>
             {!showRoomSection && <h1>{roomId ? rooms.entities[roomId]?.name : 'Entrar al karaoke'}</h1>}
             {isLoadingRooms && <p role='status'>Buscando salas…</p>}
-            {!isLoadingRooms && !allowNewGuest && <p role='status'>{roomId ? 'Esta sala no admite invitados.' : 'No hay salas abiertas.'}</p>}
+            {!isLoadingRooms && !allowNewGuest && !requiresTable && <p role='status'>{roomId ? 'Esta sala no admite invitados.' : 'No hay salas abiertas.'}</p>}
           </>
         )}
         {mode !== 'guest' && (allowNew

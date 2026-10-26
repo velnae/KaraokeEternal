@@ -7,6 +7,7 @@ import { RootState } from 'store/store'
 import HttpApi from 'lib/HttpApi'
 import Persistor from 'store/Persistor'
 import { fetchPrefs } from './prefs'
+import { TABLE_ACCESS_REQUIRED } from 'shared/tableAccess'
 import {
   ACCOUNT_RECEIVE,
   ACCOUNT_REQUEST,
@@ -19,7 +20,6 @@ import {
 } from 'shared/actionTypes'
 
 const api = new HttpApi('')
-const basename = new URL(document.baseURI).pathname
 
 const receiveAccount = createAction<object>(ACCOUNT_RECEIVE)
 
@@ -34,21 +34,25 @@ export const login = createAsyncThunk(
     const user = await api.post('login', {
       body: creds,
     })
+    sessionStorage.removeItem('tableInvitation')
 
     // signing in can cause additional reducers to be injected and
     // trigger rehydration with stale data, so purge here first
-    Persistor.get().purge()
+    await Persistor.get().purge()
 
     thunkAPI.dispatch(receiveAccount(user))
     thunkAPI.dispatch(fetchPrefs())
     thunkAPI.dispatch(connectSocket())
     socket.open()
+    await Persistor.get().flush()
 
     // redirect in query string?
     const redirect = new URLSearchParams(window.location.search).get('redirect')
 
     if (redirect) {
-      AppRouter.navigate(basename.replace(/\/$/, '') + redirect)
+      AppRouter.navigate(redirect)
+    } else if (window.location.pathname.endsWith('/join')) {
+      AppRouter.navigate('/library', { replace: true })
     }
   },
 )
@@ -69,7 +73,7 @@ export const requestLogout = createAsyncThunk(
     }
 
     thunkAPI.dispatch(logout())
-    Persistor.get().purge()
+    await Persistor.get().purge()
     socket.close()
   },
 )
@@ -85,15 +89,17 @@ export const createAccount = createAsyncThunk<void, FormData, { state: RootState
     const user = await api.post(isFirstRun ? 'setup' : 'user', {
       body: data,
     })
+    sessionStorage.removeItem('tableInvitation')
 
     // signing in can cause additional reducers to be injected and
     // trigger rehydration with stale data, so purge here first
-    Persistor.get().purge()
+    await Persistor.get().purge()
 
     thunkAPI.dispatch(receiveAccount(user))
     thunkAPI.dispatch(fetchPrefs())
     thunkAPI.dispatch(connectSocket())
     socket.open()
+    await Persistor.get().flush()
 
     // redirect in query string?
     const redirect = new URLSearchParams(window.location.search).get('redirect')
@@ -101,7 +107,9 @@ export const createAccount = createAsyncThunk<void, FormData, { state: RootState
     if (data.get('role') === 'guest') {
       AppRouter.navigate('/library')
     } else if (redirect) {
-      AppRouter.navigate(basename.replace(/\/$/, '') + redirect)
+      AppRouter.navigate(redirect)
+    } else if (window.location.pathname.endsWith('/join')) {
+      AppRouter.navigate('/library', { replace: true })
     }
   },
 )
@@ -126,14 +134,41 @@ export const updateAccount = createAsyncThunk<void, FormData, { state: RootState
 // ------------------------------------
 // Request account (does not refresh JWT)
 // ------------------------------------
-export const fetchAccount = createAsyncThunk(
+export const fetchAccount = createAsyncThunk<void, void, { state: RootState }>(
   ACCOUNT_REQUEST,
   async (_, thunkAPI) => {
+    const identity = thunkAPI.getState().user
     try {
       const user = await api.get('user')
-      thunkAPI.dispatch(receiveAccount(user))
-    } catch {
-      // ignore errors
+      // A delayed response must not replace a newer login or table transfer.
+      if (thunkAPI.getState().user === identity) thunkAPI.dispatch(receiveAccount(user))
+    } catch (error) {
+      const status = (error as { status?: number }).status
+      if ((status === 401 || status === 404) && thunkAPI.getState().user === identity) {
+        socket.close()
+        thunkAPI.dispatch(logout())
+        await Persistor.get().purge()
+      }
+      // Keep the identity on transient network/server errors so reconnect can retry.
+    }
+  },
+)
+
+export const joinTable = createAsyncThunk(
+  'user/JOIN_TABLE',
+  async (body: { roomId: number, invitation?: string, roomPassword: string }, { dispatch }) => {
+    socket.close()
+    try {
+      const user = await api.post('table-join', { body })
+      dispatch(receiveAccount(user))
+      await Persistor.get().flush()
+      sessionStorage.removeItem('tableInvitation')
+      await dispatch(connectSocket())
+      socket.open()
+      AppRouter.navigate('/library', { replace: true })
+    } catch (error) {
+      socket.open()
+      throw error
     }
   },
 )
@@ -160,6 +195,11 @@ export const connectSocket = createAsyncThunk<void, void, { state: RootState }>(
 // Reducer
 // ------------------------------------
 interface UserState {
+  participantSessionId: string | null
+  tableId: number | null
+  tableLabel: string | null
+  expiresAt: number | null
+  tableAccessError: string | null
   userId: number | null
   username: string | null
   name: string | null
@@ -171,6 +211,11 @@ interface UserState {
 }
 
 const initialState: UserState = {
+  participantSessionId: null,
+  tableId: null,
+  tableLabel: null,
+  expiresAt: null,
+  tableAccessError: null,
   userId: null,
   username: null,
   name: null,
@@ -193,6 +238,11 @@ const userReducer = createReducer(initialState, (builder) => {
     .addCase(SOCKET_AUTH_ERROR, () => ({
       ...initialState,
     }))
+    .addCase(createAction<string>(TABLE_ACCESS_REQUIRED), (state, action) => {
+      state.tableAccessError = action.payload
+      state.tableLabel = null
+      state.tableId = null
+    })
 })
 
 export default persistReducer({

@@ -18,6 +18,7 @@ import styles from './QueueItem.css'
 const LONG_PRESS_THRESHOLD_MS = 700
 
 interface QueueItemProps {
+  tableLabelSnapshot?: string | null
   artist: string
   errorMessage: string
   isAdmin: boolean
@@ -52,6 +53,7 @@ interface QueueItemProps {
 }
 
 const QueueItem = ({
+  tableLabelSnapshot,
   artist,
   errorMessage,
   isAdmin,
@@ -186,6 +188,13 @@ const QueueItem = ({
           </div>
           <div className={clsx(styles.user, isOwner && styles.isOwner)}>
             {userDisplayName}
+            {tableLabelSnapshot && (
+              <span>
+                {' '}
+                ·
+                {tableLabelSnapshot}
+              </span>
+            )}
           </div>
           <div className={styles.badges}>
             <div className={clsx(styles.status, (status === 'REJECTED' || status === 'FAILED') && styles.rejected)}>

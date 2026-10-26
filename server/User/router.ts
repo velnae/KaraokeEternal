@@ -9,6 +9,7 @@ import Prefs from '../Prefs/Prefs.js'
 import Queue from '../Queue/Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import User from '../User/User.js'
+import { emptyTableContext, enforceConnectedParticipants, joinTable, participation, revokeParticipation, validateInvitation } from '../Tables/admission.js'
 import { QUEUE_PUSH } from '../../shared/actionTypes.js'
 import {
   USERNAME_MIN_LENGTH,
@@ -37,8 +38,21 @@ const { sign: jwtSign } = jsonWebToken
 // Takes the "raw" object returned by the User class and massages it
 // into the shape used by the client (state.user) and in server-side
 // routers. Should be used to generate the JWT.
-const createUserCtx = (user, roomId) => {
+const createUserCtx = (user, roomId, sessionId?: string | null) => {
+  const identity = { userId: user.userId, roomId: parseInt(roomId, 10) || null, isAdmin: user.role === 'admin', participantSessionId: sessionId }
+  let tableContext = emptyTableContext()
+  let tableAccessError: string | null = null
+  if (!identity.isAdmin && identity.roomId) {
+    try {
+      tableContext = participation(identity)
+    } catch (error) {
+      tableAccessError = (error as Error).message
+    }
+  }
   return {
+    ...tableContext,
+    participantSessionId: sessionId ?? null,
+    tableAccessError,
     dateCreated: user.dateCreated,
     dateUpdated: user.dateUpdated,
     isAdmin: user.role === 'admin',
@@ -81,7 +95,20 @@ router.post('/login', async (ctx) => {
     db.run(String(query), query.parameters)
   }
 
-  const userCtx = createUserCtx(user, roomId)
+  let tableContext
+  try {
+    tableContext = joinTable({
+      userId: user.userId,
+      roomId,
+      isAdmin: user.role === 'admin',
+      participantSessionId: ctx.user?.userId === user.userId ? ctx.user.participantSessionId : undefined,
+    }, req.body.invitation)
+  } catch (error) {
+    ctx.throw(403, (error as Error).message)
+  }
+  const userCtx = { ...createUserCtx(user, roomId), ...tableContext, tableAccessError: null }
+  if (ctx.user?.participantSessionId !== tableContext.participantSessionId) revokeParticipation(ctx.user?.participantSessionId)
+  enforceConnectedParticipants(ctx.io)
 
   // create JWT
   const token = jwtSign(userCtx, ctx.jwtKey)
@@ -97,7 +124,8 @@ router.post('/login', async (ctx) => {
 
 // logout
 router.get('/logout', (ctx) => {
-  // @todo force socket room leave
+  revokeParticipation(ctx.user?.participantSessionId)
+  enforceConnectedParticipants(ctx.io)
   ctx.cookies.set('keToken', '')
   ctx.status = 200
   ctx.body = {}
@@ -105,6 +133,7 @@ router.get('/logout', (ctx) => {
 
 // get own account (helps sync account changes across devices)
 router.get('/user', (ctx) => {
+  ctx.set('Cache-Control', 'no-store')
   if (typeof ctx.user.userId !== 'number') {
     ctx.throw(401)
   }
@@ -116,7 +145,23 @@ router.get('/user', (ctx) => {
     ctx.throw(404)
   }
 
-  ctx.body = createUserCtx(user, ctx.user.roomId)
+  ctx.body = createUserCtx(user, ctx.user.roomId, ctx.user.participantSessionId)
+})
+
+// Reuse account identity when a guest scans another table or renews participation.
+router.post('/table-join', async (ctx) => {
+  const user = typeof ctx.user.userId === 'number' ? User.getById(ctx.user.userId, true) : false
+  if (!user || user.role === 'admin') return ctx.throw(403, 'Ingrese como cantante para vincular una mesa')
+  const req = ctx.request as unknown as RequestWithBody
+  const roomId = Number(req.body.roomId)
+  try {
+    await Rooms.validate(roomId, req.body.roomPassword)
+    const tableContext = joinTable({ userId: user.userId, roomId, participantSessionId: ctx.user.participantSessionId }, req.body.invitation)
+    const userCtx = { ...createUserCtx(user, roomId), ...tableContext, tableAccessError: null }
+    ctx.cookies.set('keToken', jwtSign(userCtx, ctx.jwtKey), { httpOnly: true, sameSite: 'lax' })
+    enforceConnectedParticipants(ctx.io)
+    ctx.body = userCtx
+  } catch (error) { ctx.throw(403, (error as Error).message) }
 })
 
 // list all users (admin only)
@@ -328,7 +373,7 @@ router.put('/user/:userId', async (ctx) => {
     }
   }
 
-  const userCtx = createUserCtx(updatedUser, ctx.user.roomId || null)
+  const userCtx = createUserCtx(updatedUser, ctx.user.roomId || null, ctx.user.participantSessionId)
 
   // create JWT
   // @todo: this should not extend the JWT expiry date
@@ -366,6 +411,7 @@ router.post('/user', async (ctx) => {
         req.body.roomPassword,
         { role: req.body.role },
       )
+      validateInvitation(Number(req.body.roomId), req.body.invitation)
     } catch (err) {
       ctx.throw(401, err.message)
     }
@@ -383,9 +429,11 @@ router.post('/user', async (ctx) => {
     await deleteFile(imageFile.filepath)
   }
 
-  // create user
+  // Revalidate after asynchronous account creation; clean up a failed admission.
+  let createdUserId: number | undefined
   try {
     const userId = await User.create({ ...req.body, image } as any, req.body.role)
+    createdUserId = userId
 
     // if admin creating another user, we're done
     if (ctx.user.isAdmin) {
@@ -400,7 +448,9 @@ router.post('/user', async (ctx) => {
       throw new Error('No se encontró el usuario')
     }
 
-    const userCtx = createUserCtx(user, req.body.roomId || null)
+    const roomId = Number(req.body.roomId)
+    const tableContext = joinTable({ userId, roomId }, req.body.invitation)
+    const userCtx = { ...createUserCtx(user, roomId), ...tableContext, tableAccessError: null }
 
     // create JWT
     const token = jwtSign(userCtx, ctx.jwtKey)
@@ -413,6 +463,7 @@ router.post('/user', async (ctx) => {
 
     ctx.body = userCtx
   } catch (err) {
+    if (createdUserId !== undefined && !ctx.user.isAdmin) User.remove(createdUserId)
     ctx.throw(403, err.message)
   }
 })

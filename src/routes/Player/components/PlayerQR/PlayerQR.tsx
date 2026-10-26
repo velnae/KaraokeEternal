@@ -5,6 +5,7 @@ import { CSSTransition } from 'react-transition-group'
 import { QRCode } from 'react-qrcode-logo'
 import type { QueueItem, IRoomPrefs } from 'shared/types'
 import styles from './PlayerQR.css'
+import { tableMode } from 'shared/tableAccess'
 
 const MIN_STATIC_MS = 10000 // 10 sec
 const MAX_STATIC_MS = 180000 // 3 min
@@ -23,6 +24,7 @@ const PlayerQR = ({ height, prefs, queueItem }: PlayerQRProps) => {
   const [alternate, setAlternate] = useState(false)
   const { isPlaying } = useAppSelector(state => state.player)
   const { roomId } = useAppSelector(state => state.user)
+  const strictTables = useAppSelector(state => tableMode(state.rooms.entities[roomId]?.prefs) === 'REQUIRED_QR')
 
   const scheduleNextToggle = useCallback(() => {
     if (maxTimerID.current) {
@@ -84,6 +86,8 @@ const PlayerQR = ({ height, prefs, queueItem }: PlayerQRProps) => {
 
   const size = Math.round(height * (0.05 + (prefs.size ?? 0.5) / 5)) // min: 5vh, max: 25vh
   const quietZoneSize = 5 + (10 * (prefs.size ?? 0.5)) // min: 5px, max: 15px
+
+  if (strictTables) return <div className={styles.container}>Para cantar, escanee el QR de su mesa</div>
 
   return (
     <CSSTransition

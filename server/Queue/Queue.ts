@@ -23,6 +23,7 @@ class Queue {
     origin = 'PARTICIPANT',
     status = 'APPROVED',
     requestId,
+    tableContext,
   }: {
     roomId: number
     song: ResolvedSong
@@ -30,6 +31,7 @@ class Queue {
     origin?: QueueItemOrigin
     status?: 'PENDING_APPROVAL' | 'APPROVED'
     requestId?: string
+    tableContext?: import('../../shared/tableAccess.js').TableContext
   }): void {
     const validationError = getResolvedSongValidationError(song)
     if (validationError) throw new Error(validationError)
@@ -62,6 +64,9 @@ class Queue {
     fields.set('dateCreated', now)
     fields.set('dateUpdated', now)
     fields.set('requestId', requestId ?? null)
+    fields.set('tableId', tableContext?.tableId ?? null)
+    fields.set('participantSessionId', tableContext?.participantSessionId ?? null)
+    fields.set('tableLabelSnapshot', tableContext?.tableLabel ?? null)
 
     const query = sql`
       INSERT INTO queue ${sql.tuple(Array.from(fields.keys()).map(sql.column))}
@@ -97,6 +102,7 @@ class Queue {
         queue.origin, queue.source, queue.status, queue.externalId,
         queue.title, queue.artistOrChannel, queue.durationSeconds, queue.thumbnailUrl,
         queue.dateCreated, queue.dateUpdated,
+        queue.tableId, queue.tableLabelSnapshot,
         media.mediaId, media.relPath, media.rgTrackGain, media.rgTrackPeak,
         users.name AS userDisplayName, users.dateUpdated AS userDateUpdated,
         paths.pathId, paths.data AS pathData,

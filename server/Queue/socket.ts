@@ -1,5 +1,6 @@
 import Queue from './Queue.js'
 import Rooms from '../Rooms/Rooms.js'
+import { participation } from '../Tables/admission.js'
 import {
   QUEUE_ADD,
   QUEUE_APPROVE,
@@ -113,7 +114,9 @@ const ACTION_HANDLERS = {
       return acknowledge({ type: QUEUE_ADD + '_ERROR', error: `Se alcanzó el máximo de solicitudes de canciones pendientes (${queuePrefs.maxPendingPerParticipant})` })
     }
 
+    const tableContext = participation(sock.user, { ...room, status: room.status ?? 'open' })
     Queue.add({
+      ...(tableContext.tableId ? { tableContext } : {}),
       roomId,
       song,
       userId: sock.user.userId,

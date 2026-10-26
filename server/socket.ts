@@ -12,6 +12,8 @@ import { participantPrefs } from './Rooms/participantPrefs.js'
 import Queue from './Queue/Queue.js'
 import QueueSocket from './Queue/socket.js'
 import SongSourcesSocket from './SongSources/socket.js'
+import { participation } from './Tables/admission.js'
+import { TABLE_ACCESS_REQUIRED } from '../shared/tableAccess.js'
 
 import {
   LIBRARY_PUSH,
@@ -63,7 +65,24 @@ export default function (io, jwtKey) {
     }
 
     // attach disconnect handler
+    let expiryTimer: ReturnType<typeof setTimeout> | undefined
+    const checkAdmission = () => {
+      try {
+        return participation(sock.user)
+      } catch (error) {
+        sock.emit('action', { type: TABLE_ACCESS_REQUIRED, payload: (error as Error).message })
+        sock.disconnect(true)
+        return null
+      }
+    }
+    const tableContext = checkAdmission()
+    if (!tableContext) return
+    if (tableContext.expiresAt) {
+      expiryTimer = setTimeout(checkAdmission, Math.max(1, tableContext.expiresAt * 1000 - Date.now() + 1))
+      expiryTimer.unref()
+    }
     sock.on('disconnect', (reason) => {
+      clearTimeout(expiryTimer)
       log.verbose('%s (%s) disconnected (%s)',
         sock.user.name, sock.id, reason,
       )
@@ -114,6 +133,7 @@ export default function (io, jwtKey) {
       }
 
       try {
+        if (!checkAdmission()) return acknowledge?.({ type: type + _ERROR, error: 'Escanee el QR de su mesa para continuar' })
         await handlers[type](sock, action, acknowledge)
       } catch (err) {
         log.error(err)

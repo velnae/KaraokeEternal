@@ -16,6 +16,7 @@ Host awesome karaoke parties where everyone can easily find and queue songs from
   - Music-synced visualizations (with automatic lyrics background removal)
 - Fast, modern mobile browser app designed for "karaoke conditions"
 - Easy joining with QR codes and guest accounts
+- Fixed table QR codes with optional or strict singer admission ([operator guide](docs/TABLE-QR.md))
 - Multiple simultaneous rooms/queues (optionally password-protected)
 - Dynamic queues keep parties fair, fun and no-fuss
 - Fully self-hosted

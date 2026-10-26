@@ -3,6 +3,7 @@ import sql from 'sqlate'
 import { db } from '../lib/Database.js'
 import { ValidationError } from '../lib/Errors.js'
 import { getQueuePrefsValidationError, normalizeQueuePrefs } from '../../shared/queueRules.js'
+import { TABLE_MODES, tableMode } from '../../shared/tableAccess.js'
 
 const NAME_MIN_LENGTH = 1
 const NAME_MAX_LENGTH = 50
@@ -92,9 +93,18 @@ class Rooms {
     const queuePrefsError = getQueuePrefsValidationError(prefs?.queue)
     if (queuePrefsError) throw new ValidationError(queuePrefsError)
 
+    if (prefs?.tables !== undefined && (!prefs.tables || typeof prefs.tables !== 'object' || !TABLE_MODES.includes(prefs.tables.mode))) {
+      throw new ValidationError('El modo de acceso por mesas no es válido')
+    }
+    if (tableMode(prefs) === 'REQUIRED_QR' && tableMode(typeof roomId === 'number' ? Rooms.get(roomId, { status: STATUSES }).entities[roomId]?.prefs : {}) !== 'REQUIRED_QR') {
+      const active = db.get<{ count: number }>('SELECT COUNT(*) AS count FROM roomTables WHERE roomId = ? AND status = \'active\'', [roomId ?? null])
+      if (!active?.count) throw new ValidationError('Cree al menos una mesa activa antes de activar el modo estricto')
+    }
+
     const normalizedPrefs = {
       ...(prefs ?? {}),
       queue: normalizeQueuePrefs(prefs?.queue),
+      tables: { mode: tableMode(prefs) },
     }
 
     if (!name || !name.trim() || name.length < NAME_MIN_LENGTH || name.length > NAME_MAX_LENGTH) {

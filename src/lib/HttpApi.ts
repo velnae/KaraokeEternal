@@ -44,6 +44,6 @@ export default class HttpApi {
     }
 
     const txt = await res.text()
-    throw new Error(txt)
+    throw Object.assign(new Error(txt), { status: res.status })
   }
 }

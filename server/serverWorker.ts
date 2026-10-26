@@ -22,6 +22,7 @@ import mediaRouter from './Media/router.js'
 import prefsRouter from './Prefs/router.js'
 import roomsRouter from './Rooms/router.js'
 import userRouter from './User/router.js'
+import tablesRouter from './Tables/router.js'
 import pushQueuesAndLibrary from './lib/pushQueuesAndLibrary.js'
 import { Server as SocketIO } from 'socket.io'
 import socketActions from './socket.js'
@@ -145,10 +146,8 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   app.use(async (ctx, next) => {
     ctx.jwtKey = jwtKey // used by login route
 
-    // skip JWT/session validation if non-API request or logging in/out
-    if (!ctx.request.path.startsWith(`${urlPath}api/`)
-      || ctx.request.path === `${urlPath}api/login`
-      || ctx.request.path === `${urlPath}api/logout`) {
+    // Login/logout also need the previous identity for participation revocation.
+    if (!ctx.request.path.startsWith(`${urlPath}api/`)) {
       return next()
     }
 
@@ -186,6 +185,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(prefsRouter.routes())
   baseRouter.use(roomsRouter.routes())
   baseRouter.use(userRouter.routes())
+  baseRouter.use(tablesRouter.routes())
   app.use(baseRouter.routes())
 
   if (env.NODE_ENV !== 'development') {
