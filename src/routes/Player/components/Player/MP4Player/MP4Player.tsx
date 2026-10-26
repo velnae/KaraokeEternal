@@ -25,6 +25,10 @@ class MP4Player extends React.Component<MP4PlayerProps> {
     this.updateSources()
   }
 
+  componentWillUnmount () {
+    this.video.current?.pause()
+  }
+
   componentDidUpdate (prevProps: MP4PlayerProps) {
     if (prevProps.mediaKey !== this.props.mediaKey) {
       this.updateSources()

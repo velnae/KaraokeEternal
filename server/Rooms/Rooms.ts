@@ -103,6 +103,9 @@ class Rooms {
 
     const normalizedPrefs = {
       ...(prefs ?? {}),
+      // Live animation controls have their own versioned update path. A stale
+      // room editor must not re-enable an animator that an operator stopped.
+      ...(typeof roomId === 'number' ? { animation: Rooms.get(roomId, { status: STATUSES }).entities[roomId]?.prefs?.animation } : {}),
       queue: normalizeQueuePrefs(prefs?.queue),
       tables: { mode: tableMode(prefs) },
     }

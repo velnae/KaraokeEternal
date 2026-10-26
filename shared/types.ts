@@ -50,6 +50,7 @@ export interface OptimisticQueueItem {
 }
 
 export interface IRoomPrefs {
+  animation?: import('./animation.js').AnimationPrefs
   tables?: { mode: import('./tableAccess.js').TableMode }
   qr: {
     isEnabled: boolean

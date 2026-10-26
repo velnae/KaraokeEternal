@@ -84,7 +84,7 @@ export const requestScanStop = createAsyncThunk(
 // ------------------------------------
 // Reducer
 // ------------------------------------
-interface PrefsState {
+export interface PrefsState {
   branding: ClientBranding
   isFirstRun?: boolean
   isScanning: boolean

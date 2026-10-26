@@ -48,6 +48,8 @@ class Player extends React.Component<PlayerProps> {
   audioCtx: AudioContext | null = null
   audioGainNode: GainNode | null = null
   audioSourceNode: MediaElementAudioSourceNode | null = null
+  audioSources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>()
+  audioLifecycle = 0
   isFetching = false // internal
 
   state: State = {
@@ -55,18 +57,31 @@ class Player extends React.Component<PlayerProps> {
   }
 
   componentDidMount () {
-    if (!this.audioCtx) {
+    // StrictMode immediately remounts the same instance and media element.
+    // Keep its source/context association alive across that synchronous cycle.
+    this.audioLifecycle++
+    this.ensureAudioContext()
+    this.updateVolume()
+  }
+
+  ensureAudioContext = () => {
+    if (!this.audioCtx || this.audioCtx.state === 'closed') {
       this.audioCtx = new (window.AudioContext || window.webkitAudioContext)()
       this.audioGainNode = this.audioCtx.createGain()
+      this.audioGainNode.connect(this.audioCtx.destination)
+      this.audioSources = new WeakMap()
     }
-
-    this.updateVolume()
   }
 
   componentDidUpdate (prevProps: PlayerProps) {
     // may have been suspended by browser if no user interaction yet
     if (this.props.isPlaying && !prevProps.isPlaying) {
-      this.audioCtx?.resume()
+      const context = this.audioCtx
+      if (context && context.state !== 'closed') {
+        void context.resume().catch((error) => {
+          if (this.audioCtx === context && context.state !== 'closed') this.props.onError(`No se pudo habilitar el audio: ${error.message}`)
+        })
+      }
     }
 
     // prevent applying next song's RG vals prematurely
@@ -84,17 +99,46 @@ class Player extends React.Component<PlayerProps> {
   }
 
   handleAudioElement = (el: HTMLVideoElement | HTMLAudioElement) => {
-    if (!this.audioCtx || (this.audioSourceNode && this.audioSourceNode.mediaElement === el)) {
-      return
-    }
+    if (!el) return
+    // Child media mounts run before this parent's componentDidMount.
+    this.ensureAudioContext()
+    if (this.audioSourceNode?.mediaElement === el) return
 
-    this.audioSourceNode = this.audioCtx.createMediaElementSource(el)
+    this.audioSourceNode?.disconnect()
+    let source = this.audioSources.get(el)
+    if (!source) {
+      source = this.audioCtx.createMediaElementSource(el)
+      this.audioSources.set(el, source)
+    }
+    this.audioSourceNode = source
     this.audioSourceNode.connect(this.audioGainNode)
-    this.audioGainNode.connect(this.audioCtx.destination)
+    this.updateVolume()
 
     // hand back copy of original audio source
     const sourceNodeCopy = this.audioSourceNode
     this.setState({ visualizerAudioSourceNode: sourceNodeCopy })
+  }
+
+  componentWillUnmount () {
+    const lifecycle = ++this.audioLifecycle
+    // Actual route exits release the graph. A StrictMode remount in this same
+    // turn cancels disposal; closing then recreating a source for the preserved
+    // DOM element is illegal even if the old context has already closed.
+    queueMicrotask(() => {
+      if (lifecycle !== this.audioLifecycle) return
+      const context = this.audioCtx
+      this.audioSourceNode?.disconnect()
+      this.audioGainNode?.disconnect()
+      this.audioSourceNode = null
+      this.audioGainNode = null
+      this.audioCtx = null
+      this.audioSources = new WeakMap()
+      if (context && context.state !== 'closed') {
+        void context.close().catch((error) => {
+          if (context.state !== 'closed') console.error('Could not release music audio context', error)
+        })
+      }
+    })
   }
 
   handlePlay = () => {
@@ -152,13 +196,14 @@ class Player extends React.Component<PlayerProps> {
 
     if (typeof this.props.mediaId !== 'number') return null
 
-    let PlayerComponent
+    const mediaProps = { ...this.props, onAudioElement: this.handleAudioElement, onPlay: this.handlePlay }
+    const media = playerKind === 'cdg'
+      ? <CDGPlayer {...mediaProps} />
+      : playerKind === 'mp4'
+        ? <MP4Player {...mediaProps} />
+        : playerKind === 'mp4-alpha' ? <MP4AlphaPlayer {...mediaProps} /> : null
 
-    if (playerKind === 'cdg') PlayerComponent = CDGPlayer
-    else if (playerKind === 'mp4') PlayerComponent = MP4Player
-    else if (playerKind === 'mp4-alpha') PlayerComponent = MP4AlphaPlayer
-
-    if (typeof PlayerComponent === 'undefined') {
+    if (!media) {
       this.props.onError(`No hay reproductor para el tipo de archivo multimedia: ${this.props.mediaType}`)
       return null
     }
@@ -170,11 +215,7 @@ class Player extends React.Component<PlayerProps> {
 
     return (
       <>
-        <PlayerComponent
-          {...this.props}
-          onAudioElement={this.handleAudioElement}
-          onPlay={this.handlePlay}
-        />
+        {media}
         {isVisualizerActive && (
           <PlayerVisualizer
             audioSourceNode={this.state.visualizerAudioSourceNode}

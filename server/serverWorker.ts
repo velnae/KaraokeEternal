@@ -23,6 +23,9 @@ import prefsRouter from './Prefs/router.js'
 import roomsRouter from './Rooms/router.js'
 import userRouter from './User/router.js'
 import tablesRouter from './Tables/router.js'
+import animationRouter from './Animation/router.js'
+import Animation from './Animation/Animation.js'
+import { loadCatalog } from './Animation/catalog.js'
 import pushQueuesAndLibrary from './lib/pushQueuesAndLibrary.js'
 import { Server as SocketIO } from 'socket.io'
 import socketActions from './socket.js'
@@ -38,6 +41,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   const indexFile = path.join(env.KES_PATH_WEBROOT, 'index.html')
   const urlPath = env.KES_URL_PATH.replace(/\/?$/, '/') // force trailing slash
   const jwtKey = Prefs.getJwtKey(env.KES_ROTATE_KEY)
+  await loadCatalog(path.join(env.KES_PATH_DATA, 'animation'), path.join(env.KES_PATH_ASSETS, 'animation'))
   const app = new Koa()
   let server, io
 
@@ -65,6 +69,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     })
 
     // attach socket.io handlers
+    const stopAnimation = Animation.initialize(io)
     socketActions(io, jwtKey)
 
     // attach IPC action handlers
@@ -93,6 +98,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
 
     // handle shutdown gracefully
     shutdownHandlers.push(() => new Promise((resolve) => {
+      stopAnimation()
       // also calls http server's close method, which ultimately handles the callback
       io.close(resolve)
 
@@ -186,6 +192,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(roomsRouter.routes())
   baseRouter.use(userRouter.routes())
   baseRouter.use(tablesRouter.routes())
+  baseRouter.use(animationRouter.routes())
   app.use(baseRouter.routes())
 
   if (env.NODE_ENV !== 'development') {

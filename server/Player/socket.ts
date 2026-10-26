@@ -1,5 +1,6 @@
 import Rooms from '../Rooms/Rooms.js'
 import Queue from '../Queue/Queue.js'
+import Animation from '../Animation/Animation.js'
 import getLogger from '../lib/Log.js'
 
 import {
@@ -58,6 +59,10 @@ const authoritativeOnly = (sock, actionType, acknowledge): boolean => {
 
 const sendCommand = (sock, requestType, commandType, payload, acknowledge) => {
   if (!adminOnly(sock, requestType, acknowledge)) return
+
+  if ([PLAYER_REQ_NEXT, PLAYER_REQ_REPLAY, PLAYER_REQ_PAUSE, PLAYER_REQ_PLAY].includes(requestType)) {
+    Animation.cancel(sock.user.roomId, 'Orden musical del operador')
+  }
 
   sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {
     type: commandType,
@@ -167,7 +172,7 @@ const ACTION_HANDLERS = {
       })
     }
 
-    acknowledge?.({ type: PLAYER_AUTHORITY_GRANTED })
+    Animation.claim(sock.user.roomId, sock.id)
 
     if (Queue.syncPlayerLifecycle(sock.user.roomId, payload)) {
       sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {
@@ -184,11 +189,13 @@ const ACTION_HANDLERS = {
       type: PLAYER_STATUS,
       payload,
     })
+    acknowledge?.({ type: PLAYER_AUTHORITY_GRANTED })
   },
   [PLAYER_EMIT_LEAVE]: (sock, _action, acknowledge) => {
     if (!authoritativeOnly(sock, PLAYER_EMIT_LEAVE, acknowledge)) return
 
     sock._isPlayerAuthoritative = false
+    Animation.disconnect(sock.user.roomId, sock.id)
     sock._lastPlayerStatus = null
 
     // any players left in room?

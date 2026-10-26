@@ -4,6 +4,8 @@ import parseCookie from './lib/parseCookie.js'
 import Library from './Library/Library.js'
 import LibrarySocket from './Library/socket.js'
 import PlayerSocket from './Player/socket.js'
+import AnimationSocket from './Animation/socket.js'
+import Animation from './Animation/Animation.js'
 import Prefs from './Prefs/Prefs.js'
 import PrefsSocket from './Prefs/socket.js'
 import Rooms from './Rooms/Rooms.js'
@@ -34,6 +36,7 @@ const handlers = {
   ...LibrarySocket,
   ...QueueSocket,
   ...PlayerSocket,
+  ...AnimationSocket,
   ...PrefsSocket,
   ...RoomsSocket,
   ...SongSourcesSocket,
@@ -96,6 +99,7 @@ export default function (io, jwtKey) {
       )
 
       const wasAuthoritativePlayer = Rooms.isAuthoritativePlayer(sock)
+      if (wasAuthoritativePlayer) Animation.disconnect(sock.user.roomId, sock.id)
       sock._isPlayerAuthoritative = false
 
       // Only the authoritative player ending its session can interrupt playback.

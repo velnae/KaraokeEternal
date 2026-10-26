@@ -1,0 +1,20 @@
+[
+  {
+    "id": "demo-welcome", "title": "Bienvenida · voz de prueba",
+    "displayText": "Bienvenidos a Il Gatto. Disfruten la música y su mesa.",
+    "filename": "welcome.wav", "source": "Locally generated Chatterbox LATAM demo, default voice, seed 42; no customer voice reference.",
+    "license": "Test asset generated for this project; production voice approval required.", "active": true
+  },
+  {
+    "id": "demo-thanks", "title": "Agradecimiento · voz de prueba",
+    "displayText": "Gracias por compartir este momento con nosotros.",
+    "filename": "thanks.wav", "source": "Locally generated Chatterbox LATAM demo, default voice, seed 42; no customer voice reference.",
+    "license": "Test asset generated for this project; production voice approval required.", "active": true
+  },
+  {
+    "id": "demo-invitation", "title": "Invitación · voz de prueba",
+    "displayText": "Escanea el QR de tu mesa y elige tu próxima canción.",
+    "filename": "invitation.wav", "source": "Locally generated Chatterbox LATAM demo, default voice, seed 42; no customer voice reference.",
+    "license": "Test asset generated for this project; production voice approval required.", "active": true
+  }
+]

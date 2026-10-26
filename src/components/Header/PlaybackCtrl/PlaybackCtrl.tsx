@@ -11,6 +11,7 @@ import NoPlayer from './NoPlayer/NoPlayer'
 import DisplayCtrl from './DisplayCtrl/DisplayCtrl'
 import styles from './PlaybackCtrl.css'
 import { PlaybackOptions } from 'shared/types'
+import AnimationQuickControls from 'components/Animation/AnimationQuickControls'
 
 const handleFullscreen = () => {
   if (screenfull.isEnabled) {
@@ -78,6 +79,7 @@ const PlaybackCtrl = () => {
       </div>
 
       <div className={styles.viewActions}>
+        <AnimationQuickControls />
         <Button
           className={clsx(styles.btn, styles.displayCtrl)}
           icon='TUNE'

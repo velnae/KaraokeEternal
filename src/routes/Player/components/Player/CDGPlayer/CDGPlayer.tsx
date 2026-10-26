@@ -12,7 +12,7 @@ interface CDGPlayerProps {
   cdgSize: number
   isPlaying: boolean
   mediaId: number
-  mediaKey: string
+  mediaKey: number
   mediaReplayKey?: number
   width: number
   height: number
@@ -68,6 +68,7 @@ class CDGPlayer extends React.Component<CDGPlayerProps> {
   }
 
   componentWillUnmount () {
+    this.audio.current?.pause()
     this.stopCDG()
   }
 

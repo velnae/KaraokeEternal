@@ -27,6 +27,7 @@
     "lint:fix": "npm run lint -- --fix",
     "test": "vitest run --config config/vitest.config.ts",
     "test:tables:e2e": "node config/table-qr.e2e.mjs",
+    "test:animation:e2e": "node config/animation.e2e.mjs",
     "typecheck": "tsc -b --noEmit",
     "build": "npm run build:server ; npm run build:client",
     "build:client": "webpack --config config/webpack.config.js",

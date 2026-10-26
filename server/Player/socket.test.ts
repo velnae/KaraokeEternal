@@ -26,6 +26,8 @@ import Queue from '../Queue/Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import ACTION_HANDLERS from './socket.js'
 
+vi.mock('../Animation/Animation.js', () => ({ default: { claim: vi.fn(), cancel: vi.fn(), disconnect: vi.fn() } }))
+
 const failureInfo = vi.hoisted(() => vi.fn())
 vi.mock('../lib/Log.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../lib/Log.js')>()

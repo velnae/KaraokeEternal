@@ -4,7 +4,12 @@ import Player from '../Player/Player'
 import PlayerTextOverlay from '../PlayerTextOverlay/PlayerTextOverlay'
 import PlayerQR from '../PlayerQR/PlayerQR'
 import getRoundRobinQueue from 'routes/Queue/selectors/getRoundRobinQueue'
-import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, type PlayerState } from '../../modules/player'
+import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, playerUpdate, type PlayerState } from '../../modules/player'
+import store from 'store/store'
+import socket from 'lib/socket'
+import useAnimationPlayer from '../Animation/useAnimationPlayer'
+import Button from 'components/Button/Button'
+import animationStyles from 'components/Animation/Animation.css'
 import getRoomPrefs from '../../selectors/getRoomPrefs'
 import type { QueueItem } from 'shared/types'
 import styles from './PlayerController.css'
@@ -33,6 +38,11 @@ const PlayerController = (props: PlayerControllerProps) => {
     .map(queueId => queue.entities[queueId])
     .find(item => item.status === 'APPROVED')
   const settlement = useRef<PlaybackSettlementState>({ token: null, outcome: null })
+  const advancing = useRef(false)
+  const mounted = useRef(true)
+  const animation = useAnimationPlayer()
+  const animationRef = useRef(animation)
+  animationRef.current = animation
 
   const dispatch = useAppDispatch()
   const handleStatus = useCallback((status?: Partial<PlayerState>) => {
@@ -43,6 +53,7 @@ const PlayerController = (props: PlayerControllerProps) => {
   const handlePlay = () => dispatch(playerPlay())
 
   const handleReplay = useCallback((queueId: number) => {
+    if (!socket.connected || advancing.current || animationRef.current.busy || animationRef.current.blocked) return
     const nextItem = queue.entities[queueId]
     if (!nextItem) return
 
@@ -64,48 +75,50 @@ const PlayerController = (props: PlayerControllerProps) => {
       queueId: nextItem.queueId,
       nextUserId: null,
       _isReplayingQueueId: null,
+      _isBetweenTracks: false,
     })
   }, [handleStatus, player.historyJSON, player.queueId, queue.entities])
 
-  const handleLoadNext = useCallback((includeCurrentInHistory = true) => {
-    const historyJSON = appendCompletedToHistory(
-      player.historyJSON,
-      includeCurrentInHistory ? queueItem?.queueId : undefined,
-    )
-
-    // queue exhausted?
-    if (!nextQueueItem) {
-      handleStatus({
-        historyJSON,
-        isAtQueueEnd: true,
-        isErrored: false,
-        mediaType: null,
-        _isPlayingNext: false,
-      })
-
-      return
+  const handleLoadNext = useCallback(async (includeCurrentInHistory = true, announce = false, boundary: 'ended' | 'idle' = 'ended') => {
+    if (!socket.connected || advancing.current || animationRef.current.busy || animationRef.current.blocked
+      || store.getState().player._authority !== 'GRANTED') return
+    advancing.current = true
+    const before = store.getState().player
+    const sourceId = before.queueId
+    const historyJSON = appendCompletedToHistory(before.historyJSON, includeCurrentInHistory && sourceId >= 0 ? sourceId : undefined)
+    dispatch(playerUpdate({ historyJSON, _isBetweenTracks: true }))
+    const selection = () => {
+      const state = store.getState()
+      const ordered = getRoundRobinQueue({ ...state, status: { ...state.status, queueId: state.player.queueId, historyJSON: state.player.historyJSON, nextUserId: state.player.nextUserId } })
+      const index = ordered.result.indexOf(state.player.queueId)
+      return ordered.result.slice(index + 1).map(id => ordered.entities[id]).find(item => item.status === 'APPROVED')
     }
-
-    // play next
-    handleStatus({
-      errorMessage: '',
-      historyJSON,
-      isAtQueueEnd: false,
-      isErrored: false,
-      isPlaying: true,
-      isVideoKeyingEnabled: nextQueueItem.isVideoKeyingEnabled,
-      mediaType: nextQueueItem.mediaType,
-      position: 0,
-      queueId: nextQueueItem.queueId,
-      nextUserId: null,
-      _isPlayingNext: false,
-    })
-  }, [handleStatus, nextQueueItem, player.historyJSON, queueItem])
+    try {
+      if (announce) await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, selection()?.queueId ?? null)
+      if (!mounted.current) return
+      const current = store.getState().player
+      if (!socket.connected || current._authority !== 'GRANTED' || current._isReplayingQueueId !== null || animationRef.current.blocked) return
+      // Read the current intent, never restore the pre-announcement pause state.
+      if (!current.isPlaying && !current._isPlayingNext) return
+      const next = selection()
+      if (!next) {
+        dispatch(playerStatus({ historyJSON: current.historyJSON, isAtQueueEnd: true, isErrored: false, mediaType: null, _isPlayingNext: false, _isBetweenTracks: false }))
+        return
+      }
+      dispatch(playerStatus({
+        errorMessage: '', historyJSON: current.historyJSON, isAtQueueEnd: false, isErrored: false,
+        isPlaying: true, isVideoKeyingEnabled: next.isVideoKeyingEnabled, mediaType: next.mediaType,
+        position: 0, queueId: next.queueId, nextUserId: null, _isPlayingNext: false, _isBetweenTracks: false,
+      }))
+    } finally { advancing.current = false }
+  }, [dispatch])
 
   const handleEnd = useCallback(() => {
     if (!queueItem) return
     const token = playbackToken(queueItem.queueId, player._lastReplayTime)
-    settlePlayback(settlement.current, token, 'ENDED', { onAdvance: handleLoadNext })
+    settlePlayback(settlement.current, token, 'ENDED', { onAdvance: (include) => {
+      void handleLoadNext(include, true)
+    } })
   }, [handleLoadNext, player._lastReplayTime, queueItem])
 
   const handleError = useCallback((msg: string, diagnostic?: { category: 'iframe' | 'api-load', code?: number }) => {
@@ -152,28 +165,41 @@ const PlayerController = (props: PlayerControllerProps) => {
   ])
 
   // on unmount
-  useEffect(() => () => dispatch(playerLeave()), [dispatch])
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      dispatch(playerLeave())
+    }
+  }, [dispatch])
 
   // playing for first time or playing next?
   useEffect(() => {
-    if ((player.isPlaying && player.queueId === -1) || player._isPlayingNext) {
-      handleLoadNext()
+    if (!animation.busy && !animation.blocked && ((player.isPlaying && (player.queueId === -1 || player._isBetweenTracks)) || player._isPlayingNext)) {
+      void handleLoadNext(!player._isBetweenTracks)
     }
-  }, [handleLoadNext, player.isPlaying, player.queueId, player._isPlayingNext])
+  }, [handleLoadNext, player.isPlaying, player.queueId, player._isPlayingNext, player._isBetweenTracks, animation.busy, animation.blocked])
 
   // replaying?
   useEffect(() => {
     if (player._isReplayingQueueId !== null) {
       handleReplay(player._isReplayingQueueId)
     }
-  }, [handleReplay, player._isReplayingQueueId])
+  }, [handleReplay, player._isReplayingQueueId, animation.busy, animation.blocked])
 
   // queue was exhausted, but is no longer?
   useEffect(() => {
-    if (player.isAtQueueEnd && nextQueueItem && player.isPlaying) {
-      handleLoadNext()
+    if (!animation.busy && !animation.blocked && player.isAtQueueEnd && nextQueueItem && player.isPlaying) {
+      void handleLoadNext()
     }
-  }, [handleLoadNext, player.isPlaying, player.isAtQueueEnd, nextQueueItem])
+  }, [handleLoadNext, player.isPlaying, player.isAtQueueEnd, nextQueueItem, animation.busy, animation.blocked])
+
+  useEffect(() => {
+    if (!animation.busy && !animation.blocked && animation.unlocked && animation.snapshot?.active?.status === 'PENDING'
+      && !player.isErrored && (player.isAtQueueEnd || player.queueId === -1)) {
+      void handleLoadNext(false, true, 'idle')
+    }
+  }, [animation.snapshot, animation.busy, animation.blocked, animation.unlocked, player.isErrored, player.isAtQueueEnd, player.queueId, handleLoadNext])
 
   // retrying after error?
   useEffect(() => {
@@ -198,7 +224,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         cdgAlpha={player.cdgAlpha}
         cdgSize={player.cdgSize}
         isPlaying={player.isPlaying}
-        isVisible={!!queueItem && !player.isErrored && !player.isAtQueueEnd}
+        isVisible={!!queueItem && !player.isErrored && !player.isAtQueueEnd && !player._isBetweenTracks && !animation.busy && !animation.blocked}
         isReplayGainEnabled={prefs.isReplayGainEnabled}
         isVideoKeyingEnabled={!!queueItem?.isVideoKeyingEnabled}
         isWebGLSupported={player.isWebGLSupported}
@@ -221,6 +247,14 @@ const PlayerController = (props: PlayerControllerProps) => {
         width={props.width}
         height={props.height}
       />
+      {animation.text && <div className={animationStyles.overlay} role='status' data-testid='announcement-overlay'><p>{animation.text}</p></div>}
+      {animation.blocked && !animation.busy && <div className={animationStyles.overlay} role='status'><p>Esperando el cierre de la intervención anterior…</p></div>}
+      {animation.snapshot?.prefs.enabled && !animation.unlocked && (
+        <div className={animationStyles.unlock}>
+          <Button onClick={() => void animation.unlock()}>Habilitar audio del animador</Button>
+          {animation.error && <p role='alert'>{animation.error}</p>}
+        </div>
+      )}
       <PlayerTextOverlay
         queueItem={queueItem as QueueItem}
         nextQueueItem={nextQueueItem as QueueItem}

@@ -27,6 +27,7 @@ let config = {
     clean: true,
   },
   resolve: {
+    extensionAlias: { '.js': ['.ts', '.js'] },
     extensions: ['.ts', '.tsx', '.js', '.json'],
     modules: [
       path.join(baseDir, 'src'),

@@ -6,6 +6,7 @@ import Rooms, { STATUSES } from '../Rooms/Rooms.js'
 import { ValidationError } from '../lib/Errors.js'
 import { participantPrefs } from './participantPrefs.js'
 import { enforceConnectedParticipants } from '../Tables/admission.js'
+import Animation from '../Animation/Animation.js'
 
 interface RequestWithBody {
   body: Record<string, unknown>
@@ -62,6 +63,7 @@ router.put('/:roomId', async (ctx) => {
 
   try {
     await Rooms.set(roomId, (ctx.request as unknown as RequestWithBody).body)
+    if (Rooms.get(roomId, { status: STATUSES }).entities[roomId]?.status !== 'open') Animation.cancel(roomId, 'Sala cerrada')
     enforceConnectedParticipants(ctx.io)
   } catch (err) {
     if (err instanceof ValidationError) ctx.throw(422, err.message)
@@ -103,6 +105,7 @@ router.delete('/:roomId', (ctx) => {
   }
 
   // remove room's queue first
+  Animation.cancel(roomId, 'Sala eliminada')
   const queueQuery = sql`
     DELETE FROM queue
     WHERE roomId = ${roomId}

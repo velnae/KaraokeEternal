@@ -13,10 +13,12 @@ import status from './modules/status'
 import ui from './modules/ui'
 import user from './modules/user'
 import userStars from './modules/userStars'
+import animation from './modules/animation'
 
 export interface LazyLoadedSlices {} // eslint-disable-line @typescript-eslint/no-empty-object-type
 
 const combinedReducer = combineSlices({
+  animation,
   artists,
   library,
   prefs,
