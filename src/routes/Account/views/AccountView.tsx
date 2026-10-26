@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { fetchPrefs } from 'store/modules/prefs'
 import FirstRun from './FirstRun/FirstRun'
@@ -11,6 +11,7 @@ const AccountView = () => {
   const isFirstRun = useAppSelector(state => state.prefs.isFirstRun === true)
   const ui = useAppSelector(state => state.ui)
   const dispatch = useAppDispatch()
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   // once per mount
   // (do this here instead of Prefs component to detect firstRun)
@@ -20,6 +21,7 @@ const AccountView = () => {
 
   return (
     <div
+      ref={scrollContainerRef}
       className={styles.container}
       style={{
         paddingTop: ui.headerHeight,
@@ -28,7 +30,7 @@ const AccountView = () => {
       }}
     >
       {isSignedIn
-        && <SignedInView />}
+        && <SignedInView scrollContainerRef={scrollContainerRef} />}
 
       {!isFirstRun && !isSignedIn
         && <SignedOutView />}

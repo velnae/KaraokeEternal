@@ -83,6 +83,29 @@ try {
   await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('admin')
   await admin.getByPlaceholder('contraseña', { exact: true }).fill('isolated-test-password')
   await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
+  const adminShortcuts = admin.getByRole('navigation', { name: 'Secciones de administración' })
+  for (const [name, id] of [
+    ['Salas', 'admin-rooms'],
+    ['Usuarios', 'admin-users'],
+    ['Ajustes', 'admin-prefs'],
+    ['Marca del cliente', 'admin-branding'],
+    ['Mi cuenta', 'admin-account'],
+  ]) {
+    await adminShortcuts.getByRole('link', { name, exact: true }).click()
+    await expect(admin).toHaveURL(`${base}account#${id}`)
+    await expect.poll(async () => admin.locator(`#${id}`).evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      return bounds.top >= 0 && bounds.top < innerHeight - 100
+    })).toBe(true)
+  }
+  await admin.reload()
+  await expect(admin.locator('#admin-account')).toBeInViewport()
+  await adminShortcuts.getByRole('link', { name: 'Salas', exact: true }).click()
+  await adminShortcuts.scrollIntoViewIfNeeded()
+  await adminShortcuts.getByRole('link', { name: 'Salas', exact: true }).click()
+  await expect(admin).toHaveURL(`${base}account#admin-rooms`)
+  await expect(admin.locator('#admin-rooms')).toBeInViewport()
+  pass('Every admin shortcut stays on account and scrolls to its section, including reload/repeated clicks')
   await admin.getByRole('button', { name: 'Mesas', exact: true }).click()
   await admin.getByRole('button', { name: 'Nueva mesa', exact: true }).click()
   await admin.getByLabel('Código', { exact: true }).fill('05')

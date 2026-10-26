@@ -42,12 +42,6 @@ const BrandingPrefs = () => {
     if (!dirty) setDraft(branding)
   }, [branding, dirty])
 
-  useEffect(() => {
-    if (window.location.hash === '#admin-branding') {
-      document.getElementById('admin-branding')?.scrollIntoView()
-    }
-  }, [])
-
   const change = (values: Partial<typeof draft>) => {
     const next = { ...draft, ...values }
     setDraft(next)

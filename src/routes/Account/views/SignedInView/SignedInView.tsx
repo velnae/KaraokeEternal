@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react'
+import { Link, useLocation } from 'react-router'
 import combinedReducer from 'store/reducers'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { fetchAccount } from 'store/modules/user'
@@ -11,8 +12,18 @@ import Users from '../../components/Users/Users'
 import theme from 'styles/karaokeTheme.css'
 import styles from './SignedInView.css'
 
-const SignedInView = () => {
+const adminSections = [
+  ['admin-rooms', 'Salas'],
+  ['admin-users', 'Usuarios'],
+  ['admin-prefs', 'Ajustes'],
+  ['admin-branding', 'Marca del cliente'],
+  ['admin-account', 'Mi cuenta'],
+] as const
+
+const SignedInView = ({ scrollContainerRef }: { scrollContainerRef: React.RefObject<HTMLDivElement | null> }) => {
+  const location = useLocation()
   const { isAdmin } = useAppSelector(state => state.user)
+  const headerHeight = useAppSelector(state => state.ui.headerHeight)
   const sliceExists = !!useAppSelector(state => state.users)
   const dispatch = useAppDispatch()
 
@@ -26,17 +37,26 @@ const SignedInView = () => {
     (async () => dispatch(fetchAccount()))()
   }, [dispatch])
 
+  useEffect(() => {
+    const section = adminSections.find(([id]) => location.hash === `#${id}`)
+    const target = section && document.getElementById(section[0])
+    const container = scrollContainerRef.current
+    if (!target || !container) return
+    // Scroll only the account panel; scrollIntoView also moves outer ancestors.
+    container.scrollTo({
+      top: container.scrollTop + target.getBoundingClientRect().top - container.getBoundingClientRect().top - headerHeight - 12,
+    })
+  }, [location.hash, location.key, isAdmin, headerHeight, scrollContainerRef])
+
   return (
     <div className={`${theme.forms} ${styles.container}`}>
       {isAdmin && (
         <>
           <h1>Administración</h1>
           <nav className={styles.shortcuts} aria-label='Secciones de administración'>
-            <a href='#admin-rooms'>Salas</a>
-            <a href='#admin-users'>Usuarios</a>
-            <a href='#admin-prefs'>Ajustes</a>
-            <a href='#admin-branding'>Marca del cliente</a>
-            <a href='#admin-account'>Mi cuenta</a>
+            {adminSections.map(([id, name]) => (
+              <Link key={id} to={{ pathname: '/account', hash: `#${id}` }}>{name}</Link>
+            ))}
           </nav>
           <section id='admin-rooms'><Rooms /></section>
           <section id='admin-users'><Users /></section>
