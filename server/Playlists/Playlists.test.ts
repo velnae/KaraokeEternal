@@ -36,18 +36,27 @@ it('keeps repertoire independent from the queue and prevents duplicate saved son
   expect(Playlists.get(1, playlistId).items.map(item => item.itemId)).toEqual(ids)
 })
 
-it('prepares a bounded queue, refills in order, loops and does not duplicate reconciliation', () => {
+it('prepares one full cycle and waits for its last pending song before repeating', () => {
   configure()
   Playlists.reconcile(1)
-  expect(pending().map(item => item.title)).toEqual(['Song 1', 'Song 2'])
+  expect(pending().map(item => item.title)).toEqual(['Song 1', 'Song 2', 'Song 3'])
   for (let index = 0; index < 5; index++) Playlists.reconcile(1)
-  expect(pending()).toHaveLength(2)
-  Queue.transition(1, pending()[0].queueId, 'PLAYING')
+  expect(pending()).toHaveLength(3)
+  let current = pending()[0].queueId
+  Queue.transition(1, current, 'PLAYING')
   Playlists.reconcile(1)
   expect(pending().map(item => item.title)).toEqual(['Song 2', 'Song 3'])
+  Queue.transition(1, current, 'PLAYED')
+  current = pending()[0].queueId
+  Queue.transition(1, current, 'PLAYING')
+  Playlists.reconcile(1)
+  expect(pending().map(item => item.title)).toEqual(['Song 3'])
+  Queue.transition(1, current, 'PLAYED')
   Queue.transition(1, pending()[0].queueId, 'PLAYING')
   Playlists.reconcile(1)
-  expect(pending().map(item => item.title)).toEqual(['Song 3', 'Song 1'])
+  expect(pending().map(item => item.title)).toEqual(['Song 1', 'Song 2', 'Song 3'])
+  for (let index = 0; index < 5; index++) Playlists.reconcile(1)
+  expect(pending()).toHaveLength(3)
   expect(Playlists.get(1, playlistId).items).toHaveLength(3)
 })
 
@@ -104,7 +113,7 @@ it('skips failed tracks without retry loops and allows explicit retry', () => {
   expect(Playlists.snapshot(1).playback.message).toContain('Todas las canciones fallaron')
   configure({ restart: true })
   Playlists.reconcile(1)
-  expect(pending()).toHaveLength(2)
+  expect(pending()).toHaveLength(3)
 })
 
 it('deleting the selected playlist stops future music but retains current/history snapshots', () => {
@@ -137,7 +146,7 @@ it('switches lists without touching current music or manual house songs', () => 
   configure({ playlistId: next })
   Playlists.reconcile(1)
   expect(db.get<{ status: string }>('SELECT status FROM queue WHERE queueId=?', [playing])?.status).toBe('PLAYING')
-  expect(pending().map(item => item.title)).toEqual(['Song 4', 'Song 5', 'Song 5'])
+  expect(pending().map(item => item.title)).toEqual(['Song 4', 'Song 5'])
   expect(Playlists.snapshot(2).playback.enabled).toBe(false)
 })
 
@@ -146,10 +155,53 @@ it('discards prepared copies of a failed one-song loop instead of repeatedly pla
   Playlists.addResolved(1, single, song(1))
   configure({ playlistId: single })
   Playlists.reconcile(1)
-  expect(pending()).toHaveLength(2)
-  Queue.transition(1, pending()[0].queueId, 'FAILED')
+  expect(pending()).toHaveLength(1)
+  const current = pending()[0].queueId
+  Queue.transition(1, current, 'PLAYING')
+  Playlists.reconcile(1)
+  expect(pending()).toHaveLength(1)
+  Queue.transition(1, current, 'FAILED')
   Playlists.reconcile(1)
   expect(pending()).toHaveLength(0)
   for (let index = 0; index < 3; index++) Playlists.reconcile(1)
   expect(db.get<{ count: number }>('SELECT count(*) count FROM queue WHERE status=\'FAILED\'')?.count).toBe(1)
+})
+
+it.each([0, 1, 2, 10])('queues all five tracks regardless of the interleave setting %i', (interleave) => {
+  db.run('UPDATE rooms SET data=json_set(data,\'$.prefs.queue.houseTracksBeforeParticipant\',?) WHERE roomId=1', [interleave])
+  for (const id of [4, 5]) Playlists.addResolved(1, playlistId, song(id))
+  configure()
+  Playlists.reconcile(1)
+  expect(pending().map(item => item.title)).toEqual(['Song 1', 'Song 2', 'Song 3', 'Song 4', 'Song 5'])
+  for (let index = 0; index < 5; index++) Playlists.reconcile(1)
+  expect(pending()).toHaveLength(5)
+})
+
+it('extends an already-active two-song window without resetting its run or duplicating entries', () => {
+  for (const id of [4, 5]) Playlists.addResolved(1, playlistId, song(id))
+  configure()
+  const { runId } = db.get<{ runId: string }>('SELECT runId FROM housePlayback WHERE roomId=1')!
+  const items = Playlists.get(1, playlistId).items
+  for (const item of items.slice(0, 2)) Queue.add({ roomId: 1, userId: 1, song: item.song, origin: 'HOUSE', playlistItemId: item.itemId, houseRunId: runId })
+  db.run('UPDATE housePlayback SET cursor=2 WHERE roomId=1')
+  const originalIds = pending().map(item => item.queueId)
+  Playlists.reconcile(1)
+  expect(pending().map(item => item.title)).toEqual(items.map(item => item.song.title))
+  expect(pending().slice(0, 2).map(item => item.queueId)).toEqual(originalIds)
+  expect(db.get<{ runId: string }>('SELECT runId FROM housePlayback WHERE roomId=1')?.runId).toBe(runId)
+  expect(Playlists.reconcile(1)).toBe(false)
+})
+
+it('completes a legacy window spanning two cycles without duplicating a still-pending track', () => {
+  for (const id of [4, 5]) Playlists.addResolved(1, playlistId, song(id))
+  configure()
+  const { runId } = db.get<{ runId: string }>('SELECT runId FROM housePlayback WHERE roomId=1')!
+  const items = Playlists.get(1, playlistId).items
+  for (const item of [items[4], items[0]]) Queue.add({ roomId: 1, userId: 1, song: item.song, origin: 'HOUSE', playlistItemId: item.itemId, houseRunId: runId })
+  db.run('UPDATE housePlayback SET cursor=1 WHERE roomId=1')
+  Playlists.reconcile(1)
+  expect(pending().map(item => item.title)).toEqual(['Song 5', 'Song 1', 'Song 2', 'Song 3', 'Song 4'])
+  Queue.transition(1, pending()[0].queueId, 'PLAYING')
+  Playlists.reconcile(1)
+  expect(pending().map(item => item.title)).toEqual(['Song 1', 'Song 2', 'Song 3', 'Song 4', 'Song 5'])
 })

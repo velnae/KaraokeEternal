@@ -2,19 +2,41 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { parseBuffer } from 'music-metadata'
-import { clipDurationLimit, VOICE_FAMILIES, type AnimationClip, type AudioKind } from '../../shared/animation.js'
+import { clipDurationLimit, type AnimationClip, type AudioKind } from '../../shared/animation.js'
+import type { AudioMetadata } from '../../shared/audioCatalog.js'
+import { db } from '../lib/Database.js'
+import { completeResource, createResource, editResource, getResource, prepareResource, resourceClip, type StoredResource } from './Resources.js'
 import getLogger from '../lib/Log.js'
 
-interface CatalogEntry { clip: AnimationClip, bytes: Buffer, mime: string }
-const entries = new Map<string, CatalogEntry>()
-const log = getLogger('animation')
 let catalogDirectory = ''
 let revision = 0
-let publication = Promise.resolve()
+export const catalogVersion = () => revision
+export const catalogChanged = () => {
+  revision++
+}
+export const catalogRoot = () => catalogDirectory
+export interface CatalogRecord extends Partial<AnimationClip> { id: string, filename: string, active: boolean }
 
+export async function inspectCatalogFile (filename: string, kind: AudioKind, checksum?: string) {
+  const root = await fs.realpath(catalogDirectory)
+  const file = await fs.realpath(path.resolve(root, filename))
+  if (!file.startsWith(root + path.sep)) throw new Error('Archivo fuera del catálogo.')
+  const stat = await fs.stat(file)
+  if (!stat.isFile() || stat.size > 20 * 1024 * 1024) throw new Error('El archivo supera el tamaño permitido.')
+  const mime = ({ '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg' })[path.extname(file).toLowerCase()]
+  if (!mime) throw new Error('Use un archivo MP3, WAV u OGG.')
+  const bytes = await fs.readFile(file)
+  const metadata = await parseBuffer(bytes, { mimeType: mime }, { duration: true })
+  const durationMs = Math.ceil((metadata.format.duration ?? 0) * 1000)
+  if (durationMs <= 0 || durationMs > clipDurationLimit(kind)) throw new Error('La duración del audio no es válida para este tipo.')
+  const hash = createHash('sha256').update(bytes).digest('hex')
+  if (checksum && checksum !== hash) throw new Error('El archivo cambió desde su registro.')
+  return { filename, mime, durationMs, checksum: hash, size: stat.size }
+}
+
+// The JSON manifest is imported, never rewritten. SQLite owns subsequent edits.
 export async function loadCatalog (directory: string, bundledDirectory?: string) {
   catalogDirectory = directory
-  const next = new Map<string, CatalogEntry>()
   await fs.mkdir(directory, { recursive: true })
   const manifest = path.join(directory, 'catalog.json')
   try {
@@ -23,76 +45,70 @@ export async function loadCatalog (directory: string, bundledDirectory?: string)
     if (bundledDirectory) await fs.cp(bundledDirectory, directory, { recursive: true, force: false })
   }
   try {
-    const root = await fs.realpath(directory)
-    const records: unknown = JSON.parse(await fs.readFile(manifest, 'utf8'))
-    if (!Array.isArray(records) || records.length > 200 || records.filter(record => record?.active).length > 30) throw new Error('Invalid catalog size')
-    for (const record of records) {
-      try {
-        if (!record.active) continue
-        for (const key of ['id', 'title', 'displayText', 'filename', 'source', 'license']) {
-          if (typeof record[key] !== 'string' || !record[key].trim() || record[key].length > 500) throw new Error('Invalid metadata')
-        }
-        if (!/^[a-z0-9-]{1,64}$/.test(record.id) || next.has(record.id)) throw new Error('Invalid clip ID')
-        const file = await fs.realpath(path.resolve(root, record.filename))
-        if (!file.startsWith(root + path.sep)) throw new Error('File outside catalog')
-        const stat = await fs.stat(file)
-        if (!stat.isFile() || stat.size > 5 * 1024 * 1024) throw new Error('Invalid file size')
-        const bytes = await fs.readFile(file)
-        const ext = path.extname(file).toLowerCase()
-        const mime = ({ '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg' })[ext]
-        if (!mime) throw new Error('Unsupported audio format')
-        const metadata = await parseBuffer(bytes, { mimeType: mime }, { duration: true })
-        const durationMs = Math.ceil((metadata.format.duration ?? 0) * 1000)
-        const kind: AudioKind = ['voice', 'effect', 'ambience'].includes(record.kind) ? record.kind : 'voice'
-        if (durationMs <= 0 || durationMs > clipDurationLimit(kind)) throw new Error('Invalid duration')
-        const checksum = createHash('sha256').update(bytes).digest('hex')
-        if (record.checksum && record.checksum !== checksum) throw new Error('Checksum mismatch')
-        next.set(record.id, { bytes, mime, clip: {
-          id: record.id, title: record.title, displayText: record.displayText,
-          durationMs, checksum, source: record.source, license: record.license,
-          kind, family: VOICE_FAMILIES.includes(record.family) ? record.family : 'manual',
-          modes: Array.isArray(record.modes) ? record.modes.filter(mode => ['dinner', 'mixed', 'party'].includes(mode)) : ['dinner', 'mixed', 'party'],
-          approvedForAuto: record.approvedForAuto === true,
-          weight: Number.isFinite(record.weight) ? Math.max(0.1, Math.min(10, record.weight)) : 1,
-          ...(Number.isInteger(record.roomId) ? { roomId: record.roomId } : {}),
-          ...(Number.isFinite(record.validUntil) ? { validUntil: record.validUntil } : {}),
-        } })
-      } catch (error) {
-        log.warn('Skipping animation clip: %s', (error as Error).message)
-      }
-    }
-  } catch (error) {
-    log.warn('Animation catalog unavailable: %s', (error as Error).message)
-  }
-  entries.clear()
-  next.forEach((entry, id) => entries.set(id, entry))
-  revision++
-}
-
-export const catalogClips = (roomId?: number) => [...entries.values()].map(entry => entry.clip).filter(clip => roomId === undefined || clip.roomId === undefined || clip.roomId === roomId)
-export const catalogAsset = (id: string) => entries.get(id)
-export const catalogVersion = () => revision
-
-export interface CatalogRecord extends Partial<AnimationClip> { id: string, filename: string, active: boolean }
-export function saveCatalogRecord (record: CatalogRecord) {
-  const operation = publication.then(async (): Promise<void> => {
-    const manifest = path.join(catalogDirectory, 'catalog.json')
     const records: CatalogRecord[] = JSON.parse(await fs.readFile(manifest, 'utf8'))
-    const next = records.filter(item => item.id !== record.id).concat(record)
-    if (next.filter(item => item.active).length > 30 || next.length > 200) throw new Error('El catálogo está lleno. Desactive recursos antes de publicar.')
-    const temporary = manifest + '.tmp'
-    await fs.writeFile(temporary, JSON.stringify(next, null, 2) + '\n')
-    await fs.rename(temporary, manifest)
-    await loadCatalog(catalogDirectory)
-    return undefined
-  })
-  publication = operation.catch(() => {})
-  return operation
+    if (!Array.isArray(records)) throw new Error('Invalid manifest')
+    for (const record of records) {
+      if (getResource(record.id)) continue
+      await saveCatalogRecord(record).catch(error => getLogger('animation').warn('Catalog import: %s', error.message))
+    }
+  } catch (error) { getLogger('animation').warn('Catalog import: %s', (error as Error).message) }
+  // Reconcile all historical jobs, not only the latest UI page.
+  for (const job of db.all<{ jobId: string, roomId: number, configJSON: string, status: string, filename: string | null, checksum: string | null, createdAt: number, error: string | null }>('SELECT * FROM catalogGenerationJobs')) {
+    const id = `generated-${job.jobId}`
+    const config = JSON.parse(job.configJSON)
+    const existing = getResource(id)
+    if (existing) {
+      const metadata: AudioMetadata = JSON.parse(existing.metadataJSON)
+      if (!metadata.generationInput) db.run('UPDATE audioResources SET metadataJSON=? WHERE id=?', [JSON.stringify({ ...config, ...metadata, providerId: config.providerId ?? 'elevenlabs', model: config.model, generationInput: config }), id])
+      continue
+    }
+    createResource({ id, roomId: job.roomId, kind: config.kind, title: config.title,
+      metadata: { ...config, providerId: config.providerId ?? 'elevenlabs', language: config.kind === 'voice' ? 'es' : undefined, origin: 'generated', automatic: true, generationInput: config },
+      state: ['rejected', 'cancelled'].includes(job.status) ? 'archived' : 'active', createdAt: job.createdAt })
+    if (job.filename && ['published', 'publishing', 'ready_for_review', 'rejected'].includes(job.status)) {
+      try {
+        completeResource(id, await inspectCatalogFile(job.filename, config.kind, job.checksum ?? undefined))
+        if (job.status !== 'rejected') db.run('UPDATE catalogGenerationJobs SET status=\'published\',error=NULL WHERE jobId=?', [job.jobId])
+      } catch (error) { prepareResource(id, 'failed', (error as Error).message) }
+    } else prepareResource(id, job.status === 'generating' ? 'uncertain' : ['queued', 'failed', 'uncertain', 'cancelled'].includes(job.status) ? job.status as 'queued' | 'failed' | 'uncertain' | 'cancelled' : 'failed', job.error)
+  }
+  // Interrupted uploads cannot be silently considered usable.
+  db.run('UPDATE audioResources SET preparation=\'failed\',error=\'La carga se interrumpió. Vuelva a subir el archivo.\' WHERE preparation=\'preparing\' AND json_extract(metadataJSON,\'$.origin\')=\'uploaded\'')
+  for (const row of db.all<StoredResource>('SELECT * FROM audioResources WHERE preparation=\'ready\'')) {
+    try {
+      await inspectCatalogFile(row.filename!, row.kind, row.checksum!)
+    } catch (error) { prepareResource(row.id, 'failed', (error as Error).message) }
+  }
+  catalogChanged()
 }
 
+export const catalogClips = (roomId?: number) => db.all<StoredResource>(`SELECT * FROM audioResources WHERE state='active' AND preparation='ready'${roomId === undefined ? '' : ' AND (roomId=? OR roomId IS NULL)'}`, roomId === undefined ? [] : [roomId]).map(resourceClip)
+export function catalogAsset (id: string) {
+  const row = getResource(id)
+  return row?.state === 'active' && row.preparation === 'ready' ? { clip: resourceClip(row), filename: row.filename!, mime: row.mime! } : undefined
+}
+export async function resourceFile (id: string, roomId: number) {
+  const row = getResource(id, roomId)
+  if (!row || row.preparation !== 'ready' || !row.filename) throw new Error('Este audio no está disponible.')
+  const root = await fs.realpath(catalogDirectory)
+  const file = await fs.realpath(path.resolve(root, row.filename))
+  if (!file.startsWith(root + path.sep)) throw new Error('Archivo no válido.')
+  return { row, file }
+}
+export async function saveCatalogRecord (record: CatalogRecord, extra: Partial<AudioMetadata> = {}) {
+  const kind = record.kind ?? 'voice'
+  const metadata: AudioMetadata = { text: record.displayText ?? record.title ?? '', family: record.family ?? 'manual', modes: record.modes ?? ['dinner', 'mixed', 'party'],
+    origin: record.roomId === undefined ? 'included' : 'generated', automatic: record.approvedForAuto === true, validUntil: record.validUntil, source: record.source, license: record.license, ...extra }
+  createResource({ id: record.id, roomId: record.roomId ?? null, kind, title: record.title ?? record.id, metadata, state: record.active ? 'active' : 'disabled' })
+  try {
+    completeResource(record.id, await inspectCatalogFile(record.filename, kind, record.checksum))
+    catalogChanged()
+  } catch (error) {
+    prepareResource(record.id, 'failed', (error as Error).message)
+    throw error
+  }
+}
 export async function setCatalogActive (id: string, roomId: number, active: boolean) {
-  const manifest: CatalogRecord[] = JSON.parse(await fs.readFile(path.join(catalogDirectory, 'catalog.json'), 'utf8'))
-  const record = manifest.find(item => item.id === id && item.roomId === roomId)
-  if (!record) throw new Error('No se encontró un recurso propio de la sala')
-  await saveCatalogRecord({ ...record, active })
+  editResource(roomId, id, { state: active ? 'active' : 'disabled' })
+  catalogChanged()
 }

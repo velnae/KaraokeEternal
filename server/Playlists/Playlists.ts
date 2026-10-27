@@ -4,9 +4,8 @@ import { db } from '../lib/Database.js'
 import Queue from '../Queue/Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import { getSongSource } from '../SongSources/index.js'
-import { normalizeQueuePrefs } from '../../shared/queueRules.js'
 import { getResolvedSongValidationError, type ResolvedSong } from '../../shared/songSource.js'
-import type { PlaylistItem, PlaylistSnapshot, SavedPlaylist } from '../../shared/playlists.js'
+import type { PlaylistSnapshot, SavedPlaylist } from '../../shared/playlists.js'
 import { QUEUE_PUSH } from '../../shared/actionTypes.js'
 import getLogger from '../lib/Log.js'
 
@@ -113,15 +112,28 @@ export default class Playlists {
     const reset = !previous || previous.playlistId !== playlistId || input.restart === true
     let cursor = reset ? 0 : previous.cursor
     if (!reset && (!input.enabled || Number(input.repeat) !== previous.repeat)) {
-      const last = db.get<{ position: number }>(`SELECT i.position FROM queue q JOIN musicPlaylistItems i ON i.itemId=q.playlistItemId
-        WHERE q.roomId=? AND q.houseRunId=? AND q.status IN ('PLAYING','PLAYED','FAILED') ORDER BY q.queueId DESC LIMIT 1`, [roomId, previous.runId])
-      cursor = last?.position ?? 0
+      cursor = this.playedCursor(roomId, previous.runId)
     }
     if (reset || !input.enabled || Number(input.repeat) !== previous.repeat) this.clearPending(roomId)
     db.run(`INSERT INTO housePlayback(roomId,playlistId,enabled,repeat,cursor,runId,actorId,message) VALUES(?,?,?,?,?,?,?,'')
       ON CONFLICT(roomId) DO UPDATE SET playlistId=excluded.playlistId,enabled=excluded.enabled,repeat=excluded.repeat,
       cursor=excluded.cursor,runId=excluded.runId,actorId=excluded.actorId,message=''`,
     [roomId, playlistId, Number(input.enabled), Number(input.repeat), cursor, reset ? randomUUID() : previous.runId, actorId])
+  }
+
+  private static playedCursor (roomId: number, runId: string, currentQueueId = -1) {
+    return db.get<{ position: number }>(`SELECT i.position FROM queue q JOIN musicPlaylistItems i ON i.itemId=q.playlistItemId
+      WHERE q.roomId=? AND q.houseRunId=? AND (q.status IN ('PLAYING','PLAYED','FAILED') OR q.queueId=?) ORDER BY q.queueId DESC LIMIT 1`,
+    [roomId, runId, currentQueueId])?.position ?? 0
+  }
+
+  // Called inside the queue-cleanup transaction; the caller removes pending rows.
+  static suspendForQueueCleanup (roomId: number, currentQueueId: number): boolean {
+    const state = db.get<PlaybackRow>('SELECT * FROM housePlayback WHERE roomId=?', [roomId])
+    if (!state?.enabled) return false
+    db.run('UPDATE housePlayback SET enabled=0,cursor=?,message=? WHERE roomId=?',
+      [this.playedCursor(roomId, state.runId, currentQueueId), 'Lista desactivada al vaciar la cola.', roomId])
+    return true
   }
 
   private static clearPending (roomId: number, itemId?: number) {
@@ -152,24 +164,23 @@ export default class Playlists {
       db.run('UPDATE housePlayback SET message=? WHERE roomId=?', [list.items.length ? 'Todas las canciones fallaron. Revise la lista y pulse Reiniciar lista para reintentarlas.' : 'La lista está vacía. Agregue canciones desde Biblioteca.', roomId])
       return changed
     }
-    const target = Math.max(1, normalizeQueuePrefs(room.prefs?.queue).houseTracksBeforeParticipant)
-    // Queue insertion and cursor commit together; timers/reconnects can repeat safely.
+    // Prepare a complete cycle independently of interleaving; wrap only after
+    // its prepared songs have been consumed, never on each timer/status tick.
     db.exec('BEGIN IMMEDIATE')
     try {
-      let count = db.get<{ count: number }>('SELECT count(*) count FROM queue WHERE roomId=? AND houseRunId=? AND status=\'APPROVED\'', [roomId, state.runId])!.count
+      const prepared = new Set(db.all<{ playlistItemId: number }>('SELECT playlistItemId FROM queue WHERE roomId=? AND houseRunId=? AND status=\'APPROVED\'', [roomId, state.runId]).map(row => row.playlistItemId))
       let cursor = state.cursor
       let message = failed.length ? `${failed.length} canciones omitidas por error. Reinicie la lista para reintentarlas.` : ''
-      while (count < target) {
-        let item: PlaylistItem | undefined = available.find(entry => entry.position > cursor)
-        if (!item && state.repeat) item = available[0]
-        if (!item) {
-          message = 'Lista preparada hasta el final. Active Repetir o pulse Reiniciar lista para volver a usarla.'
-          break
-        }
+      if (state.repeat && prepared.size === 0 && !available.some(item => item.position > cursor)) cursor = 0
+      for (const item of available) {
+        if (item.position <= cursor || prepared.has(item.itemId)) continue
         Queue.add({ roomId, userId: state.actorId, song: item.song, origin: 'HOUSE', requestId: randomUUID(), playlistItemId: item.itemId, houseRunId: state.runId })
+        prepared.add(item.itemId)
         cursor = item.position
-        count++
         changed = true
+      }
+      if (!state.repeat && prepared.size === 0) {
+        message = 'Lista preparada hasta el final. Active Repetir o pulse Reiniciar lista para volver a usarla.'
       }
       if (cursor !== state.cursor || message !== state.message) {
         db.run('UPDATE housePlayback SET cursor=?,message=? WHERE roomId=?', [cursor, message, roomId])

@@ -155,7 +155,6 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
 
   app.use(koaFavicon(path.join(env.KES_PATH_ASSETS, 'favicon.ico')))
   app.use(koaRange)
-  app.use(koaBody({ multipart: true }))
 
   // all http requests
   app.use(async (ctx, next) => {
@@ -188,6 +187,17 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     ctx.stopScanner = stopScanner
 
     await next()
+  })
+
+  // Authenticate bounded audio uploads before multipart parsing/storage.
+  const parseBody = koaBody({ multipart: true })
+  const parseAudio = koaBody({ multipart: true, formidable: { maxFileSize: 20 * 1024 * 1024, maxTotalFileSize: 20 * 1024 * 1024, maxFiles: 1, maxFieldsSize: 64 * 1024 } })
+  app.use((ctx, next) => {
+    if (ctx.path === `${urlPath}api/animation/resources/upload`) {
+      if (!ctx.user?.isAdmin || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
+      return parseAudio(ctx, next)
+    }
+    return parseBody(ctx, next)
   })
 
   // http api endpoints

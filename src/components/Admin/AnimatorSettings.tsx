@@ -1,48 +1,122 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useAppSelector } from 'store/hooks'
+import Button from 'components/Button/Button'
+import Modal from 'components/Modal/Modal'
 import AnimationPanel from 'components/Animation/AnimationPanel'
 import CatalogProductionPanel from 'components/Animation/CatalogProductionPanel'
 import AnimationQuickControls from 'components/Animation/AnimationQuickControls'
-import { fetchAnimationClips } from 'lib/animationApi'
+import OperationControls from 'components/Animation/OperationControls'
+import { animationRequest } from 'lib/animationApi'
+import { ANIMATION_CONTROL } from 'shared/animation'
+import type { ProviderCapabilities } from 'shared/audioCatalog'
+import HttpApi from 'lib/HttpApi'
 import styles from './Admin.css'
+import audioStyles from 'components/Animation/AudioLibrary.css'
 
-const areas = [['operation', 'Funcionamiento'], ['audio', 'Audios'], ['connection', 'Conexión y consumo']] as const
-export default function AnimatorSettings () {
-  const [params] = useSearchParams()
-  const area = areas.some(([key]) => key === params.get('view')) ? params.get('view') : 'operation'
-  const roomId = useAppSelector(state => state.user.roomId)
-  const snapshot = useAppSelector(state => state.animation.snapshot?.roomId === state.user.roomId ? state.animation.snapshot : null)
-  const [verified, setVerified] = useState(false)
-  const [catalog, setCatalog] = useState<{ roomId: number, published: boolean } | null>(null)
-  const published = catalog?.roomId === roomId && catalog.published
+function ProviderSettings () {
+  const [providers, setProviders] = useState<ProviderCapabilities[]>([])
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
   useEffect(() => {
-    let alive = true
-    void fetchAnimationClips().then((clips): void => {
-      if (alive) setCatalog({ roomId, published: clips.length > 0 })
-      return undefined
-    }).catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [roomId, snapshot?.catalogVersion])
+    void new HttpApi('animation/').get<{ providers: ProviderCapabilities[] }>('providers').then(result => setProviders(result.providers)).catch(error => setError(error.message))
+  }, [])
+  const check = async (provider: ProviderCapabilities) => {
+    setBusy(true)
+    setError('')
+    try {
+      await new HttpApi('animation/').post('production/check', { body: { providerId: provider.id, kind: provider.kinds[0] } })
+      setMessage(`${provider.name}: conexión disponible`)
+    } catch (error) {
+      setError((error as Error).message)
+    } finally { setBusy(false) }
+  }
+  return (
+    <section aria-label='Proveedores de audio'>
+      <h3>Proveedores de audio</h3>
+      {providers.map(provider => (
+        <div key={provider.id} className={audioStyles.toolbar}>
+          <span>{provider.name}</span>
+          {provider.configured
+            ? <Button className={audioStyles.secondary} disabled={busy} onClick={() => void check(provider)}>Comprobar conexión</Button>
+            : (
+                <p className={audioStyles.help}>
+                  Configure las credenciales de
+                  {provider.name}
+                  {' '}
+                  en el servidor.
+                </p>
+              )}
+        </div>
+      ))}
+      {message && <p role='status'>{message}</p>}
+      {error && <p role='alert' className={audioStyles.notice}>{error}</p>}
+    </section>
+  )
+}
+
+export default function AnimatorSettings () {
+  const [params, setParams] = useSearchParams()
+  const view = params.get('view') === 'audio' ? 'audio' : 'control'
+  const settings = params.get('panel') === 'settings' || params.get('view') === 'connection'
+  const roomId = useAppSelector(state => state.user.roomId)
+  const { snapshot, connected } = useAppSelector(state => state.animation)
+  const current = snapshot?.roomId === roomId ? snapshot : null
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const toggle = async () => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await animationRequest(ANIMATION_CONTROL, { controlVersion: current?.controlVersion, enabled: !current?.prefs.enabled })
+    } catch (error) {
+      setError((error as Error).message)
+    } finally { setBusy(false) }
+  }
+  const close = () => {
+    const next = new URLSearchParams(params)
+    next.delete('panel')
+    if (next.get('view') === 'connection') next.set('view', 'control')
+    setParams(next, { replace: true })
+  }
   return (
     <>
-      <section className={styles.checklist} aria-label='Preparación del animador'>
-        <h2>Preparación de la sala</h2>
-        <ol>
-          <li data-complete={verified}><Link to='?view=connection'>{verified ? 'Conexión verificada' : 'Verificar conexión'}</Link></li>
-          <li data-complete={published}><Link to='?view=audio'>{published ? 'Audio publicado' : 'Preparar y publicar un audio'}</Link></li>
-          <li data-complete={!!snapshot?.audioUnlocked}><Link to='/player' target='_blank' rel='noopener'>{snapshot?.audioUnlocked ? 'Audio habilitado' : 'Habilitar audio en el reproductor'}</Link></li>
-          <li data-complete={!!snapshot?.session}><Link to='?view=operation'>{snapshot?.session ? 'Jornada iniciada' : 'Iniciar jornada en modo automático'}</Link></li>
-        </ol>
-      </section>
+      <div className={audioStyles.headerControls}>
+        <label className={audioStyles.check}>
+          <input type='checkbox' role='switch' aria-label='Activado' checked={!!current?.prefs.enabled} disabled={!current || !connected || busy} onChange={() => void toggle()} />
+          {current?.prefs.enabled ? 'Activado' : 'Desactivado'}
+        </label>
+        <div className={audioStyles.actions}>
+          {view === 'audio' && <AnimationQuickControls showLink={false} />}
+          <Button
+            className={audioStyles.secondary}
+            onClick={() => {
+              const next = new URLSearchParams(params)
+              next.set('panel', 'settings')
+              setParams(next)
+            }}
+          >
+            Ajustes
+          </Button>
+        </div>
+      </div>
+      {(!connected || !current) && <p role='status' className={audioStyles.notice}>Conectando con la sala… Los controles se habilitarán al recuperar la conexión.</p>}
+      {error && <p role='alert' className={audioStyles.notice}>{error}</p>}
       <nav className={styles.tabs} aria-label='Ajustes del animador'>
-        {areas.map(([key, label]) => <Link key={key} to={`?view=${key}`} aria-current={area === key ? 'page' : undefined}>{label}</Link>)}
+        <Link to='?view=control' aria-current={view === 'control' ? 'page' : undefined}>Control</Link>
+        <Link to='?view=audio' aria-current={view === 'audio' ? 'page' : undefined}>Audios</Link>
       </nav>
-      {area !== 'operation' && <AnimationQuickControls showLink={false} />}
-      <div hidden={area !== 'operation'}><AnimationPanel /></div>
-      <CatalogProductionPanel key={roomId} view={area === 'connection' ? 'connection' : area === 'audio' ? 'audio' : 'hidden'} onConnectionChange={setVerified} />
+      <div hidden={view !== 'control'}><AnimationPanel /></div>
+      <CatalogProductionPanel key={roomId} visible={view === 'audio'} />
+      {settings && (
+        <Modal className={audioStyles.dialog} title='Ajustes del animador' onClose={close}>
+          <OperationControls settings />
+          <ProviderSettings />
+          <div className={audioStyles.actions}><Button className={audioStyles.secondary} onClick={close}>Cerrar ajustes</Button></div>
+        </Modal>
+      )}
     </>
   )
 }

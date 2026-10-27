@@ -29,6 +29,7 @@
     "test:tables:e2e": "node config/table-qr.e2e.mjs",
     "test:library:e2e": "node config/library.e2e.mjs",
     "test:playlists:e2e": "node config/playlists.e2e.mjs",
+    "test:queue:cleanup": "node config/queue-cleanup.e2e.mjs",
     "test:animation:e2e": "node config/animation.e2e.mjs",
     "test:animation:phase2": "node config/animation-phase2.e2e.mjs",
     "typecheck": "tsc -b --noEmit",

@@ -2,7 +2,7 @@ import React from 'react'
 import { Link } from 'react-router'
 import { useAppSelector } from 'store/hooks'
 import { animationRequest } from 'lib/animationApi'
-import { ANIMATION_CANCEL, ANIMATION_CONTROL } from 'shared/animation'
+import { ANIMATION_CANCEL } from 'shared/animation'
 import Button from 'components/Button/Button'
 import styles from './Animation.css'
 
@@ -16,11 +16,6 @@ export default function AnimationQuickControls ({ showLink = true }: { showLink?
     <div className={styles.quick}>
       {showLink && <Link to='/admin/settings/animator'>Animador</Link>}
       {snapshot?.active && <Button variant='danger' onClick={() => send(ANIMATION_CANCEL, { interventionId: snapshot.active?.interventionId })}>Detener anuncio</Button>}
-      {snapshot?.prefs.enabled && (
-        <Button onClick={() => send(ANIMATION_CONTROL, { controlVersion: snapshot.controlVersion, microphoneOccupied: !snapshot.microphoneOccupied })}>
-          {snapshot.microphoneOccupied ? 'Liberar micrófono' : 'Tomar micrófono'}
-        </Button>
-      )}
       {error && <span role='alert'>{error}</span>}
     </div>
   )

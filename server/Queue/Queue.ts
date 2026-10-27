@@ -13,6 +13,10 @@ import { getResolvedSongValidationError, type ResolvedSong } from '../../shared/
 const HIDDEN_QUEUE_STATUSES = ['REJECTED', 'REMOVED']
 
 class Queue {
+  static cleanupGeneration (roomId: number): number {
+    return db.get<{ generation: number }>('SELECT generation FROM queueCleanupState WHERE roomId=?', [roomId])?.generation ?? 0
+  }
+
   /**
    * Add a validated, resolved song snapshot to a room's queue.
    */
@@ -107,7 +111,7 @@ class Queue {
       SELECT queueId, songId, userId, prevQueueId,
         queue.origin, queue.source, queue.status, queue.externalId,
         queue.title, queue.artistOrChannel, queue.durationSeconds, queue.thumbnailUrl,
-        queue.dateCreated, queue.dateUpdated,
+        queue.dateCreated, queue.dateUpdated, queue.historyClearedAt,
         queue.tableId, queue.tableLabelSnapshot,
         media.mediaId, media.relPath, media.rgTrackGain, media.rgTrackPeak,
         users.name AS userDisplayName, users.dateUpdated AS userDateUpdated,
@@ -136,6 +140,7 @@ class Queue {
       thumbnailUrl: string | null
       dateCreated: number
       dateUpdated: number
+      historyClearedAt: number | null
       mediaId: number | null
       relPath: string | null
       rgTrackGain: number | null
@@ -269,8 +274,9 @@ class Queue {
   /**
    * Delete a queue item
    */
-  static remove (queueId: number, roomId?: number): void {
-    db.exec('BEGIN IMMEDIATE')
+  static remove (queueId: number, roomId?: number, withinTransaction = false): void {
+    db.exec(withinTransaction ? 'SAVEPOINT queue_remove' : 'BEGIN IMMEDIATE')
+    const commit = withinTransaction ? 'RELEASE queue_remove' : 'COMMIT'
     db.exec('PRAGMA defer_foreign_keys = ON') // v0.9 betas didn't have prevQueueId DEFERRABLE
 
     try {
@@ -284,7 +290,7 @@ class Queue {
       const removedRow = db.get<{ prevQueueId: number | null }>(String(selectQuery), selectQuery.parameters)
 
       if (removedRow === undefined) {
-        db.exec('COMMIT')
+        db.exec(commit)
         return
       }
 
@@ -304,9 +310,12 @@ class Queue {
         WHERE queueId = ${queueId}
       `
       db.run(String(removeQuery), removeQuery.parameters)
-      db.exec('COMMIT')
+      db.exec(commit)
     } catch (err) {
-      db.exec('ROLLBACK')
+      if (withinTransaction) {
+        db.exec('ROLLBACK TO queue_remove')
+        db.exec('RELEASE queue_remove')
+      } else db.exec('ROLLBACK')
       throw err
     }
   }

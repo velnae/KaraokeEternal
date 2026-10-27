@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import AnnouncementAudio from './AnnouncementAudio'
 import type { AnimationClip } from '../../../../../shared/animation.js'
+import { createHash } from 'node:crypto'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -51,11 +52,27 @@ it('rejects an old preparation after closing instead of using a disposed context
   }))
   vi.stubGlobal('fetch', fetch)
   const pending = audio.unlock([{ id: 'test', checksum: 'test' } as AnimationClip])
-  await Promise.resolve()
-  expect(fetch).toHaveBeenCalledTimes(1)
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
   audio.close()
   finishFetch!(new Response('old audio'))
   await expect(pending).rejects.toThrow('cancelada')
   expect(context.decodeAudioData).not.toHaveBeenCalled()
   expect(audio.buffers.size).toBe(0)
+})
+
+it('bounds decoded memory and retains high-priority requested clips instead of the last loaded files', async () => {
+  const audio = new AnnouncementAudio()
+  const context = { state: 'running', resume: vi.fn(async () => {}), close: vi.fn(async () => {}), decodeAudioData: vi.fn(async () => ({ duration: 10, length: 441000, numberOfChannels: 2 })) }
+  audio.context = context as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  const clips = Array.from({ length: 24 }, (_, index) => ({ id: `voice-${index}`, durationMs: 10000, checksum: createHash('sha256').update(`voice-${index}`).digest('hex') } as AnimationClip))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(url.split('/').pop())))
+  await audio.unlock(clips)
+  expect(audio.decodedBytes).toBeLessThanOrEqual(audio.maxDecodedBytes)
+  expect(audio.buffers.has(clips[0].checksum)).toBe(true)
+  expect(audio.buffers.has(clips[23].checksum)).toBe(false)
+  await audio.unlock([clips[23], clips[0]])
+  expect(audio.buffers.size).toBe(2)
+  expect(audio.buffers.has(clips[23].checksum)).toBe(true)
+  audio.close()
 })

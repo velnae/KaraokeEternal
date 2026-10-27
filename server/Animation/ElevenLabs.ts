@@ -1,4 +1,6 @@
 import type { ProductionConfig } from '../../shared/catalogProduction.js'
+import type { AudioProvider } from './AudioProvider.js'
+import type { AudioKind } from '../../shared/animation.js'
 
 export class ProviderError extends Error {
   constructor (message: string, public uncertain: boolean) { super(message) }
@@ -41,11 +43,20 @@ async function rejectionDetail (response: Response): Promise<string | undefined>
   }
 }
 
-export class ElevenLabs {
-  constructor (private key: string, private base = 'https://api.elevenlabs.io') {}
+export class ElevenLabs implements AudioProvider {
+  constructor (private key: string, private base = 'https://api.elevenlabs.io', private voiceModel = 'eleven_v4') {}
 
-  async check (model: string) {
+  get capabilities () {
+    return { id: 'elevenlabs', name: 'ElevenLabs', configured: !!this.key, kinds: ['voice', 'effect', 'ambience'] as AudioKind[], models: { voice: this.voiceModel, effect: 'eleven_text_to_sound_v2', ambience: 'eleven_text_to_sound_v2' }, styles: ['warm', 'cheerful', 'celebration'], languages: ['es'], loop: true }
+  }
+
+  async check (model: string, kind: AudioKind = 'voice') {
     const headers = { 'xi-api-key': this.key }
+    if (kind !== 'voice') {
+      const response = await fetch(`${this.base}/v1/models`, { headers, signal: AbortSignal.timeout(10000) })
+      if (!response.ok) throw new ProviderError('No se pudo verificar la conexión con ElevenLabs.', false)
+      return []
+    }
     const responses = await Promise.all(['models', 'voices'].map(resource => fetch(`${this.base}/v1/${resource}`, { headers, signal: AbortSignal.timeout(10000) })))
     if (responses.some(response => !response.ok)) throw new ProviderError('No se pudo verificar la cuenta o sus permisos de ElevenLabs.', false)
     const models = await responses[0].json() as { model_id: string }[]
@@ -59,7 +70,7 @@ export class ElevenLabs {
     const endpoint = voice ? `text-to-speech/${encodeURIComponent(config.voiceId!)}` : 'sound-generation'
     const body = voice
       ? { text: config.spokenText, model_id: config.model, voice_settings: config.settings, language_code: 'es' }
-      : { text: config.text, model_id: 'eleven_text_to_sound_v2', duration_seconds: config.durationSeconds, loop: config.kind === 'ambience', prompt_influence: 0.3 }
+      : { text: config.text, model_id: 'eleven_text_to_sound_v2', duration_seconds: config.durationSeconds, loop: config.kind === 'ambience' && config.loop !== false, prompt_influence: 0.3 }
     try {
       const response = await fetch(`${this.base}/v1/${endpoint}?output_format=mp3_44100_128`, {
         method: 'POST', headers: { 'xi-api-key': this.key, 'Content-Type': 'application/json' },
@@ -87,7 +98,7 @@ export class ElevenLabs {
       return { bytes: Buffer.concat(chunks), requestId: response.headers.get('request-id') }
     } catch (error) {
       if (error instanceof ProviderError) throw error
-      throw new ProviderError('Generación sin confirmación. Revise el consumo antes de regenerar.', true)
+      throw new ProviderError('No se pudo confirmar la generación. No se repetirá automáticamente.', true)
     }
   }
 }

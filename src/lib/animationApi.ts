@@ -22,6 +22,7 @@ export function animationRequest (type: string, payload: object = {}, timeout = 
 }
 
 export const fetchAnimationClips = () => new HttpApi('animation/').get<AnimationClip[]>('catalog')
+export const fetchPreparedAnimationClips = () => new HttpApi('animation/').get<AnimationClip[]>('preparation')
 export const syncAnimation = () => animationRequest(ANIMATION_SYNC)
 
 socket.on('disconnect', () => store.dispatch({ type: ANIMATION_DISCONNECTED }))

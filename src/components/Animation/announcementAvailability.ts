@@ -15,7 +15,6 @@ export function announcementBlocker ({ snapshot, connected, hasClip, roomClosed 
   if (!snapshot.playerPresent) return 'Abra el reproductor de la sala para enviar el anuncio.'
   if (!hasClip) return 'Seleccione un clip disponible en el catálogo.'
   if (expired) return 'El recurso ya venció. Seleccione otro anuncio.'
-  if (snapshot.microphoneOccupied) return 'Marque el micrófono como libre para solicitar un anuncio.'
   if (snapshot.prefs.volume === 0) return 'Suba el volumen de voz para solicitar un anuncio.'
   if (snapshot.active) return 'Ya hay una solicitud. Espere a que termine o cancélela.'
   if (snapshot.blockedUntil > now) return 'Esperando el cierre de la intervención anterior.'

@@ -7,6 +7,10 @@ import { open, close, db } from '../lib/Database.js'
 import { CatalogProduction, type ProductionOptions } from './Production.js'
 import { loadCatalog, catalogAsset, catalogClips } from './catalog.js'
 import type { ProductionInput } from '../../shared/catalogProduction.js'
+import { getResource, resourceDTO } from './Resources.js'
+import type { AudioProvider } from './AudioProvider.js'
+import * as catalog from './catalog.js'
+import { execFileSync } from 'node:child_process'
 
 function wav (seconds = 1, silent = false) {
   const samples = 24000 * seconds
@@ -85,6 +89,7 @@ beforeEach(async () => {
   await production.check()
 })
 afterEach(async () => {
+  vi.restoreAllMocks()
   await production.stop()
   await new Promise<void>(resolve => provider.close(() => resolve()))
   close()
@@ -101,10 +106,10 @@ describe('catalog production', () => {
     const accepted = production.enqueue(1, 1, [{ ...input, voiceId: status.voiceId }])
     expect(accepted).toHaveLength(1)
     await production.drain()
-    expect(production.list(1)[0].status).toBe('ready_for_review')
+    expect(production.list(1)[0].status).toBe('published')
   })
 
-  it('deduplicates generation and publishes only after explicit review, without exposing secrets', async () => {
+  it('deduplicates generation and makes valid output automatically available without exposing secrets', async () => {
     production.enqueue(1, 1, [input, input])
     production.enqueue(1, 1, [input])
     await production.drain()
@@ -113,13 +118,13 @@ describe('catalog production', () => {
     expect(requests[0].url).toContain('/text-to-speech/testvoice')
     expect(requests[0].body).toMatchObject({ model_id: 'eleven_v4', voice_settings: { stability: 0.6, similarity_boost: 0.75 } })
     expect(requests[0].body).not.toHaveProperty('speed')
-    expect(job.status).toBe('ready_for_review')
-    expect(catalogAsset(`generated-${job.jobId}`)).toBeUndefined()
-    expect(published).not.toHaveBeenCalled()
+    expect(job.status).toBe('published')
+    expect(catalogAsset(`generated-${job.jobId}`)).toBeDefined()
+    expect(published).toHaveBeenCalledOnce()
     expect(JSON.stringify(production.status()) + JSON.stringify(job)).not.toContain('test-secret')
     await expect(production.audio(2, job.jobId)).rejects.toThrow('disponible')
-    await production.review(1, 7, job.jobId, true)
-    await production.review(1, 7, job.jobId, true)
+    await production.register(1, job.jobId)
+    await production.register(1, job.jobId)
     expect(catalogAsset(`generated-${job.jobId}`)?.clip).toMatchObject({ roomId: 1, family: 'welcome', approvedForAuto: true })
     expect(catalogClips(2).some(clip => clip.id === `generated-${job.jobId}`)).toBe(false)
     expect(requests).toHaveLength(1)
@@ -159,7 +164,7 @@ describe('catalog production', () => {
     const [job] = production.list(1)
     expect(job.status).toBe('failed')
     expect(catalogAsset(`generated-${job.jobId}`)).toBeUndefined()
-    await expect(production.review(1, 1, job.jobId, true)).rejects.toThrow('pendiente')
+    await expect(production.register(1, job.jobId)).rejects.toThrow('preparado')
   })
 
   it('retains uncertain provider outcomes and does not retry them implicitly', async () => {
@@ -192,7 +197,7 @@ describe('catalog production', () => {
     await production.stop()
     for (let index = 0; index < 101; index++) production.enqueue(1, 1, [{ ...input, text: `Otro mensaje número ${index}.` }])
     expect(production.list(1).some(job => job.jobId === first.jobId)).toBe(false)
-    expect(production.list(1, [first.jobId]).find(job => job.jobId === first.jobId)?.status).toBe('ready_for_review')
+    expect(production.list(1, [first.jobId]).find(job => job.jobId === first.jobId)?.status).toBe('published')
     expect(production.list(2, [first.jobId])).toHaveLength(0)
     expect(production.enqueue(1, 1, [input])[0].jobId).toBe(first.jobId)
     expect(requests).toHaveLength(1)
@@ -225,5 +230,86 @@ describe('catalog production', () => {
     expect(production.list(1)[0].status).toBe('cancelled')
     expect(production.status().usedCharacters).toBe(0)
     expect(requests).toHaveLength(0)
+  })
+
+  it('uploads without a provider, keeps metadata and does not synthesize', async () => {
+    await production.stop()
+    production = new CatalogProduction(directory, { ...options, key: '' }, published)
+    await production.start()
+    const result = await production.upload(1, 'uploaded-test', 'effect', 'Aplauso', { category: 'Celebración', family: 'celebration' }, wav(), 'aplauso.wav')
+    expect(result).toMatchObject({ preparation: 'ready', state: 'active', kind: 'effect', metadata: { origin: 'uploaded', category: 'Celebración' } })
+    expect(catalogClips(1).some(clip => clip.id === result.id)).toBe(true)
+    expect(getResource(result.id, 2)).toBeUndefined()
+    expect(requests).toHaveLength(0)
+  })
+
+  it('supports an effect-only provider without fetching voices or using an ElevenLabs model', async () => {
+    await production.stop()
+    const alternative: AudioProvider = { capabilities: { id: 'fixture', name: 'Fixture', configured: true, kinds: ['effect'], models: { effect: 'fixture-effects' }, styles: [], languages: [], loop: false },
+      check: vi.fn(async () => []), generate: vi.fn(async () => ({ bytes: wav(), requestId: 'fake-1' })) }
+    production = new CatalogProduction(directory, { ...options, key: '' }, published, [alternative])
+    await production.start()
+    await production.check('fixture', 'effect')
+    const [job] = production.enqueue(1, 1, [{ ...input, providerId: 'fixture', kind: 'effect', durationSeconds: 1 }])
+    await production.drain()
+    expect(resourceDTO(getResource(`generated-${job.jobId}`)!)).toMatchObject({ preparation: 'ready', metadata: { providerId: 'fixture', model: 'fixture-effects' } })
+    expect(alternative.generate).toHaveBeenCalledOnce()
+  })
+
+  it('retries a failed local registration from its stored file without regenerating', async () => {
+    const registration = vi.spyOn(catalog, 'saveCatalogRecord').mockRejectedValueOnce(new Error('Temporary storage error'))
+    const [job] = production.enqueue(1, 1, [input])
+    await production.drain()
+    expect(getResource(`generated-${job.jobId}`)?.preparation).toBe('failed')
+    expect(requests).toHaveLength(1)
+    registration.mockRestore()
+    await production.register(1, job.jobId)
+    expect(getResource(`generated-${job.jobId}`)?.preparation).toBe('ready')
+    expect(requests).toHaveLength(1)
+  })
+
+  it.each(['mp3', 'ogg'])('prepares a real %s upload by content', async (format) => {
+    const bytes = execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=300:duration=1', '-f', format, 'pipe:1'])
+    const result = await production.upload(1, `uploaded-${format}`, 'voice', format, {}, bytes, `fixture.${format}`)
+    expect(result.preparation).toBe('ready')
+    expect(result.durationMs).toBeGreaterThan(900)
+  })
+
+  it('rejects unsupported content renamed as WAV', async () => {
+    const bytes = execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=300:duration=1', '-f', 'flac', 'pipe:1'])
+    const result = await production.upload(1, 'uploaded-disguised', 'voice', 'Wrong format', {}, bytes, 'fixture.wav')
+    expect(result.preparation).toBe('failed')
+    expect(result.error).toContain('MP3, WAV u OGG')
+  })
+
+  it('distinguishes deliberate versions of the same original while deduplicating a retried version request', async () => {
+    const [original] = production.enqueue(1, 1, [input])
+    await production.drain()
+    const version = { ...input, parentId: `generated-${original.jobId}`, revision: 1, versionRequestId: 'intent-one' }
+    const [first] = production.enqueue(1, 1, [version])
+    const [retry] = production.enqueue(1, 1, [version])
+    const [second] = production.enqueue(1, 1, [{ ...version, versionRequestId: 'intent-two' }])
+    await production.drain()
+    expect(first.jobId).toBe(retry.jobId)
+    expect(second.jobId).not.toBe(first.jobId)
+    expect(requests).toHaveLength(3)
+    expect(getResource(`generated-${original.jobId}`)?.preparation).toBe('ready')
+  })
+
+  it('reconciles old generation keys so omitted provider defaults do not regenerate an existing audio', async () => {
+    const [job] = production.enqueue(1, 1, [input])
+    await production.drain()
+    await production.stop()
+    const legacy = { ...job.config }
+    delete legacy.providerId
+    delete legacy.language
+    db.run('UPDATE catalogGenerationJobs SET generationKey=?,configJSON=? WHERE jobId=?', ['old-key', JSON.stringify(legacy), job.jobId])
+    production = new CatalogProduction(directory, options, published)
+    await production.start()
+    await production.check()
+    const [reused] = production.enqueue(1, 1, [{ ...input, category: '', language: 'es', providerId: 'elevenlabs' }])
+    await production.drain()
+    expect(reused.jobId).toBe(job.jobId)
+    expect(requests).toHaveLength(1)
   })
 })

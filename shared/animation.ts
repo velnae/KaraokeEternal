@@ -63,6 +63,7 @@ export interface AnimationClip {
   weight?: number
   roomId?: number
   validUntil?: number
+  loop?: boolean
 }
 export type InterventionStatus = 'PENDING' | 'RESERVED' | 'PLAYING' | 'PLAYED' | 'CANCELLED' | 'EXPIRED' | 'FAILED' | 'INTERRUPTED' | 'UNCERTAIN'
 export interface Intervention {

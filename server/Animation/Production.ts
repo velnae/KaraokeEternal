@@ -1,18 +1,21 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { parseBuffer } from 'music-metadata'
 import { db } from '../lib/Database.js'
 import getLogger from '../lib/Log.js'
-import { clipDurationLimit, VOICE_FAMILIES } from '../../shared/animation.js'
+import { clipDurationLimit, VOICE_FAMILIES, type AudioKind } from '../../shared/animation.js'
 import { voicePrompt, type GenerationJob, type ProductionConfig, type ProductionInput, type ProductionStatus } from '../../shared/catalogProduction.js'
-import { catalogAsset, saveCatalogRecord } from './catalog.js'
+import type { AudioMetadata } from '../../shared/audioCatalog.js'
+import { catalogAsset, catalogChanged, resourceFile, saveCatalogRecord } from './catalog.js'
 import { ElevenLabs, ProviderError } from './ElevenLabs.js'
+import type { AudioProvider } from './AudioProvider.js'
+import { prepareAudio, AudioValidationError } from './AudioPreparation.js'
+import { completeResource, createResource, getResource, prepareResource, resourceDTO, validateMetadata } from './Resources.js'
+import { generationKey } from './generationKey.js'
 
 const run = promisify(execFile)
-class AudioValidationError extends Error {}
 type StoredJob = Omit<GenerationJob, 'config'> & { configJSON: string, filename: string | null, checksum: string | null }
 const positive = (value: string | undefined, fallback: number) => Number.isFinite(Number(value)) && Number(value) >= 0 && value !== '' && value !== undefined ? Number(value) : fallback
 export interface ProductionOptions {
@@ -27,29 +30,31 @@ export interface ProductionOptions {
   ffmpeg: string
 }
 export const productionOptions = (): ProductionOptions => ({
-  key: process.env.KES_ELEVENLABS_API_KEY ?? '',
-  baseUrl: process.env.KES_ELEVENLABS_BASE_URL,
-  voiceId: process.env.KES_ELEVENLABS_VOICE_ID ?? '',
-  model: process.env.KES_ELEVENLABS_MODEL ?? 'eleven_v4',
-  characterLimit: positive(process.env.KES_ELEVENLABS_CHARACTER_LIMIT, 10000),
-  effectSecondsLimit: positive(process.env.KES_ELEVENLABS_EFFECT_SECONDS_LIMIT, 300),
+  key: process.env.KES_ELEVENLABS_API_KEY ?? '', baseUrl: process.env.KES_ELEVENLABS_BASE_URL,
+  voiceId: process.env.KES_ELEVENLABS_VOICE_ID ?? '', model: process.env.KES_ELEVENLABS_MODEL ?? 'eleven_v4',
+  characterLimit: positive(process.env.KES_ELEVENLABS_CHARACTER_LIMIT, 10000), effectSecondsLimit: positive(process.env.KES_ELEVENLABS_EFFECT_SECONDS_LIMIT, 300),
   pricePerThousandCharacters: process.env.KES_ELEVENLABS_PRICE_PER_1K_CHARS ? positive(process.env.KES_ELEVENLABS_PRICE_PER_1K_CHARS, 0) : null,
   pricePerEffectSecond: process.env.KES_ELEVENLABS_PRICE_PER_EFFECT_SECOND ? positive(process.env.KES_ELEVENLABS_PRICE_PER_EFFECT_SECOND, 0) : null,
   ffmpeg: process.env.KES_FFMPEG_PATH || 'ffmpeg',
 })
 
 export class CatalogProduction {
-  private provider: ElevenLabs
+  private providers: Map<string, AudioProvider>
+  private verified = new Map<string, { voiceId: string, name: string }[]>()
   private processorAvailable = false
   private unavailableReason: string | null = null
-  private verifiedVoices: { voiceId: string, name: string }[] | null = null
   private stopped = false
   private working: Promise<void> | null = null
   private activeAbort: AbortController | null = null
   private timer?: ReturnType<typeof setInterval>
+  private uploads = new Set<Promise<unknown>>()
 
-  constructor (private directory: string, private options: ProductionOptions, private onPublished: (roomId: number) => void = () => {}) {
-    this.provider = new ElevenLabs(options.key, options.baseUrl)
+  constructor (private directory: string, private options: ProductionOptions, private onPublished: (roomId: number) => void = () => {}, providers?: AudioProvider[]) {
+    this.providers = new Map((providers ?? [new ElevenLabs(options.key, options.baseUrl, options.model)]).map(provider => [provider.capabilities.id, provider] as const))
+  }
+
+  capabilities () {
+    return { providers: [...this.providers.values()].map(provider => provider.capabilities), processorAvailable: this.processorAvailable }
   }
 
   async start () {
@@ -57,13 +62,15 @@ export class CatalogProduction {
       await fs.mkdir(path.join(this.directory, 'production'), { recursive: true })
       await run(this.options.ffmpeg, ['-version'], { timeout: 5000 })
       this.processorAvailable = true
-    } catch {
-      this.processorAvailable = false
-      this.unavailableReason = 'Revise FFmpeg y los permisos de la carpeta de producción en el servidor.'
-    }
-    db.run('UPDATE catalogGenerationJobs SET status=\'uncertain\', error=\'Servidor reiniciado durante la generación. Revise el consumo antes de regenerar.\', finishedAt=? WHERE status=\'generating\'', [Date.now()])
-    for (const job of db.all<StoredJob>('SELECT * FROM catalogGenerationJobs WHERE status=\'publishing\'')) {
-      db.run('UPDATE catalogGenerationJobs SET status=? WHERE jobId=?', [catalogAsset(`generated-${job.jobId}`) ? 'published' : 'ready_for_review', job.jobId])
+    } catch { this.unavailableReason = 'Revise FFmpeg y los permisos de almacenamiento del servidor.' }
+    db.run('UPDATE catalogGenerationJobs SET status=\'uncertain\',error=\'La generación se interrumpió sin confirmación.\',finishedAt=? WHERE status=\'generating\'', [Date.now()])
+    for (const job of db.all<StoredJob>('SELECT * FROM catalogGenerationJobs ORDER BY createdAt,rowid')) {
+      const config = JSON.parse(job.configJSON)
+      const key = generationKey(job.roomId, config)
+      if (!db.get('SELECT jobId FROM catalogGenerationJobs WHERE roomId=? AND generationKey=?', [job.roomId, key])) db.run('UPDATE catalogGenerationJobs SET generationKey=? WHERE jobId=?', [key, job.jobId])
+      this.track(job.roomId, job.jobId, config)
+      if (['publishing', 'ready_for_review'].includes(job.status)) await this.register(job.roomId, job.jobId).catch(() => {})
+      else if (['queued', 'uncertain', 'failed', 'cancelled'].includes(job.status)) prepareResource(`generated-${job.jobId}`, job.status as 'queued' | 'uncertain' | 'failed' | 'cancelled', job.error)
     }
     this.timer = setInterval(() => {
       void this.drain()
@@ -77,89 +84,104 @@ export class CatalogProduction {
     clearInterval(this.timer)
     this.activeAbort?.abort()
     await this.working
+    await Promise.allSettled(this.uploads)
   }
 
+  // Legacy accounting is internal; the new UI consumes capabilities instead.
   status (): ProductionStatus {
     const now = new Date()
-    const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
-    const totals = db.all<{ unitType: string, total: number }>(`SELECT unitType,SUM(units) total FROM catalogGenerationJobs
-      WHERE startedAt >= ? OR (startedAt IS NULL AND status='queued') GROUP BY unitType`, [monthStart])
-    const { model, characterLimit, effectSecondsLimit, pricePerThousandCharacters, pricePerEffectSecond } = this.options
-    const voices = (this.verifiedVoices ?? []).map(voice => ({ ...voice }))
-    const voiceId = voices.some(voice => voice.voiceId === this.options.voiceId)
-      ? this.options.voiceId
-      : voices[0]?.voiceId ?? this.options.voiceId
-    return { configured: !!this.options.key, connectionVerified: this.verifiedVoices !== null, processorAvailable: this.processorAvailable,
-      unavailableReason: this.unavailableReason, model, voiceId, voices,
-      characterLimit, effectSecondsLimit, pricePerThousandCharacters, pricePerEffectSecond,
-      usedCharacters: totals.find(row => row.unitType === 'characters')?.total ?? 0,
-      usedEffectSeconds: totals.find(row => row.unitType === 'seconds')?.total ?? 0 }
+    const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+    const totals = db.all<{ unitType: string, total: number }>('SELECT unitType,SUM(units) total FROM catalogGenerationJobs WHERE startedAt>=? OR (startedAt IS NULL AND status=\'queued\') GROUP BY unitType', [start])
+    const voices = this.verified.get('elevenlabs:voice') ?? []
+    return { configured: !!this.options.key, connectionVerified: this.verified.size > 0, processorAvailable: this.processorAvailable, unavailableReason: this.unavailableReason,
+      voices, voiceId: voices.some(voice => voice.voiceId === this.options.voiceId) ? this.options.voiceId : voices[0]?.voiceId ?? this.options.voiceId,
+      model: this.options.model, characterLimit: this.options.characterLimit, effectSecondsLimit: this.options.effectSecondsLimit,
+      pricePerThousandCharacters: this.options.pricePerThousandCharacters, pricePerEffectSecond: this.options.pricePerEffectSecond,
+      usedCharacters: totals.find(row => row.unitType === 'characters')?.total ?? 0, usedEffectSeconds: totals.find(row => row.unitType === 'seconds')?.total ?? 0 }
   }
 
-  async check () {
-    if (!this.options.key) throw new Error('Configure KES_ELEVENLABS_API_KEY en el servidor.')
-    this.verifiedVoices = null
-    const voices = await this.provider.check(this.options.model)
-    this.verifiedVoices = voices
+  async check (providerId = 'elevenlabs', kind: AudioKind = 'voice') {
+    const provider = this.providers.get(providerId)
+    if (!provider?.capabilities.configured || !provider.capabilities.kinds.includes(kind)) throw new Error('Configure un proveedor compatible en el servidor.')
+    const voices = await provider.check(provider.capabilities.models[kind] ?? '', kind)
+    this.verified.set(`${providerId}:${kind}`, voices)
     return voices
   }
 
   list (roomId: number, include: string[] = []): GenerationJob[] {
     const rows = db.all<StoredJob>('SELECT * FROM catalogGenerationJobs WHERE roomId=? ORDER BY createdAt DESC,rowid DESC LIMIT 100', [roomId])
-    for (const jobId of include.slice(0, 9)) {
-      if (rows.some(row => row.jobId === jobId)) continue
-      const row = db.get<StoredJob>('SELECT * FROM catalogGenerationJobs WHERE roomId=? AND jobId=?', [roomId, jobId])
+    for (const id of include.slice(0, 9)) {
+      if (rows.some(row => row.jobId === id)) continue
+      const row = db.get<StoredJob>('SELECT * FROM catalogGenerationJobs WHERE roomId=? AND jobId=?', [roomId, id])
       if (row) rows.push(row)
     }
-    return rows
-      .map(({ configJSON, filename, checksum, ...job }) => {
-        void filename
-        void checksum
-        return { ...job, config: JSON.parse(configJSON), active: !!catalogAsset(`generated-${job.jobId}`) }
-      })
+    return rows.map(({ configJSON, filename, checksum, ...job }) => {
+      void filename
+      void checksum
+      return { ...job, config: JSON.parse(configJSON), active: !!catalogAsset(`generated-${job.jobId}`) }
+    })
+  }
+
+  private track (roomId: number, jobId: string, config: ProductionConfig) {
+    return createResource({ id: `generated-${jobId}`, roomId, kind: config.kind, title: config.title, preparation: 'queued',
+      metadata: { ...config, origin: 'generated', family: config.family, modes: config.modes ?? ['dinner', 'mixed', 'party'], automatic: true,
+        providerId: config.providerId ?? 'elevenlabs', generationInput: { ...config },
+        source: `${config.providerId ?? 'elevenlabs'} ${config.model}; job ${jobId}`, license: 'Generated using the configured provider account.',
+        voiceName: this.verified.get(`${config.providerId ?? 'elevenlabs'}:voice`)?.find(voice => voice.voiceId === config.voiceId)?.name } })
   }
 
   private config (input: ProductionInput): ProductionConfig {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Recurso de producción no válido.')
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Recurso no válido.')
     const kind = input.kind
-    if (!['voice', 'effect', 'ambience'].includes(kind)) throw new Error('Tipo de recurso no válido')
+    if (!['voice', 'effect', 'ambience'].includes(kind)) throw new Error('Tipo no válido.')
+    const providerId = input.providerId ?? 'elevenlabs'
+    const provider = this.providers.get(providerId)
+    if (!provider?.capabilities.configured || !provider.capabilities.kinds.includes(kind)) throw new Error('El proveedor no admite este tipo de audio.')
     const text = typeof input.text === 'string' ? input.text.normalize('NFC').replace(/\s+/g, ' ').trim() : ''
     const title = typeof input.title === 'string' ? input.title.trim() : ''
-    if ([...text].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) throw new Error('El texto contiene caracteres de control.')
-    if (!title || title.length > 80 || !text || text.length > (kind === 'voice' ? 220 : 450)) throw new Error('Revise el título y la longitud del texto.')
-    if (/[<>[\]]/.test(text)) throw new Error('Use el perfil de interpretación; no introduzca etiquetas de motor ni HTML.')
-    if (!['manual', ...VOICE_FAMILIES].includes(input.family)) throw new Error('Familia no válida')
-    if (input.family === 'promotion' && (!Number.isFinite(input.validUntil) || input.validUntil! <= Date.now())) throw new Error('Indique hasta cuándo estará vigente la promoción.')
-    if (!['warm', 'cheerful', 'celebration'].includes(input.style)) throw new Error('Perfil de interpretación no válido')
+    if (!title || title.length > 80 || !text || text.length > (kind === 'voice' ? 220 : 450)) throw new Error('Revise el nombre y el texto del audio.')
+    if (/[<>[\]]/.test(text) || [...text].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) throw new Error('Use texto sin etiquetas de motor ni HTML.')
+    if (!['manual', ...VOICE_FAMILIES].includes(input.family)) throw new Error('Uso no válido.')
+    if (input.family === 'promotion' && !(Number.isFinite(input.validUntil) && input.validUntil! > Date.now())) throw new Error('Indique una vigencia futura.')
+    if (kind === 'voice' && !provider.capabilities.styles.includes(input.style)) throw new Error('Interpretación no compatible.')
+    if (input.language && !provider.capabilities.languages.includes(input.language)) throw new Error('Idioma no compatible.')
+    if (input.loop && !provider.capabilities.loop) throw new Error('El proveedor no admite bucles.')
     const voiceId = input.voiceId || this.options.voiceId
-    if (kind === 'voice' && !/^[a-zA-Z0-9_-]{1,120}$/.test(voiceId)) throw new Error('Seleccione una voz de ElevenLabs.')
+    if (kind === 'voice' && !/^[a-zA-Z0-9_-]{1,120}$/.test(voiceId)) throw new Error('Seleccione una voz.')
     const durationSeconds = kind === 'voice' ? undefined : input.durationSeconds ?? (kind === 'effect' ? 2 : 8)
-    if (durationSeconds !== undefined && (!Number.isFinite(durationSeconds) || durationSeconds < 0.5 || durationSeconds * 1000 > clipDurationLimit(kind))) throw new Error('Duración fuera del límite del recurso.')
+    if (durationSeconds !== undefined && (!Number.isFinite(durationSeconds) || durationSeconds < 0.5 || durationSeconds * 1000 > clipDurationLimit(kind))) throw new Error('Duración fuera del límite de este tipo.')
     const revision = input.revision ?? 0
-    if (!Number.isInteger(revision) || revision < 0 || revision > 1000) throw new Error('Revisión no válida')
+    if (!Number.isInteger(revision) || revision < 0 || revision > 1000) throw new Error('Versión no válida.')
+    if (input.versionRequestId !== undefined && (!input.parentId || typeof input.versionRequestId !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(input.versionRequestId))) throw new Error('Solicitud de versión no válida.')
     const modes = input.modes ?? ['dinner', 'mixed', 'party']
-    if (!Array.isArray(modes) || !modes.length || modes.some(mode => !['dinner', 'mixed', 'party'].includes(mode))) throw new Error('Perfil de sala no válido')
-    return { title, text, kind, family: input.family, style: input.style, voiceId: kind === 'voice' ? voiceId : undefined,
+    if (!Array.isArray(modes) || !modes.length || modes.some(mode => !['dinner', 'mixed', 'party'].includes(mode))) throw new Error('Seleccione un perfil válido.')
+    if (input.category !== undefined && (typeof input.category !== 'string' || input.category.length > 120)) throw new Error('Categoría no válida.')
+    return { title, text, kind, providerId, category: input.category, language: kind === 'voice' ? input.language ?? provider.capabilities.languages[0] : undefined,
+      loop: kind === 'ambience' ? input.loop ?? provider.capabilities.loop : undefined, parentId: input.parentId, versionRequestId: input.versionRequestId,
+      family: input.family, style: input.style ?? 'warm', voiceId: kind === 'voice' ? voiceId : undefined,
       durationSeconds, revision, modes: [...new Set(modes)].sort(), validUntil: input.family === 'promotion' ? input.validUntil : undefined,
-      model: kind === 'voice' ? this.options.model : 'eleven_text_to_sound_v2',
-      spokenText: kind === 'voice' ? voicePrompt(text, input.style) : text,
+      model: provider.capabilities.models[kind] ?? '',
+      spokenText: kind === 'voice' && providerId === 'elevenlabs' ? voicePrompt(text, input.style) : text,
       settings: { stability: input.style === 'warm' ? 0.6 : 0.4, similarity_boost: 0.75 }, processingRevision: 1 }
   }
 
   enqueue (roomId: number, userId: number, inputs: ProductionInput[]) {
-    if (!this.options.key) throw new Error('Configure KES_ELEVENLABS_API_KEY en el servidor.')
-    if (!this.verifiedVoices) throw new Error('Verifique la conexión de ElevenLabs antes de generar.')
-    if (!this.processorAvailable) throw new Error('Instale FFmpeg para validar y preparar el audio generado.')
-    if (!Array.isArray(inputs) || !inputs.length || inputs.length > 9) throw new Error('Seleccione entre uno y nueve recursos por lote.')
+    if (!this.processorAvailable) throw new Error('Revise FFmpeg en el servidor.')
+    if (!Array.isArray(inputs) || !inputs.length || inputs.length > 9) throw new Error('Seleccione entre uno y nueve audios.')
     const configs = inputs.map(input => this.config(input))
-    if (configs.some(config => config.kind === 'voice' && !this.verifiedVoices!.some(voice => voice.voiceId === config.voiceId))) throw new Error('Seleccione una voz disponible en la cuenta verificada.')
+    for (const config of configs) {
+      const voices = this.verified.get(`${config.providerId}:${config.kind}`) ?? this.verified.get(`${config.providerId}:voice`)
+      if (!voices) throw new Error('Compruebe la conexión del proveedor.')
+      if (config.kind === 'voice' && !voices.some(voice => voice.voiceId === config.voiceId)) throw new Error('Seleccione una voz disponible.')
+      if (config.parentId && !getResource(config.parentId, roomId)) throw new Error('El audio original no pertenece a esta sala.')
+    }
     const submitted = new Set<string>()
     db.exec('SAVEPOINT generation_batch')
     try {
       for (const config of configs) {
         const encoded = JSON.stringify(config)
-        const generationKey = createHash('sha256').update(`${roomId}:${encoded}`).digest('hex')
-        const existing = db.get<{ jobId: string }>('SELECT jobId FROM catalogGenerationJobs WHERE roomId=? AND generationKey=?', [roomId, generationKey])
+        const key = generationKey(roomId, config)
+        const existing = db.get<{ jobId: string }>('SELECT jobId FROM catalogGenerationJobs WHERE roomId=? AND generationKey=?', [roomId, key])
         if (existing) {
           submitted.add(existing.jobId)
           continue
@@ -167,12 +189,12 @@ export class CatalogProduction {
         const unitType = config.kind === 'voice' ? 'characters' : 'seconds'
         const units = config.kind === 'voice' ? config.spokenText.length : config.durationSeconds!
         const usage = this.status()
-        if ((unitType === 'characters' ? usage.usedCharacters + units > usage.characterLimit : usage.usedEffectSeconds + units > usage.effectSecondsLimit)) throw new Error('El lote supera el límite mensual de producción configurado.')
-        const price = unitType === 'characters' ? this.options.pricePerThousandCharacters : this.options.pricePerEffectSecond
-        const estimatedCost = price === null ? null : price * units / (unitType === 'characters' ? 1000 : 1)
+        if (unitType === 'characters' ? usage.usedCharacters + units > usage.characterLimit : usage.usedEffectSeconds + units > usage.effectSecondsLimit) throw new Error('El lote supera el límite mensual de producción configurado.')
+        const price = unitType === 'characters' ? usage.pricePerThousandCharacters : usage.pricePerEffectSecond
         const jobId = randomUUID()
-        db.run(`INSERT INTO catalogGenerationJobs(jobId,roomId,generationKey,configJSON,status,createdAt,createdBy,units,unitType,estimatedCost)
-          VALUES(?,?,?,?,'queued',?,?,?,?,?)`, [jobId, roomId, generationKey, encoded, Date.now(), userId, units, unitType, estimatedCost])
+        db.run('INSERT INTO catalogGenerationJobs(jobId,roomId,generationKey,configJSON,status,createdAt,createdBy,units,unitType,estimatedCost) VALUES(?,?,?,?,\'queued\',?,?,?,?,?)',
+          [jobId, roomId, key, encoded, Date.now(), userId, units, unitType, price === null ? null : price * units / (unitType === 'characters' ? 1000 : 1)])
+        this.track(roomId, jobId, config)
         submitted.add(jobId)
       }
       db.exec('RELEASE generation_batch')
@@ -187,14 +209,12 @@ export class CatalogProduction {
 
   drain (): Promise<void> {
     if (this.working) return this.working
-    if (this.stopped || !this.options.key || !this.processorAvailable) return Promise.resolve()
+    if (this.stopped || !this.processorAvailable) return Promise.resolve()
     this.working = this.process().catch((error) => {
       getLogger('animation-production').error('Production worker stopped: %s', error instanceof Error ? error.message : 'Unknown error')
       this.processorAvailable = false
-      this.unavailableReason = 'La producción se detuvo por un error de almacenamiento. Revise el servidor antes de reanudarla.'
-    }).finally(() => {
-      this.working = null
-    })
+      this.unavailableReason = 'Revise el almacenamiento del servidor.'
+    }).finally(() => { this.working = null })
     return this.working
   }
 
@@ -202,89 +222,89 @@ export class CatalogProduction {
     let job: StoredJob | undefined
     while (!this.stopped && (job = db.get<StoredJob>('SELECT * FROM catalogGenerationJobs WHERE status=\'queued\' ORDER BY createdAt,rowid LIMIT 1'))) {
       const config: ProductionConfig = JSON.parse(job.configJSON)
-      const raw = path.join(this.directory, 'production', `${job.jobId}.download`)
-      const temporary = path.join(this.directory, 'production', `${job.jobId}.part`)
-      const filename = `production/${job.jobId}.mp3`
-      const budget = this.status()
-      if ((job.unitType === 'characters' && budget.usedCharacters > budget.characterLimit)
-        || (job.unitType === 'seconds' && budget.usedEffectSeconds > budget.effectSecondsLimit)) {
-        db.run('UPDATE catalogGenerationJobs SET status=\'failed\',error=\'El límite de producción cambió; esta generación no se envió.\' WHERE jobId=?', [job.jobId])
-        continue
-      }
+      const id = `generated-${job.jobId}`
       this.activeAbort = new AbortController()
       db.run('UPDATE catalogGenerationJobs SET status=\'generating\',startedAt=? WHERE jobId=?', [Date.now(), job.jobId])
+      prepareResource(id, 'generating')
       try {
-        const result = await this.provider.generate(config, this.activeAbort.signal)
+        const budget = this.status()
+        if (job.unitType === 'characters' ? budget.usedCharacters > budget.characterLimit : budget.usedEffectSeconds > budget.effectSecondsLimit) throw new AudioValidationError('Se alcanzó el límite de producción configurado.')
+        const provider = this.providers.get(config.providerId ?? 'elevenlabs')
+        if (!provider?.capabilities.configured) throw new AudioValidationError('El proveedor no está disponible.')
+        const result = await provider.generate(config, this.activeAbort.signal)
         db.run('UPDATE catalogGenerationJobs SET providerRequestId=? WHERE jobId=?', [result.requestId, job.jobId])
-        const metadata = await parseBuffer(result.bytes, undefined, { duration: true })
-        if (!metadata.format.duration) throw new AudioValidationError('El archivo generado no contiene audio válido.')
-        if (metadata.format.duration * 1000 > clipDurationLimit(config.kind)) throw new AudioValidationError(`El audio generado dura ${metadata.format.duration.toFixed(1)} s y el máximo es ${clipDurationLimit(config.kind) / 1000} s. Acorte el texto o la duración y genere otra revisión.`)
-        await fs.writeFile(raw, result.bytes)
-        const analysis = await run(this.options.ffmpeg, ['-hide_banner', '-i', raw, '-af', 'volumedetect', '-vn', '-sn', '-f', 'null', '-'], { timeout: 15000, maxBuffer: 16384, signal: this.activeAbort.signal })
-        const peak = /max_volume:\s*([\d.-]+) dB/.exec(analysis.stderr)
-        if (!peak || Number(peak[1]) < -75) throw new AudioValidationError('El archivo generado no contiene una señal de audio útil. Revíselo antes de generar otra revisión.')
-        const loudness = config.kind === 'voice' ? -16 : config.kind === 'effect' ? -20 : -24
-        await run(this.options.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', raw,
-          '-af', `loudnorm=I=${loudness}:TP=-1:LRA=7`, '-ar', '44100', '-b:a', '128k', '-f', 'mp3', temporary], { timeout: 45000, maxBuffer: 16384, signal: this.activeAbort.signal })
-        const bytes = await fs.readFile(temporary)
-        const processed = await parseBuffer(bytes, { mimeType: 'audio/mpeg' }, { duration: true })
-        const durationMs = Math.ceil((processed.format.duration ?? 0) * 1000)
-        if (!durationMs || durationMs > clipDurationLimit(config.kind) || bytes.length > 5 * 1024 * 1024) throw new AudioValidationError('El audio preparado supera los límites de duración o tamaño del catálogo. Acorte el contenido antes de generar otra revisión.')
-        await fs.rename(temporary, path.join(this.directory, filename))
-        db.run('UPDATE catalogGenerationJobs SET status=\'ready_for_review\',finishedAt=?,filename=?,durationMs=?,checksum=? WHERE jobId=?',
-          [Date.now(), filename, durationMs, createHash('sha256').update(bytes).digest('hex'), job.jobId])
+        prepareResource(id, 'preparing')
+        const media = await prepareAudio(this.directory, job.jobId, config.kind, result.bytes, this.options.ffmpeg, this.activeAbort.signal)
+        db.run('UPDATE catalogGenerationJobs SET status=\'ready_for_review\',finishedAt=?,filename=?,durationMs=?,checksum=? WHERE jobId=?', [Date.now(), media.filename, media.durationMs, media.checksum, job.jobId])
+        // Keep a registration failure recoverable without another provider call.
+        await this.register(job.roomId, job.jobId).catch(() => {})
       } catch (error) {
         const uncertain = error instanceof ProviderError && error.uncertain
-        const message = error instanceof ProviderError || error instanceof AudioValidationError ? error.message : 'No se pudo validar o preparar el audio. Revise duración, formato y FFmpeg antes de regenerar.'
+        const message = error instanceof ProviderError || error instanceof AudioValidationError ? error.message : 'No se pudo preparar el audio. Revise el archivo y el servidor.'
         db.run('UPDATE catalogGenerationJobs SET status=?,finishedAt=?,error=? WHERE jobId=?', [uncertain ? 'uncertain' : 'failed', Date.now(), message, job.jobId])
-      } finally {
-        this.activeAbort = null
-        await Promise.all([raw, temporary].map(file => fs.rm(file, { force: true }).catch(() => {})))
-      }
+        prepareResource(id, uncertain ? 'uncertain' : 'failed', message)
+      } finally { this.activeAbort = null }
     }
   }
 
   async audio (roomId: number, jobId: string) {
-    const job = db.get<StoredJob>('SELECT * FROM catalogGenerationJobs WHERE roomId=? AND jobId=?', [roomId, jobId])
-    if (!job?.filename || !['ready_for_review', 'published'].includes(job.status)) throw new Error('El audio todavía no está disponible para revisión.')
-    return fs.readFile(path.join(this.directory, job.filename))
+    const { file } = await resourceFile(`generated-${jobId}`, roomId)
+    return fs.readFile(file)
   }
 
   cancel (roomId: number, jobId: string) {
     const result = db.run('UPDATE catalogGenerationJobs SET status=\'cancelled\',finishedAt=? WHERE roomId=? AND jobId=? AND status=\'queued\'', [Date.now(), roomId, jobId])
-    if (!result.changes) throw new Error('La generación ya se envió o terminó. Espere su resultado antes de revisarla.')
+    if (!result.changes) throw new Error('La generación ya se envió o terminó.')
+    prepareResource(`generated-${jobId}`, 'cancelled')
   }
 
-  async review (roomId: number, userId: number, jobId: string, approve: boolean) {
+  async register (roomId: number, jobId: string) {
     const job = db.get<StoredJob>('SELECT * FROM catalogGenerationJobs WHERE roomId=? AND jobId=?', [roomId, jobId])
-    if (!job) throw new Error('No se encontró el recurso')
-    if (approve && job.status === 'published') return
-    if (job.status !== 'ready_for_review') throw new Error('Este recurso no está pendiente de revisión.')
-    if (!approve) {
-      db.run('UPDATE catalogGenerationJobs SET status=\'rejected\',reviewedBy=?,reviewedAt=? WHERE jobId=?', [userId, Date.now(), jobId])
-      return
-    }
+    if (!job) throw new Error('No se encontró el audio.')
+    if (job.status === 'published') return
+    if (!['ready_for_review', 'publishing'].includes(job.status)) throw new Error('El audio todavía no está preparado.')
     const config: ProductionConfig = JSON.parse(job.configJSON)
-    db.run('UPDATE catalogGenerationJobs SET status=\'publishing\',reviewedBy=?,reviewedAt=? WHERE jobId=?', [userId, Date.now(), jobId])
+    db.run('UPDATE catalogGenerationJobs SET status=\'publishing\' WHERE jobId=?', [jobId])
     try {
-      await saveCatalogRecord({ id: `generated-${job.jobId}`, filename: job.filename!, active: true, title: config.title,
-        displayText: config.kind === 'voice' ? config.text : config.title, checksum: job.checksum!, kind: config.kind,
-        family: config.family, modes: config.modes, validUntil: config.validUntil, approvedForAuto: true, roomId,
-        source: `ElevenLabs ${config.model}; job ${job.jobId}`,
-        license: 'Generated under the configured ElevenLabs account; approved by the room administrator.' })
-      if (!catalogAsset(`generated-${job.jobId}`)) throw new Error('El recurso no pasó la validación del catálogo.')
-      db.run('UPDATE catalogGenerationJobs SET status=\'published\',error=NULL WHERE jobId=?', [job.jobId])
+      await saveCatalogRecord({ id: `generated-${jobId}`, filename: job.filename!, active: true, title: config.title, displayText: config.kind === 'voice' ? config.text : config.title,
+        checksum: job.checksum!, kind: config.kind, family: config.family, modes: config.modes, validUntil: config.validUntil, approvedForAuto: true, roomId,
+        source: `${config.providerId ?? 'elevenlabs'} ${config.model}; job ${jobId}`, license: 'Generated by an administrator using the configured provider account.' })
+      db.run('UPDATE catalogGenerationJobs SET status=\'published\',error=NULL WHERE jobId=?', [jobId])
       this.onPublished(roomId)
     } catch (error) {
-      db.run('UPDATE catalogGenerationJobs SET status=\'ready_for_review\',error=\'Publicación incompleta. Puede volver a publicar sin generar otra vez.\' WHERE jobId=?', [job.jobId])
+      const message = 'No se pudo registrar el audio. Reintente sin generar otra vez.'
+      db.run('UPDATE catalogGenerationJobs SET status=\'ready_for_review\',error=? WHERE jobId=?', [message, jobId])
+      prepareResource(`generated-${jobId}`, 'failed', message)
       throw error
     }
+  }
+
+  async upload (roomId: number, id: string, kind: AudioKind, title: string, metadata: Partial<AudioMetadata>, bytes: Buffer, originalName: string) {
+    if (!this.processorAvailable || this.stopped) throw new Error('El servidor no puede preparar audios. Revise FFmpeg.')
+    if (!/\.(mp3|wav|ogg)$/i.test(originalName)) throw new Error('Use un archivo MP3, WAV u OGG.')
+    if (getResource(id, roomId)) return resourceDTO(getResource(id, roomId)!)
+    if (this.uploads.size >= 2) throw new Error('Hay otras cargas en preparación. Espere y vuelva a intentar.')
+    const clean = validateMetadata(kind, { text: metadata.text, family: metadata.family, modes: metadata.modes, category: metadata.category,
+      language: metadata.language, voiceName: metadata.voiceName, style: metadata.style, loop: metadata.loop, validUntil: metadata.validUntil,
+      origin: 'uploaded', automatic: true, originalName: path.basename(originalName) })
+    createResource({ id, roomId, kind, title, metadata: clean })
+    const work = prepareAudio(this.directory, id, kind, bytes, this.options.ffmpeg).then((media) => {
+      completeResource(id, media)
+      catalogChanged()
+      this.onPublished(roomId)
+      return undefined
+    }).catch(error => prepareResource(id, 'failed', error instanceof AudioValidationError ? error.message : 'No se pudo preparar el archivo.'))
+    this.uploads.add(work)
+    try {
+      await work
+    } finally { this.uploads.delete(work) }
+    return resourceDTO(getResource(id, roomId)!)
   }
 }
 
 let current: CatalogProduction | undefined
 export function getProduction () {
-  if (!current) throw new Error('La producción de catálogo está iniciándose.')
+  if (!current) throw new Error('La producción de audios está iniciándose.')
   return current
 }
 export async function startProduction (directory: string, onPublished: (roomId: number) => void) {

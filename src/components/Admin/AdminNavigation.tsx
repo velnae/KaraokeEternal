@@ -56,7 +56,11 @@ export default function AdminNavigation () {
         data-open={open}
         aria-label='Secciones de administración'
         onClick={(event) => {
-          if ((event.target as HTMLElement).closest('a')) setOpenPath(null)
+          const link = (event.target as HTMLElement).closest('a')
+          if (link) {
+            setOpenPath(null)
+            if (link.getAttribute('aria-current') === 'page') document.querySelector<HTMLElement>('main h1')?.focus({ preventScroll: true })
+          }
         }}
       >
         <div className={styles.identity}>

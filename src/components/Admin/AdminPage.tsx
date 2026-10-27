@@ -24,12 +24,12 @@ export default function AdminPage ({ title, description, children }: { title: st
   useEffect(() => {
     container.current?.scrollTo({ top: 0 })
     heading.current?.focus({ preventScroll: true })
-  }, [location.key])
+  }, [location.pathname])
   return (
     <main ref={container} className={`${styles.page} ${theme.forms}`} style={{ paddingTop: headerHeight, scrollPaddingTop: headerHeight + 16 }}>
       <header className={styles.heading}>
         <h1 ref={heading} tabIndex={-1}>{title}</h1>
-        <p>{description}</p>
+        {description && <p>{description}</p>}
       </header>
       {ready ? children : <p role='status'>Cargando administración…</p>}
     </main>

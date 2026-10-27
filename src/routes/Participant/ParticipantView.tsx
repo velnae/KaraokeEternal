@@ -10,6 +10,7 @@ import { QUEUE_REMOVE } from 'shared/actionTypes'
 import type { QueueItem } from 'shared/types'
 import { tableMode } from 'shared/tableAccess'
 import { normalizeQueuePrefs } from 'shared/queueRules'
+import { isQueueHistoryHidden } from 'shared/queueCleanup'
 import socket from 'lib/socket'
 import Button from 'components/Button/Button'
 import Icon from 'components/Icon/Icon'
@@ -47,7 +48,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
   }, [connected, dispatch])
 
   const items = Object.values(queue.entities).filter((item): item is QueueItem => item.isOptimistic !== true)
-  const own = items.filter(item => item.userId === user.userId && item.origin === 'PARTICIPANT')
+  const own = items.filter(item => item.userId === user.userId && item.origin === 'PARTICIPANT' && !isQueueHistoryHidden(item))
   const rules = normalizeQueuePrefs(room?.prefs?.queue)
   const pending = own.filter(isPendingRequest).length
   const remaining = Math.max(0, rules.maxPendingPerParticipant - pending)

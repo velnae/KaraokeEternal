@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { useAppSelector } from 'store/hooks'
 import Button from 'components/Button/Button'
 import { usePlaylists } from './usePlaylists'
 import styles from './Playlists.css'
@@ -81,7 +80,6 @@ export default function HousePlaylistControl () {
   const { data, error, roomId } = state
   const [params] = useSearchParams()
   const suggested = data?.playlists.some(list => String(list.playlistId) === params.get('playlist')) ? params.get('playlist') : null
-  const playerPresent = useAppSelector(state => state.status.isPlayerPresent)
   return (
     <section className={styles.house} aria-label='Lista diaria de la casa'>
       <header className={styles.editorHeading}>
@@ -95,13 +93,6 @@ export default function HousePlaylistControl () {
         <>
           <HouseForm key={`${roomId}:${suggested}:${data.playback.playlistId}:${data.playback.enabled}:${data.playback.repeat}`} state={state} suggested={suggested} />
           {data.playback.message && <p role='status' className={styles.notice}>{data.playback.message}</p>}
-          {data.playback.enabled && !playerPresent && (
-            <p className={styles.notice}>
-              <Link to='/player' target='_blank' rel='noopener'>Abrir reproductor</Link>
-              {' '}
-              para escuchar la lista.
-            </p>
-          )}
           <details className={styles.helpDetails}>
             <summary>Cómo funciona</summary>
             <p>La selección queda guardada para los próximos días. La lista suena cuando no hay pedidos y se intercala según la configuración de la sala.</p>

@@ -1,0 +1,11 @@
+.container { padding: 12px 0; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.actions button { width: auto; min-height: 44px; }
+.container p { color: var(--secondary); font-size: 14px; line-height: 1.5; margin: 12px 0 0; }
+.container p button { min-height: 44px; margin-left: 8px; color: var(--cyan); text-decoration: underline; }
+.confirmation { display: grid; gap: 16px; }
+.confirmation p { margin: 0; line-height: 1.55; }
+.error { color: var(--amber); padding: 12px; border-left: 2px solid var(--amber); }
+.cancel { min-height: 44px; padding: 10px 16px; color: var(--lyrics); background: var(--equipment); border: 1px solid var(--edge); border-radius: 10px; cursor: pointer; }
+.cancel:disabled { opacity: .6; cursor: wait; }
+@media (max-width: 400px) { .confirmation .actions button { flex: 1; } }

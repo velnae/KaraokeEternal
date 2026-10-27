@@ -3,7 +3,7 @@ import { ensureState } from 'redux-optimistic-ui'
 import store from 'store/store'
 import { useAppSelector } from 'store/hooks'
 import socket from 'lib/socket'
-import { animationRequest, animationTime, fetchAnimationClips, syncAnimation } from 'lib/animationApi'
+import { animationRequest, animationTime, fetchPreparedAnimationClips, syncAnimation } from 'lib/animationApi'
 import {
   ANIMATION_CANCEL, ANIMATION_EVENT, ANIMATION_READY, ANIMATION_RESERVE,
   ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP,
@@ -66,17 +66,20 @@ export default function useAnimationPlayer () {
       store.dispatch(playerUpdate({ _authority: 'PENDING' }))
     }
     const commands = (action: { type: string }) => {
-      if ([PLAYER_CMD_NEXT, PLAYER_CMD_REPLAY, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY].includes(action.type)) abort()
+      if ([PLAYER_CMD_NEXT, PLAYER_CMD_REPLAY, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY].includes(action.type)) {
+        abort()
+        ambientCursor.current = { clipId: '', offsetMs: 0 }
+      }
     }
     const watch = store.subscribe(() => {
       const current = store.getState().animation.snapshot
       const grant = grantRef.current
       if (current) audio.current.volume(ambientRun.current ? current.prefs.ambienceVolume ?? 0.2 : current.prefs.volume)
-      if (grant && (!current?.prefs.enabled || current.microphoneOccupied || current.prefs.volume === 0
+      if (grant && (!current?.prefs.enabled || current.prefs.volume === 0
         || current.playerEpoch !== grant.playerEpoch || current.active?.interventionId !== grant.interventionId || current.active?.stopRequestedAt)) audio.current.stop()
       const ambient = ambientRun.current?.grant
       if (ambient && (!current?.prefs.enabled || !current.prefs.automation || !current.prefs.ambienceEnabled || current.prefs.ambienceVolume === 0
-        || current.microphoneOccupied || current.session?.status !== 'OPEN' || current.playerEpoch !== ambient.playerEpoch
+        || current.session?.status !== 'OPEN' || current.playerEpoch !== ambient.playerEpoch
         || current.ambience?.id !== ambient.id || (current.active?.status === 'PENDING' && audio.current.buffers.has(current.active.clipChecksum)
           && current.active.durationMs <= (current.voiceBudgetRemainingMs ?? 120000)))) audio.current.stop()
     })
@@ -112,7 +115,7 @@ export default function useAnimationPlayer () {
     try {
       // Resume within the user gesture; fetching the manifest comes afterwards.
       await audio.current.unlock([])
-      const clips = await fetchAnimationClips()
+      const clips = await fetchPreparedAnimationClips()
       const hashes = await audio.current.unlock(clips)
       if (!mounted.current) return
       await syncAnimation()
@@ -122,10 +125,11 @@ export default function useAnimationPlayer () {
     } catch (error) { if (mounted.current) setError((error as Error).message) }
   }
 
+  const lastFinishedAt = snapshot?.history[0]?.finishedAt
   useEffect(() => {
-    if (!unlocked || authority !== 'GRANTED' || !audio.current.ready || loadedCatalog.current === snapshot?.catalogVersion) return
+    if (!unlocked || authority !== 'GRANTED' || !audio.current.ready) return
     let alive = true
-    void fetchAnimationClips().then(clips => audio.current.unlock(clips)).then(async (hashes): Promise<void> => {
+    void fetchPreparedAnimationClips().then(clips => audio.current.unlock(clips)).then(async (hashes): Promise<void> => {
       if (alive) {
         await animationRequest(ANIMATION_READY, { audioUnlocked: true, readyClips: hashes })
         loadedCatalog.current = snapshot?.catalogVersion
@@ -135,7 +139,7 @@ export default function useAnimationPlayer () {
     return () => {
       alive = false
     }
-  }, [snapshot?.catalogVersion, unlocked, authority])
+  }, [snapshot?.catalogVersion, snapshot?.active?.interventionId, lastFinishedAt, snapshot?.prefs.profile, unlocked, authority])
 
   const waitingForVoiceBudget = snapshot?.active?.status === 'PENDING' && snapshot.active.durationMs > (snapshot.voiceBudgetRemainingMs ?? 120000)
   useEffect(() => {
@@ -158,7 +162,7 @@ export default function useAnimationPlayer () {
     const current = state.animation.snapshot
     if (running.current || ambientRun.current || ambientStarting.current || Date.now() < ambientRetryAt.current || !socket.connected || !audio.current.ready
       || state.player._authority !== 'GRANTED' || !current?.prefs.enabled || !current.prefs.automation || !current.prefs.ambienceEnabled
-      || current.session?.status !== 'OPEN' || current.microphoneOccupied || state.player.isErrored
+      || current.session?.status !== 'OPEN' || state.player.isErrored
       || !(state.player.isAtQueueEnd || state.player.queueId === -1)
       || (current.active && (current.active.status !== 'PENDING' || (audio.current.buffers.has(current.active.clipChecksum)
         && current.active.durationMs <= (current.voiceBudgetRemainingMs ?? 120000))))) return
@@ -180,7 +184,7 @@ export default function useAnimationPlayer () {
       const outcome = await completion
       const decodedMs = Math.round(audio.current.buffers.get(grant.clip.checksum)!.duration * 1000)
       const length = Math.min(grant.clip.durationMs, decodedMs)
-      ambientCursor.current = { clipId: grant.clip.id, offsetMs: outcome === 'ENDED' ? Math.min(length, grant.offsetMs + grant.durationMs) % length : 0 }
+      ambientCursor.current = { clipId: grant.clip.id, offsetMs: outcome === 'ENDED' ? grant.clip.loop === false ? Math.min(length, grant.offsetMs + grant.durationMs) : Math.min(length, grant.offsetMs + grant.durationMs) % length : 0 }
     } catch (error) {
       if (mounted.current) setError((error as Error).message)
     } finally {
@@ -197,7 +201,7 @@ export default function useAnimationPlayer () {
     const active = current?.active
     const automatic = !active && current?.prefs.automation && current.session && !state.player._isReplayPlayback
     if (running.current || !socket.connected || state.player._authority !== 'GRANTED' || !current?.prefs.enabled
-      || current.microphoneOccupied || current.prefs.volume <= 0 || (!automatic && active?.status !== 'PENDING')
+      || current.prefs.volume <= 0 || (!automatic && active?.status !== 'PENDING')
       || !audio.current.ready || (active && !audio.current.buffers.has(active.clipChecksum))
       || (active && active.durationMs > (current.voiceBudgetRemainingMs ?? 120000))) return
     if (automatic && boundary === 'idle' && Date.now() - idleAttemptAt.current < 10000 && idleSignal.current === current.pendingEventJSON) return
@@ -236,7 +240,7 @@ export default function useAnimationPlayer () {
       const storageKey = `animation-started:${grant.interventionId}`
       if (!mounted.current || generation !== version.current || performance.now() - began >= 1000
         || !socket.connected || latest.player._authority !== 'GRANTED' || !latestSnapshot?.prefs.enabled
-        || latestSnapshot.microphoneOccupied || latestSnapshot.prefs.volume <= 0 || latestSnapshot.active?.stopRequestedAt
+        || latestSnapshot.prefs.volume <= 0 || latestSnapshot.active?.stopRequestedAt
         || latestSnapshot.playerEpoch !== grant.playerEpoch || latestSnapshot.active?.interventionId !== grant.interventionId
         || latestContext !== grant.contextKey || animationTime() >= grant.startBefore!
         || attempted.current.has(grant.interventionId) || sessionStorage.getItem(storageKey)) {

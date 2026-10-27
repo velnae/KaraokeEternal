@@ -9,6 +9,11 @@ export default class AnnouncementAudio {
   private finishSource: (() => void) | null = null
   private gain: GainNode | null = null
   private generation = 0
+  private preparing: Promise<string[]> = Promise.resolve([])
+  private playingChecksum: string | null = null
+  readonly maxDecodedBytes = 32 * 1024 * 1024
+
+  get decodedBytes () { return [...this.buffers.values()].reduce((total, buffer) => total + buffer.length * buffer.numberOfChannels * 4, 0) }
 
   async unlock (clips: AnimationClip[]) {
     if (!this.context || this.context.state === 'closed') this.context = new AudioContext()
@@ -25,21 +30,42 @@ export default class AnnouncementAudio {
     await context.resume()
     assertCurrent()
     if (context.state !== 'running') throw new Error('El navegador no habilitó el audio')
-    for (const clip of clips) {
-      if (this.buffers.has(clip.checksum)) continue
-      const response = await fetch(`${document.baseURI}api/animation/assets/${encodeURIComponent(clip.id)}`)
+    const prepare = async () => {
       assertCurrent()
-      if (!response.ok) throw new Error('No se pudo descargar el clip')
-      const bytes = await response.arrayBuffer()
-      const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
-      if (checksum !== clip.checksum) throw new Error('La versión del clip cambió')
-      assertCurrent()
-      const buffer = await context.decodeAudioData(bytes)
-      assertCurrent()
-      if (buffer.duration <= 0 || buffer.duration * 1000 > clipDurationLimit(clip.kind) || Math.abs(buffer.duration * 1000 - clip.durationMs) > 100) throw new Error('La duración del clip no es válida')
-      this.buffers.set(clip.checksum, buffer)
+      const desired = new Set(clips.slice(0, 24).map(clip => clip.checksum))
+      for (const hash of this.buffers.keys()) {
+        if (!desired.has(hash) && hash !== this.playingChecksum) this.buffers.delete(hash)
+      }
+      const retained = new Set<string>()
+      for (const clip of clips.slice(0, 24)) {
+        if (this.buffers.has(clip.checksum)) {
+          retained.add(clip.checksum)
+          continue
+        }
+        const response = await fetch(`${document.baseURI}api/animation/assets/${encodeURIComponent(clip.id)}`)
+        assertCurrent()
+        if (!response.ok) throw new Error('No se pudo descargar el clip')
+        const bytes = await response.arrayBuffer()
+        const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
+        if (checksum !== clip.checksum) throw new Error('La versión del clip cambió')
+        assertCurrent()
+        const buffer = await context.decodeAudioData(bytes)
+        assertCurrent()
+        if (buffer.duration <= 0 || buffer.duration * 1000 > clipDurationLimit(clip.kind) || Math.abs(buffer.duration * 1000 - clip.durationMs) > 100) throw new Error('La duración del clip no es válida')
+        const size = buffer.length * buffer.numberOfChannels * 4
+        if (size > this.maxDecodedBytes) throw new Error('El audio supera la memoria disponible para este canal.')
+        for (const hash of this.buffers.keys()) {
+          if (this.decodedBytes + size <= this.maxDecodedBytes) break
+          if (hash !== this.playingChecksum && !retained.has(hash)) this.buffers.delete(hash)
+        }
+        if (this.decodedBytes + size > this.maxDecodedBytes) continue
+        this.buffers.set(clip.checksum, buffer)
+        retained.add(clip.checksum)
+      }
+      return [...this.buffers.keys()]
     }
-    return clips.length ? clips.map(clip => clip.checksum).filter(hash => this.buffers.has(hash)) : [...this.buffers.keys()]
+    this.preparing = this.preparing.catch((): string[] => []).then(prepare)
+    return this.preparing
   }
 
   get ready () { return this.context?.state === 'running' }
@@ -51,6 +77,7 @@ export default class AnnouncementAudio {
     const offset = Math.max(0, (segment?.offsetMs ?? 0) / 1000)
     const duration = Math.min(buffer.duration - offset, (segment?.durationMs ?? buffer.duration * 1000) / 1000)
     if (duration <= 0) throw new Error('Tramo de audio no válido')
+    this.playingChecksum = checksum
     return new Promise((resolve) => {
       const source = context.createBufferSource()
       const gain = context.createGain()
@@ -71,6 +98,7 @@ export default class AnnouncementAudio {
         this.stopSource = null
         this.finishSource = null
         this.gain = null
+        this.playingChecksum = null
         resolve(stopped ? 'STOPPED' : 'ENDED')
       }
       const stop = () => {

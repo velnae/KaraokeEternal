@@ -31,7 +31,7 @@ export default function AdminRoutes () {
           </AdminPage>
         )}
       />
-      <Route path='settings/animator' element={<AdminPage title='Animador' description='Prepare los audios y decida cómo acompañar las pausas de la sala.'><AnimatorSettings /></AdminPage>} />
+      <Route path='settings/animator' element={<AdminPage title='Animador' description=''><AnimatorSettings /></AdminPage>} />
       <Route path='settings/playback' element={<AdminPage title='Reproducción' description='Ajuste el comportamiento del reproductor y el nivel de las canciones.'><PlayerPrefs /></AdminPage>} />
       <Route path='settings/files' element={<AdminPage title='Archivos' description='Administre las carpetas de música y actualice la biblioteca.'><PathPrefs /></AdminPage>} />
       <Route path='settings/branding' element={<AdminPage title='Marca del local' description='Personalice la identidad que ven sus participantes.'><BrandingPrefs /></AdminPage>} />

@@ -68,11 +68,21 @@ validated song snapshots and the room's playback selection/cursor. It adds
 optional playlist/run attribution to queue rows without changing existing
 queue entries. Saved items retain IDs/metadata, not downloaded YouTube media.
 
-The server prepares only `max(1, houseTracksBeforeParticipant)` future songs,
-plus the currently playing song. Queue insertion and cursor advance commit
-together. Repeated status reports and startup reconciliation do not repeatedly
-append the entire list. Replaying saved songs does not resolve them through
-the provider again; actual playback can still fail if a file/video disappears.
+Activating a list prepares its complete available cycle. A five-track list adds
+five upcoming house songs, independently of `houseTracksBeforeParticipant`.
+That setting controls only interleaving between participant turns.
+
+Queue insertion and cursor advance commit together. A repeated cycle is
+prepared only when no songs from the prepared cycle remain pending; repeated
+status reports, reloads and startup reconciliation do not append extra copies.
+The bound is one saved cycle (at most 200 entries), plus the current song.
+Existing partial windows are completed from their cursor without restarting
+playback. Replaying saved songs does not resolve them through the provider
+again; actual playback can still fail if a file/video disappears.
+
+**De la casa** counts pending songs, not the saved list's total. The count
+decreases as songs start playing; when the last pending song starts, repetition
+can prepare the next cycle so playback continues without a gap.
 
 Disabling a list or changing repeat mode rewinds preparation to the last
 actually playing/completed song before discarding buffered entries, so resume
@@ -85,6 +95,18 @@ the same source ID twice reuses the entry. Reordering validates the complete
 item set; cross-room item/list identifiers are rejected.
 
 ## Verification
+
+The full-cycle correction passed **39 focused playlist, cleanup and scheduler
+tests** and **9 playlist E2E scenarios in each of development and production**.
+The regression creates a list named **Nuevo** with five distinct tracks and an
+interleave setting of two, checks five actual queue entries and the UI count,
+reloads without duplicates, then plays all five in order before repeating.
+Unit tests also cover interleave values 0/1/2/10 and upgrading existing partial
+or wrapped windows. TypeScript, scoped lint, server build and diff checks passed;
+mobile/desktop screenshots were inspected.
+
+Full-cycle evidence: development `/tmp/karaoke-playlists-e2e-bVAwGS`, production
+`/tmp/karaoke-playlists-e2e-ylVlZu`.
 
 The initial backend/playback implementation baseline was:
 

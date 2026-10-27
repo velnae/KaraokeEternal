@@ -101,7 +101,7 @@ describe('automatic sessions and ambient authority', () => {
 
   it('prioritizes a manual request and rejects a stale automatic context', async () => {
     await automaticCatalog()
-    const manual = Animation.request(identity, 'manual', catalogClips(1)[0])
+    const manual = Animation.request(identity, 'manual', catalogClips(1).find(clip => clip.kind === 'voice')!)
     expect(Animation.automatic(identity, autoInput(), { queueId: -1 })).toBeNull()
     expect(Animation.active(1)?.interventionId).toBe(manual.interventionId)
     Animation.cancel(1)
@@ -111,7 +111,7 @@ describe('automatic sessions and ambient authority', () => {
 
   it('does not append a waiting welcome after a manual announcement claimed the same pause', async () => {
     await automaticCatalog()
-    Animation.request(identity, 'manual-priority', catalogClips(1)[0])
+    Animation.request(identity, 'manual-priority', catalogClips(1).find(clip => clip.kind === 'voice')!)
     const grant = reserve()
     Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')
     Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'ENDED')
@@ -136,7 +136,7 @@ describe('automatic sessions and ambient authority', () => {
     expect(Animation.reserveAmbience(identity, epoch, { queueId: 1 })).toBeNull()
     const grant = Animation.reserveAmbience(identity, epoch, { queueId: -1 })!
     expect(grant.durationMs).toBeLessThanOrEqual(10000)
-    Animation.request(identity, 'manual', catalogClips(1)[0])
+    Animation.request(identity, 'manual', catalogClips(1).find(clip => clip.kind === 'voice')!)
     expect(() => reserve()).toThrow('sala no permite')
     Animation.stopAmbience(identity, grant.id)
     expect(reserve().status).toBe('RESERVED')
@@ -259,12 +259,11 @@ describe('manual animation lifecycle', () => {
     expect(() => reserve({ expectedNextQueueId: 999 })).toThrow('turno')
   })
 
-  it('blocks announcements while the microphone is occupied or volume is zero', () => {
+  it('rejects stale microphone controls while preserving the volume guard', () => {
     Animation.request(identity, 'first', clip)
-    Animation.control(1, 1, { microphoneOccupied: true })
+    expect(() => Animation.control(1, 1, { microphoneOccupied: true })).toThrow('ya no existe')
     expect(Animation.history(1)[0].status).toBe('PENDING')
-    expect(() => Animation.request(identity, 'second', clip)).toThrow('micrófono')
-    Animation.control(1, 2, { microphoneOccupied: false, volume: 0 })
+    Animation.control(1, 1, { volume: 0 })
     expect(() => Animation.request(identity, 'second', clip)).toThrow('volumen')
   })
 
@@ -294,11 +293,11 @@ describe('manual animation lifecycle', () => {
     expect(Animation.state(1).blockedUntil).toBe(grant.leaseUntil)
   })
 
-  it('preserves microphone state across restart', () => {
-    Animation.control(1, 1, { microphoneOccupied: true })
+  it('clears legacy microphone state across restart', () => {
+    db.run('UPDATE animationRoomState SET microphoneOccupied=1 WHERE roomId=1')
     cleanup()
     cleanup = Animation.initialize(server)
-    expect(Animation.state(1).microphoneOccupied).toBe(1)
+    expect(Animation.state(1).microphoneOccupied).toBe(0)
   })
 
   it('rejects another socket or epoch reporting a playback outcome', () => {

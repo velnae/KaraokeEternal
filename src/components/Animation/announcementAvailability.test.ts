@@ -25,10 +25,10 @@ describe('announcement request availability', () => {
     expect(announcementBlocker({ ...input, hasClip: false })).toContain('Seleccione un clip')
   })
 
-  it('preserves the enabled, room, microphone and volume checks', () => {
+  it('preserves enabled, room and volume checks without legacy microphone blocking', () => {
     expect(announcementBlocker({ ...input, snapshot: { ...snapshot, prefs: { ...snapshot.prefs, enabled: false } } })).toContain('Active el animador')
     expect(announcementBlocker({ ...input, roomClosed: true })).toContain('sala está cerrada')
-    expect(announcementBlocker({ ...input, snapshot: { ...snapshot, microphoneOccupied: 1 } })).toContain('micrófono como libre')
+    expect(announcementBlocker({ ...input, snapshot: { ...snapshot, microphoneOccupied: 1 } })).toBeNull()
     expect(announcementBlocker({ ...input, snapshot: { ...snapshot, prefs: { ...snapshot.prefs, volume: 0 } } })).toContain('Suba el volumen')
   })
 

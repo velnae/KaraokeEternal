@@ -71,7 +71,7 @@ export default class Animation {
   static snapshot (roomId: number): AnimationSnapshot {
     const state = Animation.state(roomId)
     const owner = owners.get(roomId)
-    return { ...state, prefs: animationPrefs(Animation.room(roomId).prefs.animation), active: Animation.active(roomId),
+    return { ...state, microphoneOccupied: 0, prefs: animationPrefs(Animation.room(roomId).prefs.animation), active: Animation.active(roomId),
       history: Animation.history(roomId), playerPresent: !!owner, audioUnlocked: owner?.unlocked ?? false,
       readyClips: owner?.readyClips ?? [], serverTime: Date.now(), session: currentSession(roomId), ambience: Animation.ambience(roomId),
       catalogVersion: catalogVersion(), voiceBudgetRemainingMs: voiceBudget(Animation.selectionHistory(roomId), Date.now()) }
@@ -91,6 +91,7 @@ export default class Animation {
     owners.clear()
     db.run('UPDATE animationInterventions SET status = CASE WHEN status = \'PENDING\' THEN \'CANCELLED\' ELSE \'UNCERTAIN\' END, finishedAt = ?, reason = \'Servidor reiniciado\' WHERE status IN ' + activeStatuses, [Date.now()])
     db.run('UPDATE animationRoomState SET pendingEventJSON=NULL')
+    db.run('UPDATE animationRoomState SET microphoneOccupied=0')
     db.run('UPDATE animationSessions SET status=\'CLOSED\',closedAt=? WHERE status=\'CLOSING\'', [Date.now()])
     const timer = setInterval(() => Animation.sweep(), 250)
     timer.unref()
@@ -165,7 +166,6 @@ export default class Animation {
     if (Animation.room(identity.roomId).status !== 'open' || !snapshot.prefs.enabled) throw new Error('El animador está desactivado')
     if (snapshot.prefs.volume <= 0) throw new Error('Suba el volumen de voz antes de anunciar')
     if (!snapshot.playerPresent) throw new Error('Abra el reproductor de la sala')
-    if (snapshot.microphoneOccupied) throw new Error('El micrófono está ocupado')
     if (clip.validUntil && clip.validUntil <= Date.now()) throw new Error('El recurso ya venció. Seleccione otro anuncio.')
     if (snapshot.active || snapshot.blockedUntil > Date.now()) throw new Error('Ya hay una intervención pendiente o en recuperación')
     const now = Date.now()
@@ -193,6 +193,7 @@ export default class Animation {
   }
 
   static control (roomId: number, version: number, patch: Partial<AnimationPrefs> & { microphoneOccupied?: boolean }) {
+    if (patch.microphoneOccupied !== undefined) throw new Error('El control de micrófono ya no existe. Actualice esta página.')
     const state = Animation.state(roomId)
     if (version !== state.controlVersion) throw new Error('Los controles cambiaron. Revise el estado actual.')
     const old = animationPrefs(Animation.room(roomId).prefs.animation)
@@ -200,15 +201,14 @@ export default class Animation {
     db.exec('SAVEPOINT animation_control')
     try {
       db.run('UPDATE rooms SET data = json_set(data, \'$.prefs.animation\', json(?)) WHERE roomId = ?', [JSON.stringify(prefs), roomId])
-      db.run('UPDATE animationRoomState SET controlVersion = controlVersion + 1, microphoneOccupied = ? WHERE roomId = ?',
-        [patch.microphoneOccupied === undefined ? state.microphoneOccupied : Number(patch.microphoneOccupied), roomId])
+      db.run('UPDATE animationRoomState SET controlVersion = controlVersion + 1, microphoneOccupied = 0 WHERE roomId = ?', [roomId])
       db.exec('RELEASE animation_control')
     } catch (error) {
       db.exec('ROLLBACK TO animation_control')
       db.exec('RELEASE animation_control')
       throw error
     }
-    if (!prefs.enabled || prefs.volume === 0 || (patch.microphoneOccupied === true && Animation.active(roomId)?.status !== 'PENDING')) {
+    if (!prefs.enabled || prefs.volume === 0) {
       Animation.cancel(roomId, 'Animador bloqueado por el operador')
     }
     const active = Animation.active(roomId)
@@ -224,7 +224,7 @@ export default class Animation {
     const row = snapshot.active
     if (!row || row.interventionId !== input.interventionId || row.status !== 'PENDING') throw new Error('La solicitud ya no está pendiente')
     if (owner?.socketId !== identity.socketId || input.playerEpoch !== owner.epoch) throw new Error('Reproductor sin autoridad')
-    if (!snapshot.prefs.enabled || snapshot.microphoneOccupied || snapshot.prefs.volume <= 0 || snapshot.blockedUntil > now || snapshot.ambience
+    if (!snapshot.prefs.enabled || snapshot.prefs.volume <= 0 || snapshot.blockedUntil > now || snapshot.ambience
       || input.controlVersion !== snapshot.controlVersion || Animation.room(identity.roomId).status !== 'open') throw new Error('La sala no permite intervenir')
     if (!owner.unlocked || interventionAssets(row).some(asset => !owner.readyClips.includes(asset.checksum))) throw new Error('El audio no está preparado')
     if (row.durationMs > (snapshot.voiceBudgetRemainingMs ?? 120000)) {
@@ -292,7 +292,7 @@ export default class Animation {
     if (owner?.socketId !== identity.socketId || owner.epoch !== input.playerEpoch) throw new Error('Reproductor sin autoridad')
     const now = Date.now()
     const state = Animation.state(roomId)
-    if (state.microphoneOccupied || state.blockedUntil > now || Animation.ambience(roomId) || !owner.unlocked) return null
+    if (state.blockedUntil > now || Animation.ambience(roomId) || !owner.unlocked) return null
     const signal = pendingEvent(roomId)
     let family: VoiceFamily | undefined
     let key = ''
@@ -351,7 +351,7 @@ export default class Animation {
     const prefs = animationPrefs(snapshot.prefs)
     const owner = owners.get(roomId)
     if (owner?.socketId !== identity.socketId || owner.epoch !== epoch) throw new Error('Reproductor sin autoridad')
-    if (!prefs.enabled || !prefs.automation || !prefs.ambienceEnabled || prefs.ambienceVolume === 0 || snapshot.microphoneOccupied
+    if (!prefs.enabled || !prefs.automation || !prefs.ambienceEnabled || prefs.ambienceVolume === 0
       || snapshot.session?.status !== 'OPEN' || Animation.room(roomId).status !== 'open'
       || status.isErrored || !(status.isAtQueueEnd || status.queueId === -1)
       || snapshot.blockedUntil > Date.now() || (snapshot.active && snapshot.active.status !== 'PENDING')
@@ -359,6 +359,7 @@ export default class Animation {
     const clips = catalogClips(roomId).filter(clip => clip.kind === 'ambience' && clip.approvedForAuto && clip.modes?.includes(prefs.profile) && owner.readyClips.includes(clip.checksum))
     const clip = clips.find(clip => clip.id === clipId) ?? clips[0]
     if (!clip) return null
+    if (clip.loop === false && clip.id === clipId && offsetMs >= clip.durationMs) return null
     const offset = Math.max(0, Math.min(clip.durationMs - 1, offsetMs))
     const durationMs = Math.min(10000, clip.durationMs - offset)
     const grant: AmbienceGrant = { id: randomUUID(), clip, ownerSocketId: identity.socketId, playerEpoch: epoch,
@@ -385,7 +386,7 @@ export default class Animation {
       if (row.stopRequestedAt || now > row.startBefore! || owners.get(identity.roomId)?.epoch !== epoch) throw new Error('El permiso de inicio venció')
       const room = Animation.room(identity.roomId)
       const state = Animation.snapshot(identity.roomId)
-      if (room.status !== 'open' || !state.prefs.enabled || state.microphoneOccupied || state.prefs.volume <= 0
+      if (room.status !== 'open' || !state.prefs.enabled || state.prefs.volume <= 0
         || animationContext(Queue.get(identity.roomId), room.prefs.queue) !== row.contextKey) {
         Animation.cancel(identity.roomId, 'El contexto cambió antes del inicio')
         throw new Error('El contexto cambió antes del inicio')

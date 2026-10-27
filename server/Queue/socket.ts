@@ -8,6 +8,7 @@ import {
   QUEUE_REJECT,
   QUEUE_REMOVE,
   QUEUE_PUSH,
+  QUEUE_CLEANUP,
 } from '../../shared/actionTypes.js'
 import { normalizeQueuePrefs } from '../../shared/queueRules.js'
 import {
@@ -17,11 +18,33 @@ import {
   type SongSource,
 } from '../../shared/queueLifecycle.js'
 import { getSongSource } from '../SongSources/index.js'
+import { cleanupQueue, cleanupReceipt } from './cleanup.js'
 
 // ------------------------------------
 // Action Handlers
 // ------------------------------------
 const ACTION_HANDLERS = {
+  [QUEUE_CLEANUP]: (sock, { payload }, acknowledge) => {
+    if (!sock.user?.isAdmin) return acknowledge({ type: QUEUE_CLEANUP + '_ERROR', error: 'Solo los administradores pueden limpiar la cola' })
+    if (!payload || !['pending', 'history'].includes(payload.operation) || typeof payload.requestId !== 'string'
+      || !/^[a-zA-Z0-9-]{16,64}$/.test(payload.requestId) || !Number.isSafeInteger(payload.throughQueueId) || payload.throughQueueId < 0
+      || (payload.checkOnly !== true && payload.confirmed !== true)) {
+      return acknowledge({ type: QUEUE_CLEANUP + '_ERROR', error: 'Confirma una operación de limpieza válida' })
+    }
+    try {
+      const roomId = sock.user.roomId
+      const status = Rooms.getPlayerStatus(sock.server, roomId)
+      const current = status?.isAtQueueEnd !== true && Number.isSafeInteger(status?.queueId) ? status.queueId : -1
+      const result = payload.checkOnly === true
+        ? cleanupReceipt(roomId, sock.user.userId, payload)
+        : cleanupQueue(roomId, sock.user.userId, payload, current)
+      const queue = Queue.get(roomId)
+      acknowledge({ type: QUEUE_CLEANUP + '_SUCCESS', payload: { found: !!result, result, queue } })
+      if (result) sock.server.to(Rooms.prefix(roomId)).emit('action', { type: QUEUE_PUSH, payload: queue })
+    } catch (error) {
+      acknowledge({ type: QUEUE_CLEANUP + '_ERROR', error: (error as Error).message })
+    }
+  },
   [QUEUE_ADD]: async (sock, { payload }, acknowledge) => {
     const { songId } = payload
     const origin: QueueItemOrigin = payload.origin ?? 'PARTICIPANT'
@@ -69,6 +92,8 @@ const ACTION_HANDLERS = {
 
     if (acknowledgeExisting()) return
 
+    const generation = Queue.cleanupGeneration(roomId)
+
     try {
       await Rooms.validate(roomId, null, { validatePassword: false })
     } catch (err) {
@@ -107,6 +132,9 @@ const ACTION_HANDLERS = {
     // Resolution is asynchronous: another request may have filled the last slot.
     // Receipt lookup, final validation and insert below run without an await.
     if (acknowledgeExisting()) return
+    if (generation !== Queue.cleanupGeneration(roomId)) {
+      return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'La cola se vació mientras se preparaba el pedido. Vuelve a solicitar la canción si aún la quieres.' })
+    }
     room = Rooms.get(roomId).entities[roomId]
     if (!room) return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'La sala ya no está abierta' })
     queuePrefs = normalizeQueuePrefs(room.prefs?.queue)

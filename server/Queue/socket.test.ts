@@ -16,6 +16,7 @@ import { localSongSource } from '../SongSources/LocalSongSource.js'
 import { youtubeSongSource } from '../SongSources/YouTubeSongSource.js'
 
 const handler = ACTION_HANDLERS[QUEUE_ADD]
+beforeEach(() => vi.spyOn(Queue, 'cleanupGeneration').mockReturnValue(0))
 
 const resolvedSong = (songId: number): ResolvedSong => ({
   source: 'LOCAL',

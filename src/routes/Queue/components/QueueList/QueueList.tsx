@@ -13,6 +13,8 @@ import Button from 'components/Button/Button'
 import styles from './QueueList.css'
 import { Link, useSearchParams } from 'react-router'
 import HousePlaylistControl from 'components/Playlists/HousePlaylistControl'
+import QueueMaintenance from '../QueueMaintenance/QueueMaintenance'
+import { isQueueHistoryHidden } from 'shared/queueCleanup'
 
 type QueueFilter = 'queue' | 'pending' | 'house'
 
@@ -39,7 +41,7 @@ const QueueList = () => {
   const [tableFilter, setTableFilter] = useState('all')
   const tableOptions = new Map<number, string>()
   for (const item of Object.values(rawQueue.entities)) {
-    if (item.isOptimistic !== true && item.tableId) tableOptions.set(item.tableId, item.tableLabelSnapshot || `Mesa ${item.tableId}`)
+    if (item.isOptimistic !== true && !isQueueHistoryHidden(item) && item.tableId) tableOptions.set(item.tableId, item.tableLabelSnapshot || `Mesa ${item.tableId}`)
   }
 
   const pendingIds = rawQueue.result.filter((queueId) => {
@@ -56,11 +58,15 @@ const QueueList = () => {
     const item = rawQueue.entities[queueId]
     return item.isOptimistic !== true && item.origin === 'HOUSE' && item.status === 'APPROVED'
   })
-  const result = user.isAdmin && filter === 'pending'
+  const selectedResult = user.isAdmin && filter === 'pending'
     ? pendingIds
     : user.isAdmin && filter === 'house'
       ? houseIds
       : [...ownerFeedbackIds, ...queue.result.filter(queueId => !ownerFeedbackIds.includes(queueId))]
+  const result = selectedResult.filter((id) => {
+    const item = rawQueue.entities[id]
+    return item.isOptimistic === true || !isQueueHistoryHidden(item) || (id === queueId && !isAtQueueEnd)
+  })
   const pendingLabel = `Por aprobar (${pendingIds.length})`
   const houseLabel = `De la casa (${houseIds.length})`
 
@@ -168,6 +174,7 @@ const QueueList = () => {
           </Button>
         </div>
       )}
+      {user.isAdmin && <QueueMaintenance key={`${user.roomId}:${user.userId}`} />}
       {user.isAdmin && filter === 'house' && <HousePlaylistControl key={user.roomId} />}
       {user.isAdmin && filter === 'queue' && result.length === 0 && (
         <div className={styles.empty}>
