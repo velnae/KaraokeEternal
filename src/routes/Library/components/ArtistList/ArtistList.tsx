@@ -15,6 +15,7 @@ const ROW_HEIGHT_SONG = 56
 
 interface ArtistListProps {
   ui: RootState['ui']
+  contentTop?: number
 }
 
 interface CustomRowProps {
@@ -57,6 +58,7 @@ const RowComponent = ({
 
 const ArtistList = ({
   ui,
+  contentTop,
 }: ArtistListProps) => {
   const dispatch = useAppDispatch()
   const { expandedArtists } = useAppSelector(state => state.library)
@@ -122,13 +124,12 @@ const ArtistList = ({
         paddingTop={ui.headerHeight}
         paddingRight={30} // width of AlphaPicker
         paddingBottom={ui.footerHeight}
-        width={ui.innerWidth}
         height={ui.innerHeight}
       />
       <AlphaPicker
         onPick={handleAlphaPick}
         height={ui.innerHeight - ui.headerHeight - ui.footerHeight}
-        top={ui.headerHeight}
+        top={contentTop ?? ui.headerHeight}
       />
     </div>
   )

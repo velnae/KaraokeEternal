@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { closeUserEditor, fetchUsers, filterByOnline, filterByRoom, openUserEditor, type UserWithRoomsAndRole } from '../../modules/users'
 import { formatDateTime } from 'lib/dateTime'
@@ -8,8 +9,19 @@ import EditUser from './EditUser/EditUser'
 import getUsers from '../../selectors/getUsers'
 import styles from './Users.css'
 
+function UserAccess ({ user }: { user: UserWithRoomsAndRole }) {
+  const role = { guest: 'Invitado', standard: 'Usuario estándar', admin: 'Administrador' }[user.role] || user.role
+  return (
+    <div className={styles.access}>
+      <span className={styles.role} data-role={user.role}>{role}</span>
+      <span className={styles.connection} data-online={user.rooms.length > 0}>{user.rooms.length ? 'En línea' : 'Sin conexión'}</span>
+    </div>
+  )
+}
+
 const Users = () => {
   const [editorUser, setEditorUser] = useState<UserWithRoomsAndRole | null>(null)
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'failed'>('loading')
 
   const curUserId = useAppSelector(state => state.user.userId)
   const { isEditorOpen, filterOnline, filterRoomId } = useAppSelector(state => state.users)
@@ -24,76 +36,99 @@ const Users = () => {
     else dispatch(filterByRoom(parseInt(e.target.value, 10)))
   }
 
-  const handleOpen = (e: React.MouseEvent<HTMLElement>) => {
-    setEditorUser(users.entities[parseInt(e.currentTarget.dataset.userId)])
+  const handleOpen = (user: UserWithRoomsAndRole | null = null) => {
+    setEditorUser(user)
     dispatch(openUserEditor())
   }
 
-  // once per mount
+  const load = useCallback(() => dispatch(fetchUsers()).unwrap()
+    .then(() => setLoadState('ready'))
+    .catch(() => setLoadState('failed')), [dispatch])
   useEffect(() => {
-    dispatch(fetchUsers())
-  }, [dispatch])
+    void load()
+  }, [load])
 
   const rows = users.result.map((userId) => {
     const user = users.entities[userId]
+    const displayName = user.username || user.name || `Usuario ${userId}`
 
     return (
       <tr key={userId}>
-        {userId === curUserId && (
-          <td translate='no'>
-            <strong>{user.username || user.name}</strong>
-            {user.username && user.name !== user.username && <small className={styles.displayName}>{user.name}</small>}
-          </td>
-        )}
-        {userId !== curUserId && (
-          <td>
-            <Button className={styles.nameButton} data-user-id={userId} onClick={handleOpen}>{user.username || user.name}</Button>
-            {user.username && user.name !== user.username && <small className={styles.displayName}>{user.name}</small>}
-          </td>
-        )}
-        <td>{user.role === 'guest' ? 'Invitado' : user.role === 'standard' ? 'Usuario' : user.role === 'admin' ? 'Administrador' : user.role}</td>
-        <td>{formatDateTime(new Date(user.dateCreated * 1000))}</td>
+        <td>
+          <strong className={styles.username} translate='no'>{displayName}</strong>
+          {user.username && user.name !== user.username && <small className={styles.displayName} translate='no'>{user.name}</small>}
+          {userId === curUserId && <small className={styles.currentUser}>Tu cuenta</small>}
+          <div className={styles.mobileAccess}><UserAccess user={user} /></div>
+        </td>
+        <td className={styles.accessColumn}><UserAccess user={user} /></td>
+        <td className={styles.registeredColumn}>{formatDateTime(new Date(user.dateCreated * 1000))}</td>
+        <td className={styles.actionsColumn}>
+          {userId === curUserId
+            ? <Link className={styles.rowAction} to='/admin/account'>Mi cuenta</Link>
+            : <Button variant='default' className={styles.rowAction} aria-label={`Editar a ${displayName}`} onClick={() => handleOpen(user)}>Editar</Button>}
+        </td>
       </tr>
     )
   })
 
   const roomOpts = rooms.result
-    .filter(roomId => !!rooms.entities[roomId].numUsers)
+    .filter(roomId => !!rooms.entities[roomId].numUsers || roomId === filterRoomId)
     .map(roomId => <option key={roomId} value={roomId}>{rooms.entities[roomId].name}</option>)
 
   const userFilter = (
-    <select aria-label='Filtrar usuarios' className={styles.usersFilter} onChange={handleFilterChange} value={filterOnline ? 'online' : filterRoomId || 'all'}>
-      <option key='all' value='all'>Todos</option>
-      <option key='online' value='online'>Conectados</option>
-      <optgroup label='Conectados en...'>
+    <select aria-label='Filtrar usuarios' onChange={handleFilterChange} value={filterOnline ? 'online' : filterRoomId || 'all'}>
+      <option key='all' value='all'>Todos los usuarios</option>
+      <option key='online' value='online'>En línea</option>
+      <optgroup label='En línea por sala'>
         {roomOpts}
       </optgroup>
     </select>
   )
 
   return (
-    <Panel
-      title='Usuarios'
-      titleComponent={userFilter}
-    >
+    <Panel title='Usuarios'>
       <>
+        <div className={styles.toolbar}>
+          <p role='status'>{loadState === 'loading' ? 'Cargando usuarios…' : loadState === 'ready' ? `${users.result.length} ${users.result.length === 1 ? 'usuario visible' : 'usuarios visibles'}` : 'No se pudo cargar la lista.'}</p>
+          <label className={styles.usersFilter}>
+            Mostrar
+            {userFilter}
+          </label>
+        </div>
+        {loadState === 'failed' && (
+          <Button
+            variant='default'
+            className={styles.rowAction}
+            onClick={() => {
+              setLoadState('loading')
+              void load()
+            }}
+          >
+            Reintentar
+          </Button>
+        )}
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Nombre de usuario</th>
-              <th>Rol</th>
-              <th>Fecha de registro</th>
+              <th scope='col'>Usuario</th>
+              <th scope='col' className={styles.accessColumn}>Acceso</th>
+              <th scope='col' className={styles.registeredColumn}>Fecha de registro</th>
+              <th scope='col' className={styles.actionsColumn}>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {rows}
           </tbody>
         </table>
-
-        <br />
-        <Button onClick={handleOpen} variant='primary'>
-          Crear usuario
-        </Button>
+        {loadState === 'ready' && !users.result.length && (
+          <div className={styles.empty}>
+            <p>No hay usuarios con este filtro.</p>
+            <Button variant='default' className={styles.rowAction} onClick={() => dispatch(filterByOnline(false))}>Mostrar todos</Button>
+          </div>
+        )}
+        <div className={styles.actions}>
+          <Button className={styles.createButton} onClick={() => handleOpen()} variant='primary'>Crear usuario</Button>
+        </div>
 
         {isEditorOpen && (
           <EditUser onClose={handleClose} user={editorUser} />

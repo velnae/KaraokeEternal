@@ -1,6 +1,25 @@
-.container { display: flex; align-items: center; gap: 6px; max-width: 1000px; margin: 0 auto; padding: 6px 12px 12px; }
-.container button { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 10px; color: var(--secondary); }
-.container button.active { color: var(--cyan); background: var(--equipment); }
-.container button svg { width: 22px; height: 22px; }
-.searchInput { min-width: 0; min-height: 46px; border: 1px solid var(--edge) !important; border-radius: 12px; background: var(--equipment) !important; color: var(--lyrics) !important; padding: 10px 12px !important; box-shadow: none !important; font-size: 16px !important; }
-.searchInput::placeholder { color: var(--secondary) !important; }
+.container { padding: 20px clamp(16px, 3vw, 40px) 16px; border-bottom: 1px solid var(--edge); }
+.heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.heading h1 { margin: 0; font-size: 28px; line-height: 1.2; }
+.sources { display: flex; flex-wrap: wrap; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.sources legend { font-size: 12px; color: var(--secondary); margin-bottom: 4px; }
+.sources label, .favorites { display: flex; align-items: center; gap: 8px; min-height: 44px; color: var(--secondary); font-size: 14px; cursor: pointer; }
+.sources label { border-bottom: 2px solid transparent; }
+.sources label:has(input:checked) { border-bottom-color: var(--cyan); color: var(--cyan); }
+.sources input, .favorites input { accent-color: var(--cyan); width: 16px; height: 16px; margin: 0; }
+.search { display: flex; align-items: center; gap: 4px; padding: 4px; background: var(--equipment); border: 1px solid var(--edge); border-radius: 12px; }
+.search:focus-within { border-color: var(--cyan); }
+.search input { flex: 1; min-width: 0; min-height: 44px; padding: 10px 12px; border: 0; background: transparent; color: var(--lyrics); box-shadow: none; font-size: 16px; }
+.search input::placeholder { color: var(--secondary); }
+.search .searchButton, .search .clear { display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; border-radius: 8px; }
+.search .searchButton { background: var(--cyan); color: var(--stage); }
+.search .clear { color: var(--secondary); }
+.search .searchButton:disabled { color: var(--secondary); background: var(--stage); }
+.favorites { margin-top: 8px; }
+@media (max-width: 600px) {
+  .container { padding-top: 16px; }
+  .heading { gap: 8px; margin-bottom: 12px; }
+  .heading h1 { font-size: 24px; }
+  .sources { width: 100%; }
+  .sources legend { display: none; }
+}

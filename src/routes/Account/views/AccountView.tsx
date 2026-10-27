@@ -5,8 +5,12 @@ import FirstRun from './FirstRun/FirstRun'
 import SignedInView from './SignedInView/SignedInView'
 import SignedOutView from './SignedOutView/SignedOutView'
 import styles from './AccountView.css'
+import { Navigate, useLocation } from 'react-router'
+import { legacyAdminPaths } from 'components/Admin/legacyAdminPaths'
 
 const AccountView = () => {
+  const isAdmin = useAppSelector(state => state.user.isAdmin)
+  const location = useLocation()
   const isSignedIn = useAppSelector(state => state.user.userId !== null)
   const isFirstRun = useAppSelector(state => state.prefs.isFirstRun === true)
   const ui = useAppSelector(state => state.ui)
@@ -18,6 +22,12 @@ const AccountView = () => {
   useEffect(() => {
     dispatch(fetchPrefs())
   }, [dispatch])
+
+  if (isAdmin && !isFirstRun) {
+    const requested = new URLSearchParams(location.search).get('redirect')
+    const redirect = requested && /^\/(?:admin(?:\/[^?#]*)?|library|queue|requests|player)(?:[?#]|$)/.test(requested) ? requested : '/admin/account'
+    return <Navigate to={legacyAdminPaths[location.hash] || redirect} replace />
+  }
 
   return (
     <div

@@ -1,0 +1,41 @@
+.filters { border: 0; padding: 0; margin: 12px 0 0; min-width: 0; }
+.filters legend { font-size: 13px; color: var(--secondary); padding: 0; margin-bottom: 8px; }
+.options { display: flex; flex-wrap: wrap; gap: 8px; }
+.options label { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: 8px; color: var(--secondary); background: var(--stage); cursor: pointer; font-size: 14px; }
+.options label:has(input:checked) { color: var(--cyan); border-color: var(--cyan); background: var(--equipment); }
+.options label:focus-within { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.options input { width: 16px; height: 16px; margin: 0; accent-color: var(--cyan); flex-shrink: 0; }
+.filters p { font-size: 12px; color: var(--secondary); line-height: 1.5; margin: 8px 0 0; }
+.result { display: grid; grid-template-columns: 144px minmax(0, 1fr) auto; align-items: center; gap: 14px 20px; padding: 20px; margin-bottom: 12px; border: 1px solid var(--edge); border-radius: 12px; background: var(--equipment); }
+.result[data-state='APPROVED'], .result[data-state='PLAYING'] { border-left: 3px solid var(--cyan); }
+.details { min-width: 0; }
+.details h2 { margin: 0 0 6px; font-size: 17px; line-height: 1.4; color: var(--lyrics); overflow-wrap: anywhere; }
+.details p { margin: 0 0 6px; color: var(--secondary); font-size: 13px; overflow-wrap: anywhere; }
+.resultActions { display: flex; align-items: center; gap: 8px; }
+.primaryAction { min-width: 0; }
+.moreButton { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border: 1px solid var(--edge); border-radius: 8px; background: var(--stage); color: var(--secondary); cursor: pointer; }
+.moreButton[aria-expanded='true'], .moreButton:hover { color: var(--cyan); border-color: var(--cyan); }
+.extraOptions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px; padding-top: 14px; border-top: 1px solid var(--edge); }
+.extraOptions .secondaryAction { min-height: 44px; width: auto; border-radius: 8px; padding: 10px 12px; color: var(--cyan); font-size: 13px; background: var(--stage); }
+.extraOptions .secondaryAction:disabled { opacity: .6; }
+.resultActions .add, .confirmed { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; width: auto; padding: 10px 14px; font-size: 14px; line-height: 1.4; border-radius: 8px; text-decoration: none; }
+.resultActions svg { flex-shrink: 0; }
+.resultActions .add:disabled { background: var(--stage); color: var(--secondary); border: 1px solid var(--edge); }
+.confirmed { color: var(--cyan); border: 1px solid var(--cyan); }
+.confirmed[data-status='PENDING_APPROVAL'] { color: var(--amber); border-color: var(--amber); }
+.message { grid-column: 1 / -1; font-size: 13px; color: var(--secondary); }
+.message:empty { display: none; }
+.message p { margin: 0; line-height: 1.5; }
+.message .warning { color: var(--amber); }
+@media (max-width: 900px) {
+  .result { grid-template-columns: 104px minmax(0, 1fr); gap: 14px; padding: 16px; }
+  .resultActions { grid-column: 1 / -1; }
+  .primaryAction { flex: 1; }
+  .extraOptions { margin-top: 0; }
+  .resultActions .add, .confirmed { width: 100%; }
+  .message p { margin-top: 0; }
+}
+@media (max-width: 380px) {
+  .options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .result { grid-template-columns: 80px minmax(0, 1fr); gap: 12px; padding: 12px; }
+}

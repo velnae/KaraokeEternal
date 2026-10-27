@@ -95,7 +95,7 @@ const QueuePrefs = ({ onChange, prefs = {} }: QueuePrefsProps) => {
         <NumberField
           id='queue-house-tracks'
           label='Canciones de la casa entre turnos de participantes'
-          description='Use 0 para desactivar la inserción automática de canciones de la casa.'
+          description='Use 0 para no intercalar canciones. La música de la casa puede continuar cuando no hay pedidos.'
           {...QUEUE_PREF_LIMITS.houseTracksBeforeParticipant}
           value={queue.houseTracksBeforeParticipant}
           onChange={value => handleSetQueuePrefs({ houseTracksBeforeParticipant: value })}

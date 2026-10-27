@@ -79,7 +79,7 @@ const PlaybackCtrl = () => {
       </div>
 
       <div className={styles.viewActions}>
-        <AnimationQuickControls />
+        {isPlayer && <AnimationQuickControls />}
         <Button
           className={clsx(styles.btn, styles.displayCtrl)}
           icon='TUNE'

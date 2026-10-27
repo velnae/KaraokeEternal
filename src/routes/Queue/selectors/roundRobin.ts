@@ -234,5 +234,9 @@ const interleaveHouseItems = (
     }
   })
 
+  // With no approved participant waiting, the house pool supplies idle music.
+  if (!upcoming.some(queueId => (entities[queueId] as QueueItem).origin === 'PARTICIPANT')) {
+    scheduled.push(...housePool.slice(houseIndex))
+  }
   return scheduled
 }

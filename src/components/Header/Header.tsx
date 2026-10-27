@@ -2,13 +2,12 @@ import React from 'react'
 import clsx from 'clsx'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { RootState } from 'store/store'
-import { Routes, Route, useLocation } from 'react-router'
+import { useLocation } from 'react-router'
 import { createSelector } from '@reduxjs/toolkit'
 
 import { requestScanStop } from 'store/modules/prefs'
 import getRoundRobinQueue from 'routes/Queue/selectors/getRoundRobinQueue'
 import getWaits from 'routes/Queue/selectors/getWaits'
-import LibraryHeader from 'routes/Library/components/LibraryHeader/LibraryHeader'
 import PlaybackCtrl from './PlaybackCtrl/PlaybackCtrl'
 import ProgressBar from './ProgressBar/ProgressBar'
 import UpNext from './UpNext/UpNext'
@@ -80,11 +79,6 @@ const Header = React.forwardRef<HTMLDivElement>((_, ref) => {
           />
         )}
 
-      {isAdmin && (
-        <Routes>
-          <Route path='/library' element={<LibraryHeader />} />
-        </Routes>
-      )}
     </div>
   )
 })

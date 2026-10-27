@@ -24,6 +24,8 @@ class Queue {
     status = 'APPROVED',
     requestId,
     tableContext,
+    playlistItemId,
+    houseRunId,
   }: {
     roomId: number
     song: ResolvedSong
@@ -32,6 +34,8 @@ class Queue {
     status?: 'PENDING_APPROVAL' | 'APPROVED'
     requestId?: string
     tableContext?: import('../../shared/tableAccess.js').TableContext
+    playlistItemId?: number
+    houseRunId?: string
   }): void {
     const validationError = getResolvedSongValidationError(song)
     if (validationError) throw new Error(validationError)
@@ -67,6 +71,8 @@ class Queue {
     fields.set('tableId', tableContext?.tableId ?? null)
     fields.set('participantSessionId', tableContext?.participantSessionId ?? null)
     fields.set('tableLabelSnapshot', tableContext?.tableLabel ?? null)
+    fields.set('playlistItemId', playlistItemId ?? null)
+    fields.set('houseRunId', houseRunId ?? null)
 
     const query = sql`
       INSERT INTO queue ${sql.tuple(Array.from(fields.keys()).map(sql.column))}

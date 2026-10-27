@@ -1,10 +1,11 @@
 import type { AnimationSnapshot } from '../../../shared/animation.js'
 
-export function announcementBlocker ({ snapshot, connected, hasClip, roomClosed = false, now }: {
+export function announcementBlocker ({ snapshot, connected, hasClip, roomClosed = false, expired = false, now }: {
   snapshot: AnimationSnapshot | null
   connected: boolean
   hasClip: boolean
   roomClosed?: boolean
+  expired?: boolean
   now: number
 }): string | null {
   if (!snapshot) return 'Conectando los controles de la sala…'
@@ -13,6 +14,7 @@ export function announcementBlocker ({ snapshot, connected, hasClip, roomClosed 
   if (!snapshot.prefs.enabled) return 'Active el animador para solicitar un anuncio.'
   if (!snapshot.playerPresent) return 'Abra el reproductor de la sala para enviar el anuncio.'
   if (!hasClip) return 'Seleccione un clip disponible en el catálogo.'
+  if (expired) return 'El recurso ya venció. Seleccione otro anuncio.'
   if (snapshot.microphoneOccupied) return 'Marque el micrófono como libre para solicitar un anuncio.'
   if (snapshot.prefs.volume === 0) return 'Suba el volumen de voz para solicitar un anuncio.'
   if (snapshot.active) return 'Ya hay una solicitud. Espere a que termine o cancélela.'

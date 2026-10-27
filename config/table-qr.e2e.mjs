@@ -9,6 +9,7 @@ import path from 'node:path'
 import { createServer } from 'node:net'
 
 const root = path.resolve(import.meta.dirname, '..')
+const development = process.env.KARAOKE_E2E_MODE === 'development'
 const require = createRequire(`${root}/package.json`)
 const { io } = require('socket.io-client')
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'karaoke-table-e2e-'))
@@ -21,8 +22,9 @@ const origin = `http://127.0.0.1:${port}`
 const base = `${origin}/karaoke/`
 let server
 const start = async () => {
-  server = spawn(process.execPath, ['build/server/main.js', '--data', data, '--port', String(port), '--urlPath', '/karaoke/', '--serverLogLevel', '0'], { cwd: root, env: { ...process.env, NODE_ENV: 'production', KES_SCAN: '', KES_ROTATE_KEY: 'false' }, stdio: ['ignore', log, log] })
-  for (let i = 0; i < 100; i++) {
+  const entry = development ? ['--import', 'tsx', 'server/main.ts'] : ['build/server/main.js']
+  server = spawn(process.execPath, [...entry, '--data', data, '--port', String(port), '--urlPath', '/karaoke/', '--serverLogLevel', '0'], { cwd: root, env: { ...process.env, NODE_ENV: development ? 'development' : 'production', KES_SCAN: '', KES_ROTATE_KEY: 'false' }, stdio: ['ignore', log, log] })
+  for (let i = 0; i < 200; i++) {
     try {
       if ((await fetch(`${base}api/prefs`)).ok) return
     } catch { /* Wait for the isolated server to listen. */ }
@@ -78,35 +80,95 @@ try {
   const admin = await adminContext.newPage()
   admin.on('pageerror', error => errors.push(error.message))
   admin.on('dialog', dialog => dialog.accept())
-  await admin.goto(`${base}account`)
+  await admin.goto(`${base}admin/rooms`)
+  await expect(admin).toHaveURL(`${base}account?redirect=%2Fadmin%2Frooms`)
   await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).click()
   await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('admin')
   await admin.getByPlaceholder('contraseña', { exact: true }).fill('isolated-test-password')
   await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
+  await expect(admin).toHaveURL(`${base}admin/rooms`)
   const adminShortcuts = admin.getByRole('navigation', { name: 'Secciones de administración' })
-  for (const [name, id] of [
-    ['Salas', 'admin-rooms'],
-    ['Usuarios', 'admin-users'],
-    ['Ajustes', 'admin-prefs'],
-    ['Marca del cliente', 'admin-branding'],
-    ['Mi cuenta', 'admin-account'],
+  for (const [name, route, legacy] of [
+    ['Salas y mesas', 'admin/rooms', 'admin-rooms'],
+    ['Usuarios', 'admin/users', 'admin-users'],
+    ['Reproducción', 'admin/settings/playback', 'admin-prefs'],
+    ['Archivos', 'admin/settings/files'],
+    ['Marca del local', 'admin/settings/branding', 'admin-branding'],
+    ['Mi cuenta', 'admin/account', 'admin-account'],
   ]) {
     await adminShortcuts.getByRole('link', { name, exact: true }).click()
-    await expect(admin).toHaveURL(`${base}account#${id}`)
-    await expect.poll(async () => admin.locator(`#${id}`).evaluate((element) => {
-      const bounds = element.getBoundingClientRect()
-      return bounds.top >= 0 && bounds.top < innerHeight - 100
-    })).toBe(true)
+    await expect(admin).toHaveURL(`${base}${route}`)
+    await expect(admin.getByRole('heading', { name, exact: true, level: 1 })).toBeInViewport()
+    await admin.reload()
+    await expect(admin.getByRole('heading', { name, exact: true, level: 1 })).toBeInViewport()
+    if (legacy) {
+      await admin.goto(`${base}account#${legacy}`)
+      await expect(admin).toHaveURL(`${base}${route}`)
+    }
   }
+  await adminShortcuts.getByRole('link', { name: 'Usuarios', exact: true }).click()
+  await admin.getByLabel('Filtrar usuarios').selectOption('all')
+  await admin.getByRole('button', { name: 'Crear usuario', exact: true }).focus()
+  await admin.keyboard.press('Enter')
+  const createUserDialog = admin.getByRole('dialog', { name: 'Crear usuario', exact: true })
+  await createUserDialog.getByPlaceholder('nombre de usuario o correo electrónico').fill('ui-singer@example.test')
+  await createUserDialog.getByPlaceholder('contraseña', { exact: true }).fill('ui-singer-password')
+  await createUserDialog.getByPlaceholder('confirmar contraseña', { exact: true }).fill('ui-singer-password')
+  await createUserDialog.getByPlaceholder('nombre para mostrar').fill('Cantante de prueba')
+  await createUserDialog.getByRole('combobox').selectOption('standard')
+  await createUserDialog.getByRole('button', { name: 'Crear usuario', exact: true }).click()
+  await expect(createUserDialog).toBeHidden()
+  const editUser = admin.getByRole('button', { name: 'Editar a ui-singer@example.test', exact: true })
+  await editUser.focus()
+  await editUser.press('Enter')
+  const editUserDialog = admin.getByRole('dialog', { name: 'Editar usuario: ui-singer@example.test', exact: true })
+  await editUserDialog.getByPlaceholder('nombre para mostrar').fill('Cambio sin guardar')
+  await admin.keyboard.press('Escape')
+  await expect(admin.getByText('Cambio sin guardar', { exact: true })).toHaveCount(0)
+  await editUser.click()
+  await editUserDialog.getByPlaceholder('nombre para mostrar').fill('Cantante actualizado')
+  await editUserDialog.getByRole('button', { name: 'Guardar cambios', exact: true }).click()
+  await expect(editUserDialog).toBeHidden()
+  await expect(admin.getByText('Cantante actualizado', { exact: true })).toBeVisible()
   await admin.reload()
-  await expect(admin.locator('#admin-account')).toBeInViewport()
-  await adminShortcuts.getByRole('link', { name: 'Salas', exact: true }).click()
-  await adminShortcuts.scrollIntoViewIfNeeded()
-  await adminShortcuts.getByRole('link', { name: 'Salas', exact: true }).click()
-  await expect(admin).toHaveURL(`${base}account#admin-rooms`)
-  await expect(admin.locator('#admin-rooms')).toBeInViewport()
-  pass('Every admin shortcut stays on account and scrolls to its section, including reload/repeated clicks')
-  await admin.getByRole('button', { name: 'Mesas', exact: true }).click()
+  await admin.getByLabel('Filtrar usuarios').selectOption('all')
+  await expect(admin.getByText('Cantante actualizado', { exact: true })).toBeVisible()
+  for (const width of [320, 390, 768, 1440]) {
+    await admin.setViewportSize({ width, height: 1000 })
+    await expect(editUser).toBeVisible()
+    assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `users overflow at ${width}`)
+    await admin.screenshot({ path: `${data}/users-${width}.png` })
+  }
+  await admin.getByRole('table').getByRole('link', { name: 'Mi cuenta', exact: true }).click()
+  await expect(admin).toHaveURL(`${base}admin/account`)
+  pass('Users support explicit edit/account actions, keyboard create/edit/cancel, persisted changes and responsive layouts')
+
+  for (const width of [320, 390, 768, 1440]) {
+    await admin.setViewportSize({ width, height: 1000 })
+    if (width <= 1100) {
+      const menu = admin.getByRole('button', { name: 'Abrir menú Administración', exact: true })
+      await menu.focus()
+      await menu.press('Enter')
+      await expect(adminShortcuts).toBeVisible()
+      await admin.keyboard.press('Escape')
+      await expect(menu).toBeFocused()
+      await expect(adminShortcuts).toBeHidden()
+      await menu.press('Enter')
+      await admin.screenshot({ path: `${data}/admin-menu-${width}.png` })
+    }
+    await adminShortcuts.getByRole('link', { name: 'Salas y mesas', exact: true }).click()
+    await expect(admin.getByRole('heading', { name: 'Salas y mesas', level: 1 })).toBeFocused()
+    await expect.poll(() => admin.getByRole('heading', { name: 'Salas y mesas', level: 1 }).evaluate(element => element.getBoundingClientRect().top)).toBeGreaterThan(width <= 1100 ? 120 : 68)
+    await expect(admin.getByRole('button', { name: 'Ver mesas de Sala 1', exact: true })).toBeVisible()
+    assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+    await admin.screenshot({ path: `${data}/admin-rooms-${width}.png` })
+    if (width <= 1100) await expect(adminShortcuts).toBeHidden()
+    else assert.ok(await admin.locator('main').evaluate(element => element.getBoundingClientRect().width > 1000))
+  }
+  await expect(admin).toHaveURL(`${base}admin/rooms`)
+  pass('Admin routes support deep links, legacy redirects, wide layout and keyboard-responsive navigation')
+  await admin.getByRole('button', { name: 'Ver mesas de Sala 1', exact: true }).focus()
+  await admin.getByRole('button', { name: 'Ver mesas de Sala 1', exact: true }).press('Enter')
   await admin.getByRole('button', { name: 'Nueva mesa', exact: true }).click()
   await admin.getByLabel('Código', { exact: true }).fill('05')
   await admin.getByLabel('Nombre opcional').fill('Terraza')
@@ -143,6 +205,7 @@ try {
     await admin.getByRole('heading', { name: 'Mesas de Sala 1', exact: true }).scrollIntoViewIfNeeded()
     assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `admin overflow at ${width}`)
     await admin.screenshot({ path: `${data}/tables-${width}.png` })
+    await admin.getByRole('list', { name: 'Mesas de la sala' }).screenshot({ path: `${data}/tables-grid-${width}.png` })
   }
   pass('Table manager search, empty state, editor cancellation and responsive layouts')
   const tables = await call(api, 'rooms/1/tables')
@@ -205,6 +268,12 @@ try {
   await guest.getByRole('button', { name: 'Entrar', exact: true }).click()
   await expect(guest).toHaveURL(`${base}library`)
   await expect(guest.getByText('Mesa 05 · Terraza', { exact: true })).toBeVisible()
+  await guest.goto(`${base}admin/settings/animator`)
+  await expect(guest).toHaveURL(`${base}queue`)
+  await expect(guest.getByRole('navigation', { name: 'Secciones de administración' })).toHaveCount(0)
+  assert.equal((await guestContext.request.get(`${base}api/animation/production`)).status(), 403)
+  await guest.goto(`${base}library`)
+  pass('Participants cannot enter admin settings or access production APIs')
   let user = await call(guestContext.request, 'user')
   assert.equal(user.tableId, first.tableId)
   const originalSession = user.participantSessionId

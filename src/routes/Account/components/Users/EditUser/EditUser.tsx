@@ -30,7 +30,7 @@ const EditUser = ({ user, onClose }: EditUserProps) => {
     <Modal
       className={styles.modal}
       onClose={onClose}
-      title={user ? user.username : 'Crear usuario'}
+      title={user ? `Editar usuario: ${user.username || user.name}` : 'Crear usuario'}
     >
       <AccountForm user={user} onSubmit={handleSubmit} showRole autoFocus={!user}>
         <div className={styles.btnContainer}>
@@ -42,7 +42,7 @@ const EditUser = ({ user, onClose }: EditUserProps) => {
 
           {user && (
             <Button type='submit' className={styles.btn} variant='primary'>
-              Actualizar usuario
+              Guardar cambios
             </Button>
           )}
 

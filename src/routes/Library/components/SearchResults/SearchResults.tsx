@@ -1,14 +1,13 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useRef } from 'react'
 import { ensureState } from 'redux-optimistic-ui'
 import { RootState } from 'store/store'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
-import { clearYouTubeSearch, searchYouTube, toggleArtistResultExpanded } from '../../modules/library'
+import { toggleArtistResultExpanded } from '../../modules/library'
 import getSearchResults from '../../selectors/getSearchResults'
 import getSongsStatus from '../../selectors/getSongsStatus'
 import PaddedList from 'components/PaddedList/PaddedList'
 import ArtistItem from '../ArtistItem/ArtistItem'
 import SongList from '../SongList/SongList'
-import YouTubeSearchResults from '../YouTubeSearchResults/YouTubeSearchResults'
 import type { ListImperativeAPI, RowComponentProps } from 'react-window'
 import styles from './SearchResults.css'
 
@@ -31,8 +30,6 @@ interface CustomRowProps {
   artistsResult: number[]
   songsResult: number[]
   expandedArtistResults: number[]
-  showYouTube: boolean
-  youtubeSearch: RootState['library']['youtubeSearch']
 }
 
 // this is outside the SearchResults component to keep the reference as stable as possible,
@@ -48,8 +45,6 @@ const RowComponent = ({
   artistsResult,
   songsResult,
   expandedArtistResults,
-  showYouTube,
-  youtubeSearch,
 }: RowComponentProps<CustomRowProps>) => {
   const { starredSongs } = useAppSelector(state => ensureState(state.userStars))
   const { upcoming } = useAppSelector(getSongsStatus)
@@ -102,7 +97,7 @@ const RowComponent = ({
 
   // song results
   if (index === artistsResult.length + 2) {
-    if (!songsResult.length && !artistsResult.length && !showYouTube) {
+    if (!songsResult.length && !artistsResult.length) {
       return <div style={style} className={styles.empty}>Sin resultados</div>
     }
     return (
@@ -116,33 +111,18 @@ const RowComponent = ({
     )
   }
 
-  if (showYouTube && index === artistsResult.length + 3) {
-    return <div style={style} className={styles.youtubeHeading}>YouTube</div>
-  }
-
-  return (
-    <div style={style} key='youtube'>
-      <YouTubeSearchResults {...youtubeSearch} />
-    </div>
-  )
+  return null
 }
 
 const SearchResults = ({ ui }: SearchResultsProps) => {
   const dispatch = useAppDispatch()
   const artists = useAppSelector(state => state.artists)
   const expandedArtistResults = useAppSelector(state => state.library.expandedArtistResults)
-  const { filterStr, filterStarred, youtubeSearch } = useAppSelector(state => state.library)
+  const { filterStr, filterStarred } = useAppSelector(state => state.library)
   const { artistsResult, songsResult } = useAppSelector(getSearchResults)
 
   const listRef = useRef<ListImperativeAPI | null>(null)
   const filterKeywords = filterStr.trim() ? filterStr.trim().toLowerCase().split(' ') : []
-  const youtubeQuery = filterStr.trim()
-  const showYouTube = youtubeQuery.length >= 2 && !filterStarred
-
-  useEffect(() => {
-    if (showYouTube) dispatch(searchYouTube({ query: youtubeQuery }))
-    else dispatch(clearYouTubeSearch())
-  }, [dispatch, showYouTube, youtubeQuery])
 
   const rowHeight = (index: number) => {
     // artists heading
@@ -165,12 +145,10 @@ const SearchResults = ({ ui }: SearchResultsProps) => {
 
     // song results
     if (index === artistsResult.length + 2) {
-      return !songsResult.length && !artistsResult.length && !showYouTube ? 56 : songsResult.length * ROW_HEIGHT_SONG_WITH_ARTIST
+      return !songsResult.length && !artistsResult.length ? 56 : songsResult.length * ROW_HEIGHT_SONG_WITH_ARTIST
     }
 
-    // YouTube heading and result group
-    if (index === artistsResult.length + 3) return ROW_HEIGHT_RESULT_HEADING
-    return youtubeSearch.results.length ? youtubeSearch.results.length * 116 : 80
+    return 0
   }
 
   const handleRef = (ref: ListImperativeAPI) => {
@@ -191,11 +169,9 @@ const SearchResults = ({ ui }: SearchResultsProps) => {
         artistsResult,
         songsResult,
         expandedArtistResults,
-        showYouTube,
-        youtubeSearch,
       }}
       rowHeight={rowHeight}
-      numRows={artistsResult.length + 3 + (showYouTube ? 2 : 0)}
+      numRows={artistsResult.length + 3}
       paddingTop={ui.headerHeight}
       paddingRight={4}
       paddingBottom={ui.footerHeight + 32}

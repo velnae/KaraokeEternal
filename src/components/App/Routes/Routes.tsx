@@ -7,6 +7,7 @@ import LibraryView from 'routes/Library/views/LibraryView'
 import QueueView from 'routes/Queue/views/QueueView'
 import ParticipantView from 'routes/Participant/ParticipantView'
 import JoinView from 'routes/Account/views/JoinView'
+import AdminRoutes from 'components/Admin/AdminRoutes'
 
 const PlayerView = React.lazy(() => import('routes/Player/views/PlayerView'))
 
@@ -16,6 +17,7 @@ const AppRoutes = () => {
     <Routes>
       <Route path='/join' element={<JoinView />} />
       <Route path='/account' element={<AccountView />} />
+      <Route path='/admin/*' element={<AdminRoutes />} />
       <Route
         path='/library'
         element={(
@@ -28,7 +30,7 @@ const AppRoutes = () => {
         path='/queue'
         element={(
           <RequireAuth path='/queue' redirectTo='/account'>
-            {isAdmin ? <QueueView /> : <ParticipantView page='room' />}
+            {isAdmin ? <AdminQueue /> : <ParticipantView page='room' />}
           </RequireAuth>
         )}
       />
@@ -65,6 +67,11 @@ const AppRoutes = () => {
 }
 
 export default AppRoutes
+
+function AdminQueue () {
+  const location = useLocation()
+  return location.hash === '#animator' ? <Navigate to='/admin/settings/animator' replace /> : <QueueView />
+}
 
 interface RequireAuthProps {
   children: React.ReactNode

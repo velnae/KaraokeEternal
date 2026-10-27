@@ -1,53 +1,45 @@
 import React, { useState } from 'react'
 import { useAppSelector } from 'store/hooks'
 import { Link } from 'react-router'
+import useResizeObserver from 'use-resize-observer'
 import ArtistList from '../components/ArtistList/ArtistList'
 import SearchResults from '../components/SearchResults/SearchResults'
-import TextOverlay from 'components/TextOverlay/TextOverlay'
-import Spinner from 'components/Spinner/Spinner'
-import Button from 'components/Button/Button'
+import LibraryHeader from '../components/LibraryHeader/LibraryHeader'
+import YouTubeSearchResults from '../components/YouTubeSearchResults/YouTubeSearchResults'
+import { useYouTubeSearch } from 'routes/Participant/useYouTubeSearch'
 import styles from './LibraryView.css'
 
-const LibraryView = () => {
-  const { isAdmin } = useAppSelector(state => state.user)
-  const { isLoading, filterStr, filterStarred } = useAppSelector(state => state.library)
-  const songsResult = useAppSelector(state => state.songs.result)
+export default function LibraryView () {
+  const { isLoading, filterStr, filterStarred, searchSource, youtubeMode } = useAppSelector(state => state.library)
+  const songs = useAppSelector(state => state.songs.result)
   const ui = useAppSelector(state => state.ui)
-
-  const isSearching = !!filterStr.trim().length || filterStarred
-  const [initialHeaderHeight] = useState(ui.headerHeight)
-  const [finalHeaderHeight, setFinalHeaderHeight] = useState(null)
-
-  // don't render ArtistList until headerHeight is stable; otherwise
-  // scroll position restoration does not work well (appears OBO)
-  // @todo - this is hacky
-  if (finalHeaderHeight === null && ui.headerHeight > initialHeaderHeight) {
-    setFinalHeaderHeight(ui.headerHeight)
-  }
-
-  if (!finalHeaderHeight) return null
-
+  const [retry, setRetry] = useState(0)
+  const search = useYouTubeSearch(filterStr, youtubeMode, retry, searchSource === 'youtube')
+  const { ref, height = 0, width = 0 } = useResizeObserver<HTMLDivElement>()
+  const listUI = { ...ui, innerHeight: height, innerWidth: width, headerHeight: 0, footerHeight: 0 }
   return (
-    <>
-      {!isSearching && <ArtistList ui={ui} />}
-
-      {isSearching && <SearchResults ui={ui} />}
-
-      {isLoading && <Spinner />}
-
-      {!isSearching && !isLoading && songsResult.length === 0 && (
-        <TextOverlay className={styles.empty}>
-          <h1>Busca una canción</h1>
-          <Button variant='primary' onClick={() => document.getElementById('library-search')?.focus()}>Buscar en YouTube</Button>
-          {isAdmin && (
-            <p>
-              <Link to='/account#admin-prefs'>Carpetas locales</Link>
-            </p>
-          )}
-        </TextOverlay>
-      )}
-    </>
+    <main className={styles.container} style={{ paddingTop: ui.headerHeight, paddingBottom: ui.footerHeight }}>
+      <LibraryHeader onSearch={() => setRetry(value => value + 1)} />
+      <div ref={ref} className={styles.content}>
+        {searchSource === 'youtube'
+          ? <div className={styles.youtube}><YouTubeSearchResults {...search} onRetry={() => setRetry(value => value + 1)} /></div>
+          : isLoading
+            ? <p className={styles.notice} role='status'>Cargando archivos locales…</p>
+            : !songs.length
+                ? (
+                    <div className={styles.notice}>
+                      <h2>No hay canciones locales</h2>
+                      <p>
+                        Agrega una carpeta de música en
+                        {' '}
+                        <Link to='/admin/settings/files'>Archivos</Link>
+                        {' '}
+                        o busca en YouTube.
+                      </p>
+                    </div>
+                  )
+                : height > 0 && (filterStr.trim() || filterStarred ? <SearchResults ui={listUI} /> : <ArtistList ui={listUI} contentTop={ui.innerHeight - ui.footerHeight - height} />)}
+      </div>
+    </main>
   )
 }
-
-export default LibraryView

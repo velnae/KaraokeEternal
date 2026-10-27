@@ -1,0 +1,247 @@
+import { chromium, request, expect } from 'playwright/test'
+import { spawn, execFileSync } from 'node:child_process'
+import { createServer } from 'node:net'
+import { DatabaseSync } from 'node:sqlite'
+import { io } from 'socket.io-client'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import assert from 'node:assert/strict'
+
+const root = path.resolve(import.meta.dirname, '..')
+const development = process.env.KARAOKE_E2E_MODE === 'development'
+const data = fs.mkdtempSync(path.join(os.tmpdir(), 'karaoke-playlists-e2e-'))
+const log = fs.openSync(path.join(data, 'server.log'), 'a')
+const reservation = createServer()
+await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
+const port = reservation.address().port
+await new Promise(resolve => reservation.close(resolve))
+const origin = `http://127.0.0.1:${port}`
+const base = `${origin}/karaoke/`
+const api = await request.newContext()
+let server, browser, socket, db
+const errors = []
+const pass = name => console.log(`PASS ${name}`)
+const call = async (url, body, method = body === undefined ? 'GET' : 'POST') => {
+  const response = await api.fetch(`${base}api/${url}`, { method, data: body })
+  assert.equal(response.status(), 200, await response.text())
+  return response.json()
+}
+const start = async () => {
+  const entry = development ? ['--import', 'tsx', 'server/main.ts'] : ['build/server/main.js']
+  server = spawn(process.execPath, [...entry, '--data', data, '--port', String(port), '--urlPath', '/karaoke/', '--serverLogLevel', '0'], {
+    cwd: root, stdio: ['ignore', log, log], env: { ...process.env, NODE_ENV: development ? 'development' : 'production', KES_SCAN: '', KES_ROTATE_KEY: 'false' },
+  })
+  for (let attempt = 0; attempt < 240; attempt++) {
+    try {
+      if ((await fetch(`${base}api/prefs`)).ok) return
+    } catch { /* Wait for isolated server. */ }
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  throw new Error('Isolated server unavailable')
+}
+const stop = async () => {
+  if (!server || server.exitCode !== null || server.signalCode !== null) return
+  const ended = new Promise(resolve => server.once('exit', resolve))
+  server.kill('SIGTERM')
+  await ended
+}
+const emit = async (type, payload = {}) => {
+  const reply = await socket.timeout(5000).emitWithAck('action', { type, payload })
+  assert.ok(!reply.error, reply.error)
+  return reply
+}
+const current = () => db.prepare('SELECT queueId,songId,origin FROM queue WHERE status=\'PLAYING\' ORDER BY queueId DESC LIMIT 1').get()
+try {
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180:r=10', '-f', 'lavfi', '-i', 'sine=frequency=220:sample_rate=44100', '-t', '4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(data, 'song.mp4')])
+  await start()
+  await call('setup', { username: 'admin', newPassword: 'playlist-test-password', newPasswordConfirm: 'playlist-test-password', name: 'Operator' })
+  const room = (await call('rooms/1')).entities[1]
+  await call('rooms/1', { name: room.name, status: 'open', prefs: { ...room.prefs, queue: { houseTracksBeforeParticipant: 1 } } }, 'PUT')
+  db = new DatabaseSync(path.join(data, 'database.sqlite3'))
+  db.exec('INSERT INTO artists(artistId,name,nameNorm) VALUES(1,\'Artist\',\'artist\'); INSERT INTO songs(songId,artistId,title,titleNorm) VALUES(1,1,\'House one\',\'house one\'),(2,1,\'House two\',\'house two\'),(3,1,\'Singer three\',\'singer three\'),(4,1,\'Missing file\',\'missing file\');')
+  db.prepare('INSERT INTO paths(pathId,path,priority,data) VALUES(1,?,1,?)').run(data, '{"prefs":{"isWatching":false}}')
+  db.exec('INSERT INTO media(mediaId,songId,pathId,relPath,duration,isPreferred) VALUES(1,1,1,\'song.mp4\',4,1),(2,2,1,\'song.mp4\',4,1),(3,3,1,\'song.mp4\',4,1),(4,4,1,\'missing.mp4\',4,1)')
+  await stop()
+  await start()
+  await call('login', { username: 'admin', password: 'playlist-test-password', roomId: 1 })
+  const cookie = (await api.storageState()).cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ')
+  socket = io(origin, { path: '/karaoke/socket.io', extraHeaders: { cookie }, transports: ['websocket'], autoConnect: false })
+  socket.connect()
+  await new Promise((resolve, reject) => {
+    socket.once('connect', resolve)
+    socket.once('connect_error', reject)
+  })
+  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, headless: true })
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } })
+  context.on('page', page => page.on('pageerror', error => errors.push(error.message)))
+  const admin = await context.newPage()
+  await admin.goto(`${base}account?roomId=1`)
+  await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).click()
+  await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('admin')
+  await admin.getByPlaceholder('contraseña', { exact: true }).fill('playlist-test-password')
+  await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
+  await admin.getByRole('link', { name: 'Listas de reproducción', exact: true }).click()
+  await expect(admin.getByRole('region', { name: 'Lista diaria de la casa' })).toHaveCount(0)
+  await admin.getByRole('button', { name: 'Nueva lista', exact: true }).click()
+  const nameDialog = admin.getByRole('dialog', { name: 'Nueva lista', exact: true })
+  await expect(nameDialog.getByLabel('Nombre de la lista', { exact: true })).toBeFocused()
+  await nameDialog.getByLabel('Nombre de la lista', { exact: true }).fill('Música diaria')
+  await nameDialog.getByRole('button', { name: 'Crear lista', exact: true }).click()
+  await expect(admin.getByLabel('Lista para editar')).toHaveValue('1')
+  await expect(admin.getByLabel('Nombre de la lista', { exact: true })).toHaveCount(0)
+  await admin.getByRole('link', { name: 'Agregar canciones', exact: true }).click()
+  await expect(admin).toHaveURL(`${base}library?saveTo=1`)
+  await admin.getByRole('radio', { name: 'Archivos locales', exact: true }).check()
+  await admin.getByRole('searchbox').fill('House')
+  for (const title of ['House one', 'House two']) {
+    await admin.getByRole('button', { name: `Guardar ${title} en una lista`, exact: true }).focus()
+    await admin.keyboard.press('Enter')
+    const dialog = admin.getByRole('dialog', { name: 'Guardar en una lista', exact: true })
+    await expect(dialog.getByLabel('Lista de destino')).toHaveValue('1')
+    await expect(dialog.getByLabel('Nombre de la nueva lista')).toHaveCount(0)
+    await dialog.getByRole('button', { name: 'Guardar canción', exact: true }).click()
+    await expect(dialog.getByText('Guardada en «Música diaria»', { exact: true })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: 'Guardar canción', exact: true })).toHaveCount(0)
+    await expect(dialog.getByRole('button', { name: 'Listo', exact: true })).toBeFocused()
+    await admin.keyboard.press('Enter')
+  }
+  await admin.getByRole('link', { name: 'Listas de reproducción', exact: true }).click()
+  await expect(admin.getByRole('list', { name: 'Canciones de la lista' }).getByRole('listitem')).toHaveCount(2)
+  await admin.getByRole('button', { name: 'Bajar House one', exact: true }).click()
+  await expect(admin.getByRole('list', { name: 'Canciones de la lista' }).getByRole('listitem').first()).toContainText('House two')
+  await admin.getByText('Opciones de la lista', { exact: true }).click()
+  await admin.getByRole('button', { name: 'Cambiar nombre', exact: true }).click()
+  const renameDialog = admin.getByRole('dialog', { name: 'Cambiar nombre', exact: true })
+  await renameDialog.getByLabel('Nombre de la lista', { exact: true }).fill('Cambio sin guardar')
+  await admin.keyboard.press('Escape')
+  await expect(admin.getByLabel('Lista para editar').locator('option:checked')).toHaveText('Música diaria')
+  await admin.getByRole('button', { name: 'Cambiar nombre', exact: true }).click()
+  await renameDialog.getByLabel('Nombre de la lista', { exact: true }).fill('Repertorio del local')
+  await renameDialog.getByRole('button', { name: 'Guardar nombre' }).click()
+  await admin.reload()
+  await expect(admin.getByLabel('Lista para editar').locator('option:checked')).toHaveText('Repertorio del local')
+  pass('Saved lists support keyboard addition from local library, ordering, rename and reload persistence')
+  await admin.getByRole('button', { name: 'Nueva lista', exact: true }).click()
+  await nameDialog.getByLabel('Nombre de la lista', { exact: true }).fill('Segunda lista')
+  await nameDialog.getByRole('button', { name: 'Crear lista', exact: true }).click()
+  await expect(admin.getByLabel('Lista para editar')).toHaveValue('2')
+  await admin.getByRole('link', { name: 'Agregar canciones', exact: true }).click()
+  await expect(admin).toHaveURL(`${base}library?saveTo=2`)
+  await admin.getByRole('radio', { name: 'Archivos locales', exact: true }).check()
+  await admin.getByRole('searchbox').fill('House')
+  await admin.getByRole('button', { name: 'Guardar House one en una lista', exact: true }).click()
+  const secondSave = admin.getByRole('dialog', { name: 'Guardar en una lista', exact: true })
+  await expect(secondSave.getByLabel('Lista de destino')).toHaveValue('2')
+  await secondSave.getByRole('button', { name: 'Guardar canción', exact: true }).click()
+  await expect(secondSave.getByText('Guardada en «Segunda lista»', { exact: true })).toBeVisible()
+  await admin.keyboard.press('Enter')
+  await admin.goto(`${base}admin/playlists?list=2`)
+  await expect(admin.getByLabel('Lista para editar')).toHaveValue('2')
+  await admin.getByRole('link', { name: 'Configurar en De la casa', exact: true }).click()
+  await expect(admin.getByLabel('Lista predeterminada')).toHaveValue('2')
+  await expect(admin.getByLabel('Activar lista', { exact: true })).not.toBeChecked()
+  await admin.getByRole('button', { name: 'Cancelar cambios', exact: true }).click()
+  await expect(admin.getByLabel('Lista predeterminada')).toHaveValue('')
+  assert.equal(db.prepare('SELECT count(*) n FROM housePlayback').get().n, 0)
+  await admin.goto(`${base}admin/playlists?list=1`)
+  await expect(admin.getByLabel('Lista para editar')).toHaveValue('1')
+  pass('Contextual links preserve a non-default list without activating it; cancelling discards configuration drafts')
+  await admin.getByRole('link', { name: 'Configurar en De la casa', exact: true }).click()
+  await expect(admin).toHaveURL(`${base}queue?view=house&playlist=1`)
+  const house = admin.getByRole('region', { name: 'Lista diaria de la casa' })
+  await expect(house.getByLabel('Lista predeterminada')).toHaveValue('1')
+  await house.getByLabel('Activar lista', { exact: true }).check()
+  await house.getByRole('button', { name: 'Guardar cambios', exact: true }).click()
+  await expect(house.getByRole('status', { name: 'Estado de la lista de la casa' })).toHaveText('Activada')
+  await expect(house.getByRole('button', { name: 'Guardar cambios', exact: true })).toHaveCount(0)
+  await expect(admin).toHaveURL(`${base}queue?view=house`)
+  await house.getByLabel('Repetir al terminar').uncheck()
+  await house.getByRole('button', { name: 'Cancelar cambios', exact: true }).click()
+  await expect(house.getByLabel('Repetir al terminar')).toBeChecked()
+  await expect(house.getByRole('button', { name: 'Guardar cambios', exact: true })).toHaveCount(0)
+  assert.equal(db.prepare('SELECT count(*) n FROM queue WHERE status=\'APPROVED\'').get().n, 1)
+  const preparedId = db.prepare('SELECT queueId FROM queue').get().queueId
+  await stop()
+  await start()
+  await expect.poll(() => socket.connected, { timeout: 15000 }).toBe(true)
+  assert.equal(db.prepare('SELECT count(*) n FROM queue').get().n, 1)
+  assert.equal(db.prepare('SELECT queueId FROM queue').get().queueId, preparedId)
+  await admin.reload()
+  await expect(house.getByLabel('Activar lista', { exact: true })).toBeChecked()
+  pass('Default list, repeat and prepared song survive server restart without duplicated queue entries')
+  const player = await context.newPage()
+  await player.goto(`${base}player`)
+  const transport = player.getByRole('toolbar', { name: 'Controles de reproducción' })
+  await transport.getByRole('button', { name: 'Reproducir', exact: true }).click()
+  await expect.poll(() => current()?.songId).toBe(2)
+  await expect.poll(() => player.locator('video').evaluate(video => !video.paused && video.currentTime > 0)).toBe(true)
+  await expect.poll(() => current()?.songId, { timeout: 10000 }).toBe(1)
+  await expect.poll(() => current()?.songId, { timeout: 10000 }).toBe(2)
+  const playingId = current().queueId
+  await emit('server/QUEUE_ADD', { songId: 3, requestId: crypto.randomUUID() })
+  await emit('server/QUEUE_ADD', { songId: 3, requestId: crypto.randomUUID() })
+  assert.equal(current().queueId, playingId)
+  await expect.poll(() => current()?.origin, { timeout: 10000 }).toBe('PARTICIPANT')
+  await expect.poll(() => current()?.origin, { timeout: 10000 }).toBe('HOUSE')
+  await expect.poll(() => current()?.origin, { timeout: 10000 }).toBe('PARTICIPANT')
+  await expect.poll(() => current()?.origin, { timeout: 10000 }).toBe('HOUSE')
+  pass('House playlist loops alone, yields at a natural boundary, interleaves one house song and returns to idle music')
+  await transport.getByRole('button', { name: 'Pausar', exact: true }).click()
+  await expect.poll(() => player.locator('video').evaluate(video => video.paused)).toBe(true)
+  const paused = current().queueId
+  await player.waitForTimeout(4500)
+  assert.equal(current().queueId, paused)
+  assert.equal(db.prepare('SELECT count(*) n FROM queue WHERE status=\'APPROVED\' AND houseRunId IS NOT NULL').get().n, 1)
+  await admin.goto(`${base}queue?view=house`)
+  await house.getByLabel('Activar lista', { exact: true }).uncheck()
+  await house.getByRole('button', { name: 'Guardar cambios', exact: true }).click()
+  await expect.poll(() => db.prepare('SELECT count(*) n FROM queue WHERE status=\'APPROVED\' AND houseRunId IS NOT NULL').get().n).toBe(0)
+  assert.equal(current().queueId, paused)
+  await transport.getByRole('button', { name: 'Reproducir', exact: true }).click()
+  await expect(player.getByRole('heading', { name: 'Sin canciones', exact: true })).toBeVisible({ timeout: 10000 })
+  pass('Pause does not advance or grow the buffer; disabling removes future generated songs without cutting the current one')
+  for (const width of [390, 1440]) {
+    await admin.setViewportSize({ width, height: 1100 })
+    await admin.screenshot({ path: path.join(data, `house-${width}.png`) })
+    assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+    await admin.goto(`${base}admin/playlists`)
+    await expect(admin.getByRole('list', { name: 'Canciones de la lista' }).getByRole('listitem')).toHaveCount(2)
+    await expect(house).toHaveCount(0)
+    await admin.screenshot({ path: path.join(data, `playlists-${width}.png`) })
+    await admin.getByRole('region', { name: 'Editar lista guardada' }).screenshot({ path: path.join(data, `playlist-editor-${width}.png`) })
+    await admin.goto(`${base}queue?view=house`)
+    await expect(house.getByLabel('Lista predeterminada')).toHaveValue('1')
+  }
+  const broken = await call('rooms/1/playlists', { name: 'Unavailable songs' })
+  await call(`rooms/1/playlists/${broken.createdPlaylistId}/items`, { source: 'LOCAL', sourceId: '4' })
+  await call('rooms/1/playlists/playback', { playlistId: broken.createdPlaylistId, enabled: true, repeat: true }, 'PUT')
+  await expect.poll(() => db.prepare('SELECT count(*) n FROM queue WHERE songId=4 AND status=\'FAILED\'').get().n, { timeout: 15000 }).toBe(1)
+  await expect.poll(async () => (await call('rooms/1/playlists')).playback.message).toContain('Todas las canciones fallaron')
+  await expect(house.getByText('Todas las canciones fallaron. Revise la lista y pulse Reiniciar lista para reintentarlas.', { exact: true })).toBeVisible({ timeout: 7000 })
+  const failedPreparedCount = db.prepare('SELECT count(*) n FROM queue WHERE songId=4').get().n
+  assert.ok(failedPreparedCount <= 2, 'At most the current song and one prepared copy')
+  await player.waitForTimeout(2500)
+  assert.equal(db.prepare('SELECT count(*) n FROM queue WHERE songId=4').get().n, failedPreparedCount)
+  assert.equal(db.prepare('SELECT count(*) n FROM queue WHERE songId=4 AND status=\'FAILED\'').get().n, 1)
+  assert.equal(db.prepare('SELECT count(*) n FROM queue WHERE songId=4 AND status IN (\'APPROVED\',\'PLAYING\')').get().n, 0)
+  pass('An unavailable local house track is skipped once and an all-failed playlist stops with a visible recovery message')
+  await call('rooms/1/playlists/1', undefined, 'DELETE')
+  assert.equal((await call('rooms/1/playlists')).playlists.some(list => list.playlistId === 1), false)
+  assert.ok(db.prepare('SELECT count(*) n FROM queue WHERE songId IN(1,2)').get().n > 0)
+  pass('Deleting a saved list leaves playback history intact')
+  assert.deepEqual(errors, [])
+  console.log(`Evidence: ${data}`)
+} catch (error) {
+  console.error(`Evidence retained: ${data}`, errors)
+  if (db) console.error('House:', db.prepare('SELECT * FROM housePlayback').all(), 'Queue:', db.prepare('SELECT queueId,songId,status,origin FROM queue').all())
+  if (browser) for (const context of browser.contexts()) for (const page of context.pages()) console.error(page.url(), await page.locator('body').innerText().catch(() => 'unavailable'))
+  throw error
+} finally {
+  socket?.disconnect()
+  await browser?.close()
+  await stop()
+  db?.close()
+  await api.dispose()
+  fs.closeSync(log)
+}

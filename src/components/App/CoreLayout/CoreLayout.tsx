@@ -1,4 +1,4 @@
-import React, { useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { useMatch } from 'react-router'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import useResizeObserver from 'use-resize-observer'
@@ -12,15 +12,20 @@ import Navigation from 'components/Navigation/Navigation'
 import Modal from 'components/Modal/Modal'
 import SongInfo from 'components/SongInfo/SongInfo'
 import Routes from '../Routes/Routes'
+import AdminNavigation from 'components/Admin/AdminNavigation'
+import adminStyles from 'components/Admin/Admin.css'
 import { clearErrorMessage, setFooterHeight, setHeaderHeight } from 'store/modules/ui'
 
 const CoreLayout = () => {
   const isPlayerRoute = useMatch('/player')
+  const isAdmin = useAppSelector(state => state.user.isAdmin)
+  const adminShell = isAdmin && !isPlayerRoute
   const dispatch = useAppDispatch()
   const headerRef = useRef<HTMLDivElement>(null)
   const navRef = useRef<HTMLDivElement>(null)
 
   useResizeObserver({
+    box: 'border-box',
     onResize: ({ height }) => { dispatch(setHeaderHeight(height)) },
     ref: headerRef,
   })
@@ -32,14 +37,18 @@ const CoreLayout = () => {
 
   const ui = useAppSelector(state => state.ui)
   const closeError = () => dispatch(clearErrorMessage())
+  useEffect(() => {
+    if (adminShell || isPlayerRoute) dispatch(setFooterHeight(0))
+  }, [adminShell, isPlayerRoute, dispatch])
 
   return (
-    <div className={theme.theme}>
+    <div className={`${theme.theme} ${adminShell ? adminStyles.shell : ''}`}>
+      {adminShell && <AdminNavigation />}
       <Header ref={headerRef} />
 
-      <Routes />
+      <div className={adminStyles.content}><Routes /></div>
 
-      {!isPlayerRoute && <Navigation ref={navRef} />}
+      {!isPlayerRoute && !adminShell && <Navigation ref={navRef} />}
 
       <SongInfo />
 

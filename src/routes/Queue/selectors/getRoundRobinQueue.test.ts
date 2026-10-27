@@ -163,7 +163,7 @@ describe('house and operator ordering', () => {
       .toEqual(expected)
   })
 
-  it('never inserts house items before the first participant or without participants', () => {
+  it('prioritizes the first participant and uses house music when no participants wait', () => {
     const entities = {
       1: item(1, 99, 'APPROVED', 'HOUSE'),
       2: item(2, 10),
@@ -172,7 +172,7 @@ describe('house and operator ordering', () => {
     expect(buildRoundRobinQueue([1, 2], entities, [], -1, null, prefs('FAIR', 1, 2)).result)
       .toEqual([2])
     expect(buildRoundRobinQueue([1], { 1: entities[1] }, [], -1, null, prefs('FAIR', 1, 2)).result)
-      .toEqual([])
+      .toEqual([1])
   })
 
   it('does not let house items alter participant fairness history', () => {

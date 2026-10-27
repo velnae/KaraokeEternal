@@ -29,8 +29,8 @@
 .filter { flex: 0 0 160px; }
 .listHeading, .tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .listHeading > span { color: var(--secondary); font-size: 14px; }
-.list { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
-.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px 16px; border: 1px solid var(--edge); border-radius: 12px; padding: 18px; background: var(--stage); }
+.list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); align-items: start; gap: 16px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; border: 1px solid var(--edge); border-radius: 12px; padding: 18px; background: var(--stage); }
 .tableIdentity { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .code { display: flex; align-items: center; justify-content: center; min-width: 58px; max-width: 100px; min-height: 58px; padding: 4px; border-radius: 10px; background: #172e3b; color: var(--cyan); font-size: 26px; font-weight: 700; letter-spacing: -.04em; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .tableName { min-width: 0; }
@@ -40,11 +40,12 @@
 .status[data-status='disabled'] { color: var(--amber); }
 .status[data-status='archived'] { color: var(--secondary); }
 .row:not([data-status='active']) .code { color: var(--secondary); background: var(--equipment); }
-.activity { display: flex; gap: 22px; margin: 0; align-items: center; }
-.activity div { display: flex; flex-direction: column-reverse; gap: 4px; text-align: right; }
+.activity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; padding: 12px; align-items: center; background: var(--equipment); border-radius: 8px; }
+.activity div { display: flex; flex-direction: column-reverse; gap: 4px; text-align: left; min-width: 0; }
 .activity dt { color: var(--secondary); font-size: 12px; }
 .activity dd { margin: 0; color: var(--lyrics); font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .rowActions { display: flex; gap: 8px; grid-column: 1 / -1; }
+.rowActions button { flex: 1; }
 .operations { grid-column: 1 / -1; border-top: 1px solid var(--edge); padding-top: 5px; }
 .operations summary { cursor: pointer; min-height: 44px; align-content: center; color: var(--secondary); font-size: 13px; }
 .operations summary:focus-visible { outline: var(--focus-outline); outline-offset: 3px; border-radius: 4px; }
@@ -76,9 +77,6 @@
   .toolbar { flex-direction: column; align-items: stretch; }
   .filter { flex-basis: auto; }
   .row { padding: 14px; grid-template-columns: 1fr; gap: 14px; }
-  .activity { gap: 24px; }
-  .activity div { text-align: left; flex-direction: row; align-items: baseline; gap: 8px; }
-  .rowActions button { flex: 1; }
   .tools { width: 100%; }
   .dialogActions > button { flex: 1; }
 }

@@ -11,6 +11,8 @@ import getRoundRobinQueue from '../../selectors/getRoundRobinQueue'
 import getWaits from '../../selectors/getWaits'
 import Button from 'components/Button/Button'
 import styles from './QueueList.css'
+import { Link, useSearchParams } from 'react-router'
+import HousePlaylistControl from 'components/Playlists/HousePlaylistControl'
 
 type QueueFilter = 'queue' | 'pending' | 'house'
 
@@ -26,7 +28,14 @@ const QueueList = () => {
   const starCounts = useAppSelector(state => state.starCounts)
   const user = useAppSelector(state => state.user)
   const waits = useAppSelector(getWaits)
-  const [filter, setFilter] = useState<QueueFilter>('queue')
+  const [params, setParams] = useSearchParams()
+  const view = params.get('view')
+  const filter: QueueFilter = view === 'pending' || view === 'house' ? view : 'queue'
+  const setFilter = (value: QueueFilter) => setParams((previous) => {
+    const next = new URLSearchParams(previous)
+    next.set('view', value)
+    return next
+  })
   const [tableFilter, setTableFilter] = useState('all')
   const tableOptions = new Map<number, string>()
   for (const item of Object.values(rawQueue.entities)) {
@@ -157,6 +166,13 @@ const QueueList = () => {
           >
             {houseLabel}
           </Button>
+        </div>
+      )}
+      {user.isAdmin && filter === 'house' && <HousePlaylistControl key={user.roomId} />}
+      {user.isAdmin && filter === 'queue' && result.length === 0 && (
+        <div className={styles.empty}>
+          <h1>La cola de reproducción está vacía</h1>
+          <Link to='/library'>Buscar una canción</Link>
         </div>
       )}
       {user.isAdmin && filter === 'pending' && pendingIds.length === 0 && (

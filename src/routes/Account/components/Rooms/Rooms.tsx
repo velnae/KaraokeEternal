@@ -9,8 +9,10 @@ import { filterByRoom } from '../../modules/users'
 import getRoomList from '../../selectors/getRoomList'
 import styles from './Rooms.css'
 import Tables from './Tables/Tables'
+import { useNavigate } from 'react-router'
 
 const Rooms = () => {
+  const navigate = useNavigate()
   const [editorRoom, setEditorRoom] = useState(null)
   const [tablesRoomId, setTablesRoomId] = useState<number | null>(null)
 
@@ -25,7 +27,7 @@ const Rooms = () => {
   }
   const handleFilterUsers = (e: React.MouseEvent<HTMLElement>) => {
     dispatch(filterByRoom(parseInt(e.currentTarget.dataset.roomId)))
-    document.getElementById('admin-users')?.scrollIntoView({ block: 'start' })
+    navigate('/admin/users')
   }
   const handleOpen = (e: React.MouseEvent<HTMLElement>) => {
     setEditorRoom(rooms.entities[parseInt(e.currentTarget.dataset.roomId || '0')])
@@ -47,20 +49,35 @@ const Rooms = () => {
       <tr key={String(roomId)}>
         <td translate='no'><Button className={styles.nameButton} data-room-id={roomId} onClick={handleOpen}>{room.name}</Button></td>
         <td>
-          <span className={styles.status} data-status={room.status}>{room.status === 'open' ? 'Abierta' : room.status === 'closed' ? 'Cerrada' : room.status}</span>
-          {room.numUsers > 0 && (
-            <>
-&nbsp;
-              <Button className={styles.userCount} data-room-id={roomId} aria-label={`Ver usuarios de ${room.name}`} onClick={handleFilterUsers}>
-                (
+          <div className={styles.roomStatus}>
+            <span className={styles.status} data-status={room.status}>{room.status === 'open' ? 'Abierta' : room.status === 'closed' ? 'Cerrada' : room.status}</span>
+            {room.numUsers > 0 && (
+              <Button
+                className={styles.userCount}
+                data-room-id={roomId}
+                aria-label={`Ver usuarios de ${room.name}: ${room.numUsers} ${room.numUsers === 1 ? 'conexión' : 'conexiones'}`}
+                title='Ver usuarios de la sala. El total incluye las pestañas y los reproductores conectados.'
+                onClick={handleFilterUsers}
+              >
                 {room.numUsers}
-                )
+                {' '}
+                {room.numUsers === 1 ? 'conexión' : 'conexiones'}
               </Button>
-            </>
-          )}
+            )}
+            {room.numUsers === 0 && <span className={styles.noConnections}>Sin conexiones</span>}
+          </div>
         </td>
         <td>{formatDateTime(new Date(room.dateCreated * 1000))}</td>
-        <td><Button onClick={() => setTablesRoomId(roomId)}>Mesas</Button></td>
+        <td>
+          <Button
+            variant='default'
+            className={styles.tablesButton}
+            aria-label={`Ver mesas de ${room.name}`}
+            onClick={() => setTablesRoomId(roomId)}
+          >
+            Ver mesas
+          </Button>
+        </td>
       </tr>
     )
   })
@@ -82,7 +99,7 @@ const Rooms = () => {
               <th>Nombre</th>
               <th>Estado</th>
               <th>Fecha de creación</th>
-              <th>Mesas</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -90,10 +107,11 @@ const Rooms = () => {
           </tbody>
         </table>
 
-        <br />
-        <Button onClick={handleOpen} variant='primary'>
-          Crear sala
-        </Button>
+        <div className={styles.actions}>
+          <Button className={styles.createButton} onClick={handleOpen} variant='primary'>
+            Crear sala
+          </Button>
+        </div>
 
         {isEditorOpen && <EditRoom onClose={handleClose} room={editorRoom} />}
       </>

@@ -1,6 +1,7 @@
 import Rooms from '../Rooms/Rooms.js'
 import Queue from '../Queue/Queue.js'
 import Animation from '../Animation/Animation.js'
+import Playlists from '../Playlists/Playlists.js'
 import getLogger from '../lib/Log.js'
 
 import {
@@ -104,6 +105,9 @@ const ACTION_HANDLERS = {
     }
 
     const changed = Queue.transition(sock.user.roomId, queueId, 'FAILED')
+    try {
+      Playlists.reconcile(sock.user.roomId)
+    } catch (error) { log.error('House refill: %s', (error as Error).message) }
     acknowledge?.({ type: PLAYER_EMIT_FAILURE + '_SUCCESS' })
 
     if (changed) {
@@ -174,7 +178,11 @@ const ACTION_HANDLERS = {
 
     Animation.claim(sock.user.roomId, sock.id)
 
-    if (Queue.syncPlayerLifecycle(sock.user.roomId, payload)) {
+    let changed = Queue.syncPlayerLifecycle(sock.user.roomId, payload)
+    try {
+      changed = Playlists.reconcile(sock.user.roomId) || changed
+    } catch (error) { log.error('House refill: %s', (error as Error).message) }
+    if (changed) {
       sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {
         type: QUEUE_PUSH,
         payload: Queue.get(sock.user.roomId),

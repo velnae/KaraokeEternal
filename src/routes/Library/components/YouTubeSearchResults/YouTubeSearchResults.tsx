@@ -1,10 +1,12 @@
 import React from 'react'
+import { ensureState } from 'redux-optimistic-ui'
+import { useAppSelector } from 'store/hooks'
 import Button from 'components/Button/Button'
-import SongArtwork from 'components/SongArtwork/SongArtwork'
-import { formatDuration } from 'lib/dateTime'
-import { useAppDispatch } from 'store/hooks'
-import { queueYouTubeSong } from 'routes/Queue/modules/queue'
+import SongResultCard from 'components/SongSearch/SongResultCard'
+import { useSongRequests } from 'components/SongSearch/useSongRequests'
+import { useConnection } from 'routes/Participant/useConnection'
 import type { SongSearchResult } from 'shared/songSource'
+import type { QueueItem } from 'shared/types'
 import styles from './YouTubeSearchResults.css'
 
 interface YouTubeSearchResultsProps {
@@ -13,59 +15,51 @@ interface YouTubeSearchResultsProps {
   isLoading: boolean
   query: string
   results: SongSearchResult[]
+  onRetry?: () => void
 }
 
-const YouTubeSearchResults = ({ code, error, isLoading, query, results }: YouTubeSearchResultsProps) => {
-  const dispatch = useAppDispatch()
-
-  if (isLoading) return <div className={styles.message}>Buscando en YouTube…</div>
-
-  if (error) {
-    const message = code === 'YOUTUBE_UNCONFIGURED'
-      ? 'La búsqueda en YouTube no está configurada.'
-      : code === 'YOUTUBE_QUOTA'
-        ? 'Se agotó la cuota de búsqueda de YouTube.'
-        : 'La búsqueda en YouTube no está disponible temporalmente.'
-
-    return (
-      <div className={styles.message}>
-        {message}
-        <br />
-        Las canciones locales siguen disponibles.
-      </div>
-    )
-  }
-
-  if (query && results.length === 0) {
-    return <div className={styles.message}>No se encontraron videos de YouTube que se puedan reproducir.</div>
-  }
-
+export default function YouTubeSearchResults ({ code, error, isLoading, query, results, onRetry }: YouTubeSearchResultsProps) {
+  const connected = useConnection()
+  const user = useAppSelector(state => state.user)
+  const queue = useAppSelector(state => ensureState(state.queue))
+  const { controller, receipts } = useSongRequests()
+  const house = useSongRequests('HOUSE')
+  const own = Object.values(queue.entities).filter((item): item is QueueItem => item.isOptimistic !== true && item.userId === user.userId)
   return (
-    <div className={styles.results}>
+    <section className={styles.results} aria-label='Resultados de YouTube'>
+      <div role='status' className={styles.message}>
+        {!query && (
+          <>
+            <h2>Encuentra la versión que buscas</h2>
+            <p>Escribe al menos 2 caracteres del título o artista y elige el tipo de video.</p>
+          </>
+        )}
+        {isLoading && <p>Buscando en YouTube…</p>}
+        {error && (
+          <>
+            <p>{code === 'YOUTUBE_UNCONFIGURED' ? 'La búsqueda en YouTube no está configurada. Configura el servicio en el servidor.' : code === 'YOUTUBE_QUOTA' ? 'Se agotó la cuota de búsqueda de YouTube. Puedes usar Archivos locales.' : !connected ? 'Sin conexión. La búsqueda continuará al reconectar.' : 'No se pudo buscar en YouTube. Intenta nuevamente.'}</p>
+            {connected && onRetry && !['YOUTUBE_UNCONFIGURED', 'YOUTUBE_QUOTA'].includes(code || '') && <Button variant='default' onClick={onRetry}>Reintentar búsqueda</Button>}
+          </>
+        )}
+        {query && !isLoading && !error && <p>{results.length ? `${results.length} resultados` : 'Sin resultados. Prueba otro título, artista o tipo de video.'}</p>}
+      </div>
       {results.map(result => (
-        <div className={styles.result} key={result.sourceId}>
-          <div className={styles.thumbnail}>
-            <SongArtwork thumbnailUrl={result.thumbnailUrl} />
-          </div>
-          <div className={styles.primary} translate='no'>
-            <div className={styles.title} title={result.title}>{result.title}</div>
-            <div className={styles.channel}>{result.artistOrChannel}</div>
-            <div className={styles.meta}>
-              <span className={styles.source}>YouTube</span>
-              {result.durationSeconds !== null && <span>{formatDuration(result.durationSeconds)}</span>}
-            </div>
-          </div>
-          <Button
-            aria-label={`Solicitar ${result.title} de YouTube`}
-            className={styles.add}
-            icon='PLUS'
-            onClick={() => dispatch(queueYouTubeSong(result.sourceId))}
-            title='Solicitar canción de YouTube'
-          />
-        </div>
+        <SongResultCard
+          key={result.sourceId}
+          result={result}
+          receipt={receipts[result.sourceId]}
+          active={own.find(item => item.origin === 'PARTICIPANT' && item.externalId === result.sourceId && ['APPROVED', 'PENDING_APPROVAL', 'PLAYING'].includes(item.status))}
+          house={{
+            receipt: house.receipts[result.sourceId],
+            active: own.find(item => item.origin === 'HOUSE' && item.externalId === result.sourceId && ['APPROVED', 'PLAYING'].includes(item.status)),
+            onRequest: () => { void house.controller.request(result.sourceId, result.title) },
+          }}
+          admin
+          connected={connected}
+          blocker={!connected ? 'Sin conexión. Espera a reconectar para agregar la canción.' : queue.isLoading ? 'Actualizando la cola. Espera un momento.' : !user.roomId ? 'Entra a una sala desde Mi cuenta para agregar canciones.' : null}
+          onRequest={() => { void controller.request(result.sourceId, result.title) }}
+        />
       ))}
-    </div>
+    </section>
   )
 }
-
-export default YouTubeSearchResults

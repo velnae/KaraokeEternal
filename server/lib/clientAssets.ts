@@ -12,7 +12,11 @@ export const preventDevelopmentCaching: Middleware = async (ctx, next) => {
 }
 
 export const createClientIndex = (urlPath: string, getContent: () => string): Middleware => {
-  const routes = [urlPath, ...['account', 'library', 'queue', 'requests', 'player', 'join'].map(route => `${urlPath}${route}/`)]
+  const routes = [urlPath, ...[
+    'account', 'library', 'queue', 'requests', 'player', 'join',
+    'admin', 'admin/rooms', 'admin/users', 'admin/playlists', 'admin/account', 'admin/settings/animator',
+    'admin/settings/playback', 'admin/settings/files', 'admin/settings/branding',
+  ].map(route => `${urlPath}${route}/`)]
   return (ctx, next) => {
     if (!routes.includes(ctx.request.path.replace(/\/?$/, '/'))) return next()
     ctx.set('content-type', 'text/html')

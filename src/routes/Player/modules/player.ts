@@ -132,6 +132,7 @@ export interface PlayerState {
   _isReplayingQueueId: number | null
   _lastReplayTime: number
   _isBetweenTracks: boolean
+  _isReplayPlayback: boolean
 }
 
 const initialState: PlayerState = {
@@ -160,6 +161,7 @@ const initialState: PlayerState = {
   _isReplayingQueueId: null,
   _lastReplayTime: 0,
   _isBetweenTracks: false,
+  _isReplayPlayback: false,
 }
 
 const playerReducer = createReducer(initialState, (builder) => {

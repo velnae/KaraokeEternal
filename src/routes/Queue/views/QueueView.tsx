@@ -1,17 +1,15 @@
 import React, { useEffect, useRef } from 'react'
 import { useAppSelector } from 'store/hooks'
 import { ensureState } from 'redux-optimistic-ui'
-import { Link, useLocation } from 'react-router'
+import { Link } from 'react-router'
 import getRoundRobinQueue from '../selectors/getRoundRobinQueue'
 import QueueList from '../components/QueueList/QueueList'
 import Spinner from 'components/Spinner/Spinner'
 import TextOverlay from 'components/TextOverlay/TextOverlay'
 import styles from './QueueView.css'
-import AnimationPanel from 'components/Animation/AnimationPanel'
 
 const QueueView = () => {
   const { headerHeight, footerHeight } = useAppSelector(state => state.ui)
-  const location = useLocation()
   const isInRoom = useAppSelector(state => !!state.user.roomId)
   const isLoading = useAppSelector(state => ensureState(state.queue).isLoading)
   const queue = useAppSelector(getRoundRobinQueue)
@@ -20,12 +18,6 @@ const QueueView = () => {
   const user = useAppSelector(state => state.user)
   const containerRef = useRef<HTMLDivElement>(null)
   const initialScrollDone = useRef(false)
-
-  useEffect(() => {
-    if (location.hash !== '#animator' || !user.isAdmin) return
-    containerRef.current?.scrollTo({ top: 0 })
-    initialScrollDone.current = true
-  }, [location.hash, location.key, user.isAdmin])
 
   // ensure current song is in view on first mount only
   useEffect(() => {
@@ -60,9 +52,7 @@ const QueueView = () => {
 
       {isLoading && <Spinner />}
 
-      {isInRoom && user.isAdmin && <AnimationPanel />}
-
-      {!user.isAdmin && !isLoading && queue.result.length === 0 && !rawQueue.result.some((queuedId) => {
+      {isInRoom && !user.isAdmin && !isLoading && queue.result.length === 0 && !rawQueue.result.some((queuedId) => {
         const item = rawQueue.entities[queuedId]
         return item.isOptimistic !== true && (
           (user.isAdmin && item.status === 'PENDING_APPROVAL')

@@ -28,6 +28,21 @@ it('does not replace API or asset responses with the application index', async (
   }
 })
 
+it('serves admin deep links under the configured base without capturing unrelated paths', async () => {
+  const middleware = createClientIndex('/karaoke/', () => '<base href="/">')
+  for (const route of ['rooms', 'users', 'playlists', 'account', 'settings/animator', 'settings/playback', 'settings/files', 'settings/branding']) {
+    const ctx = context(`/karaoke/admin/${route}`)
+    await middleware(ctx as unknown as Context, vi.fn())
+    expect(ctx.status).toBe(200)
+    expect(ctx.body).toBe('<base href="/karaoke/">')
+  }
+  for (const path of ['/admin/rooms', '/karaoke/api/admin', '/karaoke/admin/main.js']) {
+    const next = vi.fn()
+    await middleware(context(path) as unknown as Context, next)
+    expect(next).toHaveBeenCalledOnce()
+  }
+})
+
 it('prevents browser and CDN caching even when downstream middleware replaces headers', async () => {
   const ctx = context()
   await preventDevelopmentCaching(ctx as unknown as Context, async () => {

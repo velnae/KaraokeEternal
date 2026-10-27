@@ -1,0 +1,51 @@
+.manager { display: grid; gap: 20px; }
+.toolbar, .editorHeading { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; }
+.editorHeading { align-items: center; }
+.editorHeading h2 { margin: 0; font-size: 20px; }
+.listPicker { display: grid; gap: 8px; flex: 1; min-width: min(100%, 220px); max-width: 480px; font-size: 13px; color: var(--secondary); }
+.listPicker select { min-width: 0; width: 100%; }
+.toolbar .refresh { display: grid; place-items: center; width: 44px; height: 44px; color: var(--secondary); border: 1px solid var(--edge); border-radius: 8px; }
+.empty { padding: 32px 20px; text-align: center; border: 1px dashed var(--edge); border-radius: 12px; }
+.empty h2 { font-size: 20px; }
+.empty p { color: var(--secondary); }
+.field { display: grid; gap: 8px; min-width: 0; color: var(--secondary); font-size: 14px; }
+.field input, .field select { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--edge); border-radius: 8px; color: var(--lyrics); background: var(--stage); font-size: 16px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.actions button { width: auto; min-height: 44px; }
+.actions a { display: inline-flex; align-items: center; min-height: 44px; }
+.editor, .house { padding: 24px; border: 1px solid var(--edge); border-radius: 12px; background: var(--equipment); }
+.editor > * + * { margin-top: 16px; }
+.primaryLink { min-height: 44px; padding: 10px 14px; border-radius: 8px; color: var(--stage); background: var(--cyan); text-decoration: none; }
+.options { position: relative; }
+.options summary { cursor: pointer; min-height: 44px; padding: 12px; color: var(--secondary); font-size: 13px; }
+.optionActions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 8px; }
+.optionActions button { width: auto; }
+.listFooter { padding-top: 16px; border-top: 1px solid var(--edge); }
+.listFooter a { display: inline-flex; align-items: center; min-height: 44px; }
+.playbackOptions { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.playbackState { font-size: 13px; color: var(--secondary); }
+.playbackState[data-active='true'] { color: var(--cyan); }
+.house > .editorHeading { margin-bottom: 16px; }
+.helpDetails { margin-top: 16px; border-top: 1px solid var(--edge); color: var(--secondary); font-size: 13px; line-height: 1.5; }
+.helpDetails summary { min-height: 44px; padding-block: 12px; cursor: pointer; }
+.songTitle { margin: 0; line-height: 1.5; }
+.saved { display: flex; align-items: center; gap: 10px; color: var(--cyan); line-height: 1.5; }
+.house { margin: 16px 0; }
+.house h2 { margin: 0 0 12px; font-size: 22px; }
+.house > p, .help { color: var(--secondary); font-size: 14px; line-height: 1.5; }
+.houseForm { display: grid; gap: 12px; }
+.check { display: flex; gap: 10px; align-items: center; min-height: 44px; }
+.check input { accent-color: var(--cyan); width: 18px; height: 18px; }
+.notice { padding: 12px; border-left: 2px solid var(--amber); color: var(--amber); line-height: 1.5; }
+.songs { padding: 0; list-style: none; }
+.songs li { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--edge); }
+.songs strong, .songs p { overflow-wrap: anywhere; }
+.songs p, .songs small { color: var(--secondary); font-size: 13px; }
+.save { min-height: 44px; padding: 10px 12px; border: 1px solid var(--edge); border-radius: 8px; color: var(--cyan); font-size: 13px; background: var(--stage); }
+.save:hover { border-color: var(--cyan); }
+.saveCompact { display: grid; place-items: center; width: 44px; min-height: 44px; color: var(--cyan); }
+@media (max-width: 680px) {
+  .editor, .house { padding: 16px; }
+  .songs li { grid-template-columns: 64px minmax(0, 1fr); gap: 12px; }
+  .songs .actions { grid-column: 1 / -1; }
+}

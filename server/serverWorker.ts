@@ -24,8 +24,11 @@ import roomsRouter from './Rooms/router.js'
 import userRouter from './User/router.js'
 import tablesRouter from './Tables/router.js'
 import animationRouter from './Animation/router.js'
+import playlistsRouter from './Playlists/router.js'
+import { startHousePlaylists } from './Playlists/Playlists.js'
 import Animation from './Animation/Animation.js'
 import { loadCatalog } from './Animation/catalog.js'
+import { startProduction } from './Animation/Production.js'
 import pushQueuesAndLibrary from './lib/pushQueuesAndLibrary.js'
 import { Server as SocketIO } from 'socket.io'
 import socketActions from './socket.js'
@@ -46,7 +49,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   let server, io
 
   // called when middleware is finalized
-  function createServer () {
+  async function createServer () {
     server = http.createServer(app.callback())
 
     // http server error handler
@@ -70,7 +73,9 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
 
     // attach socket.io handlers
     const stopAnimation = Animation.initialize(io)
+    const stopProduction = await startProduction(path.join(env.KES_PATH_DATA, 'animation'), roomId => Animation.publish(roomId))
     socketActions(io, jwtKey)
+    const stopHousePlaylists = startHousePlaylists(io)
 
     // attach IPC action handlers
     IPC.use(IPCLibraryActions(io))
@@ -97,14 +102,18 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     })
 
     // handle shutdown gracefully
-    shutdownHandlers.push(() => new Promise((resolve) => {
+    shutdownHandlers.push(async () => {
       stopAnimation()
+      stopHousePlaylists()
+      await stopProduction()
+      return new Promise((resolve) => {
       // also calls http server's close method, which ultimately handles the callback
-      io.close(resolve)
+        io.close(resolve)
 
-      // HMR keep-alive connections can prevent http server from fully closing
-      server.closeAllConnections()
-    }))
+        // HMR keep-alive connections can prevent http server from fully closing
+        server.closeAllConnections()
+      })
+    })
   }
 
   // --------------------
@@ -193,6 +202,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(userRouter.routes())
   baseRouter.use(tablesRouter.routes())
   baseRouter.use(animationRouter.routes())
+  baseRouter.use(playlistsRouter.routes())
   app.use(baseRouter.routes())
 
   if (env.NODE_ENV !== 'development') {
@@ -205,7 +215,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     app.use(koaMount(urlPath, koaStatic(env.KES_PATH_WEBROOT)))
     app.use(koaMount(`${urlPath}assets`, koaStatic(env.KES_PATH_ASSETS)))
 
-    createServer()
+    await createServer()
     return
   }
 
@@ -229,7 +239,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
 
     if (!server) {
       app.use(createClientIndex(urlPath, () => indexContent))
-      createServer()
+      await createServer()
     }
   })
 

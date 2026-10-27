@@ -1,4 +1,5 @@
 import type { QueueItem } from '../../../shared/types'
+import { youtubeQuery } from '../../../shared/youtubeSearch'
 
 export const requestStatusLabels = {
   PENDING_APPROVAL: 'Por aprobar',
@@ -24,7 +25,4 @@ export const estimatedWait = (before: QueueItem[], currentId: number, position: 
   return Math.ceil(seconds / 60)
 }
 
-export const karaokeQuery = (query: string, karaoke: boolean) => {
-  const trimmed = query.trim()
-  return karaoke && !/\bkaraoke\b/i.test(trimmed) ? `${trimmed} karaoke` : trimmed
-}
+export const karaokeQuery = (query: string, karaoke: boolean) => youtubeQuery(query, karaoke ? 'karaoke' : 'all')

@@ -24,16 +24,19 @@ import {
 } from '../../shared/actionTypes.js'
 import Queue from '../Queue/Queue.js'
 import Rooms from '../Rooms/Rooms.js'
+import Playlists from '../Playlists/Playlists.js'
 import ACTION_HANDLERS from './socket.js'
 
 vi.mock('../Animation/Animation.js', () => ({ default: { claim: vi.fn(), cancel: vi.fn(), disconnect: vi.fn() } }))
+vi.mock('../Playlists/Playlists.js', () => ({ default: { reconcile: vi.fn(() => false) } }))
 
 const failureInfo = vi.hoisted(() => vi.fn())
+const refillError = vi.hoisted(() => vi.fn())
 vi.mock('../lib/Log.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../lib/Log.js')>()
   return {
     ...original,
-    default: (scope: string) => scope === 'player-failure' ? { info: failureInfo } : original.default(scope),
+    default: (scope: string) => scope === 'player-failure' ? { info: failureInfo, error: refillError } : original.default(scope),
   }
 })
 
@@ -66,6 +69,7 @@ describe('player queue lifecycle', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     failureInfo.mockClear()
+    refillError.mockClear()
   })
 
   it('rejects status reports from non-admin sockets', () => {
@@ -120,6 +124,29 @@ describe('player queue lifecycle', () => {
     })
     expect(sync).not.toHaveBeenCalled()
     expect(second._isPlayerAuthoritative).toBe(false)
+  })
+
+  it('publishes prepared house songs even when the current lifecycle did not change', () => {
+    const { socket, emit } = createSocket()
+    const queue = { result: [5], entities: {} }
+    vi.spyOn(Queue, 'syncPlayerLifecycle').mockReturnValue(false)
+    vi.spyOn(Queue, 'get').mockReturnValue(queue)
+    vi.mocked(Playlists.reconcile).mockReturnValueOnce(true)
+    ACTION_HANDLERS[PLAYER_EMIT_STATUS](socket, { payload: {} }, vi.fn())
+    expect(emit).toHaveBeenCalledWith('action', { type: QUEUE_PUSH, payload: queue })
+  })
+
+  it('does not withhold playback authority when house replenishment fails', () => {
+    const { socket, emit } = createSocket()
+    const acknowledge = vi.fn()
+    vi.spyOn(Queue, 'syncPlayerLifecycle').mockReturnValue(false)
+    vi.mocked(Playlists.reconcile).mockImplementationOnce(() => {
+      throw new Error('fixture failure')
+    })
+    ACTION_HANDLERS[PLAYER_EMIT_STATUS](socket, { payload: {} }, acknowledge)
+    expect(acknowledge).toHaveBeenCalledWith({ type: PLAYER_AUTHORITY_GRANTED })
+    expect(emit).toHaveBeenCalledWith('action', { type: PLAYER_STATUS, payload: {} })
+    expect(refillError).toHaveBeenCalledOnce()
   })
 
   it.each([

@@ -1,3 +1,5 @@
-.empty h1 {
-  font-family: var(--font-family-custom);
-}
+.container { display: flex; flex-direction: column; height: 100dvh; min-width: 0; }
+.content { flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.youtube { height: 100%; overflow-y: auto; }
+.notice { padding: 24px; color: var(--secondary); line-height: 1.5; }
+.notice h2 { color: var(--lyrics); font-size: 22px; }

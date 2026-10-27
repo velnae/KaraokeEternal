@@ -63,7 +63,10 @@ router.put('/:roomId', async (ctx) => {
 
   try {
     await Rooms.set(roomId, (ctx.request as unknown as RequestWithBody).body)
-    if (Rooms.get(roomId, { status: STATUSES }).entities[roomId]?.status !== 'open') Animation.cancel(roomId, 'Sala cerrada')
+    if (Rooms.get(roomId, { status: STATUSES }).entities[roomId]?.status !== 'open') {
+      Animation.cancel(roomId, 'Sala cerrada')
+      if (Animation.snapshot(roomId).session) Animation.session(roomId, ctx.user.userId, 'finish')
+    }
     enforceConnectedParticipants(ctx.io)
   } catch (err) {
     if (err instanceof ValidationError) ctx.throw(422, err.message)

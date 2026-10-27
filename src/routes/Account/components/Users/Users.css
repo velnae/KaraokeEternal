@@ -1,16 +1,39 @@
-.usersFilter { max-width: 55%; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.toolbar p { color: var(--secondary); font-size: 14px; margin: 0 0 12px; }
+.usersFilter { display: grid; gap: 8px; min-width: 0; max-width: 100%; font-size: 13px; color: var(--secondary); }
+.usersFilter select { width: 100%; }
 .table {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
   th { padding: 0 8px 12px; color: var(--secondary); font-size: 12px; font-weight: 500; }
   td { padding: 8px; border-top: 1px solid var(--edge); color: var(--secondary); font-size: 14px; }
-  td:first-child { width: 50%; overflow-wrap: anywhere; }
-  td:last-child { white-space: nowrap; font-size: 12px; }
+  td:first-child { width: 40%; overflow-wrap: anywhere; }
 }
-.nameButton { min-height: 44px; text-align: left; color: var(--cyan); font-weight: 600; }
-.displayName { display: block; color: var(--secondary); }
+.username { color: var(--lyrics); font-weight: 600; }
+.displayName, .currentUser { display: block; color: var(--secondary); margin-top: 5px; font-size: 13px; }
+.access { display: grid; justify-items: start; gap: 8px; }
+.role { font-size: 13px; line-height: 1.4; color: var(--lyrics); }
+.role[data-role='admin'] { color: var(--amber); }
+.connection { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--secondary); }
+.connection::before { content: ''; width: 6px; height: 6px; flex-shrink: 0; background: currentColor; border-radius: 50%; }
+.connection[data-online='true'] { color: var(--cyan); }
+.table .registeredColumn { white-space: nowrap; font-size: 12px; }
+.table .actionsColumn { width: 1%; text-align: right; }
+.table .rowAction, .rowAction { display: inline-flex; align-items: center; justify-content: center; width: auto; min-height: 44px; padding: 10px 12px; border: 1px solid var(--edge); border-radius: 8px; color: var(--cyan); background: var(--stage); font-size: 14px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.rowAction:hover { border-color: var(--cyan); background: var(--equipment); }
+.rowAction:active { background: var(--cyan); color: var(--stage); }
+.rowAction:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.mobileAccess { display: none; }
+.empty { padding: 24px 12px; text-align: center; color: var(--secondary); border-block: 1px solid var(--edge); }
+.actions { display: flex; justify-content: flex-start; margin-top: 20px; }
+.actions .createButton { width: auto; min-height: 44px; padding-inline: 20px; }
 @media (max-width: 600px) {
-  .table th:last-child, .table td:last-child { display: none; }
-  .table td:first-child { width: 60%; }
+  .toolbar { align-items: stretch; flex-direction: column; }
+  .toolbar p { margin: 0; }
+  .table .registeredColumn, .table .accessColumn { display: none; }
+  .table td:first-child { width: auto; }
+  .table th, .table td { padding-inline: 6px; }
+  .mobileAccess { display: block; margin-top: 10px; }
+  .actions .createButton { width: 100%; }
 }

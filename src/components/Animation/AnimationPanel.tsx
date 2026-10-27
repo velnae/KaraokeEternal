@@ -9,6 +9,7 @@ import { announcementBlocker } from './announcementAvailability'
 import theme from 'styles/karaokeTheme.css'
 import styles from './Animation.css'
 import socket from 'lib/socket'
+import OperationControls from './OperationControls'
 
 export default function AnimationPanel () {
   const { snapshot, connected } = useAppSelector(state => state.animation)
@@ -28,7 +29,7 @@ export default function AnimationPanel () {
     setError('')
     void fetchAnimationClips().then((result): void => {
       if (alive) {
-        setClips(result)
+        setClips(result.filter(clip => clip.kind !== 'ambience'))
         setSelected(result[0]?.id ?? '')
       }
       return undefined
@@ -39,7 +40,7 @@ export default function AnimationPanel () {
     return () => {
       alive = false
     }
-  }, [roomId])
+  }, [roomId, snapshot?.catalogVersion])
 
   const current = snapshot?.roomId === roomId ? snapshot : null
   useEffect(() => {
@@ -51,7 +52,7 @@ export default function AnimationPanel () {
 
   const active = current?.active
   const clip = clips.find(item => item.id === selected)
-  const blocker = announcementBlocker({ snapshot: current, connected, hasClip: !!clip, roomClosed: room?.status === 'closed', now: animationTime() })
+  const blocker = announcementBlocker({ snapshot: current, connected, hasClip: !!clip, expired: !!clip?.validUntil && clip.validUntil <= animationTime(), roomClosed: room?.status === 'closed', now: animationTime() })
   const controlsDisabled = !connected || !current || busy
   const audioPending = !!current?.prefs.enabled && current.playerPresent && !current.audioUnlocked
   const percent = volumeDraft ?? Math.round((current?.prefs.volume ?? 0.5) * 100)
@@ -84,7 +85,7 @@ export default function AnimationPanel () {
     setError('')
     try {
       const result = await fetchAnimationClips()
-      setClips(result)
+      setClips(result.filter(clip => clip.kind !== 'ambience'))
       setSelected(previous => result.some(item => item.id === previous) ? previous : result[0]?.id ?? '')
       await syncAnimation()
     } catch (error) { setError((error as Error).message) }
@@ -138,6 +139,8 @@ export default function AnimationPanel () {
         <Button className={styles.refresh} icon='REFRESH' size={20} aria-label='Actualizar estado' title='Actualizar estado' disabled={busy} onClick={() => void reload()} />
       </div>
       {error && <p className={styles.error} role='alert'>{error}</p>}
+
+      <OperationControls />
 
       <div className={styles.desk}>
         <div className={styles.message}>

@@ -10,6 +10,7 @@ import ToggleAnimation from 'components/ToggleAnimation/ToggleAnimation'
 import { formatDuration } from 'lib/dateTime'
 import type { QueueItemOrigin } from 'shared/queueLifecycle'
 import styles from './SongItem.css'
+import SaveToPlaylist from 'components/Playlists/SaveToPlaylist'
 
 let ignoreMouseup = false
 
@@ -105,6 +106,7 @@ const SongItem = ({
       </ToggleAnimation>
 
       <Buttons btnWidth={56} isExpanded={isExpanded}>
+        {isAdmin && <SaveToPlaylist compact source='LOCAL' sourceId={String(songId)} title={title} />}
         {isAdmin && (
           <Button
             aria-label='Agregar como canción de la casa'

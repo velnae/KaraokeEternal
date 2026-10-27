@@ -185,7 +185,7 @@ export default function Tables ({ room, onClose }: { room: Room, onClose: () => 
             </label>
           </div>
           <div className={styles.listHeading}>
-            <span aria-live='polite'>{loading ? 'Cargando mesas…' : `${visibleTables.length} ${visibleTables.length === 1 ? 'mesa' : 'mesas'}`}</span>
+            <span aria-live='polite'>{loading ? 'Cargando mesas…' : `${visibleTables.length} de ${tables.length} ${tables.length === 1 ? 'mesa' : 'mesas'}`}</span>
             <div className={styles.tools}>
               <Button className={styles.secondary} disabled={busy || loading} onClick={() => void run(load)}>Actualizar</Button>
               <Button className={styles.secondary} disabled={busy || loading || !activeTables.length} onClick={() => void run(async () => setCards(await Promise.all(activeTables.map(credential))))}>Imprimir mesas activas</Button>

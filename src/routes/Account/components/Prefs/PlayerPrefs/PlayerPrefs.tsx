@@ -15,6 +15,7 @@ const PlayerPrefs = () => {
 
   return (
     <Accordion
+      initialExpanded
       className={styles.container}
       headingComponent={(
         <div className={styles.heading}>

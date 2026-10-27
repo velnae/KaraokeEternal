@@ -76,13 +76,15 @@ const PlayerController = (props: PlayerControllerProps) => {
       nextUserId: null,
       _isReplayingQueueId: null,
       _isBetweenTracks: false,
+      _isReplayPlayback: true,
     })
   }, [handleStatus, player.historyJSON, player.queueId, queue.entities])
 
-  const handleLoadNext = useCallback(async (includeCurrentInHistory = true, announce = false, boundary: 'ended' | 'idle' = 'ended') => {
+  const handleLoadNext = useCallback(async (includeCurrentInHistory = true, announce = false, boundary: 'ended' | 'idle' | 'start' = 'ended') => {
     if (!socket.connected || advancing.current || animationRef.current.busy || animationRef.current.blocked
       || store.getState().player._authority !== 'GRANTED') return
     advancing.current = true
+    const controlVersion = animationRef.current.controlVersion()
     const before = store.getState().player
     const sourceId = before.queueId
     const historyJSON = appendCompletedToHistory(before.historyJSON, includeCurrentInHistory && sourceId >= 0 ? sourceId : undefined)
@@ -94,7 +96,10 @@ const PlayerController = (props: PlayerControllerProps) => {
       return ordered.result.slice(index + 1).map(id => ordered.entities[id]).find(item => item.status === 'APPROVED')
     }
     try {
-      if (announce) await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, selection()?.queueId ?? null)
+      await animationRef.current.stopAmbience()
+      if (announce && controlVersion === animationRef.current.controlVersion()) {
+        await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, selection()?.queueId ?? null)
+      }
       if (!mounted.current) return
       const current = store.getState().player
       if (!socket.connected || current._authority !== 'GRANTED' || current._isReplayingQueueId !== null || animationRef.current.blocked) return
@@ -108,7 +113,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       dispatch(playerStatus({
         errorMessage: '', historyJSON: current.historyJSON, isAtQueueEnd: false, isErrored: false,
         isPlaying: true, isVideoKeyingEnabled: next.isVideoKeyingEnabled, mediaType: next.mediaType,
-        position: 0, queueId: next.queueId, nextUserId: null, _isPlayingNext: false, _isBetweenTracks: false,
+        position: 0, queueId: next.queueId, nextUserId: null, _isPlayingNext: false, _isBetweenTracks: false, _isReplayPlayback: false,
       }))
     } finally { advancing.current = false }
   }, [dispatch])
@@ -122,7 +127,7 @@ const PlayerController = (props: PlayerControllerProps) => {
   }, [handleLoadNext, player._lastReplayTime, queueItem])
 
   const handleError = useCallback((msg: string, diagnostic?: { category: 'iframe' | 'api-load', code?: number }) => {
-    if (!queueItem || queueItem.source !== 'YOUTUBE') {
+    if (!queueItem || (queueItem.source !== 'YOUTUBE' && queueItem.origin !== 'HOUSE')) {
       dispatch(playerError(msg))
       handleStatus()
       return
@@ -176,7 +181,8 @@ const PlayerController = (props: PlayerControllerProps) => {
   // playing for first time or playing next?
   useEffect(() => {
     if (!animation.busy && !animation.blocked && ((player.isPlaying && (player.queueId === -1 || player._isBetweenTracks)) || player._isPlayingNext)) {
-      void handleLoadNext(!player._isBetweenTracks)
+      const first = player.queueId === -1 && !player._isPlayingNext
+      void handleLoadNext(!player._isBetweenTracks, first, first ? 'start' : 'ended')
     }
   }, [handleLoadNext, player.isPlaying, player.queueId, player._isPlayingNext, player._isBetweenTracks, animation.busy, animation.blocked])
 
@@ -190,16 +196,29 @@ const PlayerController = (props: PlayerControllerProps) => {
   // queue was exhausted, but is no longer?
   useEffect(() => {
     if (!animation.busy && !animation.blocked && player.isAtQueueEnd && nextQueueItem && player.isPlaying) {
-      void handleLoadNext()
+      void handleLoadNext(false, true, 'start')
     }
   }, [handleLoadNext, player.isPlaying, player.isAtQueueEnd, nextQueueItem, animation.busy, animation.blocked])
 
+  const pendingIdleVoice = animation.snapshot?.active?.status === 'PENDING'
+    && animation.snapshot.active.durationMs <= (animation.snapshot.voiceBudgetRemainingMs ?? 120000)
+  const automaticIdleVoice = !animation.snapshot?.active && animation.snapshot?.prefs.automation && animation.snapshot?.session?.sessionId
   useEffect(() => {
-    if (!animation.busy && !animation.blocked && animation.unlocked && animation.snapshot?.active?.status === 'PENDING'
+    if (!animation.busy && !animation.blocked && animation.unlocked && (pendingIdleVoice || automaticIdleVoice)
       && !player.isErrored && (player.isAtQueueEnd || player.queueId === -1)) {
       void handleLoadNext(false, true, 'idle')
     }
-  }, [animation.snapshot, animation.busy, animation.blocked, animation.unlocked, player.isErrored, player.isAtQueueEnd, player.queueId, handleLoadNext])
+  }, [pendingIdleVoice, automaticIdleVoice, animation.snapshot?.active?.interventionId, animation.snapshot?.active?.status, animation.snapshot?.prefs.automation,
+    animation.snapshot?.session?.sessionId, animation.snapshot?.session?.status, animation.snapshot?.pendingEventJSON,
+    animation.snapshot?.microphoneOccupied, animation.snapshot?.prefs.enabled, animation.snapshot?.prefs.volume,
+    animation.snapshot?.active?.durationMs, animation.snapshot?.voiceBudgetRemainingMs,
+    animation.busy, animation.blocked, animation.unlocked, animation.idleTick, player.isErrored, player.isAtQueueEnd, player.queueId, handleLoadNext])
+
+  const { startAmbience, ambientPlaying, ambientTick } = animation
+  useEffect(() => {
+    if (!advancing.current && !animation.busy && !animation.blocked && animation.unlocked && !ambientPlaying
+      && !player.isErrored && (player.isAtQueueEnd || player.queueId === -1)) void startAmbience()
+  }, [animation.snapshot, animation.busy, animation.blocked, animation.unlocked, ambientPlaying, ambientTick, startAmbience, player.isErrored, player.isAtQueueEnd, player.queueId])
 
   // retrying after error?
   useEffect(() => {

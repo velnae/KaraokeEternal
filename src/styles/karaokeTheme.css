@@ -29,7 +29,7 @@
   color: var(--lyrics);
   color-scheme: dark;
 
-  :is(a, button, input):focus-visible {
+  :is(a, button, input, select, textarea, summary):focus-visible {
     outline: 2px solid var(--cyan);
     outline-offset: 4px;
   }

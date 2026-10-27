@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { ensureState } from 'redux-optimistic-ui'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
@@ -6,14 +6,17 @@ import store from 'store/store'
 import { fetchCurrentRoom } from 'store/modules/rooms'
 import getRoundRobinQueue from 'routes/Queue/selectors/getRoundRobinQueue'
 import { queuePush } from 'routes/Queue/modules/queue'
-import { QUEUE_ADD, QUEUE_REMOVE } from 'shared/actionTypes'
+import { QUEUE_REMOVE } from 'shared/actionTypes'
 import type { QueueItem } from 'shared/types'
 import { tableMode } from 'shared/tableAccess'
 import { normalizeQueuePrefs } from 'shared/queueRules'
 import socket from 'lib/socket'
 import Button from 'components/Button/Button'
 import Icon from 'components/Icon/Icon'
-import { createRequestController } from './requests'
+import { useSongRequests } from 'components/SongSearch/useSongRequests'
+import SongResultCard from 'components/SongSearch/SongResultCard'
+import VideoTypeFilter from 'components/SongSearch/VideoTypeFilter'
+import { setYouTubeMode } from 'routes/Library/modules/library'
 import { estimatedWait, isPendingRequest, requestPriority, requestStatusLabels } from './model'
 import { useConnection } from './useConnection'
 import { useYouTubeSearch } from './useYouTubeSearch'
@@ -31,31 +34,12 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
   const status = useAppSelector(state => state.status)
   const { headerHeight, footerHeight } = useAppSelector(state => state.ui)
   const [query, setQuery] = useState('')
-  const [karaoke, setKaraoke] = useState(true)
+  const mode = useAppSelector(state => state.library.youtubeMode)
   const [retry, setRetry] = useState(0)
-  const search = useYouTubeSearch(query, karaoke, retry, page === 'search')
+  const search = useYouTubeSearch(query, mode, retry, page === 'search')
   const [cancelling, setCancelling] = useState<number | null>(null)
   const [cancelMessage, setCancelMessage] = useState('')
-  const controller = useMemo(() => createRequestController({
-    storage: {
-      getItem: key => window.sessionStorage.getItem(key),
-      setItem: (key, value) => window.sessionStorage.setItem(key, value),
-    },
-    key: `karaoke-requests:${user.roomId}:${user.userId}`,
-    makeId: () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join(''),
-    send: async (sourceId, requestId) => {
-      if (!socket.connected) throw new Error('offline')
-      const response = await socket.timeout(12000).emitWithAck('action', {
-        type: QUEUE_ADD, payload: { source: 'YOUTUBE', sourceId, origin: 'PARTICIPANT', requestId },
-      })
-      const account = store.getState().user
-      if (account.userId === user.userId && account.roomId === user.roomId && response.payload?.queue) {
-        dispatch(queuePush(response.payload.queue))
-      }
-      return response
-    },
-  }), [user.roomId, user.userId, dispatch])
-  const receipts = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
+  const { controller, receipts } = useSongRequests()
   const unsettled = Object.values(receipts).filter(receipt => receipt.phase !== 'confirmed')
 
   useEffect(() => {
@@ -164,15 +148,10 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
               <input id='youtube-query' type='search' aria-label='Buscar canción o artista' value={query} onChange={event => setQuery(event.target.value)} placeholder='Canción o artista' maxLength={200} enterKeyHint='search' />
               <Button type='submit' icon='MAGNIFIER' size={24} aria-label='Buscar' disabled={!connected || query.trim().length < 2} />
             </div>
-            <div className={styles.searchOptions}>
-              <label className={styles.filter}>
-                <input type='checkbox' aria-label='Buscar versiones karaoke' checked={karaoke} onChange={event => setKaraoke(event.target.checked)} />
-                Karaoke
-              </label>
-              <span className={styles.provider}>YouTube</span>
-            </div>
+            <VideoTypeFilter value={mode} onChange={value => dispatch(setYouTubeMode(value))} />
           </form>
           <div aria-live='polite'>
+            {query.trim().length < 2 && <p>Escribe al menos 2 caracteres para buscar.</p>}
             {search.isLoading && <p>Buscando…</p>}
             {search.error && (
               <div className={styles.notice}>
@@ -183,45 +162,23 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             {search.query && !search.isLoading && !search.error && search.results.length === 0 && (
               <div className={styles.empty}>
                 <p>Sin resultados</p>
-                {karaoke && <Button onClick={() => setKaraoke(false)}>Quitar filtro karaoke</Button>}
+                {mode !== 'all' && <Button onClick={() => dispatch(setYouTubeMode('all'))}>Buscar todos los tipos</Button>}
               </div>
             )}
           </div>
           {search.results.map((result) => {
             const receipt = receipts[result.sourceId]
             const active = own.find(item => item.externalId === result.sourceId && (isPendingRequest(item) || item.status === 'PLAYING'))
-            const uncertain = receipt?.phase === 'uncertain'
-            const sending = receipt?.phase === 'sending'
             return (
-              <article className={styles.result} key={result.sourceId}>
-                <div className={styles.artwork}>
-                  <SongArtwork thumbnailUrl={result.thumbnailUrl} durationSeconds={result.durationSeconds} />
-                </div>
-                <div className={styles.details}>
-                  <h2 id={`youtube-title-${result.sourceId}`} translate='no'>{result.title}</h2>
-                  <p translate='no'>{result.artistOrChannel}</p>
-                </div>
-                <div className={styles.resultActions}>
-                  <div role='status'>
-                    {active && !sending && !uncertain
-                      ? (
-                          <Link className={styles.requestState} data-status={active.status} to='/requests' aria-describedby={`youtube-title-${result.sourceId}`}>
-                            {requestStatusLabels[active.status]}
-                            <Icon icon='CHEVRON_RIGHT' size={20} />
-                          </Link>
-                        )
-                      : (
-                          <Button aria-describedby={`youtube-title-${result.sourceId}`} variant='primary' disabled={!connected || sending || (!uncertain && !canRequest)} onClick={() => { void controller.request(result.sourceId, result.title) }}>
-                            {sending ? 'Enviando…' : uncertain ? 'Comprobar pedido' : ready && remaining === 0 ? 'Límite alcanzado' : 'Pedir canción'}
-                          </Button>
-                        )}
-                  </div>
-                </div>
-                <div className={styles.resultMessage} role='status'>
-                  {uncertain && <p className={styles.error}>Sin confirmar</p>}
-                  {receipt?.phase === 'error' && <p className={styles.error}>{receipt.message}</p>}
-                </div>
-              </article>
+              <SongResultCard
+                key={result.sourceId}
+                result={result}
+                receipt={receipt}
+                active={active}
+                connected={connected}
+                blocker={!connected ? 'Sin conexión. Espera a reconectar para pedir la canción.' : !ready ? 'Actualizando la sala. Espera un momento.' : room.status === 'closed' ? 'Sala cerrada. Consulta al organizador.' : !canRequest ? 'Límite alcanzado. Revisa Mis pedidos antes de agregar otra canción.' : null}
+                onRequest={() => { void controller.request(result.sourceId, result.title) }}
+              />
             )
           })}
         </>

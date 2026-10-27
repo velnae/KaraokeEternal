@@ -110,8 +110,9 @@ try {
   await admin.getByPlaceholder('contraseña', { exact: true }).fill('animation-test-password')
   await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
   await expect(admin.getByRole('navigation', { name: 'Secciones de administración' })).toBeVisible()
-  await admin.goto(`${base}queue`)
-  await expect(admin.getByRole('heading', { name: 'Animador', exact: true })).toBeVisible()
+  await admin.goto(`${base}queue#animator`)
+  await expect(admin).toHaveURL(`${base}admin/settings/animator`)
+  await expect(admin.getByRole('heading', { name: 'Animador', exact: true, level: 1 })).toBeVisible()
   await expect(admin.getByLabel('Clip', { exact: true }).locator('option')).toHaveCount(3)
   const player = await context.newPage()
   // Exercise the cold mount before Socket.IO has assigned a socket ID.
@@ -132,6 +133,7 @@ try {
   const transport = player.getByRole('toolbar', { name: 'Controles de reproducción' })
   const enqueueFromLibrary = async (title, status = 'APPROVED') => {
     await admin.getByRole('link', { name: 'Biblioteca', exact: true }).click()
+    await admin.getByRole('radio', { name: 'Archivos locales', exact: true }).check()
     await admin.getByRole('searchbox', { name: 'buscar canciones', exact: true }).fill(title)
     await admin.getByText(title, { exact: true }).last().click()
     await admin.getByRole('link', { name: 'Cola', exact: true }).click()
@@ -167,12 +169,23 @@ try {
   await enqueueFromLibrary('Third test', 'PLAYING')
   await expect.poll(() => db.prepare('SELECT songId FROM queue WHERE status=\'PLAYING\'').get()?.songId).toBe(3)
   await expect.poll(outputPeak).toBeGreaterThan(0.01)
+  await player.evaluate(() => {
+    window.videoBeforeNavigation = document.querySelector('video')
+    window.timeBeforeNavigation = window.videoBeforeNavigation.currentTime
+  })
+  const navigation = admin.getByRole('navigation', { name: 'Secciones de administración' })
+  for (const name of ['Animador', 'Usuarios', 'Cola']) await navigation.getByRole('link', { name, exact: true }).click()
+  assert.ok(await player.evaluate(() => document.querySelector('video') === window.videoBeforeNavigation && !window.videoBeforeNavigation.paused && window.videoBeforeNavigation.currentTime >= window.timeBeforeNavigation))
+  await expect(admin.locator('#animator')).toHaveCount(0)
+  await expect(admin.getByRole('button', { name: 'Tomar micrófono' })).toHaveCount(0)
+  pass('Admin navigation preserves the playing media element and time; queue contains no animator configuration')
   await transport.getByRole('button', { name: 'Reproducir siguiente canción', exact: true }).click()
   await expect(player.getByRole('heading', { name: 'Sin canciones', exact: true })).toBeVisible()
   assert.equal(await player.evaluate(() => window.duplicateAudioCloses), 0)
   assert.deepEqual(errors, [])
   pass('Leaving/reentering player, skipping, natural exhaustion and enqueueing again preserve playable audio without double close')
 
+  await admin.getByRole('navigation', { name: 'Secciones de administración' }).getByRole('link', { name: 'Animador', exact: true }).click()
   const announce = admin.getByRole('button', { name: 'Anunciar en la próxima pausa' })
   await expect(announce).toBeDisabled()
   await expect(admin.getByText('Active el animador para solicitar un anuncio.', { exact: true })).toBeVisible()
@@ -188,9 +201,8 @@ try {
   assert.equal(await player.evaluate(() => window.voiceStarts.length), 0)
   for (const width of [390, 1440]) {
     await admin.setViewportSize({ width, height: 1600 })
-    await expect.poll(() => admin.locator('#animator').evaluate(element => Math.round(element.getBoundingClientRect().width))).toBe(Math.min(width, 1000) - 24)
-    await admin.getByRole('link', { name: 'Animador', exact: true }).click()
-    await expect(admin.getByRole('heading', { name: 'Animador', exact: true })).toBeInViewport()
+    await expect.poll(() => admin.locator('#animator').evaluate(element => Math.round(element.getBoundingClientRect().width))).toBeGreaterThan(width <= 1100 ? width - 100 : width - 360)
+    await admin.getByRole('heading', { name: 'Animador', exact: true, level: 1 }).scrollIntoViewIfNeeded()
     await admin.locator('#animator').screenshot({ path: path.join(data, `animation-awaiting-audio-${width}.png`) })
   }
   await admin.getByRole('button', { name: 'Cancelar solicitud', exact: true }).focus()
@@ -233,8 +245,8 @@ try {
 
   for (const width of [320, 390, 768, 1440]) {
     await admin.setViewportSize({ width, height: 1000 })
-    await expect.poll(() => admin.locator('#animator').evaluate(element => Math.round(element.getBoundingClientRect().width))).toBe(Math.min(width, 1000) - 24)
-    await admin.getByRole('link', { name: 'Animador', exact: true }).click()
+    await expect.poll(() => admin.locator('#animator').evaluate(element => Math.round(element.getBoundingClientRect().width))).toBeGreaterThan(width <= 1100 ? width - 100 : width - 360)
+    await admin.getByRole('heading', { name: 'Animador', exact: true, level: 1 }).scrollIntoViewIfNeeded()
     assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `overflow at ${width}`)
     assert.ok(await admin.getByLabel('Clip', { exact: true }).evaluate(element => element.getBoundingClientRect().width > 200), `clip selector squeezed at ${width}`)
     await admin.screenshot({ path: path.join(data, `animation-${width}.png`) })
@@ -343,7 +355,8 @@ try {
   await standby.getByRole('button', { name: 'Habilitar audio del animador' }).click()
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.audioUnlocked).toBe(true)
   await requestClip()
-  await expect(standby.getByTestId('announcement-overlay')).toBeVisible()
+  // Recovered music may still be playing the eight-second fixture after restart.
+  await expect(standby.getByTestId('announcement-overlay')).toBeVisible({ timeout: 15000 })
   const startsBeforeExit = await standby.evaluate(() => window.voiceStarts.length)
   await standby.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
   await expect(standby.getByRole('link', { name: 'Abrir reproductor', exact: true })).toBeVisible()

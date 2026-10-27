@@ -81,12 +81,14 @@ const PathPrefs = () => {
   const handleRefreshAll = () => dispatch(requestScanAll())
 
   return (
-    <Accordion headingComponent={(
-      <div className={styles.heading}>
-        <Icon icon='FOLDER_MUSIC' />
-        <div className={styles.title}>Carpetas de archivos multimedia</div>
-      </div>
-    )}
+    <Accordion
+      initialExpanded
+      headingComponent={(
+        <div className={styles.heading}>
+          <Icon icon='FOLDER_MUSIC' />
+          <div className={styles.title}>Carpetas de archivos multimedia</div>
+        </div>
+      )}
     >
       <div className={styles.content}>
         {paths.result.length === 0

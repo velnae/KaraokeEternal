@@ -6,7 +6,7 @@ import { ANIMATION_CANCEL, ANIMATION_CONTROL } from 'shared/animation'
 import Button from 'components/Button/Button'
 import styles from './Animation.css'
 
-export default function AnimationQuickControls () {
+export default function AnimationQuickControls ({ showLink = true }: { showLink?: boolean }) {
   const snapshot = useAppSelector(state => state.animation.snapshot?.roomId === state.user.roomId ? state.animation.snapshot : null)
   const [error, setError] = React.useState('')
   const send = (type: string, payload: object) => {
@@ -14,7 +14,7 @@ export default function AnimationQuickControls () {
   }
   return (
     <div className={styles.quick}>
-      <Link to='/queue#animator'>Animador</Link>
+      {showLink && <Link to='/admin/settings/animator'>Animador</Link>}
       {snapshot?.active && <Button variant='danger' onClick={() => send(ANIMATION_CANCEL, { interventionId: snapshot.active?.interventionId })}>Detener anuncio</Button>}
       {snapshot?.prefs.enabled && (
         <Button onClick={() => send(ANIMATION_CONTROL, { controlVersion: snapshot.controlVersion, microphoneOccupied: !snapshot.microphoneOccupied })}>
