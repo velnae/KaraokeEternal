@@ -25,6 +25,7 @@ describe('persistent announcement selection', () => {
   it('treats the same phrase with another style as the same spoken content', () => {
     const first = clip('a')
     expect(choose([{ ...clip('b'), displayText: first.displayText }], [played(first, 1000)]).clip).toBeUndefined()
+    expect(choose([{ ...clip('b'), displayText: `[excited] ${first.displayText} [laughs]` }], [played(first, 1000)]).clip).toBeUndefined()
   })
   it('does not repeat environmental phrases in the current session', () => {
     const first = clip('a', 'invitation')

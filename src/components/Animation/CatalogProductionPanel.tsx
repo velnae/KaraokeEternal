@@ -14,18 +14,17 @@ const api = new HttpApi('animation/')
 function resourceQuery (search: string, kind: AudioKind) {
   const query = new URLSearchParams(search)
   query.set('kind', kind)
+  for (const field of ['language', 'voiceName', 'style', 'origin', 'providerId', 'columns']) query.delete(field)
   return query.toString()
 }
-const columnLabels = { family: 'Uso', voiceName: 'Voz', language: 'Idioma', style: 'Interpretación', category: 'Categoría', loop: 'Bucle', modes: 'Perfiles' }
+const columnLabels = { family: 'Uso', voiceName: 'Voz', category: 'Categoría', loop: 'Bucle' }
 type Column = keyof typeof columnLabels
-const columnsByKind: Record<AudioKind, Column[]> = { voice: ['family', 'voiceName', 'language', 'style', 'modes'], effect: ['category', 'modes'], ambience: ['category', 'loop', 'modes'] }
+const columnsByKind: Record<AudioKind, Column[]> = { voice: ['family', 'voiceName'], effect: ['category'], ambience: ['category', 'loop'] }
 const origin = (resource: AudioResource) => resource.metadata.providerId === 'elevenlabs' ? 'ElevenLabs' : resource.metadata.providerId || (resource.metadata.origin === 'uploaded' ? 'Archivo subido' : 'Incluido')
 const characteristic = (resource: AudioResource, column: Column) => {
   const value = resource.metadata[column]
   if (column === 'family') return value === 'manual' ? 'Anuncio puntual' : familyLabels[value as keyof typeof familyLabels]
-  if (column === 'modes') return resource.metadata.modes.map(mode => ({ dinner: 'Cena', mixed: 'Mixto', party: 'Fiesta' })[mode]).join(', ')
   if (column === 'loop') return value === undefined ? 'Sin especificar' : value ? 'Sí' : 'No'
-  if (column === 'style') return ({ warm: 'Cálida', cheerful: 'Alegre', celebration: 'Celebración' })[String(value)] || String(value || 'Sin especificar')
   return String(value || 'Sin especificar')
 }
 
@@ -42,7 +41,6 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
   const [source, setSource] = useState<AudioResource | undefined>(undefined)
   const [preview, setPreview] = useState<AudioResource | null>(null)
   const [highlight, setHighlight] = useState('')
-  const [extraColumns, setExtraColumns] = useState<Column[]>([])
   const [refreshVersion, setRefreshVersion] = useState(0)
   const audio = useRef<HTMLAudioElement>(null)
   const queryString = resourceQuery(params.toString(), kind)
@@ -95,8 +93,7 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
     setParams(next, { replace: field === 'search' })
   }
   const typeLink = (type: AudioKind) => `?view=audio&kind=${type}`
-  const baseColumns = columnsByKind[kind].slice(0, kind === 'voice' ? 2 : 1)
-  const columns = columnsByKind[kind].filter(column => baseColumns.includes(column) || extraColumns.includes(column))
+  const columns = columnsByKind[kind]
   const fresh = () => {
     setDetails(null)
     setRefreshVersion(value => value + 1)
@@ -159,7 +156,7 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
       {params.get('resourceId') && <p><Link to={typeLink(kind)}>Ver todos los audios</Link></p>}
       {processor === false && <p className={styles.notice}>No se pueden preparar audios. Revise FFmpeg y los permisos del servidor.</p>}
       <details className={styles.filters}>
-        <summary>Filtros y columnas</summary>
+        <summary>Filtros</summary>
         <div className={styles.fields}>
           {kind === 'voice'
             ? (
@@ -171,18 +168,6 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
                       <option value='manual'>Anuncio puntual</option>
                       {VOICE_FAMILIES.map(value => <option key={value} value={value}>{familyLabels[value]}</option>)}
                     </select>
-                  </label>
-                  <label>
-                    Idioma
-                    <UrlTextInput value={params.get('language') || ''} onValueChange={value => change('language', value)} placeholder='Todos' />
-                  </label>
-                  <label>
-                    Voz
-                    <UrlTextInput value={params.get('voiceName') || ''} onValueChange={value => change('voiceName', value)} placeholder='Todas' />
-                  </label>
-                  <label>
-                    Interpretación
-                    <UrlTextInput value={params.get('style') || ''} onValueChange={value => change('style', value)} placeholder='Todas' />
                   </label>
                 </>
               )
@@ -212,22 +197,6 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
             </select>
           </label>
           <label>
-            Origen
-            <select value={params.get('origin') || ''} onChange={event => change('origin', event.target.value)}>
-              <option value=''>Todos</option>
-              <option value='generated'>Generado</option>
-              <option value='uploaded'>Archivo subido</option>
-              <option value='included'>Incluido</option>
-            </select>
-          </label>
-          <label>
-            Proveedor
-            <select value={params.get('providerId') || ''} onChange={event => change('providerId', event.target.value)}>
-              <option value=''>Todos</option>
-              {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
-            </select>
-          </label>
-          <label>
             Ordenar por
             <select value={params.get('sort') || 'created'} onChange={event => change('sort', event.target.value)}>
               <option value='created'>Fecha</option>
@@ -245,12 +214,6 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
           </label>
         </div>
         <div className={styles.actions}>
-          {columnsByKind[kind].filter(column => !baseColumns.includes(column)).map(column => (
-            <label className={styles.check} key={column}>
-              <input type='checkbox' checked={extraColumns.includes(column)} onChange={event => setExtraColumns(previous => event.target.checked ? [...previous, column] : previous.filter(value => value !== column))} />
-              {columnLabels[column]}
-            </label>
-          ))}
           <Link to={typeLink(kind)}>Limpiar filtros</Link>
         </div>
       </details>
@@ -279,6 +242,7 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
                 <th className={styles.detailColumn}>Duración</th>
                 <th className={styles.detailColumn}>Origen</th>
                 <th>Estado</th>
+                <th>Uso en sala</th>
                 <th>Acciones</th>
               </tr>
             </thead>
@@ -295,9 +259,19 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
                   <td className={styles.detailColumn}>{resource.durationMs ? `${(resource.durationMs / 1000).toFixed(1)} s` : '—'}</td>
                   <td className={styles.detailColumn}>{origin(resource)}</td>
                   <td><span className={styles.state} data-ready={resource.preparation === 'ready' && resource.state === 'active'}>{resourceStatus(resource)}</span></td>
+                  <td className={styles.usage}>
+                    <span>{resource.usage?.total ? `${resource.usage.total} ${resource.usage.total === 1 ? 'reproducción' : 'reproducciones'}` : 'Sin registros'}</span>
+                    {resource.usage?.lastStartedAt && (
+                      <small>
+                        Última:
+                        {' '}
+                        <time dateTime={new Date(resource.usage.lastStartedAt).toISOString()}>{new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', dateStyle: 'short', timeStyle: 'short' }).format(resource.usage.lastStartedAt)}</time>
+                      </small>
+                    )}
+                  </td>
                   <td className={styles.rowActions}>
-                    {resource.preparation === 'ready' && <Button className={styles.secondary} onClick={() => setPreview(resource)} aria-label={`Escuchar ${resource.title}`}>Escuchar</Button>}
-                    <Button className={styles.secondary} onClick={() => setDetails(resource)} aria-label={`Detalles de ${resource.title}`}>Detalles</Button>
+                    {resource.preparation === 'ready' && <Button className={`${styles.secondary} ${styles.iconAction}`} icon='PLAY' size={22} onClick={() => setPreview(resource)} aria-label={`Escuchar ${resource.title}`} title={`Escuchar ${resource.title}`} />}
+                    <Button className={`${styles.secondary} ${styles.iconAction}`} icon='INFO_OUTLINE' size={22} onClick={() => setDetails(resource)} aria-label={`Detalles de ${resource.title}`} title={`Detalles de ${resource.title}`} />
                   </td>
                 </tr>
               ))}
@@ -325,7 +299,7 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
       {form && visible && <AudioResourceForm key={`${kind}:${form}:${source?.id || ''}`} kind={kind} mode={form} providers={providers} source={source} onClose={() => setForm(null)} onSaved={saved} />}
       {details && visible && (
         <AudioResourceDetails
-          resource={details}
+          resource={page?.items.find(resource => resource.id === details.id) ?? details}
           onClose={() => setDetails(null)}
           onChange={fresh}
           onVersion={() => {

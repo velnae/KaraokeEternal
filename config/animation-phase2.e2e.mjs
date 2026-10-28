@@ -44,7 +44,7 @@ const provider = createServer(async (req, res) => {
     return
   }
   if (req.url === '/v1/voices') {
-    res.end(JSON.stringify({ voices: [{ voice_id: 'testvoice', name: 'Voz de prueba E2E' }] }))
+    res.end(JSON.stringify({ voices: [{ voice_id: 'testvoice', name: 'Voz de prueba E2E' }, { voice_id: 'sKgg4MPUDBy69X7iv3fA', name: 'Alejandro Duran' }] }))
     return
   }
   const chunks = []
@@ -160,8 +160,22 @@ try {
     const form = admin.getByRole('dialog', { name: 'Generar audio', exact: true })
     await form.getByLabel('Nombre', { exact: true }).fill(title)
     await form.getByLabel(kind === 'voice' ? 'Texto del audio' : 'Descripción del sonido', { exact: true }).fill(text)
-    if (kind === 'voice') await expect(form.getByLabel('Voz', { exact: true })).toHaveValue('testvoice')
-    else await form.getByLabel('Duración (segundos)', { exact: true }).fill(duration)
+    if (kind === 'voice') {
+      await expect(form.getByLabel('Voz', { exact: true })).toHaveValue('sKgg4MPUDBy69X7iv3fA')
+      await expect(form.getByLabel('Interpretación', { exact: true })).toHaveCount(0)
+      await expect(form.getByLabel('Idioma', { exact: true })).toHaveCount(0)
+      if (text.includes('[excited]')) {
+        await expect(form.locator('mark')).toHaveText(['[excited]', '[laughs]'])
+        await form.getByText('Etiquetas de voz', { exact: true }).click()
+        await form.getByLabel('Texto del audio', { exact: true }).press('Control+Home')
+        await form.getByRole('button', { name: 'Insertar [sighs]', exact: true }).focus()
+        await form.getByRole('button', { name: 'Insertar [sighs]', exact: true }).press('Enter')
+        await expect(form.getByLabel('Texto del audio', { exact: true })).toHaveValue(`[sighs] ${text}`)
+        await expect(form.getByLabel('Texto del audio', { exact: true })).toBeFocused()
+        await form.getByLabel('Texto del audio', { exact: true }).fill(text)
+        await form.getByText('Etiquetas de voz', { exact: true }).click()
+      }
+    } else await form.getByLabel('Duración (segundos)', { exact: true }).fill(duration)
     if (kind === 'ambience') await form.getByLabel('Apto para repetirse en bucle').check()
     if (['Presentación 1', 'Aplauso breve', 'Ambiente de pausa'].includes(title)) {
       for (const width of [390, 1440]) {
@@ -176,17 +190,23 @@ try {
   await expect(production.getByRole('button', { name: /publicar|aprobar/i })).toHaveCount(0)
   await expect(production.getByText(/tarifa|USD estimados|consumo/i)).toHaveCount(0)
   providerDelay = 1500
-  await generate('Presentación 1', 'La siguiente canción ya está lista. Sigamos disfrutando juntos.')
+  const expressiveText = '[excited] La siguiente canción ya está lista. Sigamos disfrutando juntos. [laughs]'
+  await generate('Presentación 1', expressiveText)
   await admin.getByRole('navigation', { name: 'Secciones de administración' }).getByRole('link', { name: 'Cola', exact: true }).click()
   await expect(admin.locator('#animator')).toHaveCount(0)
   await admin.goBack()
   await expect(production.getByRole('row', { name: 'Presentación 1', exact: true })).toContainText('Disponible', { timeout: 20000 })
   providerDelay = 0
   assert.equal(providerCalls.length, 1)
+  assert.equal(providerCalls[0].body.text, expressiveText)
+  assert.equal(providerCalls[0].body.language_code, 'es')
+  assert.match(providerCalls[0].url, /sKgg4MPUDBy69X7iv3fA/)
   await admin.reload()
   await expect(production.getByRole('row', { name: 'Presentación 1', exact: true })).toContainText('Disponible')
   pass('Generation becomes available automatically and survives navigation/reload without review or publication')
   const firstJob = (await call('animation/production')).jobs[0]
+  assert.ok(!(await call(`animation/resources/generated-${firstJob.jobId}`)).usage.total)
+  assert.equal((await call('animation/catalog')).find(clip => clip.id === `generated-${firstJob.jobId}`).displayText.includes('['), false)
   const reused = await call('animation/production/jobs', { inputs: [firstJob.config] })
   assert.equal(reused[0].jobId, firstJob.jobId)
   assert.equal(providerCalls.length, 1)
@@ -208,6 +228,7 @@ try {
   await expect(production.locator('audio')).toHaveCount(1)
   await expect.poll(() => production.locator('audio').evaluate(audio => audio.ended)).toBe(true)
   assert.equal(history().length, 0)
+  assert.equal((await call(`animation/resources/generated-${firstJob.jobId}`)).usage.total, 0)
   await production.getByRole('button', { name: 'Cerrar escucha', exact: true }).click()
   pass('Direct keyboard listening needs no monitoring checkbox and creates no public playback history')
 
@@ -283,6 +304,9 @@ try {
   await admin.getByRole('button', { name: 'Iniciar jornada', exact: true }).click()
   await expect.poll(() => countFamily('welcome'), { timeout: 12000 }).toBe(1)
   await expect.poll(() => history()[0]?.status).toBe('PLAYED')
+  const welcomeUsage = await call(`animation/resources/${history()[0].clipId}`)
+  assert.equal(welcomeUsage.usage.total, 1)
+  assert.equal(welcomeUsage.usage.currentDay, 1)
   await admin.reload()
   const sessionId = (await emit('server/ANIMATION_SYNC')).payload.session.sessionId
   await admin.getByRole('navigation', { name: 'Secciones de administración' }).getByRole('link', { name: 'Usuarios', exact: true }).click()
@@ -313,11 +337,15 @@ try {
   await admin.getByRole('button', { name: 'Cerrar ajustes', exact: true }).click()
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.ambience !== null, { timeout: 12000 }).toBe(true)
   await expect.poll(() => player.evaluate(() => window.animationStarts.filter(start => start.duration > 2.8).length), { timeout: 12000 }).toBeGreaterThanOrEqual(2)
+  const ambientClip = (await call('animation/catalog')).find(clip => clip.kind === 'ambience')
+  assert.equal((await call(`animation/resources/${ambientClip.id}`)).usage.total, 1)
   await admin.getByRole('button', { name: 'Confirmar celebración', exact: true }).click()
   await expect.poll(() => countFamily('celebration'), { timeout: 15000 }).toBe(1)
   await expect.poll(() => history()[0]?.status, { timeout: 10000 }).toBe('PLAYED')
   const celebration = history().find(row => row.family === 'celebration')
   assert.equal(JSON.parse(celebration.sequenceJSON).length, 2)
+  const effectId = JSON.parse(celebration.sequenceJSON)[1].id
+  assert.equal((await call(`animation/resources/${effectId}`)).usage.total, 1)
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.ambience !== null, { timeout: 10000 }).toBe(true)
   await admin.getByRole('button', { name: 'Ajustes', exact: true }).click()
   await admin.getByLabel('Sonido de pausa', { exact: true }).click()
@@ -390,14 +418,25 @@ try {
 
   const beforeRestart = history().length
   const productionsBeforeRestart = providerCalls.length
+  const effectUsageBeforeRestart = (await call(`animation/resources/${effectId}`)).usage.total
   await stop()
   await start()
   await expect.poll(() => socket.connected, { timeout: 10000 }).toBe(true)
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.playerPresent, { timeout: 10000 }).toBe(true)
   assert.equal(history().length, beforeRestart)
   assert.equal(providerCalls.length, productionsBeforeRestart)
+  assert.equal((await call(`animation/resources/${effectId}`)).usage.total, effectUsageBeforeRestart)
+  assert.equal((await api.patch(`${base}api/animation/resources/${effectId}`, { data: { usage: { total: 999 } } })).status(), 422)
   assert.equal(db.prepare('SELECT count(*) n FROM animationSessions WHERE status=\'CLOSED\'').get().n, 1)
   pass('Restart preserves sessions, catalog and history without replaying announcements or regenerating paid jobs')
+  await animatorNav.getByRole('link', { name: 'Audios', exact: true }).click()
+  await production.getByRole('navigation', { name: 'Tipos de audio' }).getByRole('link', { name: /^Efectos de apoyo/ }).click()
+  await expect(production.getByRole('row', { name: 'Aplauso breve', exact: true })).toContainText('1 reproducción')
+  for (const width of [390, 1440]) {
+    await admin.setViewportSize({ width, height: 1100 })
+    await admin.locator('main').evaluate(element => element.scrollTo({ top: 0 }))
+    await admin.screenshot({ path: path.join(data, `usage-${width}.png`) })
+  }
   await call('rooms', { name: 'Private inventory', status: 'open', prefs: {} })
   const resource = db.prepare('SELECT * FROM audioResources WHERE id=?').get(`generated-${firstJob.jobId}`)
   const copy = db.prepare('INSERT INTO audioResources(id,roomId,kind,title,state,preparation,metadataJSON,filename,mime,checksum,durationMs,size,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
@@ -422,6 +461,10 @@ try {
   assert.equal(inventoryPage.items[0].title, 'Inventario 200')
   assert.ok((await call('animation/preparation')).length <= 24)
   await animatorNav.getByRole('link', { name: 'Audios', exact: true }).click()
+  await production.getByText('Filtros', { exact: true }).click()
+  for (const label of ['Idioma', 'Voz', 'Interpretación', 'Origen', 'Proveedor']) await expect(production.getByLabel(label, { exact: true })).toHaveCount(0)
+  await expect(production.getByRole('checkbox')).toHaveCount(0)
+  await production.getByText('Filtros', { exact: true }).click()
   await production.getByLabel('Buscar audio', { exact: true }).fill('')
   await production.getByLabel('Buscar audio', { exact: true }).pressSequentially('Inventario', { delay: 10 })
   await expect(production.getByLabel('Buscar audio', { exact: true })).toBeFocused()
@@ -441,6 +484,12 @@ try {
     await admin.setViewportSize({ width, height: 1100 })
     await admin.locator('main').evaluate(element => element.scrollTo({ top: 0 }))
     assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+    await expect(production.getByRole('button', { name: /^Escuchar / }).first()).toHaveText('')
+    if (width === 1440) {
+      const input = await production.getByLabel('Buscar audio', { exact: true }).boundingBox()
+      const action = await production.getByRole('button', { name: 'Generar audio', exact: true }).boundingBox()
+      assert.ok(Math.abs((input.y + input.height) - (action.y + action.height)) <= 2)
+    }
     await admin.screenshot({ path: path.join(data, `inventory-${width}.png`) })
   }
   await animatorNav.getByRole('link', { name: 'Control', exact: true }).click()

@@ -12,6 +12,7 @@ export const ANIMATION_AUTO = 'server/ANIMATION_AUTO'
 export const ANIMATION_SESSION = 'server/ANIMATION_SESSION'
 export const ANIMATION_AMBIENCE = 'server/ANIMATION_AMBIENCE'
 export const ANIMATION_AMBIENCE_STOP = 'server/ANIMATION_AMBIENCE_STOP'
+export const ANIMATION_AMBIENCE_STARTED = 'server/ANIMATION_AMBIENCE_STARTED'
 export const ANIMATION_STATE = 'animation/STATE'
 export const ANIMATION_DISCONNECTED = 'animation/DISCONNECTED'
 export const ANIMATION_LIMITS = { clipMs: 10000, requestMs: 600000, startMs: 1000, marginMs: 500 }

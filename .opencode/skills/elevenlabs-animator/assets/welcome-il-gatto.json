@@ -1,0 +1,14 @@
+{
+  "inputs": [
+    {
+      "providerId": "elevenlabs",
+      "kind": "voice",
+      "title": "Bienvenida a Il Gatto Karaoke",
+      "text": "[warmly] ¡Bienvenidos a Pizzería Il Gatto Karaoke! [excited] Buena pizza, buena música… ¡y una noche para cantar juntos!",
+      "family": "welcome",
+      "voiceId": "sKgg4MPUDBy69X7iv3fA",
+      "language": "es",
+      "modes": ["dinner", "mixed", "party"]
+    }
+  ]
+}

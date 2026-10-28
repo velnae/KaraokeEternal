@@ -6,6 +6,8 @@ import { clipDurationLimit, familyLabels, VOICE_FAMILIES, type AudioKind, type R
 import type { AudioResource, ProviderCapabilities } from 'shared/audioCatalog'
 import type { GenerationJob, ProductionInput } from 'shared/catalogProduction'
 import styles from './AudioLibrary.css'
+import AudioTagEditor from './AudioTagEditor'
+import { DEFAULT_ANIMATOR_VOICE_ID, DEFAULT_ANIMATOR_VOICE_NAME } from 'shared/audioTags'
 
 const api = new HttpApi('animation/')
 export default function AudioResourceForm ({ kind, mode, providers, source, onClose, onSaved }: {
@@ -57,7 +59,8 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
     }
   }, [mode, providerId, kind, connectionKey])
   const voices = connection?.key === connectionKey ? connection.voices : []
-  const selectedVoice = voices.some(item => item.voiceId === voice) ? voice : voices[0]?.voiceId ?? ''
+  const selectedVoice = voice || provider?.defaultVoiceId || voices[0]?.voiceId || ''
+  const hasVoice = voices.some(item => item.voiceId === selectedVoice)
   const blocker = !title.trim()
     ? 'Indique un nombre.'
     : mode === 'upload' && !file
@@ -68,8 +71,8 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
           ? 'Conectando con el proveedor…'
           : mode === 'generate' && connection?.error
             ? connection.error
-            : mode === 'generate' && kind === 'voice' && !selectedVoice
-              ? 'No hay voces disponibles.'
+            : mode === 'generate' && kind === 'voice' && !hasVoice
+              ? 'Agregue la voz predeterminada a la cuenta de ElevenLabs o elija otra voz disponible.'
               : mode === 'generate' && !text.trim()
                 ? 'Complete el texto o la descripción.'
                 : !modes.length ? 'Seleccione un perfil.' : family === 'promotion' && !(Date.parse(expires) > Date.now()) ? 'Indique una vigencia futura.' : null
@@ -91,8 +94,8 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
         if (mounted.current) onSaved(resource.id)
       } else {
         const input: ProductionInput = { kind, title, text, providerId, family, category, voiceId: selectedVoice,
-          language: kind === 'voice' ? language || provider?.languages[0] : undefined,
-          style: (provider?.styles.includes(style) ? style : provider?.styles[0] ?? 'warm') as ProductionInput['style'],
+          language: kind === 'voice' ? providerId === 'elevenlabs' ? 'es' : language || provider?.languages[0] : undefined,
+          style: providerId === 'elevenlabs' ? undefined : (provider?.styles.includes(style) ? style : provider?.styles[0]) as ProductionInput['style'],
           modes, durationSeconds: kind === 'voice' ? undefined : duration, loop: kind === 'ambience' && provider?.loop ? loop : undefined,
           validUntil: family === 'promotion' ? Date.parse(expires) : undefined,
           parentId: source?.id, versionRequestId: source ? requestId.current : undefined, revision: source ? Number(source.metadata.generationInput?.revision ?? 0) + 1 : 0 }
@@ -124,10 +127,14 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
             <select value={providerId} onChange={event => setProviderId(event.target.value)}>{available.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
           </label>
         )}
-        <label>
-          {kind === 'voice' ? mode === 'upload' ? 'Texto hablado (opcional)' : 'Texto del audio' : 'Descripción del sonido'}
-          <textarea aria-label={kind === 'voice' ? mode === 'upload' ? 'Texto hablado (opcional)' : 'Texto del audio' : 'Descripción del sonido'} rows={3} value={text} maxLength={mode === 'generate' ? kind === 'voice' ? 220 : 450 : 2000} onChange={event => setText(event.target.value)} />
-        </label>
+        {kind === 'voice' && mode === 'generate' && provider?.audioTags
+          ? <AudioTagEditor value={text} onChange={setText} />
+          : (
+              <label>
+                {kind === 'voice' ? mode === 'upload' ? 'Texto hablado (opcional)' : 'Texto del audio' : 'Descripción del sonido'}
+                <textarea aria-label={kind === 'voice' ? mode === 'upload' ? 'Texto hablado (opcional)' : 'Texto del audio' : 'Descripción del sonido'} rows={3} value={text} maxLength={mode === 'generate' ? kind === 'voice' ? 220 : 450 : 2000} onChange={event => setText(event.target.value)} />
+              </label>
+            )}
         {kind === 'voice'
           ? (
               <>
@@ -142,7 +149,7 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
                   <label>
                     Voz
                     <select aria-label='Voz' value={selectedVoice} onChange={event => setVoice(event.target.value)}>
-                      {!voices.length && <option value=''>Sin voces disponibles</option>}
+                      {!hasVoice && <option value={selectedVoice}>{selectedVoice === DEFAULT_ANIMATOR_VOICE_ID ? `${DEFAULT_ANIMATOR_VOICE_NAME} (no disponible en la cuenta)` : 'Seleccione una voz disponible'}</option>}
                       {voices.map(item => <option key={item.voiceId} value={item.voiceId}>{item.name}</option>)}
                     </select>
                   </label>
@@ -176,7 +183,7 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
         <details>
           <summary>Más opciones</summary>
           <div className={styles.fields}>
-            {kind === 'voice' && mode === 'generate' && (
+            {kind === 'voice' && mode === 'generate' && providerId !== 'elevenlabs' && (
               <label>
                 Interpretación
                 <select value={style} onChange={event => setStyle(event.target.value)}>{provider?.styles.map(value => <option key={value} value={value}>{{ warm: 'Cálida', cheerful: 'Alegre', celebration: 'Celebración' }[value] || value}</option>)}</select>
@@ -189,12 +196,12 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
                     <input value={language} maxLength={120} onChange={event => setLanguage(event.target.value)} placeholder='Sin especificar' />
                   </label>
                 )
-              : (
-                  <label>
-                    Idioma
-                    <select value={language || provider?.languages[0] || ''} onChange={event => setLanguage(event.target.value)}>{provider?.languages.map(value => <option key={value} value={value}>{value === 'es' ? 'Español' : value}</option>)}</select>
-                  </label>
-                ))}
+              : providerId !== 'elevenlabs' && (
+                <label>
+                  Idioma
+                  <select value={language || provider?.languages[0] || ''} onChange={event => setLanguage(event.target.value)}>{provider?.languages.map(value => <option key={value} value={value}>{value === 'es' ? 'Español' : value}</option>)}</select>
+                </label>
+              ))}
           </div>
           <fieldset>
             <legend>Perfiles de sala</legend>

@@ -6,7 +6,7 @@ import socket from 'lib/socket'
 import { animationRequest, animationTime, fetchPreparedAnimationClips, syncAnimation } from 'lib/animationApi'
 import {
   ANIMATION_CANCEL, ANIMATION_EVENT, ANIMATION_READY, ANIMATION_RESERVE,
-  ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP,
+  ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED,
   animationContext, interventionAssets, type Intervention, type AmbienceGrant,
 } from 'shared/animation'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, PLAYER_EMIT_STATUS } from 'shared/actionTypes'
@@ -34,6 +34,7 @@ export default function useAnimationPlayer () {
   const ambientVersion = useRef(0)
   const ambientRetryAt = useRef(0)
   const ambientCursor = useRef({ clipId: '', offsetMs: 0 })
+  const ambientUse = useRef<{ clipId: string, id: string } | null>(null)
   const [ambientPlaying, setAmbientPlaying] = useState(false)
   const loadedCatalog = useRef<number | undefined>(undefined)
   const idleAttemptAt = useRef(0)
@@ -41,6 +42,7 @@ export default function useAnimationPlayer () {
   const idleTick = Math.floor(animationTime() / 10000)
 
   const abort = useCallback(() => {
+    ambientUse.current = null
     version.current++
     ambientVersion.current++
     audio.current.stop()
@@ -73,6 +75,9 @@ export default function useAnimationPlayer () {
     }
     const watch = store.subscribe(() => {
       const current = store.getState().animation.snapshot
+      const player = store.getState().player
+      if (!current?.prefs.enabled || !current.prefs.automation || !current.prefs.ambienceEnabled || current.session?.status !== 'OPEN'
+        || (player && !player.isAtQueueEnd && player.queueId !== -1)) ambientUse.current = null
       const grant = grantRef.current
       if (current) audio.current.volume(ambientRun.current ? current.prefs.ambienceVolume ?? 0.2 : current.prefs.volume)
       if (grant && (!current?.prefs.enabled || current.prefs.volume === 0
@@ -171,7 +176,8 @@ export default function useAnimationPlayer () {
     const generation = ambientVersion.current
     let grant: AmbienceGrant | undefined
     try {
-      const reply = await animationRequest(ANIMATION_AMBIENCE, { playerEpoch: current.playerEpoch, ...ambientCursor.current }, 1000)
+      const cursor = ambientUse.current ? ambientCursor.current : { clipId: '', offsetMs: 0 }
+      const reply = await animationRequest(ANIMATION_AMBIENCE, { playerEpoch: current.playerEpoch, ...cursor }, 1000)
       grant = reply.ambience
       const fresh = store.getState()
       if (!grant) return
@@ -180,8 +186,14 @@ export default function useAnimationPlayer () {
         || !audio.current.buffers.has(grant.clip.checksum) || animationTime() + grant.durationMs > grant.until) return
       const completion = audio.current.play(grant.clip.checksum, current.prefs.ambienceVolume ?? 0.2, grant)
       ambientRun.current = { grant, completion }
+      if (ambientUse.current?.clipId !== grant.clip.id) ambientUse.current = { clipId: grant.clip.id, id: crypto.randomUUID() }
+      try {
+        await animationRequest(ANIMATION_AMBIENCE_STARTED, { id: grant.id, runId: ambientUse.current.id }, 1000)
+      } catch { audio.current.stop() }
       setAmbientPlaying(true)
       const outcome = await completion
+      // An idle announcement probe can briefly stop ambience without emitting
+      // anything. Keep the same usage episode until real speech/music or disable.
       const decodedMs = Math.round(audio.current.buffers.get(grant.clip.checksum)!.duration * 1000)
       const length = Math.min(grant.clip.durationMs, decodedMs)
       ambientCursor.current = { clipId: grant.clip.id, offsetMs: outcome === 'ENDED' ? grant.clip.loop === false ? Math.min(length, grant.offsetMs + grant.durationMs) : Math.min(length, grant.offsetMs + grant.durationMs) % length : 0 }
@@ -250,6 +262,7 @@ export default function useAnimationPlayer () {
       sessionStorage.setItem(storageKey, '1')
       attempted.current.add(grant.interventionId)
       const assets = interventionAssets(grant)
+      ambientUse.current = null
       const completion = audio.current.play(assets[0].checksum, latestSnapshot.prefs.volume)
       started = true
       setText(grant.displayText)
@@ -264,7 +277,11 @@ export default function useAnimationPlayer () {
           outcome = 'STOPPED'
           break
         }
-        outcome = await audio.current.play(asset.checksum, latest.prefs.volume)
+        const effectCompletion = audio.current.play(asset.checksum, latest.prefs.volume)
+        try {
+          await animationRequest(ANIMATION_EVENT, { interventionId: grant.interventionId, playerEpoch: grant.playerEpoch, event: 'ASSET_STARTED', clipId: asset.id }, 1000)
+        } catch { audio.current.stop() }
+        outcome = await effectCompletion
       }
       setText('')
       await animationRequest(ANIMATION_EVENT, { interventionId: grant.interventionId, playerEpoch: grant.playerEpoch, event: outcome })

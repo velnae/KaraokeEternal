@@ -43,7 +43,7 @@ router.get('/resources', (ctx) => {
 router.get('/resources/:id', (ctx) => {
   const resource = getResource(ctx.params.id, ctx.user.roomId)
   if (!resource) ctx.throw(404, 'No se encontró el audio.')
-  ctx.body = resourceDTO(resource)
+  ctx.body = resourceDTO(resource, ctx.user.roomId)
 })
 router.get('/resources/:id/audio', async (ctx) => {
   try {

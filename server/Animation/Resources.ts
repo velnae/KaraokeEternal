@@ -1,11 +1,13 @@
 import { db } from '../lib/Database.js'
 import { VOICE_FAMILIES, type AudioKind, type AnimationClip } from '../../shared/animation.js'
 import type { AudioMetadata, AudioResource, PreparationState, ResourcePage, ResourceState } from '../../shared/audioCatalog.js'
+import { withoutAudioTags } from '../../shared/audioTags.js'
+import { audioUsage } from './usage.js'
 
 export interface StoredResource extends Omit<AudioResource, 'metadata'> { metadataJSON: string, filename: string | null }
-export const resourceDTO = ({ filename, metadataJSON, ...row }: StoredResource): AudioResource => {
+export const resourceDTO = ({ filename, metadataJSON, ...row }: StoredResource, usageRoom?: number): AudioResource => {
   void filename
-  return { ...row, metadata: JSON.parse(metadataJSON) }
+  return { ...row, metadata: JSON.parse(metadataJSON), ...(usageRoom !== undefined ? { usage: audioUsage(usageRoom, [row.id])[row.id] } : {}) }
 }
 export function getResource (id: string, roomId?: number): StoredResource | undefined {
   const row = db.get<StoredResource>('SELECT * FROM audioResources WHERE id=?', [id])
@@ -44,6 +46,7 @@ export function completeResource (id: string, media: { filename: string, mime: s
     [media.filename, media.mime, media.checksum, media.durationMs, media.size, Date.now(), id])
 }
 export function editResource (roomId: number, id: string, patch: { title?: string, state?: ResourceState, metadata?: Partial<AudioMetadata> }) {
+  if (!Object.keys(patch).every(key => ['title', 'state', 'metadata'].includes(key))) throw new Error('Los datos de uso son de solo lectura.')
   const row = getResource(id, roomId)
   if (!row || row.roomId !== roomId) throw new Error('Este audio es compartido o pertenece a otra sala; no se puede modificar.')
   const title = patch.title ?? row.title
@@ -97,14 +100,16 @@ export function listResources (roomId: number, query: Record<string, unknown>): 
   const pageSize = 20
   const total = db.get<{ count: number }>(`SELECT count(*) count FROM audioResources WHERE ${clauses.join(' AND ')}`, params)!.count
   const page = Math.min(Math.max(1, Math.floor(Number(query.page) || 1)), Math.max(1, Math.ceil(total / pageSize)))
-  const items = db.all<StoredResource>(`SELECT * FROM audioResources WHERE ${clauses.join(' AND ')} ORDER BY ${sort} ${direction},id ASC LIMIT ? OFFSET ?`, [...params, pageSize, (page - 1) * pageSize]).map(resourceDTO)
+  const items = db.all<StoredResource>(`SELECT * FROM audioResources WHERE ${clauses.join(' AND ')} ORDER BY ${sort} ${direction},id ASC LIMIT ? OFFSET ?`, [...params, pageSize, (page - 1) * pageSize]).map(row => resourceDTO(row))
+  const usage = audioUsage(roomId, items.map(item => item.id))
+  for (const item of items) item.usage = usage[item.id]
   const counts = { voice: 0, effect: 0, ambience: 0 }
   for (const row of db.all<{ kind: AudioKind, count: number }>('SELECT kind,count(*) count FROM audioResources WHERE (roomId=? OR roomId IS NULL) AND state!=\'archived\' GROUP BY kind', [roomId])) counts[row.kind] = row.count
   return { items, total, page, pageSize, counts }
 }
 export function resourceClip (row: StoredResource): AnimationClip {
   const m: AudioMetadata = JSON.parse(row.metadataJSON)
-  return { id: row.id, title: row.title, kind: row.kind, displayText: row.kind === 'voice' ? m.text || row.title : row.title,
+  return { id: row.id, title: row.title, kind: row.kind, displayText: row.kind === 'voice' ? withoutAudioTags(m.text) || row.title : row.title,
     checksum: row.checksum!, durationMs: row.durationMs!, source: m.source ?? m.providerId ?? m.origin, license: m.license ?? 'Local audio',
     family: m.family, modes: m.modes, approvedForAuto: m.automatic === true, validUntil: m.validUntil, loop: m.loop,
     ...(row.roomId !== null ? { roomId: row.roomId } : {}) }

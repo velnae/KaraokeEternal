@@ -9,6 +9,7 @@ import Queue from '../Queue/Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import handlers from './socket.js'
 import { loadCatalog, catalogClips } from './catalog.js'
+import { audioUsage } from './usage.js'
 import { animationContext, ANIMATION_CONTROL, ANIMATION_SYNC, type AnimationClip } from '../../shared/animation.js'
 
 const identity = { roomId: 1, userId: 1, socketId: 'player-a' }
@@ -65,6 +66,39 @@ function autoInput (overrides: Partial<Reservation> = {}): Reservation {
 }
 
 describe('automatic sessions and ambient authority', () => {
+  it('counts ambience once across permit renewals and rejects stale or foreign acknowledgements', async () => {
+    await automaticCatalog()
+    const epoch = Animation.state(1).playerEpoch
+    const first = Animation.reserveAmbience(identity, epoch, { queueId: -1 })!
+    expect(audioUsage(1, [first.clip.id])[first.clip.id].total).toBe(0)
+    Animation.ambienceStarted(identity, first.id, 'run-one')
+    Animation.ambienceStarted(identity, first.id, 'run-one')
+    Animation.stopAmbience(identity, first.id)
+    const next = Animation.reserveAmbience(identity, epoch, { queueId: -1 })!
+    Animation.ambienceStarted(identity, next.id, 'run-one')
+    expect(audioUsage(1, [first.clip.id])[first.clip.id].total).toBe(1)
+    expect(() => Animation.ambienceStarted({ ...identity, socketId: 'other' }, next.id, 'forged')).toThrow('Permiso')
+    expect(() => Animation.ambienceStarted(identity, first.id, 'stale')).toThrow('Permiso')
+    Animation.stopAmbience(identity, next.id)
+    const restarted = Animation.reserveAmbience(identity, epoch, { queueId: -1 })!
+    Animation.ambienceStarted(identity, restarted.id, 'run-two')
+    expect(audioUsage(1, [first.clip.id])[first.clip.id].total).toBe(2)
+  })
+
+  it('records an effect only after its own confirmed start, without counting duplicate acknowledgements', () => {
+    const pending = Animation.request(identity, 'sequence', clip)
+    const effect = { ...clip, id: 'effect', kind: 'effect', checksum: 'fx', durationMs: 1000 }
+    db.run('UPDATE animationInterventions SET sequenceJSON=?,durationMs=5000 WHERE interventionId=?', [JSON.stringify([clip, effect]), pending.interventionId])
+    Animation.ready(identity, true, [clip.checksum, 'fx'])
+    const grant = reserve()
+    expect(() => Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'ASSET_STARTED', effect.id)).toThrow('activa')
+    Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')
+    expect(audioUsage(1, [clip.id, effect.id])).toMatchObject({ [clip.id]: { total: 1 }, effect: { total: 0 } })
+    Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'ASSET_STARTED', effect.id)
+    Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'ASSET_STARTED', effect.id)
+    expect(audioUsage(1, [effect.id]).effect.total).toBe(1)
+    expect(() => Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'ASSET_STARTED', 'another')).toThrow('activa')
+  })
   it('opens a real session once and does not repeat its welcome after restart', async () => {
     await automaticCatalog()
     const sessionId = Animation.snapshot(1).session!.sessionId

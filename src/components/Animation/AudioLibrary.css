@@ -5,7 +5,7 @@
 .types { border-bottom: 1px solid var(--edge); padding-bottom: 12px; margin-bottom: 20px; }
 .types a { padding: 12px; border-radius: 8px; text-decoration: none; color: var(--secondary); font-size: 14px; }
 .types a[aria-current='page'] { color: var(--cyan); background: var(--equipment); }
-.toolbar { justify-content: space-between; margin-bottom: 20px; }
+.toolbar { justify-content: space-between; align-items: flex-end; margin-bottom: 20px; }
 .toolbar label, .filters label { display: grid; gap: 8px; font-size: 13px; color: var(--secondary); min-width: 0; }
 .search { flex: 1; min-width: 180px; }
 .toolbar input { width: 100%; }
@@ -27,8 +27,11 @@
 .table .error { color: var(--amber); }
 .state { color: var(--secondary); font-size: 13px; }
 .state[data-ready='true'] { color: var(--cyan); }
+.usage { font-variant-numeric: tabular-nums; }
+.usage > span { font-size: 13px; }
 .rowActions { white-space: nowrap; }
 .rowActions button + button { margin-left: 8px; }
+.rowActions .iconAction { width: 44px; height: 44px; padding: 0; }
 .pagination { justify-content: space-between; padding-block: 16px; color: var(--secondary); font-size: 13px; }
 .pagination span { margin-right: auto; }
 .empty { padding: 36px 20px; border: 1px dashed var(--edge); border-radius: 12px; text-align: center; color: var(--secondary); }

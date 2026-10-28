@@ -80,10 +80,6 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
                       Idioma
                       <input value={metadata.language ?? ''} onChange={event => set('language', event.target.value)} placeholder='Sin especificar' />
                     </label>
-                    <label>
-                      Interpretación
-                      <input value={metadata.style ?? ''} onChange={event => set('style', event.target.value)} placeholder='Sin especificar' />
-                    </label>
                   </>
                 )
               : (
@@ -112,6 +108,19 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
             </label>
           ))}
         </fieldset>
+        <section aria-label='Uso en sala'>
+          <h3>Uso en sala</h3>
+          <dl className={styles.technical}>
+            <dt>Total de reproducciones</dt>
+            <dd>{resource.usage?.total ?? 0}</dd>
+            <dt>Esta jornada</dt>
+            <dd>{resource.usage?.currentDay ?? 0}</dd>
+            <dt>Última reproducción</dt>
+            <dd>{resource.usage?.lastStartedAt ? new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', dateStyle: 'short', timeStyle: 'short' }).format(resource.usage.lastStartedAt) : 'Sin registros'}</dd>
+          </dl>
+          <p className={styles.help}>Solo inicios confirmados en la sala; las escuchas de prueba no cuentan.</p>
+          {resource.kind !== 'voice' && <p className={styles.help}>El registro individual de efectos y ambientes comienza con esta versión. Un ambiente continuo cuenta una vez, no por cada tramo.</p>}
+        </section>
         <details>
           <summary>Información del archivo</summary>
           <dl className={styles.technical}>

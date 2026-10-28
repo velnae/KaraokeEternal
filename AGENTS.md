@@ -23,3 +23,11 @@ layouts. For player/audio lifecycle changes, test both development (React
 StrictMode) and production. Report actual checks and any untested behavior.
 
 Keep the vendored skill unchanged; document project conventions here.
+
+## Expressive animator audio — project skill
+
+For ElevenLabs v4 animator scripts, emotion/audio tags, Il Gatto welcomes or
+voice-generation integration, load `.opencode/skills/elevenlabs-animator/SKILL.md`.
+Its local references distinguish provider capabilities from project limits and
+include a copy-ready welcome example. A script suggestion does not authorize
+generation or public playback; follow the user's requested operation.

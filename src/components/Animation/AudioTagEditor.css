@@ -1,0 +1,17 @@
+.editor { position: relative; margin-top: 8px; }
+.editor .mirror, .editor textarea.input { padding: 12px; border: 1px solid var(--edge); border-radius: 8px; font: inherit; font-size: 16px; line-height: 1.5; letter-spacing: normal; white-space: pre-wrap; overflow-wrap: break-word; tab-size: 4; }
+.mirror { position: absolute; inset: 0; pointer-events: none; overflow: hidden; background: var(--stage); color: var(--lyrics); }
+.mirror mark { color: var(--cyan); background: #17363e; border-radius: 3px; }
+.editor textarea.input { position: relative; display: block; width: 100%; min-height: 144px; resize: vertical; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--lyrics); }
+.input::selection { background: #76e0ec44; }
+.suggestions { margin-top: 8px; }
+.suggestions h4 { margin: 12px 0 8px; color: var(--secondary); font-size: 13px; font-weight: 500; }
+.suggestions p { color: var(--secondary); font-size: 13px; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tags button { min-height: 44px; padding: 6px 10px; border: 1px solid var(--edge); border-radius: 8px; color: var(--cyan); background: var(--stage); }
+.tags button:hover { border-color: var(--cyan); }
+.tags code { font-family: inherit; font-size: 13px; }
+@media (forced-colors: active) {
+  .mirror { display: none; }
+  .editor textarea.input { color: CanvasText; -webkit-text-fill-color: CanvasText; caret-color: CanvasText; }
+}

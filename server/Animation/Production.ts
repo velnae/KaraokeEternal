@@ -14,6 +14,7 @@ import type { AudioProvider } from './AudioProvider.js'
 import { prepareAudio, AudioValidationError } from './AudioPreparation.js'
 import { completeResource, createResource, getResource, prepareResource, resourceDTO, validateMetadata } from './Resources.js'
 import { generationKey } from './generationKey.js'
+import { DEFAULT_ANIMATOR_VOICE_ID, normalizeTaggedText, validAudioTagSyntax, withoutAudioTags, VOICE_SCRIPT_LIMIT } from '../../shared/audioTags.js'
 
 const run = promisify(execFile)
 type StoredJob = Omit<GenerationJob, 'config'> & { configJSON: string, filename: string | null, checksum: string | null }
@@ -31,7 +32,7 @@ export interface ProductionOptions {
 }
 export const productionOptions = (): ProductionOptions => ({
   key: process.env.KES_ELEVENLABS_API_KEY ?? '', baseUrl: process.env.KES_ELEVENLABS_BASE_URL,
-  voiceId: process.env.KES_ELEVENLABS_VOICE_ID ?? '', model: process.env.KES_ELEVENLABS_MODEL ?? 'eleven_v4',
+  voiceId: process.env.KES_ELEVENLABS_VOICE_ID || DEFAULT_ANIMATOR_VOICE_ID, model: process.env.KES_ELEVENLABS_MODEL ?? 'eleven_v4',
   characterLimit: positive(process.env.KES_ELEVENLABS_CHARACTER_LIMIT, 10000), effectSecondsLimit: positive(process.env.KES_ELEVENLABS_EFFECT_SECONDS_LIMIT, 300),
   pricePerThousandCharacters: process.env.KES_ELEVENLABS_PRICE_PER_1K_CHARS ? positive(process.env.KES_ELEVENLABS_PRICE_PER_1K_CHARS, 0) : null,
   pricePerEffectSecond: process.env.KES_ELEVENLABS_PRICE_PER_EFFECT_SECOND ? positive(process.env.KES_ELEVENLABS_PRICE_PER_EFFECT_SECOND, 0) : null,
@@ -50,7 +51,7 @@ export class CatalogProduction {
   private uploads = new Set<Promise<unknown>>()
 
   constructor (private directory: string, private options: ProductionOptions, private onPublished: (roomId: number) => void = () => {}, providers?: AudioProvider[]) {
-    this.providers = new Map((providers ?? [new ElevenLabs(options.key, options.baseUrl, options.model)]).map(provider => [provider.capabilities.id, provider] as const))
+    this.providers = new Map((providers ?? [new ElevenLabs(options.key, options.baseUrl, options.model, options.voiceId || DEFAULT_ANIMATOR_VOICE_ID)]).map(provider => [provider.capabilities.id, provider] as const))
   }
 
   capabilities () {
@@ -137,16 +138,19 @@ export class CatalogProduction {
     const providerId = input.providerId ?? 'elevenlabs'
     const provider = this.providers.get(providerId)
     if (!provider?.capabilities.configured || !provider.capabilities.kinds.includes(kind)) throw new Error('El proveedor no admite este tipo de audio.')
-    const text = typeof input.text === 'string' ? input.text.normalize('NFC').replace(/\s+/g, ' ').trim() : ''
+    const tagged = kind === 'voice' && provider.capabilities.audioTags
+    const text = typeof input.text === 'string' ? tagged ? normalizeTaggedText(input.text) : input.text.normalize('NFC').replace(/\s+/g, ' ').trim() : ''
     const title = typeof input.title === 'string' ? input.title.trim() : ''
-    if (!title || title.length > 80 || !text || text.length > (kind === 'voice' ? 220 : 450)) throw new Error('Revise el nombre y el texto del audio.')
-    if (/[<>[\]]/.test(text) || [...text].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) throw new Error('Use texto sin etiquetas de motor ni HTML.')
+    if (!title || title.length > 80 || !text || text.length > (tagged ? VOICE_SCRIPT_LIMIT : kind === 'voice' ? 220 : 450)) throw new Error('Revise el nombre y el texto del audio.')
+    if (tagged && withoutAudioTags(text).length > 220) throw new Error('Use hasta 220 caracteres de texto hablado, además de las etiquetas.')
+    if (/[<>]/.test(text) || [...text].some(char => (char.charCodeAt(0) < 32 && char !== '\n') || char.charCodeAt(0) === 127)) throw new Error('Use texto sin HTML ni SSML.')
+    if (tagged ? !validAudioTagSyntax(text) : /[[\]]/.test(text)) throw new Error(tagged ? 'Revise los corchetes: cada etiqueta debe estar cerrada y tener hasta 120 caracteres.' : 'El proveedor no admite etiquetas de audio en este recurso.')
     if (!['manual', ...VOICE_FAMILIES].includes(input.family)) throw new Error('Uso no válido.')
     if (input.family === 'promotion' && !(Number.isFinite(input.validUntil) && input.validUntil! > Date.now())) throw new Error('Indique una vigencia futura.')
-    if (kind === 'voice' && !provider.capabilities.styles.includes(input.style)) throw new Error('Interpretación no compatible.')
+    if (kind === 'voice' && providerId !== 'elevenlabs' && input.style && !provider.capabilities.styles.includes(input.style)) throw new Error('Interpretación no compatible.')
     if (input.language && !provider.capabilities.languages.includes(input.language)) throw new Error('Idioma no compatible.')
     if (input.loop && !provider.capabilities.loop) throw new Error('El proveedor no admite bucles.')
-    const voiceId = input.voiceId || this.options.voiceId
+    const voiceId = input.voiceId || provider.capabilities.defaultVoiceId || this.options.voiceId
     if (kind === 'voice' && !/^[a-zA-Z0-9_-]{1,120}$/.test(voiceId)) throw new Error('Seleccione una voz.')
     const durationSeconds = kind === 'voice' ? undefined : input.durationSeconds ?? (kind === 'effect' ? 2 : 8)
     if (durationSeconds !== undefined && (!Number.isFinite(durationSeconds) || durationSeconds < 0.5 || durationSeconds * 1000 > clipDurationLimit(kind))) throw new Error('Duración fuera del límite de este tipo.')
@@ -158,11 +162,11 @@ export class CatalogProduction {
     if (input.category !== undefined && (typeof input.category !== 'string' || input.category.length > 120)) throw new Error('Categoría no válida.')
     return { title, text, kind, providerId, category: input.category, language: kind === 'voice' ? input.language ?? provider.capabilities.languages[0] : undefined,
       loop: kind === 'ambience' ? input.loop ?? provider.capabilities.loop : undefined, parentId: input.parentId, versionRequestId: input.versionRequestId,
-      family: input.family, style: input.style ?? 'warm', voiceId: kind === 'voice' ? voiceId : undefined,
+      family: input.family, style: providerId === 'elevenlabs' ? undefined : input.style, voiceId: kind === 'voice' ? voiceId : undefined,
       durationSeconds, revision, modes: [...new Set(modes)].sort(), validUntil: input.family === 'promotion' ? input.validUntil : undefined,
       model: provider.capabilities.models[kind] ?? '',
-      spokenText: kind === 'voice' && providerId === 'elevenlabs' ? voicePrompt(text, input.style) : text,
-      settings: { stability: input.style === 'warm' ? 0.6 : 0.4, similarity_boost: 0.75 }, processingRevision: 1 }
+      spokenText: kind === 'voice' && providerId !== 'elevenlabs' && input.style ? voicePrompt(text, input.style) : text,
+      settings: { stability: 0.5, similarity_boost: 0.75 }, processingRevision: 1 }
   }
 
   enqueue (roomId: number, userId: number, inputs: ProductionInput[]) {

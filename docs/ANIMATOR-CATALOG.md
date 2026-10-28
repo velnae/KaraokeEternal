@@ -182,3 +182,35 @@ Each inventory E2E run made 22 generation requests to its local simulated
 provider; no real ElevenLabs credits were used. Live-account quality and
 physical venue output were not tested. Minute-long ambience and additional
 real provider integrations remain outside the implemented compatibility scope.
+
+### Follow-up: expressive scripts and public usage
+
+Implemented on baseline `e8e2e9c6`:
+
+- Simplified filters, fixed type-specific columns, accessible icon actions and
+  aligned inventory toolbar. Removed the duplicate player-launch link.
+- Native textarea with a synchronized tag-highlight layer, keyboard tag insertion
+  and documented v4 suggestions. Default voice is Alejandro Duran
+  (`sKgg4MPUDBy69X7iv3fA`), subject to account availability; language is `es`.
+  ElevenLabs scripts are sent without an injected interpretation prefix.
+- `015-audio-usage.sql` and `server/Animation/usage.ts` provide room-scoped,
+  idempotent confirmed-start totals, commercial-day counts and last-use timestamps.
+  Historical first-asset starts are backfilled; secondary effects and ambience
+  are recorded prospectively. `ASSET_STARTED` confirms a sequence's later asset;
+  `ANIMATION_AMBIENCE_STARTED` confirms a finite permit using a stable idle-episode
+  identity. Previews never emit either event.
+- Existing voice repetition rules ignore bracket directions. Effects and new
+  ambience episodes prefer least-used resources; an active ambience episode
+  retains its cursor rather than switching files mid-pause.
+
+Validation: 390 tests in 49 files passed; typecheck, scoped lint and both builds
+passed. Playback E2E passed 16 scenarios in development and production; catalog
+E2E passed 17 in each mode, including preserved tags/default voice, icon actions,
+toolbar alignment, public-use counts, preview exclusion and restart persistence.
+Mobile/desktop editor and usage-table screenshots were inspected.
+
+Evidence: `/tmp/karaoke-phase2-e2e-zjikbM` (development),
+`/tmp/karaoke-phase2-e2e-Qq72NV` (production),
+`/tmp/karaoke-animation-e2e-k04quH` (playback development) and
+`/tmp/karaoke-animation-e2e-a8BZBr` (playback production).
+All generation requests used a local provider fixture, not a live account.

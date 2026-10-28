@@ -13,7 +13,7 @@ export interface ProductionInput {
   text: string
   kind: AudioKind
   family: VoiceFamily | 'manual'
-  style: VoiceStyle
+  style?: VoiceStyle
   voiceId?: string
   durationSeconds?: number
   revision?: number

@@ -1,6 +1,7 @@
 import type { ProductionConfig } from '../../shared/catalogProduction.js'
 import type { AudioProvider } from './AudioProvider.js'
 import type { AudioKind } from '../../shared/animation.js'
+import { DEFAULT_ANIMATOR_VOICE_ID } from '../../shared/audioTags.js'
 
 export class ProviderError extends Error {
   constructor (message: string, public uncertain: boolean) { super(message) }
@@ -44,10 +45,11 @@ async function rejectionDetail (response: Response): Promise<string | undefined>
 }
 
 export class ElevenLabs implements AudioProvider {
-  constructor (private key: string, private base = 'https://api.elevenlabs.io', private voiceModel = 'eleven_v4') {}
+  constructor (private key: string, private base = 'https://api.elevenlabs.io', private voiceModel = 'eleven_v4', private defaultVoiceId = DEFAULT_ANIMATOR_VOICE_ID) {}
 
   get capabilities () {
-    return { id: 'elevenlabs', name: 'ElevenLabs', configured: !!this.key, kinds: ['voice', 'effect', 'ambience'] as AudioKind[], models: { voice: this.voiceModel, effect: 'eleven_text_to_sound_v2', ambience: 'eleven_text_to_sound_v2' }, styles: ['warm', 'cheerful', 'celebration'], languages: ['es'], loop: true }
+    return { id: 'elevenlabs', name: 'ElevenLabs', configured: !!this.key, kinds: ['voice', 'effect', 'ambience'] as AudioKind[], models: { voice: this.voiceModel, effect: 'eleven_text_to_sound_v2', ambience: 'eleven_text_to_sound_v2' }, styles: [], languages: ['es'], loop: true,
+      audioTags: ['eleven_v4', 'eleven_v4_turbo', 'eleven_v3'].includes(this.voiceModel), defaultVoiceId: this.defaultVoiceId }
   }
 
   async check (model: string, kind: AudioKind = 'voice') {

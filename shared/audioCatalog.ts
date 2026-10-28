@@ -2,6 +2,12 @@ import type { AudioKind, RoomProfile, VoiceFamily } from './animation.js'
 
 export type ResourceState = 'active' | 'disabled' | 'archived'
 export type PreparationState = 'queued' | 'generating' | 'preparing' | 'ready' | 'failed' | 'uncertain' | 'cancelled'
+export interface AudioUsage {
+  total: number
+  currentDay: number
+  lastStartedAt: number | null
+  businessDate: string
+}
 export interface AudioMetadata {
   text: string
   family: VoiceFamily | 'manual'
@@ -24,6 +30,7 @@ export interface AudioMetadata {
   generationInput?: Record<string, unknown>
 }
 export interface AudioResource {
+  usage?: AudioUsage
   id: string
   roomId: number | null
   kind: AudioKind
@@ -55,6 +62,8 @@ export interface ProviderCapabilities {
   styles: string[]
   languages: string[]
   loop: boolean
+  audioTags?: boolean
+  defaultVoiceId?: string
 }
 export const resourceKindLabels: Record<AudioKind, string> = {
   voice: 'Voz del animador', effect: 'Efectos de apoyo', ambience: 'Ambiente de pausa',

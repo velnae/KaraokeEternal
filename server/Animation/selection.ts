@@ -1,7 +1,8 @@
 import type { AnimationClip, Intervention, RoomProfile, VoiceFamily } from '../../shared/animation.js'
+import { withoutAudioTags } from '../../shared/audioTags.js'
 
 export const profileIntervals: Record<RoomProfile, number> = { dinner: 20 * 60000, mixed: 12 * 60000, party: 8 * 60000 }
-const semanticText = (text: string) => text.normalize('NFC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es')
+const semanticText = (text: string) => withoutAudioTags(text).normalize('NFC').toLocaleLowerCase('es')
 export const heardAt = (row: Intervention) => row.startedAt ?? (row.status === 'UNCERTAIN' && row.startBefore ? row.startBefore - 1000 : 0)
 export const voiceBudget = (history: Intervention[], now: number) => Math.max(0, 120000 - history
   .filter(row => heardAt(row) > now - 600000 && heardAt(row) <= now)

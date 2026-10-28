@@ -10,6 +10,7 @@ import {
 import { catalogClips, catalogVersion } from './catalog.js'
 import { currentSession, operateSession, pendingEvent } from './sessions.js'
 import { profileIntervals, selectAnnouncement, voiceBudget } from './selection.js'
+import { backfillAudioUsage, leastUsedAudio, recordAudioUsage } from './usage.js'
 
 type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[] }
 export interface AnimationIdentity { roomId: number, userId: number, socketId: string }
@@ -87,6 +88,7 @@ export default class Animation {
   }
 
   static initialize (server: Server) {
+    backfillAudioUsage()
     io = server
     owners.clear()
     db.run('UPDATE animationInterventions SET status = CASE WHEN status = \'PENDING\' THEN \'CANCELLED\' ELSE \'UNCERTAIN\' END, finishedAt = ?, reason = \'Servidor reiniciado\' WHERE status IN ' + activeStatuses, [Date.now()])
@@ -328,7 +330,7 @@ export default class Animation {
     const clip = selected.clip
     const sequence = [clip]
     if (family === 'celebration' && prefs.profile !== 'dinner') {
-      const effect = catalogClips(roomId).find(asset => asset.kind === 'effect' && asset.family === 'celebration' && asset.approvedForAuto && asset.modes?.includes(prefs.profile) && owner.readyClips.includes(asset.checksum))
+      const effect = leastUsedAudio(roomId, catalogClips(roomId).filter(asset => asset.kind === 'effect' && asset.family === 'celebration' && asset.approvedForAuto && asset.modes?.includes(prefs.profile) && owner.readyClips.includes(asset.checksum)))
       if (effect && clip.durationMs + effect.durationMs <= voiceBudget(history, now)) sequence.push(effect)
     }
     const id = randomUUID()
@@ -357,7 +359,7 @@ export default class Animation {
       || snapshot.blockedUntil > Date.now() || (snapshot.active && snapshot.active.status !== 'PENDING')
       || snapshot.ambience || !owner.unlocked) return null
     const clips = catalogClips(roomId).filter(clip => clip.kind === 'ambience' && clip.approvedForAuto && clip.modes?.includes(prefs.profile) && owner.readyClips.includes(clip.checksum))
-    const clip = clips.find(clip => clip.id === clipId) ?? clips[0]
+    const clip = clips.find(clip => clip.id === clipId) ?? leastUsedAudio(roomId, clips)
     if (!clip) return null
     if (clip.loop === false && clip.id === clipId && offsetMs >= clip.durationMs) return null
     const offset = Math.max(0, Math.min(clip.durationMs - 1, offsetMs))
@@ -376,12 +378,22 @@ export default class Animation {
     Animation.publish(identity.roomId)
   }
 
-  static event (identity: AnimationIdentity, id: string, epoch: number, event: 'STARTED' | 'ENDED' | 'STOPPED' | 'NOT_STARTED' | 'FAILED') {
+  static ambienceStarted (identity: AnimationIdentity, id: string, runId: string) {
+    const grant = Animation.ambience(identity.roomId)
+    const owner = owners.get(identity.roomId)
+    if (!grant || grant.id !== id || grant.ownerSocketId !== identity.socketId || owner?.socketId !== identity.socketId || owner.epoch !== grant.playerEpoch || !owner.unlocked) throw new Error('Permiso de ambiente no válido.')
+    recordAudioUsage(identity.roomId, `ambience:${runId}`, grant.clip.id, 'ambience', Date.now(), currentSession(identity.roomId)?.sessionId)
+  }
+
+  static event (identity: AnimationIdentity, id: string, epoch: number, event: 'STARTED' | 'ASSET_STARTED' | 'ENDED' | 'STOPPED' | 'NOT_STARTED' | 'FAILED', clipId?: string) {
     const row = db.get<Intervention>('SELECT * FROM animationInterventions WHERE roomId = ? AND interventionId = ?', [identity.roomId, id])
     if (!row || row.ownerSocketId !== identity.socketId || row.playerEpoch !== epoch) throw new Error('El permiso de reproducción no corresponde')
     const now = Date.now()
     if (!['RESERVED', 'PLAYING'].includes(row.status)) return
-    if (event === 'STARTED') {
+    if (event === 'ASSET_STARTED') {
+      if (row.status !== 'PLAYING' || row.stopRequestedAt || now > row.leaseUntil! || owners.get(identity.roomId)?.epoch !== epoch || !interventionAssets(row).slice(1).some(asset => asset.id === clipId)) throw new Error('El audio no corresponde a la intervención activa.')
+      recordAudioUsage(row.roomId, `intervention:${id}`, clipId!, 'intervention', now, row.sessionId)
+    } else if (event === 'STARTED') {
       if (row.status === 'PLAYING') return
       if (row.stopRequestedAt || now > row.startBefore! || owners.get(identity.roomId)?.epoch !== epoch) throw new Error('El permiso de inicio venció')
       const room = Animation.room(identity.roomId)
@@ -392,6 +404,7 @@ export default class Animation {
         throw new Error('El contexto cambió antes del inicio')
       }
       db.run('UPDATE animationInterventions SET status = \'PLAYING\', startedAt = ? WHERE interventionId = ?', [now, id])
+      recordAudioUsage(row.roomId, `intervention:${id}`, row.clipId, 'intervention', now, row.sessionId)
     } else {
       const status = event === 'ENDED' && row.startedAt && !row.stopRequestedAt
         ? 'PLAYED'

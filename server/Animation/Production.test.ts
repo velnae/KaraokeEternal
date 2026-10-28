@@ -116,7 +116,7 @@ describe('catalog production', () => {
     const [job] = production.list(1)
     expect(requests).toHaveLength(1)
     expect(requests[0].url).toContain('/text-to-speech/testvoice')
-    expect(requests[0].body).toMatchObject({ model_id: 'eleven_v4', voice_settings: { stability: 0.6, similarity_boost: 0.75 } })
+    expect(requests[0].body).toMatchObject({ model_id: 'eleven_v4', voice_settings: { stability: 0.5, similarity_boost: 0.75 } })
     expect(requests[0].body).not.toHaveProperty('speed')
     expect(job.status).toBe('published')
     expect(catalogAsset(`generated-${job.jobId}`)).toBeDefined()
@@ -143,15 +143,27 @@ describe('catalog production', () => {
     expect(production.status().usedEffectSeconds).toBe(10)
   })
 
-  it('changes cache keys for profiles and deliberate regenerations', async () => {
-    production.enqueue(1, 1, [input, { ...input, style: 'cheerful' }, { ...input, revision: 1 }])
+  it('changes cache keys for explicit audio tags and deliberate regenerations', async () => {
+    production.enqueue(1, 1, [input, { ...input, text: `[excited] ${input.text}` }, { ...input, revision: 1 }])
     await production.drain()
     expect(requests).toHaveLength(3)
     expect(production.list(1)).toHaveLength(3)
   })
 
+  it('preserves free-form voice tags without injecting a style or displaying tags to the public', async () => {
+    const text = '[excited] ¡Bienvenidos!\n[con voz cálida] Disfruten la noche. [laughs]'
+    const [job] = production.enqueue(1, 1, [{ ...input, text }])
+    await production.drain()
+    expect(requests[0].body.text).toBe(text)
+    expect(requests[0].body.language_code).toBe('es')
+    expect(job.config.style).toBeUndefined()
+    expect(catalogAsset(`generated-${job.jobId}`)?.clip.displayText).toBe('¡Bienvenidos! Disfruten la noche.')
+    expect(() => production.enqueue(1, 1, [{ ...input, text: '[excited Hola' }])).toThrow('corchetes')
+    expect(() => production.enqueue(1, 1, [{ ...input, text: '<break time="1s" /> Hola' }])).toThrow('HTML ni SSML')
+  })
+
   it('rolls back an entire batch when the configured budget is exceeded', () => {
-    options.characterLimit = 60
+    options.characterLimit = input.text.length + 1
     expect(() => production.enqueue(1, 1, [input, { ...input, text: 'Otra frase diferente.' }])).toThrow('límite mensual')
     expect(production.list(1)).toHaveLength(0)
     expect(requests).toHaveLength(0)

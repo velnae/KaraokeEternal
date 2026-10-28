@@ -25,12 +25,14 @@ musical boundaries.
 ## Inventory
 
 The three type tabs have different columns and forms. Search, state filters,
-characteristic filters, sorting and pagination query the complete inventory.
-**Filtros y columnas** exposes additional fields without expanding every row.
+usage/category/profile filters, sorting and pagination query the complete inventory.
+Columns are fixed by resource type. Row actions use play and information icons
+with accessible names and tooltips. The global player-launch control is not
+duplicated inside the animator panel.
 
 | Type | Characteristics |
 | --- | --- |
-| Voice | Spoken text, usage/event, voice, language, interpretation, profiles and promotion expiry |
+| Voice | Tagged script, usage/event, voice, profiles and promotion expiry |
 | Effect | Description, category and profiles |
 | Ambience | Description, category, loop setting and profiles |
 
@@ -53,7 +55,7 @@ without replacing the inventory or upload workflow.
 | Variable | Purpose/default |
 | --- | --- |
 | `KES_ELEVENLABS_API_KEY` | Required for ElevenLabs generation, not uploads or existing local playback |
-| `KES_ELEVENLABS_VOICE_ID` | Optional initial voice; the generation form retrieves compatible account voices |
+| `KES_ELEVENLABS_VOICE_ID` | Optional override; default Alejandro Duran (`sKgg4MPUDBy69X7iv3fA`). The voice must be available in the account. |
 | `KES_ELEVENLABS_MODEL` | Configured speech model, default `eleven_v4`; account availability is checked |
 | `KES_FFMPEG_PATH` | `ffmpeg`; validates/prepares generated and uploaded files |
 | `KES_ELEVENLABS_CHARACTER_LIMIT` | Internal monthly production allowance, default `10000` |
@@ -63,6 +65,59 @@ without replacing the inventory or upload workflow.
 Existing optional price settings remain internal legacy accounting inputs.
 The interface does not show estimates, credits or a consumption dashboard.
 An actual provider rejection or configured limit is shown on the failed request.
+
+## Expressive voice scripts
+
+For Eleven v4, write directions directly in **Texto del audio**, for example:
+
+```text
+[excited] ¡Bienvenidos a la noche de karaoke! [laughs]
+```
+
+Tags are highlighted in cyan. **Etiquetas de voz** offers documented suggestions
+and inserts at the cursor; descriptive custom tags remain possible. There is no
+Interpretación selector or automatically injected emotion. Spanish uses API code
+`es`; accent and delivery depend on the selected voice. The generator does not
+expose a redundant language picker for ElevenLabs.
+
+The script permits up to 1,000 characters including directions, with at most
+220 characters of spoken text; actual generated voice must still fit 10 seconds.
+Directions stay in the generation prompt/cache identity but are stripped from
+public display and semantic repetition comparisons. HTML and SSML are rejected.
+This applies to administrator-authored catalog audio, not unrestricted client
+greetings. Uploaded/legacy metadata is not silently rewritten.
+
+Official sources checked for this change:
+- [Eleven v4 prompting guide](https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices#prompting-eleven-v4)
+- [Text-to-Speech playground FAQ](https://elevenlabs.io/docs/eleven-creative/playground/text-to-speech)
+
+The provider documents tags as descriptive guidance, not an exhaustive enum or
+a guarantee that every voice performs every instruction identically.
+
+## Read-only usage history
+
+**Uso en sala** shows confirmed public starts and the last start time. Resource
+details include the current commercial day's count. Previews, generation,
+reservations and requests cancelled before starting never increase these counts.
+
+Migration `015-audio-usage.sql` adds the persistent room-scoped ledger. Confirmed
+historical first-asset starts are imported idempotently. Historical secondary
+effects and ambience were not individually acknowledged, so their tracking starts
+with this version rather than inventing retrospective counts.
+
+Effects register when their own segment starts. Ambience counts once per idle
+episode across renewable permits and no-op announcement probes; real music,
+speech, disable or loss of authority ends the episode. Interrupted audio with a
+confirmed start still counts as heard. Uncertain unconfirmed starts remain
+conservative scheduling evidence, but are not reported as confirmed usage.
+
+Voice selection retains its persistent semantic/history rules, now ignoring tag
+differences. Effect/ambience selection favours fewer uses in the current jornada,
+then fewer historical uses and older last use. Counts are never cleared at
+midnight or by opening another session; jornada dates follow the configured
+Lima cutoff. The UI cannot edit these statistics.
+
+## Audio preparation
 
 Voice generation uses the configured speech model; effects/ambience use the
 ElevenLabs Sound Effects endpoint. Only compatible capabilities appear in each
