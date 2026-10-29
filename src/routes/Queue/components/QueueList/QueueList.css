@@ -31,3 +31,8 @@
   color: var(--color-gray-7);
   text-align: center;
 }
+
+.queueActions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0; }
+.queueActions > section { padding: 0; min-width: 0; max-width: 100%; }
+.greetingControl { flex-shrink: 0; width: auto; min-height: 44px; padding: 10px 12px; color: var(--secondary); background: var(--equipment); border: 1px solid var(--edge); border-radius: 10px; font-size: 13px; }
+.greetingControl[aria-pressed='true'] { color: var(--amber); border-color: var(--amber); }

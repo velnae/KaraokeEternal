@@ -8,6 +8,8 @@ import { youtubeSongSource } from '../SongSources/YouTubeSongSource.js'
 import type { ResolvedSong } from '../../shared/songSource.js'
 import handlers from './socket.js'
 import Queue from './Queue.js'
+import Rooms from '../Rooms/Rooms.js'
+import Greetings from '../Greetings/Greetings.js'
 
 const song: ResolvedSong = {
   source: 'YOUTUBE', sourceId: 'AAAAAAAAAAA', externalId: 'AAAAAAAAAAA', localSongId: null,
@@ -25,6 +27,7 @@ describe('durable participant request receipts', () => {
     db.run(`INSERT INTO rooms (roomId, name, status, data) VALUES (1, 'Test', 'open', '{"prefs":{"queue":{"maxPendingPerParticipant":1,"approvalMode":"MANUAL"}}}')`)
     db.run(`INSERT INTO users (userId, username, password, name, roleId) VALUES (1, 'test', '', 'Test', 3), (2, 'other', '', 'Other', 3)`)
     vi.spyOn(youtubeSongSource, 'resolve').mockResolvedValue(song)
+    vi.spyOn(Rooms, 'getPlayerStatus').mockReturnValue(null)
   })
   afterEach(() => {
     close()
@@ -44,6 +47,25 @@ describe('durable participant request receipts', () => {
     expect(ack.mock.calls[1][0].payload.queueId).toBe(receipt.queueId)
     expect(youtubeSongSource.resolve).toHaveBeenCalledOnce()
     expect(Queue.countPending(1, 1)).toBe(1)
+  })
+
+  it('atomically stores one attributed greeting and returns it on duplicate delivery', async () => {
+    const action = { payload: { ...request('request-greeting-01').payload, greeting: { recipient: 'Rocío', message: 'Feliz cumpleaños' } } }
+    const ack = vi.fn()
+    await Promise.all([handlers[QUEUE_ADD](socket, action, ack), handlers[QUEUE_ADD](socket, action, ack)])
+    expect(ack.mock.calls.map(([reply]) => reply.payload.greetingId)).toEqual([1, 1])
+    expect(Greetings.items(1)).toMatchObject([{ sender: 'Test', tableLabel: null, recipient: 'Rocío', status: 'QUEUED' }])
+    expect(Queue.countPending(1, 1)).toBe(1)
+  })
+
+  it('rolls back an invalid greeting without leaving a partially accepted music request', async () => {
+    const action = { payload: { ...request('request-greeting-01').payload, greeting: { recipient: '', message: '' } } }
+    await expect(handlers[QUEUE_ADD](socket, action, vi.fn())).rejects.toThrow('mensaje')
+    expect(Queue.get(1).result).toHaveLength(0)
+    expect(Greetings.items(1)).toHaveLength(0)
+    const ack = vi.fn()
+    await handlers[QUEUE_ADD](socket, request('request-greeting-01'), ack)
+    expect(ack.mock.calls[0][0].payload.status).toBe('PENDING_APPROVAL')
   })
 
   it('never recreates a cancelled request when the original acknowledgment was lost', async () => {

@@ -13,6 +13,25 @@ const fixture = () => {
 }
 
 describe('mobile request confirmation', () => {
+  it('freezes a greeting through an uncertain acknowledgment and reload', async () => {
+    const { controller, options, send } = fixture()
+    const greeting = { recipient: 'Rocío', message: 'Feliz cumpleaños' }
+    send.mockRejectedValueOnce(new Error('timeout'))
+    await controller.request('video', 'Song', greeting)
+    const restored = createRequestController(options)
+    expect(restored.getSnapshot().video.greeting).toEqual(greeting)
+    await restored.request('video', 'Song', { recipient: '', message: 'Changed' })
+    expect(send.mock.calls.map(call => call[2])).toEqual([greeting, greeting])
+  })
+
+  it('allows a rejected draft to be retried without a greeting', async () => {
+    const { controller, send } = fixture()
+    send.mockResolvedValueOnce({ error: 'La ventana cerró' })
+    await controller.request('video', 'Song', { recipient: '', message: 'Hello' })
+    await controller.request('video', 'Song', null)
+    expect(send.mock.calls[1][2]).toBeUndefined()
+    expect(controller.getSnapshot().video.phase).toBe('confirmed')
+  })
   it('blocks rapid double taps and confirms only after a matching acknowledgment', async () => {
     const { controller, send } = fixture()
     const pending = controller.request('video', 'Song')
@@ -30,7 +49,7 @@ describe('mobile request confirmation', () => {
     expect(controller.getSnapshot().video.phase).toBe('uncertain')
     const restored = createRequestController({ ...options, makeId: () => 'must-not-create-another' })
     await restored.request('video', 'Song')
-    expect(send.mock.calls).toEqual([['video', 'request-0000000001'], ['video', 'request-0000000001']])
+    expect(send.mock.calls).toEqual([['video', 'request-0000000001', undefined], ['video', 'request-0000000001', undefined]])
     expect(restored.getSnapshot().video.phase).toBe('confirmed')
   })
 

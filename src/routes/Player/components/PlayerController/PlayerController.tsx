@@ -8,6 +8,8 @@ import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, player
 import store from 'store/store'
 import socket from 'lib/socket'
 import useAnimationPlayer from '../Animation/useAnimationPlayer'
+import useGreetingPlayer from '../Animation/useGreetingPlayer'
+import greetingStyles from 'components/Greetings/Greetings.css'
 import Button from 'components/Button/Button'
 import animationStyles from 'components/Animation/Animation.css'
 import getRoomPrefs from '../../selectors/getRoomPrefs'
@@ -41,6 +43,9 @@ const PlayerController = (props: PlayerControllerProps) => {
   const advancing = useRef(false)
   const mounted = useRef(true)
   const animation = useAnimationPlayer()
+  const greetings = useGreetingPlayer()
+  const greetingsRef = useRef(greetings)
+  greetingsRef.current = greetings
   const animationRef = useRef(animation)
   animationRef.current = animation
 
@@ -97,7 +102,11 @@ const PlayerController = (props: PlayerControllerProps) => {
     }
     try {
       await animationRef.current.stopAmbience()
-      if (announce && controlVersion === animationRef.current.controlVersion()) {
+      const upcoming = selection()
+      const greeted = upcoming && controlVersion === animationRef.current.controlVersion()
+        ? await greetingsRef.current.attempt(upcoming.queueId)
+        : false
+      if (!greeted && announce && controlVersion === animationRef.current.controlVersion()) {
         await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, selection()?.queueId ?? null)
       }
       if (!mounted.current) return
@@ -267,6 +276,14 @@ const PlayerController = (props: PlayerControllerProps) => {
         height={props.height}
       />
       {animation.text && <div className={animationStyles.overlay} role='status' data-testid='announcement-overlay'><p>{animation.text}</p></div>}
+      {greetings.active && (
+        <section key={greetings.active.greetingId} ref={greetings.confirmMounted} className={greetingStyles.screen} role='status' data-testid='greeting-overlay' data-greeting-id={greetings.active.greetingId}>
+          {greetings.active.recipient && <h2 translate='no'>{`Para ${greetings.active.recipient}`}</h2>}
+          <p translate='no'>{greetings.active.message}</p>
+          <footer translate='no'>{`De ${greetings.active.sender}`}</footer>
+        </section>
+      )}
+      {greetings.error && <p className={greetingStyles.playerNotice} role='status'>{greetings.error}</p>}
       {animation.blocked && !animation.busy && <div className={animationStyles.overlay} role='status'><p>Esperando el cierre de la intervención anterior…</p></div>}
       {animation.snapshot?.prefs.enabled && !animation.unlocked && (
         <div className={animationStyles.unlock}>

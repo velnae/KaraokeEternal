@@ -16,10 +16,10 @@ export function useSongRequests (origin: 'PARTICIPANT' | 'HOUSE' = 'PARTICIPANT'
     },
     key: `karaoke-requests:${roomId}:${userId}${origin === 'HOUSE' ? ':house' : ''}`,
     makeId: () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join(''),
-    send: async (sourceId, requestId) => {
+    send: async (sourceId, requestId, greeting) => {
       if (!socket.connected) throw new Error('offline')
       const response = await socket.timeout(12000).emitWithAck('action', {
-        type: QUEUE_ADD, payload: { source: 'YOUTUBE', sourceId, origin, requestId },
+        type: QUEUE_ADD, payload: { source: 'YOUTUBE', sourceId, origin, requestId, ...(greeting ? { greeting } : {}) },
       })
       const account = store.getState().user
       if (account.userId === userId && account.roomId === roomId && response.payload?.queue) {

@@ -1,0 +1,38 @@
+-- Up
+CREATE TABLE greetingControls (
+  roomId INTEGER PRIMARY KEY REFERENCES rooms(roomId) ON DELETE CASCADE,
+  paused INTEGER NOT NULL DEFAULT 0 CHECK(paused IN (0,1))
+);
+CREATE TABLE greetingTurns (
+  turnKey INTEGER PRIMARY KEY,
+  roomId INTEGER NOT NULL REFERENCES rooms(roomId) ON DELETE CASCADE,
+  ownerSocketId TEXT NOT NULL,
+  untilAt INTEGER NOT NULL,
+  finished INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE greetingTurnItems (
+  queueId INTEGER PRIMARY KEY REFERENCES queue(queueId) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  turnKey INTEGER NOT NULL REFERENCES greetingTurns(turnKey) ON DELETE CASCADE
+);
+CREATE TABLE greetings (
+  greetingId INTEGER PRIMARY KEY AUTOINCREMENT,
+  queueId INTEGER NOT NULL UNIQUE REFERENCES queue(queueId) ON DELETE CASCADE,
+  roomId INTEGER NOT NULL REFERENCES rooms(roomId) ON DELETE CASCADE,
+  userId INTEGER NOT NULL REFERENCES users(userId) ON DELETE CASCADE,
+  sender TEXT NOT NULL,
+  tableLabel TEXT,
+  recipient TEXT NOT NULL,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'QUEUED' CHECK(status IN ('QUEUED','RESERVED','DISPLAYING','DISPLAYED','CANCELLED','REMOVED','SKIPPED','INTERRUPTED')),
+  reason TEXT,
+  createdAt INTEGER NOT NULL,
+  startedAt INTEGER,
+  turnKey INTEGER REFERENCES greetingTurns(turnKey) ON DELETE SET NULL
+);
+CREATE INDEX greetings_room ON greetings(roomId,status);
+-- Down
+DROP TABLE greetings;
+DROP TABLE greetingTurnItems;
+DROP TABLE greetingTurns;
+DROP TABLE greetingControls;

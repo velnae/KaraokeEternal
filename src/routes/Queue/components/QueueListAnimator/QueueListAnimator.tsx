@@ -32,6 +32,8 @@ const QueueListAnimator = ({
   queueItems,
 }: QueueListAnimatorProps) => {
   const headerHeight = useAppSelector(state => state.ui.headerHeight)
+  // Playback ticks and greeting updates must not restart card animations.
+  const orderKey = queueItems.map(item => item.key).join('|')
 
   // Flipped applies data-* props to its child; using a div wrapper
   // here so QueueItems need not be concerned with rendering them
@@ -57,7 +59,7 @@ const QueueListAnimator = ({
     <Flipper
       applyTransformOrigin={false}
       decisionData={headerHeight}
-      flipKey={queueItems}
+      flipKey={orderKey}
     >
       {items}
     </Flipper>

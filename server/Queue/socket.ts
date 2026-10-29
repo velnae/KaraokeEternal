@@ -19,6 +19,8 @@ import {
 } from '../../shared/queueLifecycle.js'
 import { getSongSource } from '../SongSources/index.js'
 import { cleanupQueue, cleanupReceipt } from './cleanup.js'
+import Greetings from '../Greetings/Greetings.js'
+import { db } from '../lib/Database.js'
 
 // ------------------------------------
 // Action Handlers
@@ -64,7 +66,7 @@ const ACTION_HANDLERS = {
       const matches = receipt.source === source && receipt.origin === origin
         && (source === 'YOUTUBE' ? receipt.externalId : String(receipt.songId)) === sourceId
       acknowledge(matches
-        ? { type: QUEUE_ADD + '_SUCCESS', payload: { requestId, queueId: receipt.queueId, status: receipt.status, queue: Queue.get(roomId) } }
+        ? { type: QUEUE_ADD + '_SUCCESS', payload: { requestId, queueId: receipt.queueId, status: receipt.status, queue: Queue.get(roomId), greetingId: receipt.greetingId } }
         : { type: QUEUE_ADD + '_ERROR', error: 'El identificador ya pertenece a otro pedido' })
       return true
     }
@@ -143,17 +145,26 @@ const ACTION_HANDLERS = {
     }
 
     const tableContext = participation(sock.user, { ...room, status: room.status ?? 'open' })
-    Queue.add({
-      ...(tableContext.tableId ? { tableContext } : {}),
-      roomId,
-      song,
-      userId: sock.user.userId,
-      origin,
-      ...(requestId ? { requestId } : {}),
-      status: origin === 'PARTICIPANT' && !sock.user.isAdmin && queuePrefs.approvalMode === 'MANUAL'
-        ? 'PENDING_APPROVAL'
-        : 'APPROVED',
-    })
+    if (payload.greeting !== undefined && (!requestId || origin !== 'PARTICIPANT')) throw new Error('El saludo debe acompañar a un pedido de participante')
+    if (payload.greeting !== undefined) db.exec('SAVEPOINT request_greeting')
+    try {
+      const queueId = Queue.add({
+        ...(tableContext.tableId ? { tableContext } : {}),
+        roomId,
+        song,
+        userId: sock.user.userId,
+        origin,
+        ...(requestId ? { requestId } : {}),
+        status: origin === 'PARTICIPANT' && !sock.user.isAdmin && queuePrefs.approvalMode === 'MANUAL'
+          ? 'PENDING_APPROVAL'
+          : 'APPROVED',
+      })
+      if (payload.greeting !== undefined) Greetings.attach(sock.user, queueId, payload.greeting, Rooms.getPlayerStatus(sock.server, roomId) ?? {})
+      if (payload.greeting !== undefined) db.exec('RELEASE request_greeting')
+    } catch (error) {
+      if (payload.greeting !== undefined) db.exec('ROLLBACK TO request_greeting; RELEASE request_greeting')
+      throw error
+    }
 
     // success
     if (!acknowledgeExisting()) acknowledge({ type: QUEUE_ADD + '_SUCCESS' })

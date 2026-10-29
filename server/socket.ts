@@ -6,6 +6,8 @@ import LibrarySocket from './Library/socket.js'
 import PlayerSocket from './Player/socket.js'
 import AnimationSocket from './Animation/socket.js'
 import Animation from './Animation/Animation.js'
+import Greetings from './Greetings/Greetings.js'
+import GreetingsSocket from './Greetings/socket.js'
 import Prefs from './Prefs/Prefs.js'
 import PrefsSocket from './Prefs/socket.js'
 import Rooms from './Rooms/Rooms.js'
@@ -37,6 +39,7 @@ const handlers = {
   ...QueueSocket,
   ...PlayerSocket,
   ...AnimationSocket,
+  ...GreetingsSocket,
   ...PrefsSocket,
   ...RoomsSocket,
   ...SongSourcesSocket,
@@ -99,6 +102,7 @@ export default function (io, jwtKey) {
       )
 
       const wasAuthoritativePlayer = Rooms.isAuthoritativePlayer(sock)
+      if (wasAuthoritativePlayer) Greetings.interrupt(sock.user.roomId, 'La pantalla se desconectó', sock.id)
       if (wasAuthoritativePlayer) Animation.disconnect(sock.user.roomId, sock.id)
       sock._isPlayerAuthoritative = false
 
@@ -138,6 +142,9 @@ export default function (io, jwtKey) {
 
       try {
         if (!checkAdmission()) return acknowledge?.({ type: type + _ERROR, error: 'Escanee el QR de su mesa para continuar' })
+        if (sock.user.isAdmin && ['server/PLAYER_REQ_NEXT', 'server/PLAYER_REQ_REPLAY', 'server/PLAYER_REQ_PAUSE', 'server/PLAYER_REQ_PLAY', 'server/PLAYER_EMIT_LEAVE'].includes(type)) {
+          Greetings.interrupt(sock.user.roomId, 'Orden musical del operador')
+        }
         await handlers[type](sock, action, acknowledge)
       } catch (err) {
         log.error(err)

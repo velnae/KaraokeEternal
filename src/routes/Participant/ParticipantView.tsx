@@ -24,6 +24,8 @@ import { useYouTubeSearch } from './useYouTubeSearch'
 import SongArtwork from 'components/SongArtwork/SongArtwork'
 import theme from 'styles/karaokeTheme.css'
 import styles from './ParticipantView.css'
+import QueueGreeting from 'components/Greetings/QueueGreeting'
+import useGreetings from 'components/Greetings/useGreetings'
 import { youtubeSearchCanRetry, youtubeSearchError } from 'shared/youtubeSearch'
 
 const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | 'room' }) => {
@@ -42,6 +44,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
   const [cancelling, setCancelling] = useState<number | null>(null)
   const [cancelMessage, setCancelMessage] = useState('')
   const { controller, receipts } = useSongRequests()
+  const greetings = useGreetings(page === 'requests')
   const unsettled = Object.values(receipts).filter(receipt => receipt.phase !== 'confirmed')
 
   useEffect(() => {
@@ -80,7 +83,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
       ? estimatedWait(upcoming.slice(0, index), status.queueId, status.position)
       : null
     return (
-      <article key={item.queueId} className={styles.card} data-status={item.status}>
+      <article key={item.queueId} className={styles.card} data-status={item.status} data-queue-id={item.queueId}>
         <div className={styles.details}>
           <div className={styles.cardStatus}>
             <span className={styles.badge}>{requestStatusLabels[item.status]}</span>
@@ -95,10 +98,19 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             </div>
           </div>
           {personal && item.status === 'FAILED' && <Link className={styles.textAction} to='/library'>Buscar otra versión</Link>}
+          {personal && greetings.byQueue[item.queueId] && (
+            <QueueGreeting
+              greeting={greetings.byQueue[item.queueId]}
+              descriptionId={`request-title-${item.queueId}`}
+              paused={greetings.snapshot?.paused}
+              busy={greetings.busy}
+              onRemove={greetings.byQueue[item.queueId].status === 'QUEUED' ? () => void greetings.execute('remove', { greetingId: greetings.byQueue[item.queueId].greetingId }) : undefined}
+            />
+          )}
         </div>
         {personal && isPendingRequest(item) && (
           <Button className={styles.cancel} aria-label='Cancelar pedido' aria-describedby={`request-title-${item.queueId}`} disabled={!connected || cancelling !== null} onClick={() => { void cancel(item) }}>
-            {cancelling === item.queueId ? 'Cancelando…' : 'Cancelar'}
+            {cancelling === item.queueId ? 'Cancelando…' : 'Cancelar pedido'}
           </Button>
         )}
       </article>
@@ -179,7 +191,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
                 active={active}
                 connected={connected}
                 blocker={!connected ? 'Sin conexión. Espera a reconectar para pedir la canción.' : !ready ? 'Actualizando la sala. Espera un momento.' : room.status === 'closed' ? 'Sala cerrada. Consulta al organizador.' : !canRequest ? 'Límite alcanzado. Revisa Mis pedidos antes de agregar otra canción.' : null}
-                onRequest={() => { void controller.request(result.sourceId, result.title) }}
+                onRequest={(greeting) => { void controller.request(result.sourceId, result.title, greeting) }}
               />
             )
           })}
@@ -189,6 +201,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
       {page === 'requests' && (
         <>
           {cancelMessage && <p role='status'>{cancelMessage}</p>}
+          {connected && greetings.error && <p role='alert' className={styles.notice}>{greetings.error}</p>}
           {unsettled.map(receipt => (
             <article key={receipt.requestId} className={styles.card}>
               <h2 translate='no'>{receipt.title}</h2>

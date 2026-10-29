@@ -14,10 +14,16 @@ import { showErrorMessage } from 'store/modules/ui'
 import { approveRequest, queueSong, queueYouTubeSong, rejectRequest, removeItem } from '../../modules/queue'
 import type { QueueItemOrigin, QueueItemStatus, SongSource } from 'shared/queueLifecycle'
 import styles from './QueueItem.css'
+import QueueGreeting from 'components/Greetings/QueueGreeting'
+import type { Greeting } from 'shared/greetings'
 
 const LONG_PRESS_THRESHOLD_MS = 700
 
 interface QueueItemProps {
+  greeting?: Greeting
+  greetingsPaused?: boolean
+  greetingBusy?: boolean
+  onRemoveGreeting?: () => void
   tableLabelSnapshot?: string | null
   artist: string
   errorMessage: string
@@ -53,6 +59,10 @@ interface QueueItemProps {
 }
 
 const QueueItem = ({
+  greeting,
+  greetingsPaused,
+  greetingBusy = false,
+  onRemoveGreeting,
   tableLabelSnapshot,
   artist,
   errorMessage,
@@ -338,6 +348,7 @@ const QueueItem = ({
             />
           )}
         </Buttons>
+        {greeting && <QueueGreeting greeting={greeting} descriptionId={`queue-title-${queueId}`} paused={greetingsPaused} busy={greetingBusy} onRemove={onRemoveGreeting} />}
       </div>
     </div>
   )

@@ -12,6 +12,7 @@
 .details h2 { margin: 0 0 6px; font-size: 17px; line-height: 1.4; color: var(--lyrics); overflow-wrap: anywhere; }
 .details p { margin: 0 0 6px; color: var(--secondary); font-size: 13px; overflow-wrap: anywhere; }
 .resultActions { display: flex; align-items: center; gap: 8px; }
+.result[data-participant='true'] .resultActions { grid-column: 1 / -1; justify-content: flex-end; }
 .primaryAction { min-width: 0; }
 .moreButton { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border: 1px solid var(--edge); border-radius: 8px; background: var(--stage); color: var(--secondary); cursor: pointer; }
 .moreButton[aria-expanded='true'], .moreButton:hover { color: var(--cyan); border-color: var(--cyan); }

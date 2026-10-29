@@ -105,7 +105,7 @@ describe('participant pending request limit', () => {
       entities: { 1: { prefs: { queue: { maxPendingPerParticipant: 2 } } } },
     })
     vi.spyOn(Queue, 'countPending').mockReturnValue(2)
-    const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
+    const add = vi.spyOn(Queue, 'add').mockReturnValue(1)
     const acknowledge = vi.fn()
     const { socket } = createSocket()
 
@@ -127,7 +127,7 @@ describe('participant pending request limit', () => {
     })
     vi.spyOn(Queue, 'countPending').mockReturnValue(1)
     vi.spyOn(Queue, 'get').mockReturnValue(queue)
-    const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
+    const add = vi.spyOn(Queue, 'add').mockReturnValue(1)
     const acknowledge = vi.fn()
     const { socket, emit } = createSocket()
 
@@ -157,7 +157,7 @@ describe('participant pending request limit', () => {
     })
     const countPending = vi.spyOn(Queue, 'countPending')
     vi.spyOn(Queue, 'get').mockReturnValue(queue)
-    const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
+    const add = vi.spyOn(Queue, 'add').mockReturnValue(1)
     const acknowledge = vi.fn()
     const { socket } = createSocket({ isAdmin: true })
 
@@ -176,7 +176,7 @@ describe('participant pending request limit', () => {
     })
     vi.spyOn(Queue, 'countPending').mockReturnValue(0)
     vi.spyOn(Queue, 'get').mockReturnValue(mockQueue([]))
-    const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
+    const add = vi.spyOn(Queue, 'add').mockReturnValue(1)
     const { socket } = createSocket()
 
     await handler(socket, { payload: { songId: 99 } }, vi.fn())
@@ -198,7 +198,7 @@ describe('participant pending request limit', () => {
       .mockReturnValue({ result: [1], entities: { 1: { prefs: { queue: { approvalMode: 'AUTO' } } } } })
     vi.spyOn(Queue, 'countPending').mockReturnValue(0)
     vi.spyOn(Queue, 'get').mockReturnValue(mockQueue([]))
-    const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
+    const add = vi.spyOn(Queue, 'add').mockReturnValue(1)
     const moderate = vi.spyOn(Queue, 'moderate').mockImplementation(() => false)
     const { socket } = createSocket()
 
@@ -219,7 +219,7 @@ describe('house and operator creation', () => {
     vi.spyOn(Rooms, 'validate').mockResolvedValue(true)
     vi.spyOn(Rooms, 'get').mockReturnValue({ result: [1], entities: { 1: { prefs: {} } } })
     vi.spyOn(Queue, 'get').mockReturnValue(mockQueue([]))
-    const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
+    const add = vi.spyOn(Queue, 'add').mockReturnValue(1)
     const acknowledge = vi.fn()
     const { socket } = createSocket({ isAdmin: true })
 
@@ -307,7 +307,7 @@ describe('YouTube request creation', () => {
     vi.spyOn(Rooms, 'get').mockReturnValue({ result: [1], entities: { 1: { prefs: { queue: { approvalMode } } } } })
     vi.spyOn(Queue, 'countPending').mockReturnValue(0)
     vi.spyOn(Queue, 'get').mockReturnValue(mockQueue([]))
-    const add = vi.spyOn(Queue, 'add').mockImplementation(() => {})
+    const add = vi.spyOn(Queue, 'add').mockReturnValue(1)
     const acknowledge = vi.fn()
     const { socket } = createSocket()
 

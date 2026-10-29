@@ -15,6 +15,7 @@ import { Link, useSearchParams } from 'react-router'
 import HousePlaylistControl from 'components/Playlists/HousePlaylistControl'
 import QueueMaintenance from '../QueueMaintenance/QueueMaintenance'
 import { isQueueHistoryHidden } from 'shared/queueCleanup'
+import useGreetings from 'components/Greetings/useGreetings'
 
 type QueueFilter = 'queue' | 'pending' | 'house'
 
@@ -29,6 +30,7 @@ const QueueList = () => {
   const starredSongs = useAppSelector(state => ensureState(state.userStars).starredSongs)
   const starCounts = useAppSelector(state => state.starCounts)
   const user = useAppSelector(state => state.user)
+  const greetings = useGreetings(!!user.roomId)
   const waits = useAppSelector(getWaits)
   const [params, setParams] = useSearchParams()
   const view = params.get('view')
@@ -134,6 +136,12 @@ const QueueList = () => {
         starCount={typeof item.songId === 'number' ? starCounts.songs[item.songId] || 0 : 0}
         title={item.title || localSong?.title || ''}
         status={item.status}
+        greeting={greetings.byQueue[qId]}
+        greetingsPaused={greetings.snapshot?.paused}
+        greetingBusy={greetings.busy}
+        onRemoveGreeting={greetings.byQueue[qId] && (user.isAdmin || (isOwner && greetings.byQueue[qId].status === 'QUEUED'))
+          ? () => void greetings.execute('remove', { greetingId: greetings.byQueue[qId].greetingId })
+          : undefined}
         wait={typeof waits[qId] === 'number' ? formatSeconds(waits[qId], true) : undefined} // fuzzy
         // actions
         onMoveClick={handleMoveClick}
@@ -174,7 +182,17 @@ const QueueList = () => {
           </Button>
         </div>
       )}
-      {user.isAdmin && <QueueMaintenance key={`${user.roomId}:${user.userId}`} />}
+      {user.isAdmin && (
+        <div className={styles.queueActions}>
+          <QueueMaintenance key={`${user.roomId}:${user.userId}`} />
+          {(greetings.snapshot?.paused || greetings.snapshot?.items.some(item => ['QUEUED', 'RESERVED', 'DISPLAYING'].includes(item.status))) && (
+            <Button className={styles.greetingControl} disabled={greetings.busy} aria-pressed={greetings.snapshot.paused} onClick={() => void greetings.execute('pause', { paused: !greetings.snapshot?.paused })}>
+              {greetings.snapshot.paused ? 'Reanudar saludos' : 'Pausar saludos'}
+            </Button>
+          )}
+        </div>
+      )}
+      {greetings.error && <p role='alert'>{greetings.error}</p>}
       {user.isAdmin && filter === 'house' && <HousePlaylistControl key={user.roomId} />}
       {user.isAdmin && filter === 'queue' && result.length === 0 && (
         <div className={styles.empty}>

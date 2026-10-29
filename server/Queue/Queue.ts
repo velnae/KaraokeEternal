@@ -40,7 +40,7 @@ class Queue {
     tableContext?: import('../../shared/tableAccess.js').TableContext
     playlistItemId?: number
     houseRunId?: string
-  }): void {
+  }): number {
     const validationError = getResolvedSongValidationError(song)
     if (validationError) throw new Error(validationError)
     if (!song.isPlayable) throw new Error('La canción no se puede reproducir')
@@ -87,14 +87,16 @@ class Queue {
     if (res.changes !== 1) {
       throw new Error('No se pudo agregar la canción a la cola de reproducción')
     }
+    return Number(res.lastID)
   }
 
   static getRequest (roomId: number, userId: number, requestId: string) {
     const query = sql`
-      SELECT queueId, status, source, externalId, songId, origin
+      SELECT queueId, status, source, externalId, songId, origin,
+        (SELECT greetingId FROM greetings g WHERE g.queueId=queue.queueId) AS greetingId
       FROM queue WHERE roomId = ${roomId} AND userId = ${userId} AND requestId = ${requestId}
     `
-    return db.get<Pick<QueueItem, 'queueId' | 'status' | 'source' | 'externalId' | 'songId' | 'origin'>>(String(query), query.parameters)
+    return db.get<Pick<QueueItem, 'queueId' | 'status' | 'source' | 'externalId' | 'songId' | 'origin'> & { greetingId?: number }>(String(query), query.parameters)
   }
 
   /**

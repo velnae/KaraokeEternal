@@ -135,7 +135,12 @@ export class DatabaseWrapper {
         log.info('Running migration %s: %s', migration.id, migration.name)
         this.exec('BEGIN')
         try {
-          this.exec(migration.up)
+          // Compatibility migrations can cover databases that received an earlier
+          // revision of an unreleased schema without rewriting migration history.
+          const missingColumn = migration.up.match(/^-- If column missing: ([A-Za-z_]\w*)\.([A-Za-z_]\w*)[ \t]*$/m)
+          const hasColumn = missingColumn && this.all<{ name: string }>(`PRAGMA table_info("${missingColumn[1]}")`)
+            .some(column => column.name === missingColumn[2])
+          if (!hasColumn) this.exec(migration.up)
           this.run(
             `INSERT INTO "${table}" (id, name, up, down) VALUES (?, ?, ?, ?)`,
             [migration.id, migration.name, migration.up, migration.down || null],
