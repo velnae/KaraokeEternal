@@ -4,6 +4,7 @@ import type {
   SongSourceAdapter,
   SongSourceContext,
 } from '../../shared/songSource.js'
+import { youtubeVideoId } from '../../shared/youtubeSearch.js'
 
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3'
 const configuredMaxResults = Number.parseInt(process.env.KES_YOUTUBE_MAX_RESULTS ?? '', 10)
@@ -42,6 +43,7 @@ interface YouTubeApiResponse<T> {
   error?: {
     message?: string
     errors?: Array<{ reason?: string }>
+    details?: Array<{ reason?: string, metadata?: { quota_metric?: string, quota_unit?: string, quota_limit?: string } }>
   }
 }
 
@@ -50,7 +52,7 @@ interface YouTubeSearchItem {
 }
 
 export class YouTubeApiError extends Error {
-  code: 'YOUTUBE_API' | 'YOUTUBE_QUOTA' | 'YOUTUBE_UNCONFIGURED'
+  code: 'YOUTUBE_API' | 'YOUTUBE_QUOTA' | 'YOUTUBE_SEARCH_QUOTA' | 'YOUTUBE_RATE_LIMIT' | 'YOUTUBE_UNCONFIGURED'
 
   constructor (message: string, code: YouTubeApiError['code']) {
     super(message)
@@ -72,40 +74,56 @@ export const createYouTubeSongSource = ({
   maxResults = defaultMaxResults,
   regionCode = process.env.KES_YOUTUBE_REGION?.trim().toUpperCase() || 'PE',
 }: YouTubeSongSourceOptions = {}): SongSourceAdapter => {
-  const request = async <T>(resource: string, params: Record<string, string>): Promise<YouTubeApiResponse<T>> => {
+  const cache = new Map<string, { expiresAt: number, results: SongSearchResult[] }>()
+  const pending = new Map<string, Promise<SongSearchResult[]>>()
+  const blocked = new Map<string, { until: number, error: YouTubeApiError }>()
+  const request = async <T>(resource: string, params: Record<string, string>, timeoutMs = 5000): Promise<YouTubeApiResponse<T>> => {
     if (!apiKey) {
       throw new YouTubeApiError('La búsqueda en YouTube no está configurada', 'YOUTUBE_UNCONFIGURED')
     }
 
+    const cooldown = blocked.get(resource)
+    if (cooldown && cooldown.until > Date.now()) throw cooldown.error
     const url = new URL(`${YOUTUBE_API_BASE}/${resource}`)
     Object.entries({ ...params, key: apiKey }).forEach(([key, value]) => url.searchParams.set(key, value))
 
     let response: Response
     try {
-      response = await fetchImpl(url)
+      response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) })
     } catch {
       throw new YouTubeApiError('YouTube no está disponible temporalmente', 'YOUTUBE_API')
     }
 
-    const data = await response.json() as YouTubeApiResponse<T>
+    let data: YouTubeApiResponse<T>
+    try {
+      data = await response.json() as YouTubeApiResponse<T>
+    } catch {
+      throw new YouTubeApiError('YouTube devolvió una respuesta no válida. Intenta nuevamente.', 'YOUTUBE_API')
+    }
     if (!response.ok) {
       const reason = data.error?.errors?.[0]?.reason
       const isQuota = reason === 'quotaExceeded' || reason === 'dailyLimitExceeded'
-      throw new YouTubeApiError(
-        isQuota ? 'Se agotó la cuota de búsqueda de YouTube' : 'No se pudo consultar YouTube',
-        isQuota ? 'YOUTUBE_QUOTA' : 'YOUTUBE_API',
+      const dailySearch = data.error?.details?.some(detail => detail.metadata?.quota_metric === 'youtube.googleapis.com/search_list'
+        && (detail.metadata.quota_unit?.includes('/d/') || detail.metadata.quota_limit?.includes('PerDay')))
+      const rateLimited = response.status === 429 || ['rateLimitExceeded', 'userRateLimitExceeded'].includes(reason ?? '')
+      const error = new YouTubeApiError(
+        dailySearch ? 'Se agotó el límite diario de búsquedas de YouTube' : isQuota ? 'Se agotó la cuota de búsqueda de YouTube' : rateLimited ? 'YouTube está limitando las consultas. Espera un minuto.' : 'No se pudo consultar YouTube',
+        dailySearch ? 'YOUTUBE_SEARCH_QUOTA' : isQuota ? 'YOUTUBE_QUOTA' : rateLimited ? 'YOUTUBE_RATE_LIMIT' : 'YOUTUBE_API',
       )
+      // Fail fast during provider throttling; never automatically retry searches.
+      if (dailySearch || isQuota || rateLimited) blocked.set(resource, { until: Date.now() + 60000, error })
+      throw error
     }
 
     return data
   }
 
-  const fetchVideos = async (videoIds: string[]): Promise<YouTubeVideo[]> => {
+  const fetchVideos = async (videoIds: string[], timeoutMs = 20000): Promise<YouTubeVideo[]> => {
     if (!videoIds.length) return []
     const response = await request<YouTubeVideo>('videos', {
       part: 'snippet,contentDetails,status',
       id: videoIds.join(','),
-    })
+    }, timeoutMs)
     return response.items ?? []
   }
 
@@ -145,24 +163,39 @@ export const createYouTubeSongSource = ({
       const normalizedQuery = query.trim()
       if (!normalizedQuery) return []
 
-      const search = await request<YouTubeSearchItem>('search', {
-        part: 'snippet',
-        type: 'video',
-        q: normalizedQuery,
-        maxResults: String(Math.min(Math.max(maxResults, 1), 50)),
-        regionCode,
-        safeSearch: 'moderate',
-        videoEmbeddable: 'true',
-        videoSyndicated: 'true',
-      })
-      const ids = (search.items ?? []).flatMap(item => item.id?.videoId ? [item.id.videoId] : [])
-      const videos = await fetchVideos(ids)
-      const byId = new Map(videos.map(video => [video.id, video]))
-
-      return ids
-        .map(id => byId.get(id))
-        .map(video => video ? normalizeVideo(video) : null)
-        .filter((song): song is ResolvedSong => song !== null && song.isPlayable)
+      const videoId = youtubeVideoId(normalizedQuery)
+      const key = videoId ? `video:${videoId}` : `query:${normalizedQuery.replace(/\s+/g, ' ').toLowerCase()}`
+      const cached = cache.get(key)
+      if (cached && cached.expiresAt > Date.now()) {
+        cache.delete(key)
+        cache.set(key, cached)
+        return cached.results.map(result => ({ ...result }))
+      }
+      const existing = pending.get(key)
+      if (existing) return (await existing).map(result => ({ ...result }))
+      const load = async (): Promise<SongSearchResult[]> => {
+        const search = videoId
+          ? null
+          : await request<YouTubeSearchItem>('search', {
+              part: 'snippet', type: 'video', q: normalizedQuery,
+              maxResults: String(Math.min(Math.max(maxResults, 1), 50)), regionCode,
+              safeSearch: 'moderate', videoEmbeddable: 'true', videoSyndicated: 'true',
+            })
+        const ids = videoId ? [videoId] : (search?.items ?? []).flatMap(item => item.id?.videoId ? [item.id.videoId] : [])
+        const videos = await fetchVideos(ids, 5000)
+        const byId = new Map(videos.map(video => [video.id, video]))
+        return ids.map(id => byId.get(id)).map(video => video ? normalizeVideo(video) : null)
+          .filter((song): song is ResolvedSong => song !== null && song.isPlayable)
+      }
+      const task = load()
+      pending.set(key, task)
+      try {
+        const results = await task
+        cache.delete(key)
+        cache.set(key, { results, expiresAt: Date.now() + 10 * 60 * 1000 })
+        while (cache.size > 200) cache.delete(cache.keys().next().value!)
+        return results.map(result => ({ ...result }))
+      } finally { pending.delete(key) }
     },
 
     async resolve (sourceId: string, context: SongSourceContext): Promise<ResolvedSong | null> {

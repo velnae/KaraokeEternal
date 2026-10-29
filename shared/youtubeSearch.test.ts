@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { youtubeQuery } from './youtubeSearch.js'
+import { youtubeQuery, youtubeVideoId, youtubeSearchCanRetry, youtubeSearchError } from './youtubeSearch.js'
 
 describe('YouTube search intent', () => {
+  it.each([
+    'https://youtu.be/AAAAAAAAAAA?si=example',
+    'https://www.youtube.com/watch?v=AAAAAAAAAAA&t=10',
+    'https://m.youtube.com/watch?v=AAAAAAAAAAA',
+    'https://www.youtube.com/shorts/AAAAAAAAAAA',
+    'https://www.youtube.com/live/AAAAAAAAAAA',
+  ])('preserves a video URL in every search mode: %s', (url) => {
+    expect(youtubeVideoId(url)).toBe('AAAAAAAAAAA')
+    for (const mode of ['karaoke', 'lyrics', 'music-video', 'all'] as const) expect(youtubeQuery(url, mode)).toBe(url)
+  })
+
+  it('does not interpret lookalike hosts or arbitrary URLs as a video', () => {
+    for (const value of ['https://youtube.com.example.com/watch?v=AAAAAAAAAAA', 'https://example.com/AAAAAAAAAAA', 'https://youtube.com/watch?v=invalid', 'a song title']) expect(youtubeVideoId(value)).toBeNull()
+  })
+
+  it('explains daily search exhaustion and offers links instead of futile retries', () => {
+    expect(youtubeSearchError('YOUTUBE_SEARCH_QUOTA')).toContain('pegar el enlace')
+    expect(youtubeSearchError('YOUTUBE_SEARCH_QUOTA', true)).toContain('Google Cloud')
+    expect(youtubeSearchCanRetry('YOUTUBE_SEARCH_QUOTA')).toBe(false)
+    expect(youtubeSearchCanRetry('YOUTUBE_RATE_LIMIT')).toBe(true)
+  })
   it('distinguishes formats without changing the local search text', () => {
     expect(youtubeQuery('  Mi canción  ', 'karaoke')).toBe('Mi canción karaoke')
     expect(youtubeQuery('Mi canción', 'lyrics')).toBe('Mi canción letra lyrics')

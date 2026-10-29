@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createYouTubeSongSource, YouTubeApiError, parseIsoDuration } from './YouTubeSongSource.js'
 
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
@@ -18,7 +18,64 @@ const playableVideo = (id: string, overrides: Record<string, unknown> = {}) => (
   ...overrides,
 })
 
+afterEach(() => vi.restoreAllMocks())
+
 describe('YouTubeSongSource', () => {
+  it('coalesces concurrent searches and reuses metadata across rooms until cache expiry', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
+    const fetchImpl = vi.fn(async (url: URL) => url.pathname.endsWith('/search')
+      ? jsonResponse({ items: [{ id: { videoId: 'AAAAAAAAAAA' } }] })
+      : jsonResponse({ items: [playableVideo('AAAAAAAAAAA')] }))
+    const source = createYouTubeSongSource({ apiKey: 'secret', fetchImpl })
+    const [first, second] = await Promise.all([source.search('Song title', { roomId: 1 }), source.search(' song  TITLE ', { roomId: 2 })])
+    expect(first).toEqual(second)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    first[0].title = 'Changed by consumer'
+    expect((await source.search('Song title', { roomId: 2 }))[0].title).toBe('Song & Dance')
+    clock.mockReturnValue(601001)
+    await source.search('Song title', { roomId: 1 })
+    expect(fetchImpl).toHaveBeenCalledTimes(4)
+    await source.resolve('AAAAAAAAAAA', { roomId: 1 })
+    expect(fetchImpl).toHaveBeenCalledTimes(5)
+  })
+
+  it('recognizes the real daily search bucket 429 and still resolves pasted links', async () => {
+    const fetchImpl = vi.fn(async (url: URL) => url.pathname.endsWith('/search')
+      ? jsonResponse({ error: { errors: [{ reason: 'rateLimitExceeded' }], details: [{ reason: 'RATE_LIMIT_EXCEEDED', metadata: {
+          quota_metric: 'youtube.googleapis.com/search_list', quota_limit: 'defaultSearchListPerDayPerProject', quota_unit: '1/d/{project}',
+        } }] } }, 429)
+      : jsonResponse({ items: [playableVideo('AAAAAAAAAAA')] }))
+    const source = createYouTubeSongSource({ apiKey: 'secret', fetchImpl })
+    await expect(source.search('song', { roomId: 1 })).rejects.toMatchObject({ code: 'YOUTUBE_SEARCH_QUOTA' })
+    await expect(source.search('another song', { roomId: 2 })).rejects.toMatchObject({ code: 'YOUTUBE_SEARCH_QUOTA' })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    await expect(source.search('https://youtu.be/AAAAAAAAAAA?si=example', { roomId: 1 })).resolves.toMatchObject([{ sourceId: 'AAAAAAAAAAA' }])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(new URL(fetchImpl.mock.calls[1][0]).pathname).toMatch(/\/videos$/)
+  })
+
+  it('serves cached results during quota exhaustion without caching failed queries forever', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [] }))
+      .mockResolvedValueOnce(jsonResponse({ error: { errors: [{ reason: 'rateLimitExceeded' }] } }, 429))
+      .mockResolvedValueOnce(jsonResponse({ items: [] }))
+    const source = createYouTubeSongSource({ apiKey: 'secret', fetchImpl })
+    await source.search('cached query', { roomId: 1 })
+    await expect(source.search('new query', { roomId: 1 })).rejects.toMatchObject({ code: 'YOUTUBE_RATE_LIMIT' })
+    await expect(source.search('cached query', { roomId: 1 })).resolves.toEqual([])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    clock.mockReturnValue(61001)
+    await expect(source.search('new query', { roomId: 1 })).resolves.toEqual([])
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('sanitizes malformed provider responses and bounds search requests', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('<html>private provider diagnostic</html>', { status: 503 }))
+    const source = createYouTubeSongSource({ apiKey: 'secret', fetchImpl })
+    await expect(source.search('song', { roomId: 1 })).rejects.toMatchObject({ code: 'YOUTUBE_API', message: 'YouTube devolvió una respuesta no válida. Intenta nuevamente.' })
+    expect(fetchImpl.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
+  })
   it('searches videos, verifies playback metadata, and never exposes the API key', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(jsonResponse({

@@ -19,6 +19,7 @@ const listen = async (server) => {
 const queries = []
 let resolutionDelay = 800
 let failResolution = false
+let searchQuotaExhausted = false
 const ids = ['fixture0001', 'fixture0002', 'fixture0003']
 const titles = ['Mi canción — Karaoke instrumental', 'Mi canción — Video con letras', 'Mi canción — Videoclip oficial']
 const provider = createServer(async (req, res) => {
@@ -28,6 +29,13 @@ const provider = createServer(async (req, res) => {
   if (url.pathname.endsWith('/search')) {
     const query = url.searchParams.get('q')
     queries.push(query)
+    if (searchQuotaExhausted) {
+      res.writeHead(429)
+      res.end(JSON.stringify({ error: { errors: [{ reason: 'rateLimitExceeded' }], details: [{ reason: 'RATE_LIMIT_EXCEEDED', metadata: {
+        quota_metric: 'youtube.googleapis.com/search_list', quota_unit: '1/d/{project}', quota_limit: 'defaultSearchListPerDayPerProject',
+      } }] } }))
+      return
+    }
     if (query.includes('fallo')) {
       res.writeHead(500)
       res.end(JSON.stringify({ error: { errors: [{ reason: 'fixtureFailure' }] } }))
@@ -39,7 +47,7 @@ const provider = createServer(async (req, res) => {
     return
   }
   const requested = url.searchParams.get('id').split(',')
-  if (requested.length === 1 && !queries.at(-1)?.match(/lenta|nueva/)) {
+  if (requested.length === 1) {
     await new Promise(resolve => setTimeout(resolve, resolutionDelay))
     if (failResolution) {
       res.writeHead(500)
@@ -118,7 +126,7 @@ try {
   for (const [label, query] of [['Con letras', 'Mi canción letra lyrics'], ['Videoclip', 'Mi canción official music video'], ['Todos', 'Mi canción']]) {
     await admin.getByRole('radio', { name: label, exact: true }).focus()
     await admin.keyboard.press('Space')
-    await expect.poll(() => queries.at(-1)).toBe(query)
+    await expect.poll(() => queries.includes(query)).toBe(true)
     await expect(admin.locator('article[data-source-id]')).toHaveCount(3)
   }
   pass('Admin search modes change provider query through keyboard-accessible controls')
@@ -193,10 +201,10 @@ try {
   await guestSearch.fill('Mi canción')
   await expect(guest.locator('article[data-source-id]')).toHaveCount(3)
   await expect(guest.getByRole('radio', { name: 'Todos', exact: true })).toBeChecked()
-  assert.equal(queries.at(-1), 'Mi canción')
+  assert.equal(queries.filter(query => query === 'Mi canción').length, 1)
   for (const [label, suffix] of [['Con letras', 'letra lyrics'], ['Videoclip', 'official music video'], ['Karaoke', 'karaoke']]) {
     await guest.getByRole('radio', { name: label, exact: true }).check()
-    await expect.poll(() => queries.at(-1)).toBe(`Mi canción ${suffix}`)
+    await expect.poll(() => queries.includes(`Mi canción ${suffix}`)).toBe(true)
     await expect(guest.locator('article[data-source-id]')).toHaveCount(3)
   }
   const guestFirst = guest.locator(`[data-source-id="${ids[0]}"]`)
@@ -273,6 +281,42 @@ try {
     ['DELETE', `/${savedListId}`, undefined],
   ]) assert.equal((await guestContext.request.fetch(`${base}api/rooms/1/playlists${suffix}`, { method, data: body })).status(), 403)
   pass('Admin can queue YouTube as house music and save a reusable deduplicated playlist; participants cannot administer lists')
+
+  searchQuotaExhausted = true
+  const searchesBeforeQuota = queries.length
+  await search.fill('búsqueda bloqueada')
+  await expect(admin.getByText(/Se agotó el límite diario de búsquedas de YouTube/)).toBeVisible()
+  await expect(admin.getByRole('button', { name: 'Reintentar búsqueda' })).toHaveCount(0)
+  await admin.screenshot({ path: path.join(data, 'quota-admin-1440.png') })
+  await guest.goto(`${base}library`)
+  await guest.setViewportSize({ width: 390, height: 1000 })
+  await guestSearch.fill('otra búsqueda bloqueada')
+  await expect(guest.getByText(/Se agotó el límite diario de búsquedas de YouTube/)).toBeVisible()
+  await expect(guest.getByRole('button', { name: 'Reintentar', exact: true })).toHaveCount(0)
+  assert.equal(queries.length, searchesBeforeQuota + 1, 'quota cooldown avoids another rejected provider call')
+  await guest.screenshot({ path: path.join(data, 'quota-mobile-390.png') })
+  await search.fill('Mi canción')
+  await expect(admin.locator('article[data-source-id]')).toHaveCount(3)
+  assert.equal(queries.length, searchesBeforeQuota + 1, 'cached searches remain usable during exhaustion')
+  pass('Real-shaped daily quota errors are actionable in admin/mobile; cache and cooldown avoid repeated API calls')
+
+  guest.on('dialog', dialog => dialog.accept())
+  await guest.goto(`${base}requests`)
+  await guest.getByRole('button', { name: 'Cancelar pedido', exact: true }).first().click()
+  await expect(guest.getByText('Pedido cancelado', { exact: true })).toBeVisible()
+  await guest.goto(`${base}library`)
+  await guest.getByRole('radio', { name: 'Karaoke', exact: true }).check()
+  await guestSearch.fill(`https://youtu.be/${ids[2]}`)
+  await expect(guest.locator('article[data-source-id]')).toHaveCount(1)
+  await guest.locator(`[data-source-id="${ids[2]}"]`).getByRole('button', { name: 'Pedir canción', exact: true }).click()
+  await expect(guest.locator(`[data-source-id="${ids[2]}"]`).getByRole('link', { name: 'Por aprobar', exact: true })).toBeVisible()
+  await guest.screenshot({ path: path.join(data, 'link-mobile-390.png') })
+  await admin.getByRole('radio', { name: 'Karaoke', exact: true }).check()
+  await search.fill(`https://www.youtube.com/watch?v=${ids[2]}`)
+  await expect(admin.locator('article[data-source-id]')).toHaveCount(1)
+  await expect(admin.getByRole('heading', { name: titles[2], exact: true })).toBeVisible()
+  assert.equal(queries.length, searchesBeforeQuota + 1, 'video links never consume search.list quota')
+  pass('Pasted YouTube links work in both interfaces and permit a mobile song request while text search quota is exhausted')
   assert.deepEqual(errors, [])
   console.log(`Evidence: ${data}; all YouTube API responses simulated`)
 } catch (error) {

@@ -24,6 +24,7 @@ import { useYouTubeSearch } from './useYouTubeSearch'
 import SongArtwork from 'components/SongArtwork/SongArtwork'
 import theme from 'styles/karaokeTheme.css'
 import styles from './ParticipantView.css'
+import { youtubeSearchCanRetry, youtubeSearchError } from 'shared/youtubeSearch'
 
 const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | 'room' }) => {
   const dispatch = useAppDispatch()
@@ -146,7 +147,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             }}
           >
             <div className={styles.searchRow}>
-              <input id='youtube-query' type='search' aria-label='Buscar canción o artista' value={query} onChange={event => setQuery(event.target.value)} placeholder='Canción o artista' maxLength={200} enterKeyHint='search' />
+              <input id='youtube-query' type='search' aria-label='Buscar canción o artista' value={query} onChange={event => setQuery(event.target.value)} placeholder='Canción, artista o enlace de YouTube' maxLength={200} enterKeyHint='search' />
               <Button type='submit' icon='MAGNIFIER' size={24} aria-label='Buscar' disabled={!connected || query.trim().length < 2} />
             </div>
             <VideoTypeFilter value={mode} onChange={value => dispatch(setYouTubeMode(value))} />
@@ -156,8 +157,8 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             {search.isLoading && <p>Buscando…</p>}
             {search.error && (
               <div className={styles.notice}>
-                <p>{search.code === 'YOUTUBE_UNCONFIGURED' || search.code === 'YOUTUBE_QUOTA' ? 'Búsqueda no disponible. Consulta al organizador.' : 'No se pudo buscar en YouTube.'}</p>
-                {search.code !== 'YOUTUBE_UNCONFIGURED' && search.code !== 'YOUTUBE_QUOTA' && <Button disabled={!connected} onClick={() => setRetry(value => value + 1)}>Reintentar</Button>}
+                <p>{youtubeSearchError(search.code)}</p>
+                {youtubeSearchCanRetry(search.code) && <Button disabled={!connected} onClick={() => setRetry(value => value + 1)}>Reintentar</Button>}
               </div>
             )}
             {search.query && !search.isLoading && !search.error && search.results.length === 0 && (

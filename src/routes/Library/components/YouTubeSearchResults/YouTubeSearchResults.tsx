@@ -8,6 +8,7 @@ import { useConnection } from 'routes/Participant/useConnection'
 import type { SongSearchResult } from 'shared/songSource'
 import type { QueueItem } from 'shared/types'
 import styles from './YouTubeSearchResults.css'
+import { youtubeSearchCanRetry, youtubeSearchError } from 'shared/youtubeSearch'
 
 interface YouTubeSearchResultsProps {
   code: string | null
@@ -31,14 +32,14 @@ export default function YouTubeSearchResults ({ code, error, isLoading, query, r
         {!query && (
           <>
             <h2>Encuentra la versión que buscas</h2>
-            <p>Escribe al menos 2 caracteres del título o artista y elige el tipo de video.</p>
+            <p>Escribe al menos 2 caracteres del título o artista, o pega un enlace de YouTube.</p>
           </>
         )}
         {isLoading && <p>Buscando en YouTube…</p>}
         {error && (
           <>
-            <p>{code === 'YOUTUBE_UNCONFIGURED' ? 'La búsqueda en YouTube no está configurada. Configura el servicio en el servidor.' : code === 'YOUTUBE_QUOTA' ? 'Se agotó la cuota de búsqueda de YouTube. Puedes usar Archivos locales.' : !connected ? 'Sin conexión. La búsqueda continuará al reconectar.' : 'No se pudo buscar en YouTube. Intenta nuevamente.'}</p>
-            {connected && onRetry && !['YOUTUBE_UNCONFIGURED', 'YOUTUBE_QUOTA'].includes(code || '') && <Button variant='default' onClick={onRetry}>Reintentar búsqueda</Button>}
+            <p>{!connected ? 'Sin conexión. La búsqueda continuará al reconectar.' : youtubeSearchError(code, true)}</p>
+            {connected && onRetry && youtubeSearchCanRetry(code) && <Button variant='default' onClick={onRetry}>Reintentar búsqueda</Button>}
           </>
         )}
         {query && !isLoading && !error && <p>{results.length ? `${results.length} resultados` : 'Sin resultados. Prueba otro título, artista o tipo de video.'}</p>}
