@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useId, useRef, useState } from 'react'
 import Modal from 'components/Modal/Modal'
 import Button from 'components/Button/Button'
 import HttpApi from 'lib/HttpApi'
@@ -7,16 +7,24 @@ import type { AudioMetadata, AudioResource, ResourceState } from 'shared/audioCa
 import styles from './AudioLibrary.css'
 
 const api = new HttpApi('animation/')
-export default function AudioResourceDetails ({ resource, onClose, onChange, onVersion }: {
+export default function AudioResourceDetails ({ resource, onClose, onChange, onVersion, onDelete }: {
   resource: AudioResource
   onClose: () => void
   onChange: () => void
   onVersion: () => void
+  onDelete: () => void
 }) {
   const [title, setTitle] = useState(resource.title)
   const [metadata, setMetadata] = useState(resource.metadata)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const deleteId = useId()
+  const formId = useId()
+  const returnFocus = useRef(false)
+  useEffect(() => {
+    if (!confirming && returnFocus.current) document.getElementById(deleteId)?.focus()
+  }, [confirming, deleteId])
   const readOnly = resource.roomId === null
   const set = <K extends keyof AudioMetadata>(key: K, value: AudioMetadata[K]) => setMetadata(previous => ({ ...previous, [key]: value }))
   const mutate = async (patch: object) => {
@@ -47,10 +55,58 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
     const { text, family, modes, category, language, style, loop, voiceName, validUntil } = metadata
     void mutate({ title, metadata: { text, family, modes, category, language, style, loop, voiceName, validUntil } })
   }
+  const remove = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await api.delete(`resources/${resource.id}`)
+      onDelete()
+    } catch (error) {
+      setError((error as Error).message)
+    } finally { setBusy(false) }
+  }
+  if (confirming) return (
+    <Modal className={styles.dialog} title='Eliminar audio' onClose={() => { if (!busy) setConfirming(false) }}>
+      <div className={styles.form}>
+        <p className={styles.deleteMessage}>{`¿Eliminar «${resource.title}»? Desaparecerá del catálogo y no podrá restaurarse. El historial de uso se conservará.`}</p>
+        {error && <p role='alert' className={styles.notice}>{error}</p>}
+        {busy && <p role='status' className={styles.help}>Eliminando audio…</p>}
+        <div className={styles.actions}>
+          <Button autoFocus className={styles.secondary} disabled={busy} onClick={() => setConfirming(false)}>Cancelar</Button>
+          <Button variant='danger' disabled={busy} onClick={() => void remove()}>Eliminar audio</Button>
+        </div>
+      </div>
+    </Modal>
+  )
   return (
-    <Modal className={styles.dialog} title='Datos del audio' onClose={onClose}>
-      <form className={styles.form} onSubmit={save}>
-        {readOnly && <p className={styles.help}>Audio incluido. Sus datos son compartidos entre salas.</p>}
+    <Modal
+      className={`${styles.dialog} ${styles.detailsDialog}`}
+      title='Datos del audio'
+      onClose={onClose}
+      buttons={(
+        <div className={styles.detailsFooter}>
+          <div className={styles.actions}>
+            <div className={styles.fileActions}>
+              {resource.preparation === 'ready' && <a className={styles.secondary} href={`${document.baseURI}api/animation/resources/${resource.id}/audio?download=true`}>Descargar</a>}
+              <Button
+                id={deleteId}
+                className={`${styles.secondary} ${styles.deleteButton}`}
+                disabled={busy}
+                onClick={() => {
+                  returnFocus.current = true
+                  setError('')
+                  setConfirming(true)
+                }}
+              >
+                Eliminar audio
+              </Button>
+            </div>
+            {!readOnly && <Button variant='primary' type='submit' form={formId} disabled={busy || !title.trim()}>Guardar cambios</Button>}
+          </div>
+        </div>
+      )}
+    >
+      <form id={formId} className={styles.form} onSubmit={save}>
         <label>
           Nombre
           <input value={title} disabled={readOnly || busy} maxLength={120} onChange={event => setTitle(event.target.value)} />
@@ -144,13 +200,13 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
         </details>
         {error && <p role='alert' className={styles.notice}>{error}</p>}
         {resource.preparation === 'failed' && resource.error?.includes('registrar') && <Button className={styles.secondary} disabled={busy} onClick={() => void retry()}>Reintentar preparación</Button>}
-        <div className={styles.actions}>
-          {resource.preparation === 'ready' && <a className={styles.secondary} href={`${document.baseURI}api/animation/resources/${resource.id}/audio?download=true`}>Descargar</a>}
-          {!readOnly && resource.state !== 'archived' && <Button className={styles.secondary} disabled={busy} onClick={() => state(resource.state === 'active' ? 'disabled' : 'active')}>{resource.state === 'active' ? 'Desactivar' : 'Activar'}</Button>}
-          {!readOnly && <Button className={styles.secondary} disabled={busy} onClick={() => state(resource.state === 'archived' ? 'disabled' : 'archived')}>{resource.state === 'archived' ? 'Restaurar desactivado' : 'Archivar'}</Button>}
-          {metadata.origin === 'generated' && <Button className={styles.secondary} onClick={onVersion}>Crear otra versión</Button>}
-          {!readOnly && <Button variant='primary' type='submit' disabled={busy || !title.trim()}>Guardar cambios</Button>}
-        </div>
+        {!readOnly && (
+          <div className={styles.actions}>
+            {resource.state !== 'archived' && <Button className={styles.secondary} disabled={busy} onClick={() => state(resource.state === 'active' ? 'disabled' : 'active')}>{resource.state === 'active' ? 'Desactivar' : 'Activar'}</Button>}
+            <Button className={styles.secondary} disabled={busy} onClick={() => state(resource.state === 'archived' ? 'disabled' : 'archived')}>{resource.state === 'archived' ? 'Restaurar desactivado' : 'Archivar'}</Button>
+            {metadata.origin === 'generated' && <Button className={styles.secondary} onClick={onVersion}>Crear otra versión</Button>}
+          </div>
+        )}
       </form>
     </Modal>
   )

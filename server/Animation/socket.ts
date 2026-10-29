@@ -26,7 +26,7 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
     let ambience
     if (type === ANIMATION_REQUEST) {
       if (!isId(input.requestId) || !isId(input.clipId)) throw new Error('Solicitud no válida')
-      const asset = catalogAsset(input.clipId)
+      const asset = catalogAsset(input.clipId, roomId)
       if (!asset || (asset.clip.roomId !== undefined && asset.clip.roomId !== roomId)) throw new Error('El clip no está disponible')
       Animation.request(identity, input.requestId, asset.clip)
     } else if (type === ANIMATION_CANCEL) {

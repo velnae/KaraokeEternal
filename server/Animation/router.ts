@@ -8,6 +8,7 @@ import { getResource, listResources, editResource, resourceDTO } from './Resourc
 import { interventionAssets } from '../../shared/animation.js'
 import { db } from '../lib/Database.js'
 import { preparationClips } from './preparation.js'
+import { deleteResource } from './deletion.js'
 
 const router = new Router({ prefix: '/api/animation' })
 router.use(async (ctx, next) => {
@@ -26,7 +27,7 @@ router.get('/history', (ctx) => {
   ctx.body = Animation.history(ctx.user.roomId)
 })
 router.get('/assets/:clipId', async (ctx) => {
-  const asset = catalogAsset(ctx.params.clipId)
+  const asset = catalogAsset(ctx.params.clipId, ctx.user.roomId)
   if (!asset || (asset.clip.roomId !== undefined && asset.clip.roomId !== ctx.user.roomId)) ctx.throw(404)
   ctx.type = asset.mime
   const { file } = await resourceFile(ctx.params.clipId, ctx.user.roomId)
@@ -65,6 +66,13 @@ router.patch('/resources/:id', async (ctx) => {
       if (Animation.ambience(ctx.user.roomId)?.clip.id === ctx.params.id) db.run('UPDATE animationRoomState SET ambienceJSON=NULL WHERE roomId=?', [ctx.user.roomId])
     }
     Animation.publish(ctx.user.roomId)
+  } catch (error) { ctx.throw(422, (error as Error).message) }
+})
+router.delete('/resources/:id', (ctx) => {
+  try {
+    deleteResource(ctx.user.roomId, ctx.params.id)
+    Animation.publish(ctx.user.roomId)
+    ctx.body = { deleted: true }
   } catch (error) { ctx.throw(422, (error as Error).message) }
 })
 router.post('/resources/upload', async (ctx) => {

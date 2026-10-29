@@ -35,6 +35,26 @@ Historical generation status names such as `published` and the runtime
 `approvedForAuto` field remain compatibility details. They do not represent a
 new manual approval requirement.
 
+Deletion uses migration `018-audio-deletion.sql`: a `deletedAt` tombstone prevents
+legacy manifests and production reconciliation from recreating removed resources.
+Deleted resources are excluded from every inventory/runtime/media view. Their
+usage and production history remain, including already incurred generation units.
+The retired generation key permits a new explicit generation request, while a
+restart never synthesizes a replacement. Files referenced by another resource or
+job are retained; unshared files are removed. A file is renamed out of service
+before committing deletion; database failures restore it. Cleanup failures are
+logged and leave an unserved `.deleted-*` file for maintenance.
+
+Included resources can also be deleted: migration `019-room-audio-deletions.sql`
+records a persistent per-room deletion. Inventory, counts, preparation, previews,
+downloads and manual Socket.IO requests all respect it. The shared file remains
+available to other rooms and catalog import cannot reintroduce it in this room.
+
+Deletion rejects resources owned by other rooms, unfinished preparation, pending
+announcements, playing sequence segments and unexpired playback/ambience permits.
+The UI confirms the action, defaults keyboard focus to Cancel, and restores focus
+when the operator cancels. Successful deletion closes a matching local preview.
+
 ## Provider extension
 
 Implement `AudioProvider` with:
@@ -70,6 +90,7 @@ with a room identity:
   and page. Pages contain 20 resources, correct totals and type counts.
 - `GET /resources/:id`: full metadata without a filesystem path.
 - `PATCH /resources/:id`: owned-resource title, editable metadata or state.
+- `DELETE /resources/:id`: remove an owned or included resource from this room's catalog when it is not in use.
 - `GET /resources/:id/audio`: preview, including disabled/archived resources.
   `?download=true` provides an attachment; byte ranges are supported.
 - `POST /resources/upload`: one bounded multipart file plus typed metadata and
@@ -214,3 +235,30 @@ Evidence: `/tmp/karaoke-phase2-e2e-zjikbM` (development),
 `/tmp/karaoke-animation-e2e-k04quH` (playback development) and
 `/tmp/karaoke-animation-e2e-a8BZBr` (playback production).
 All generation requests used a local provider fixture, not a live account.
+
+### Follow-up: permanent deletion
+
+Validation: 440 tests in 54 files passed; typecheck, scoped lint and server/client
+builds passed. Inventory E2E passed 18 scenarios in development and production,
+including keyboard confirmation/cancellation, mobile/desktop screenshots,
+preview shutdown, media removal, access isolation and restart persistence.
+Unit tests cover active/uncertain playback, pending sequence effects, ambience,
+shared-file retention and explicit regeneration without losing previous usage.
+
+Evidence: `/tmp/karaoke-phase2-e2e-5bZYNU` (development) and
+`/tmp/karaoke-phase2-e2e-phvLXz` (production). An initial development run hit the
+120-second command timeout after the existing 17 scenarios; the complete rerun
+with a 240-second command allowance passed. Each successful run used 22 simulated
+provider calls. The venue's restored voices were checksum/decode validated and
+remained ready after server restart; physical speaker quality was not evaluated.
+
+Visibility correction: the Details footer keeps Download and Delete together on
+the same row, outside the scrolling form. Included demos use the same enabled
+Delete action. Browser assertions require complete initial viewport visibility
+and matching button positions at 390×844 and 1440×768, before focus/click/scroll.
+The earlier test's `scrollIntoViewIfNeeded()` hid this discoverability defect.
+The included-audio case verifies deletion, denied media/manual playback, restart
+persistence and continued access in another room. Updated 18-scenario runs passed
+in development (`/tmp/karaoke-phase2-e2e-luJrG8`) and production
+(`/tmp/karaoke-phase2-e2e-uAApNq`); screenshots were inspected. The 91 focused
+animation/migration tests, typecheck, scoped lint and both builds also passed.

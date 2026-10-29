@@ -40,11 +40,33 @@ duplicated inside the animator panel.
 archiving and another generated version when applicable. Renaming does not
 regenerate a file. Changing generated speech requires a new version, linked to
 the original; original bytes/history remain intact. Archived resources can be
-restored in a disabled state. Included shared assets are read-only.
+restored in a disabled state. Included assets have read-only metadata, but can
+be deleted from the room's catalog.
+
+**Detalles → Eliminar audio** stays visible beside **Descargar**, on the same row
+of the fixed dialog footer, without scrolling the form. It works for generated,
+uploaded and included demo resources. Deleting an included resource removes it
+from this room's catalog and playback, including after restart; other rooms keep
+their own access. Unlike archiving, deletion cannot be restored. Preparation, pending
+announcements and active playback must finish or be stopped first; a blocked
+deletion explains the next action. Usage and production history remain intact.
+Deleting the currently previewed resource closes that local preview.
 
 Unknown metadata from uploaded or legacy files appears as **Sin especificar**.
 Disabled resources can still be previewed/downloaded without becoming eligible
 for venue playback. Preparation progress and errors belong to their resource row.
+
+## Data directory
+
+The server stores its inventory in `database.sqlite3` and media under `animation/`
+inside its data directory. `--data` takes precedence over `KES_PATH_DATA`; otherwise
+the platform's application directory is used. On this Linux installation the
+verified directory is `~/.config/Karaoke Eternal Server/`.
+
+Keep the same data directory across restarts and deployments. A different path
+opens a separate inventory. Recovery from an older installation must transfer
+the selected media and their inventory/production metadata into the current
+database; importing them as ordinary uploads loses their generation provenance.
 
 ## Configuration
 

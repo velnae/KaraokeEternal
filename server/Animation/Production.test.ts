@@ -11,6 +11,7 @@ import { getResource, resourceDTO } from './Resources.js'
 import type { AudioProvider } from './AudioProvider.js'
 import * as catalog from './catalog.js'
 import { execFileSync } from 'node:child_process'
+import { deleteResource } from './deletion.js'
 
 function wav (seconds = 1, silent = false) {
   const samples = 24000 * seconds
@@ -97,6 +98,28 @@ afterEach(async () => {
 })
 
 describe('catalog production', () => {
+  it('keeps deleted generation history without resurrecting audio or charging until a new explicit request', async () => {
+    const [job] = production.enqueue(1, 1, [input])
+    await production.drain()
+    const units = production.status().usedCharacters
+    deleteResource(1, `generated-${job.jobId}`)
+    await expect(production.register(1, job.jobId)).rejects.toThrow('eliminado')
+    await production.stop()
+    await loadCatalog(directory)
+    production = new CatalogProduction(directory, options, published)
+    await production.start()
+    expect(getResource(`generated-${job.jobId}`)).toBeUndefined()
+    expect(production.status().usedCharacters).toBe(units)
+    expect(requests).toHaveLength(1)
+    await production.check()
+    const [replacement] = production.enqueue(1, 1, [input])
+    await production.drain()
+    expect(replacement.jobId).not.toBe(job.jobId)
+    expect(getResource(`generated-${replacement.jobId}`)?.preparation).toBe('ready')
+    expect(requests).toHaveLength(2)
+    expect(production.status().usedCharacters).toBe(units * 2)
+  })
+
   it('restores verified voices without requiring a default voice environment variable', async () => {
     options.voiceId = ''
     const status = production.status()

@@ -12,7 +12,7 @@ import { catalogAsset, catalogChanged, resourceFile, saveCatalogRecord } from '.
 import { ElevenLabs, ProviderError } from './ElevenLabs.js'
 import type { AudioProvider } from './AudioProvider.js'
 import { prepareAudio, AudioValidationError } from './AudioPreparation.js'
-import { completeResource, createResource, getResource, prepareResource, resourceDTO, validateMetadata } from './Resources.js'
+import { completeResource, createResource, getResource, isResourceDeleted, prepareResource, resourceDTO, validateMetadata } from './Resources.js'
 import { generationKey } from './generationKey.js'
 import { DEFAULT_ANIMATOR_VOICE_ID, normalizeTaggedText, validAudioTagSyntax, withoutAudioTags, VOICE_SCRIPT_LIMIT } from '../../shared/audioTags.js'
 
@@ -66,6 +66,7 @@ export class CatalogProduction {
     } catch { this.unavailableReason = 'Revise FFmpeg y los permisos de almacenamiento del servidor.' }
     db.run('UPDATE catalogGenerationJobs SET status=\'uncertain\',error=\'La generación se interrumpió sin confirmación.\',finishedAt=? WHERE status=\'generating\'', [Date.now()])
     for (const job of db.all<StoredJob>('SELECT * FROM catalogGenerationJobs ORDER BY createdAt,rowid')) {
+      if (isResourceDeleted(`generated-${job.jobId}`)) continue
       const config = JSON.parse(job.configJSON)
       const key = generationKey(job.roomId, config)
       if (!db.get('SELECT jobId FROM catalogGenerationJobs WHERE roomId=? AND generationKey=?', [job.roomId, key])) db.run('UPDATE catalogGenerationJobs SET generationKey=? WHERE jobId=?', [key, job.jobId])
@@ -263,6 +264,7 @@ export class CatalogProduction {
   }
 
   async register (roomId: number, jobId: string) {
+    if (isResourceDeleted(`generated-${jobId}`)) throw new Error('Este audio fue eliminado.')
     const job = db.get<StoredJob>('SELECT * FROM catalogGenerationJobs WHERE roomId=? AND jobId=?', [roomId, jobId])
     if (!job) throw new Error('No se encontró el audio.')
     if (job.status === 'published') return

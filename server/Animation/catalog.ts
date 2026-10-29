@@ -5,7 +5,7 @@ import { parseBuffer } from 'music-metadata'
 import { clipDurationLimit, type AnimationClip, type AudioKind } from '../../shared/animation.js'
 import type { AudioMetadata } from '../../shared/audioCatalog.js'
 import { db } from '../lib/Database.js'
-import { completeResource, createResource, editResource, getResource, prepareResource, resourceClip, type StoredResource } from './Resources.js'
+import { completeResource, createResource, editResource, getResource, isResourceDeleted, prepareResource, resourceClip, resourceRoomFilter, type StoredResource } from './Resources.js'
 import getLogger from '../lib/Log.js'
 
 let catalogDirectory = ''
@@ -48,13 +48,14 @@ export async function loadCatalog (directory: string, bundledDirectory?: string)
     const records: CatalogRecord[] = JSON.parse(await fs.readFile(manifest, 'utf8'))
     if (!Array.isArray(records)) throw new Error('Invalid manifest')
     for (const record of records) {
-      if (getResource(record.id)) continue
+      if (getResource(record.id) || isResourceDeleted(record.id)) continue
       await saveCatalogRecord(record).catch(error => getLogger('animation').warn('Catalog import: %s', error.message))
     }
   } catch (error) { getLogger('animation').warn('Catalog import: %s', (error as Error).message) }
   // Reconcile all historical jobs, not only the latest UI page.
   for (const job of db.all<{ jobId: string, roomId: number, configJSON: string, status: string, filename: string | null, checksum: string | null, createdAt: number, error: string | null }>('SELECT * FROM catalogGenerationJobs')) {
     const id = `generated-${job.jobId}`
+    if (isResourceDeleted(id)) continue
     const config = JSON.parse(job.configJSON)
     const existing = getResource(id)
     if (existing) {
@@ -74,7 +75,7 @@ export async function loadCatalog (directory: string, bundledDirectory?: string)
   }
   // Interrupted uploads cannot be silently considered usable.
   db.run('UPDATE audioResources SET preparation=\'failed\',error=\'La carga se interrumpió. Vuelva a subir el archivo.\' WHERE preparation=\'preparing\' AND json_extract(metadataJSON,\'$.origin\')=\'uploaded\'')
-  for (const row of db.all<StoredResource>('SELECT * FROM audioResources WHERE preparation=\'ready\'')) {
+  for (const row of db.all<StoredResource>('SELECT * FROM audioResources WHERE preparation=\'ready\' AND deletedAt IS NULL')) {
     try {
       await inspectCatalogFile(row.filename!, row.kind, row.checksum!)
     } catch (error) { prepareResource(row.id, 'failed', (error as Error).message) }
@@ -82,9 +83,9 @@ export async function loadCatalog (directory: string, bundledDirectory?: string)
   catalogChanged()
 }
 
-export const catalogClips = (roomId?: number) => db.all<StoredResource>(`SELECT * FROM audioResources WHERE state='active' AND preparation='ready'${roomId === undefined ? '' : ' AND (roomId=? OR roomId IS NULL)'}`, roomId === undefined ? [] : [roomId]).map(resourceClip)
-export function catalogAsset (id: string) {
-  const row = getResource(id)
+export const catalogClips = (roomId?: number) => db.all<StoredResource>(`SELECT * FROM audioResources WHERE state='active' AND preparation='ready' AND deletedAt IS NULL${roomId === undefined ? '' : ` AND ${resourceRoomFilter}`}`, roomId === undefined ? [] : [roomId, roomId]).map(resourceClip)
+export function catalogAsset (id: string, roomId?: number) {
+  const row = getResource(id, roomId)
   return row?.state === 'active' && row.preparation === 'ready' ? { clip: resourceClip(row), filename: row.filename!, mime: row.mime! } : undefined
 }
 export async function resourceFile (id: string, roomId: number) {

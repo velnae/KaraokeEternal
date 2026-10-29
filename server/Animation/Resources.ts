@@ -4,15 +4,19 @@ import type { AudioMetadata, AudioResource, PreparationState, ResourcePage, Reso
 import { withoutAudioTags } from '../../shared/audioTags.js'
 import { audioUsage } from './usage.js'
 
-export interface StoredResource extends Omit<AudioResource, 'metadata'> { metadataJSON: string, filename: string | null }
-export const resourceDTO = ({ filename, metadataJSON, ...row }: StoredResource, usageRoom?: number): AudioResource => {
+export interface StoredResource extends Omit<AudioResource, 'metadata'> { metadataJSON: string, filename: string | null, deletedAt: number | null }
+export const resourceDTO = ({ filename, metadataJSON, deletedAt, ...row }: StoredResource, usageRoom?: number): AudioResource => {
   void filename
+  void deletedAt
   return { ...row, metadata: JSON.parse(metadataJSON), ...(usageRoom !== undefined ? { usage: audioUsage(usageRoom, [row.id])[row.id] } : {}) }
 }
 export function getResource (id: string, roomId?: number): StoredResource | undefined {
-  const row = db.get<StoredResource>('SELECT * FROM audioResources WHERE id=?', [id])
+  const row = db.get<StoredResource>('SELECT * FROM audioResources WHERE id=? AND deletedAt IS NULL', [id])
+  if (roomId !== undefined && db.get('SELECT resourceId FROM audioRoomDeletions WHERE roomId=? AND resourceId=?', [roomId, id])) return undefined
   return row && (roomId === undefined || row.roomId === null || row.roomId === roomId) ? row : undefined
 }
+export const isResourceDeleted = (id: string) => !!db.get('SELECT id FROM audioResources WHERE id=? AND deletedAt IS NOT NULL', [id])
+export const resourceRoomFilter = '(roomId=? OR roomId IS NULL) AND NOT EXISTS (SELECT 1 FROM audioRoomDeletions WHERE resourceId=audioResources.id AND roomId=?)'
 export function validateMetadata (kind: AudioKind, value: Partial<AudioMetadata>): AudioMetadata {
   if (!['voice', 'effect', 'ambience'].includes(kind)) throw new Error('Tipo de audio no válido.')
   const family = value.family ?? 'manual'
@@ -27,6 +31,7 @@ export function validateMetadata (kind: AudioKind, value: Partial<AudioMetadata>
   return { ...value, origin: value.origin ?? 'uploaded', text: value.text?.trim() ?? '', family, modes: [...new Set(modes)] }
 }
 export function createResource (input: { id: string, roomId: number | null, kind: AudioKind, title: string, metadata: AudioMetadata, state?: ResourceState, preparation?: PreparationState, createdAt?: number }) {
+  if (isResourceDeleted(input.id)) throw new Error('Este audio fue eliminado. Use una nueva solicitud para subir otro archivo.')
   if (!/^[a-zA-Z0-9-]{1,100}$/.test(input.id) || typeof input.title !== 'string' || !input.title.trim() || input.title.length > 120) throw new Error('Indique un nombre de hasta 120 caracteres.')
   const existing = getResource(input.id)
   if (existing) {
@@ -60,8 +65,8 @@ export function editResource (roomId: number, id: string, patch: { title?: strin
   return resourceDTO(getResource(id)!)
 }
 export function listResources (roomId: number, query: Record<string, unknown>): ResourcePage {
-  const clauses = ['(roomId=? OR roomId IS NULL)']
-  const params: unknown[] = [roomId]
+  const clauses = [resourceRoomFilter, 'deletedAt IS NULL']
+  const params: unknown[] = [roomId, roomId]
   const kind = query.kind ?? 'voice'
   if (!['voice', 'effect', 'ambience'].includes(String(kind))) throw new Error('Tipo de audio no válido.')
   clauses.push('kind=?')
@@ -104,7 +109,7 @@ export function listResources (roomId: number, query: Record<string, unknown>): 
   const usage = audioUsage(roomId, items.map(item => item.id))
   for (const item of items) item.usage = usage[item.id]
   const counts = { voice: 0, effect: 0, ambience: 0 }
-  for (const row of db.all<{ kind: AudioKind, count: number }>('SELECT kind,count(*) count FROM audioResources WHERE (roomId=? OR roomId IS NULL) AND state!=\'archived\' GROUP BY kind', [roomId])) counts[row.kind] = row.count
+  for (const row of db.all<{ kind: AudioKind, count: number }>(`SELECT kind,count(*) count FROM audioResources WHERE ${resourceRoomFilter} AND state!='archived' AND deletedAt IS NULL GROUP BY kind`, [roomId, roomId])) counts[row.kind] = row.count
   return { items, total, page, pageSize, counts }
 }
 export function resourceClip (row: StoredResource): AnimationClip {

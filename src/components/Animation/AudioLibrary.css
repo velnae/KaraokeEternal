@@ -54,6 +54,12 @@
 .technical { display: grid; grid-template-columns: auto 1fr; gap: 8px 20px; font-size: 13px; overflow-wrap: anywhere; }
 .technical dt { color: var(--secondary); }
 .technical dd { margin: 0; }
+.detailsDialog > :last-child { flex-shrink: 0; }
+.detailsFooter { width: 100%; border-top: 1px solid var(--edge); padding-top: 16px; }
+.detailsFooter .actions { justify-content: space-between; }
+.fileActions { display: flex; align-items: center; gap: 10px; }
+.deleteButton { color: var(--btn-danger-bg-color); }
+.deleteMessage { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
 @media (max-width: 700px) {
   .types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
   .types a { padding: 12px 6px; text-align: center; font-size: 13px; }

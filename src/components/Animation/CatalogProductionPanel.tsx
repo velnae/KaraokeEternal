@@ -34,6 +34,7 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
   const roomId = useAppSelector(state => state.user.roomId)
   const [page, setPage] = useState<ResourcePage | null>(null)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [providers, setProviders] = useState<ProviderCapabilities[]>([])
   const [processor, setProcessor] = useState<boolean | null>(null)
   const [form, setForm] = useState<'generate' | 'upload' | null>(null)
@@ -225,6 +226,7 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
         </p>
       )}
       {!page && !error && <p role='status'>Cargando audios…</p>}
+      {notice && <p role='status' className={styles.help}>{notice}</p>}
       {page && !page.items.length && (
         <div className={styles.empty}>
           <h3>No hay audios en esta vista</h3>
@@ -302,6 +304,19 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
           resource={page?.items.find(resource => resource.id === details.id) ?? details}
           onClose={() => setDetails(null)}
           onChange={fresh}
+          onDelete={() => {
+            if (preview?.id === details.id) {
+              audio.current?.pause()
+              setPreview(null)
+            }
+            if (params.get('resourceId') === details.id) {
+              const next = new URLSearchParams(params)
+              next.delete('resourceId')
+              setParams(next, { replace: true })
+            }
+            setNotice('Audio eliminado.')
+            fresh()
+          }}
           onVersion={() => {
             setSource(details)
             setDetails(null)
