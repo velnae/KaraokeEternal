@@ -7,6 +7,7 @@ import AnimationPanel from 'components/Animation/AnimationPanel'
 import CatalogProductionPanel from 'components/Animation/CatalogProductionPanel'
 import AnimationQuickControls from 'components/Animation/AnimationQuickControls'
 import OperationControls from 'components/Animation/OperationControls'
+import LocalTtsSettings from 'components/Animation/LocalTtsSettings'
 import { animationRequest } from 'lib/animationApi'
 import { ANIMATION_CONTROL } from 'shared/animation'
 import type { ProviderCapabilities } from 'shared/audioCatalog'
@@ -58,7 +59,7 @@ function ProviderSettings () {
 
 export default function AnimatorSettings () {
   const [params, setParams] = useSearchParams()
-  const view = params.get('view') === 'audio' ? 'audio' : 'control'
+  const view = params.get('view') === 'local-voice' ? 'local-voice' : params.get('view') === 'audio' ? 'audio' : 'control'
   const settings = params.get('panel') === 'settings' || params.get('view') === 'connection'
   const roomId = useAppSelector(state => state.user.roomId)
   const { snapshot, connected } = useAppSelector(state => state.animation)
@@ -83,33 +84,37 @@ export default function AnimatorSettings () {
   }
   return (
     <>
-      <div className={audioStyles.headerControls}>
-        <label className={audioStyles.check}>
-          <input type='checkbox' role='switch' aria-label='Activado' checked={!!current?.prefs.enabled} disabled={!current || !connected || busy} onChange={() => void toggle()} />
-          {current?.prefs.enabled ? 'Activado' : 'Desactivado'}
-        </label>
-        <div className={audioStyles.actions}>
-          {view === 'audio' && <AnimationQuickControls showLink={false} />}
-          <Button
-            className={audioStyles.secondary}
-            onClick={() => {
-              const next = new URLSearchParams(params)
-              next.set('panel', 'settings')
-              setParams(next)
-            }}
-          >
-            Ajustes
-          </Button>
+      {view !== 'local-voice' && (
+        <div className={audioStyles.headerControls}>
+          <label className={audioStyles.check}>
+            <input type='checkbox' role='switch' aria-label='Activado' checked={!!current?.prefs.enabled} disabled={!current || !connected || busy} onChange={() => void toggle()} />
+            {current?.prefs.enabled ? 'Activado' : 'Desactivado'}
+          </label>
+          <div className={audioStyles.actions}>
+            {view === 'audio' && <AnimationQuickControls showLink={false} />}
+            <Button
+              className={audioStyles.secondary}
+              onClick={() => {
+                const next = new URLSearchParams(params)
+                next.set('panel', 'settings')
+                setParams(next)
+              }}
+            >
+              Ajustes
+            </Button>
+          </div>
         </div>
-      </div>
-      {(!connected || !current) && <p role='status' className={audioStyles.notice}>Conectando con la sala… Los controles se habilitarán al recuperar la conexión.</p>}
+      )}
+      {view !== 'local-voice' && (!connected || !current) && <p role='status' className={audioStyles.notice}>Conectando con la sala… Los controles se habilitarán al recuperar la conexión.</p>}
       {error && <p role='alert' className={audioStyles.notice}>{error}</p>}
       <nav className={styles.tabs} aria-label='Ajustes del animador'>
         <Link to='?view=control' aria-current={view === 'control' ? 'page' : undefined}>Control</Link>
         <Link to='?view=audio' aria-current={view === 'audio' ? 'page' : undefined}>Audios</Link>
+        <Link to='?view=local-voice' aria-current={view === 'local-voice' ? 'page' : undefined}>Voz local</Link>
       </nav>
       <div hidden={view !== 'control'}><AnimationPanel /></div>
       <CatalogProductionPanel key={roomId} visible={view === 'audio'} />
+      {view === 'local-voice' && <LocalTtsSettings />}
       {settings && (
         <Modal className={audioStyles.dialog} title='Ajustes del animador' onClose={close}>
           <OperationControls settings />

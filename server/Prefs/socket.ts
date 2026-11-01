@@ -13,11 +13,11 @@ const ACTION_HANDLERS = {
       })
     }
 
-    // Branding has a validated HTTP update route with public change broadcasts.
-    if (payload.key === 'branding') {
+    // These settings have validated HTTP update routes and dedicated lifecycle handling.
+    if (payload.key === 'branding' || payload.key === 'localTts') {
       return acknowledge({
         type: PREFS_SET + _ERROR,
-        error: 'Use los ajustes de marca del cliente para guardar los cambios.',
+        error: payload.key === 'localTts' ? 'Use los ajustes de voz local para guardar los cambios.' : 'Use los ajustes de marca del cliente para guardar los cambios.',
       })
     }
     Prefs.set(payload.key, payload.data)

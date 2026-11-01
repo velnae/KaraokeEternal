@@ -96,12 +96,12 @@ describe('preference mutation authorization', () => {
     expect(server.emit).not.toHaveBeenCalled()
   })
 
-  it('rejects branding writes through the generic preference socket action', () => {
+  it.each(['branding', 'localTts'])('rejects %s writes through the generic preference socket action', (key) => {
     const set = vi.spyOn(Prefs, 'set')
     const acknowledge = vi.fn()
     ACTION_HANDLERS[PREFS_SET](
       createSocket({ isAdmin: true }).socket,
-      { payload: { key: 'branding', data: defaultClientBranding } },
+      { payload: { key, data: defaultClientBranding } },
       acknowledge,
     )
     expect(set).not.toHaveBeenCalled()
