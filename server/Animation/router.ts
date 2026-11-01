@@ -5,7 +5,7 @@ import { catalogAsset, catalogClips, catalogChanged, resourceFile, setCatalogAct
 import { getProduction } from './Production.js'
 import type { ProductionInput } from '../../shared/catalogProduction.js'
 import { getResource, listResources, editResource, resourceDTO } from './Resources.js'
-import { interventionAssets } from '../../shared/animation.js'
+import { interventionAssets, type EffectType } from '../../shared/animation.js'
 import { db } from '../lib/Database.js'
 import { preparationClips } from './preparation.js'
 import { deleteResource } from './deletion.js'
@@ -84,6 +84,16 @@ router.post('/resources/upload', async (ctx) => {
     if (!/^[a-zA-Z0-9-]{1,64}$/.test(body.requestId ?? '')) ctx.throw(422, 'Solicitud no válida.')
     ctx.body = await getProduction().upload(ctx.user.roomId, `uploaded-${body.requestId}`, body.kind as 'voice' | 'effect' | 'ambience', body.title,
       JSON.parse(body.metadata ?? '{}'), await fs.readFile(files[0].filepath), files[0].originalFilename)
+  } catch (error) { ctx.throw(422, (error as Error).message) } finally {
+    await Promise.all(files.map(file => fs.rm(file.filepath, { force: true })))
+  }
+})
+router.post('/resources/:id/replace', async (ctx) => {
+  const request = ctx.request as unknown as { body?: { effectType?: EffectType, category?: string }, files?: Record<string, { filepath: string, originalFilename: string, size: number } | { filepath: string, originalFilename: string, size: number }[]> }
+  const files = Object.values(request.files ?? {}).flat()
+  try {
+    if (files.length !== 1 || files[0].size > 20 * 1024 * 1024) ctx.throw(422, 'Seleccione un archivo de hasta 20 MB.')
+    ctx.body = await getProduction().replaceUpload(ctx.user.roomId, ctx.params.id, await fs.readFile(files[0].filepath), files[0].originalFilename, request.body?.effectType, request.body?.category)
   } catch (error) { ctx.throw(422, (error as Error).message) } finally {
     await Promise.all(files.map(file => fs.rm(file.filepath, { force: true })))
   }

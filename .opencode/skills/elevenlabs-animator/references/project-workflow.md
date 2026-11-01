@@ -14,8 +14,8 @@ microphone and consumption-panel proposals.
 | Voice-script size | 1,000 total characters; at most 220 spoken characters after stripping tags |
 | Tag syntax | Balanced, non-nested brackets; 1–120 characters per tag; no newline inside a tag |
 | Actual voice duration | At most 10 seconds |
-| Supporting effects | At most 3 seconds |
-| Pause ambience | At most 30 seconds |
+| Supporting effects | Short effects: at most 4.5 seconds. Musical transitions: at most 12 seconds, used automatically after presentations. Independent playback clipping is deferred. |
+| Pause ambience | Local uploads/replacements: at most 35 seconds; ElevenLabs generation: at most 30 seconds per request |
 | Uploads | MP3, WAV or OGG, at most 20 MB; actual media is validated |
 | Profiles | `dinner` (Cena), `mixed` (Mixto), `party` (Fiesta) |
 | Availability | Automatic after technical preparation; no manual publication requirement |

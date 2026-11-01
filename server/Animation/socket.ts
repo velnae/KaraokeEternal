@@ -24,6 +24,7 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
     const identity = { roomId, userId: sock.user.userId, socketId: sock.id }
     let grant
     let ambience
+    let eligible: boolean | undefined
     if (type === ANIMATION_REQUEST) {
       if (!isId(input.requestId) || !isId(input.clipId)) throw new Error('Solicitud no válida')
       const asset = catalogAsset(input.clipId, roomId)
@@ -51,8 +52,12 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
         || !Number.isInteger(input.controlVersion)
         || !(input.sourceQueueId === null || Number.isInteger(input.sourceQueueId))
         || !(input.expectedNextQueueId === null || Number.isInteger(input.expectedNextQueueId))) throw new Error('Reserva no válida')
-      grant = type === ANIMATION_AUTO ? Animation.automatic(identity, input, sock._lastPlayerStatus ?? {}) : Animation.reserve(identity, input, sock._lastPlayerStatus ?? {})
-      sock.server.to(Rooms.prefix(roomId)).emit('action', { type: QUEUE_PUSH, payload: Queue.get(roomId) })
+      if (input.probeOnly !== undefined && (type !== ANIMATION_AUTO || typeof input.probeOnly !== 'boolean')) throw new Error('Consulta no válida')
+      if (input.probeOnly) eligible = !!Animation.automaticPlan(identity, input)
+      else {
+        grant = type === ANIMATION_AUTO ? Animation.automatic(identity, input, sock._lastPlayerStatus ?? {}) : Animation.reserve(identity, input, sock._lastPlayerStatus ?? {})
+        sock.server.to(Rooms.prefix(roomId)).emit('action', { type: QUEUE_PUSH, payload: Queue.get(roomId) })
+      }
     } else if (type === ANIMATION_EVENT) {
       if (!isId(input.interventionId) || !Number.isInteger(input.playerEpoch)
         || !['STARTED', 'ASSET_STARTED', 'ENDED', 'STOPPED', 'NOT_STARTED', 'FAILED'].includes(input.event)
@@ -63,7 +68,10 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       Animation.session(roomId, sock.user.userId, input.operation)
     } else if (type === ANIMATION_AMBIENCE) {
       if (!Number.isInteger(input.playerEpoch) || (input.offsetMs !== undefined && (!Number.isFinite(input.offsetMs) || input.offsetMs < 0))) throw new Error('Permiso de ambiente no válido')
-      ambience = Animation.reserveAmbience(identity, input.playerEpoch, sock._lastPlayerStatus ?? {}, input.clipId, input.offsetMs)
+      if (input.renewId !== undefined && !isId(input.renewId)) throw new Error('Permiso de ambiente no válido')
+      ambience = input.renewId
+        ? Animation.renewAmbience(identity, input.playerEpoch, input.renewId, sock._lastPlayerStatus ?? {})
+        : Animation.reserveAmbience(identity, input.playerEpoch, sock._lastPlayerStatus ?? {}, input.clipId, input.offsetMs)
     } else if (type === ANIMATION_AMBIENCE_STOP) {
       if (!isId(input.id)) throw new Error('Permiso de ambiente no válido')
       Animation.stopAmbience(identity, input.id)
@@ -72,7 +80,7 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       Animation.ambienceStarted(identity, input.id, input.runId)
     }
     Animation.sweep()
-    acknowledge?.({ type: ANIMATION_STATE, payload: Animation.snapshot(roomId), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
+    acknowledge?.({ type: ANIMATION_STATE, payload: Animation.snapshot(roomId), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
   } catch (error) {
     acknowledge?.({ type: ANIMATION_STATE, error: (error as Error).message })
   }

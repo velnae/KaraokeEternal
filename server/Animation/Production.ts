@@ -5,16 +5,17 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { db } from '../lib/Database.js'
 import getLogger from '../lib/Log.js'
-import { clipDurationLimit, VOICE_FAMILIES, type AudioKind } from '../../shared/animation.js'
+import { clipDurationLimit, normalizeEffectType, VOICE_FAMILIES, type AudioKind, type EffectType } from '../../shared/animation.js'
 import { voicePrompt, type GenerationJob, type ProductionConfig, type ProductionInput, type ProductionStatus } from '../../shared/catalogProduction.js'
 import type { AudioMetadata } from '../../shared/audioCatalog.js'
-import { catalogAsset, catalogChanged, resourceFile, saveCatalogRecord } from './catalog.js'
+import { catalogAsset, catalogChanged, resourceFile, saveCatalogRecord, removeUnreferencedFile } from './catalog.js'
 import { ElevenLabs, ProviderError } from './ElevenLabs.js'
 import type { AudioProvider } from './AudioProvider.js'
 import { prepareAudio, AudioValidationError } from './AudioPreparation.js'
-import { completeResource, createResource, getResource, isResourceDeleted, prepareResource, resourceDTO, validateMetadata } from './Resources.js'
+import { assertResourceUnused, completeResource, createResource, getResource, isResourceDeleted, prepareResource, resourceDTO, validateMetadata } from './Resources.js'
 import { generationKey } from './generationKey.js'
 import { DEFAULT_ANIMATOR_VOICE_ID, normalizeTaggedText, validAudioTagSyntax, withoutAudioTags, VOICE_SCRIPT_LIMIT } from '../../shared/audioTags.js'
+import { effectCategoryValue } from '../../shared/effectCategories.js'
 
 const run = promisify(execFile)
 type StoredJob = Omit<GenerationJob, 'config'> & { configJSON: string, filename: string | null, checksum: string | null }
@@ -49,6 +50,7 @@ export class CatalogProduction {
   private activeAbort: AbortController | null = null
   private timer?: ReturnType<typeof setInterval>
   private uploads = new Set<Promise<unknown>>()
+  private replacements = new Set<string>()
 
   constructor (private directory: string, private options: ProductionOptions, private onPublished: (roomId: number) => void = () => {}, providers?: AudioProvider[]) {
     this.providers = new Map((providers ?? [new ElevenLabs(options.key, options.baseUrl, options.model, options.voiceId || DEFAULT_ANIMATOR_VOICE_ID)]).map(provider => [provider.capabilities.id, provider] as const))
@@ -136,6 +138,7 @@ export class CatalogProduction {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Recurso no válido.')
     const kind = input.kind
     if (!['voice', 'effect', 'ambience'].includes(kind)) throw new Error('Tipo no válido.')
+    const effectType = normalizeEffectType(kind, input.effectType)
     const providerId = input.providerId ?? 'elevenlabs'
     const provider = this.providers.get(providerId)
     if (!provider?.capabilities.configured || !provider.capabilities.kinds.includes(kind)) throw new Error('El proveedor no admite este tipo de audio.')
@@ -147,23 +150,25 @@ export class CatalogProduction {
     if (/[<>]/.test(text) || [...text].some(char => (char.charCodeAt(0) < 32 && char !== '\n') || char.charCodeAt(0) === 127)) throw new Error('Use texto sin HTML ni SSML.')
     if (tagged ? !validAudioTagSyntax(text) : /[[\]]/.test(text)) throw new Error(tagged ? 'Revise los corchetes: cada etiqueta debe estar cerrada y tener hasta 120 caracteres.' : 'El proveedor no admite etiquetas de audio en este recurso.')
     if (!['manual', ...VOICE_FAMILIES].includes(input.family)) throw new Error('Uso no válido.')
+    if (input.celebrationMode !== undefined && !['confirmed', 'song_end'].includes(input.celebrationMode)) throw new Error('Uso de celebración no válido.')
     if (input.family === 'promotion' && !(Number.isFinite(input.validUntil) && input.validUntil! > Date.now())) throw new Error('Indique una vigencia futura.')
     if (kind === 'voice' && providerId !== 'elevenlabs' && input.style && !provider.capabilities.styles.includes(input.style)) throw new Error('Interpretación no compatible.')
     if (input.language && !provider.capabilities.languages.includes(input.language)) throw new Error('Idioma no compatible.')
     if (input.loop && !provider.capabilities.loop) throw new Error('El proveedor no admite bucles.')
     const voiceId = input.voiceId || provider.capabilities.defaultVoiceId || this.options.voiceId
     if (kind === 'voice' && !/^[a-zA-Z0-9_-]{1,120}$/.test(voiceId)) throw new Error('Seleccione una voz.')
-    const durationSeconds = kind === 'voice' ? undefined : input.durationSeconds ?? (kind === 'effect' ? 2 : 8)
-    if (durationSeconds !== undefined && (!Number.isFinite(durationSeconds) || durationSeconds < 0.5 || durationSeconds * 1000 > clipDurationLimit(kind))) throw new Error('Duración fuera del límite de este tipo.')
+    const durationSeconds = kind === 'voice' ? undefined : input.durationSeconds ?? (kind === 'effect' && effectType !== 'transition' ? 2 : 8)
+    const generationLimit = Math.min(clipDurationLimit(kind, effectType) / 1000, provider.capabilities.maxDurationSeconds?.[kind] ?? Infinity)
+    if (durationSeconds !== undefined && (!Number.isFinite(durationSeconds) || durationSeconds < 0.5 || durationSeconds > generationLimit)) throw new Error(`Duración fuera del límite de este tipo (máximo ${generationLimit} s).`)
     const revision = input.revision ?? 0
     if (!Number.isInteger(revision) || revision < 0 || revision > 1000) throw new Error('Versión no válida.')
     if (input.versionRequestId !== undefined && (!input.parentId || typeof input.versionRequestId !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(input.versionRequestId))) throw new Error('Solicitud de versión no válida.')
     const modes = input.modes ?? ['dinner', 'mixed', 'party']
     if (!Array.isArray(modes) || !modes.length || modes.some(mode => !['dinner', 'mixed', 'party'].includes(mode))) throw new Error('Seleccione un perfil válido.')
     if (input.category !== undefined && (typeof input.category !== 'string' || input.category.length > 120)) throw new Error('Categoría no válida.')
-    return { title, text, kind, providerId, category: input.category, language: kind === 'voice' ? input.language ?? provider.capabilities.languages[0] : undefined,
+    return { title, text, kind, effectType, celebrationMode: kind === 'voice' && input.family === 'celebration' ? input.celebrationMode : undefined, providerId, category: kind === 'effect' ? effectCategoryValue(input.category) : input.category, language: kind === 'voice' ? input.language ?? provider.capabilities.languages[0] : undefined,
       loop: kind === 'ambience' ? input.loop ?? provider.capabilities.loop : undefined, parentId: input.parentId, versionRequestId: input.versionRequestId,
-      family: input.family, style: providerId === 'elevenlabs' ? undefined : input.style, voiceId: kind === 'voice' ? voiceId : undefined,
+      family: effectType === 'transition' ? 'manual' : input.family, style: providerId === 'elevenlabs' ? undefined : input.style, voiceId: kind === 'voice' ? voiceId : undefined,
       durationSeconds, revision, modes: [...new Set(modes)].sort(), validUntil: input.family === 'promotion' ? input.validUntil : undefined,
       model: provider.capabilities.models[kind] ?? '',
       spokenText: kind === 'voice' && providerId !== 'elevenlabs' && input.style ? voicePrompt(text, input.style) : text,
@@ -239,7 +244,7 @@ export class CatalogProduction {
         const result = await provider.generate(config, this.activeAbort.signal)
         db.run('UPDATE catalogGenerationJobs SET providerRequestId=? WHERE jobId=?', [result.requestId, job.jobId])
         prepareResource(id, 'preparing')
-        const media = await prepareAudio(this.directory, job.jobId, config.kind, result.bytes, this.options.ffmpeg, this.activeAbort.signal)
+        const media = await prepareAudio(this.directory, job.jobId, config.kind, result.bytes, this.options.ffmpeg, this.activeAbort.signal, config.effectType)
         db.run('UPDATE catalogGenerationJobs SET status=\'ready_for_review\',finishedAt=?,filename=?,durationMs=?,checksum=? WHERE jobId=?', [Date.now(), media.filename, media.durationMs, media.checksum, job.jobId])
         // Keep a registration failure recoverable without another provider call.
         await this.register(job.roomId, job.jobId).catch(() => {})
@@ -273,7 +278,7 @@ export class CatalogProduction {
     db.run('UPDATE catalogGenerationJobs SET status=\'publishing\' WHERE jobId=?', [jobId])
     try {
       await saveCatalogRecord({ id: `generated-${jobId}`, filename: job.filename!, active: true, title: config.title, displayText: config.kind === 'voice' ? config.text : config.title,
-        checksum: job.checksum!, kind: config.kind, family: config.family, modes: config.modes, validUntil: config.validUntil, approvedForAuto: true, roomId,
+        checksum: job.checksum!, kind: config.kind, effectType: config.effectType, celebrationMode: config.celebrationMode, family: config.family, modes: config.modes, validUntil: config.validUntil, approvedForAuto: true, roomId,
         source: `${config.providerId ?? 'elevenlabs'} ${config.model}; job ${jobId}`, license: 'Generated by an administrator using the configured provider account.' })
       db.run('UPDATE catalogGenerationJobs SET status=\'published\',error=NULL WHERE jobId=?', [jobId])
       this.onPublished(roomId)
@@ -285,16 +290,66 @@ export class CatalogProduction {
     }
   }
 
+  async replaceUpload (roomId: number, id: string, bytes: Buffer, originalName: string, effectType?: EffectType, category?: string) {
+    if (!this.processorAvailable || this.stopped) throw new Error('El servidor no puede preparar audios. Revise FFmpeg.')
+    const original = getResource(id, roomId)
+    if (!original || original.roomId !== roomId || JSON.parse(original.metadataJSON).origin !== 'uploaded') throw new Error('Solo puede reemplazar archivos subidos a esta sala.')
+    const originalMetadata: AudioMetadata = JSON.parse(original.metadataJSON)
+    const nextType = normalizeEffectType(original.kind, effectType ?? originalMetadata.effectType)
+    if (category !== undefined && (typeof category !== 'string' || category.length > 120)) throw new Error('Categoría no válida.')
+    if (!/\.(mp3|wav|ogg)$/i.test(originalName)) throw new Error('Use un archivo MP3, WAV u OGG.')
+    if (this.replacements.has(id) || ['queued', 'generating', 'preparing'].includes(original.preparation)) throw new Error('El audio sigue en preparación. Espere a que termine.')
+    if (this.uploads.size >= 2) throw new Error('Hay otras cargas en preparación. Espere y vuelva a intentar.')
+    assertResourceUnused(roomId, id)
+    this.replacements.add(id)
+    // Prepare a distinct file first; invalid replacements never discard valid audio.
+    const prepareReplacement = async () => {
+      const media = await prepareAudio(this.directory, randomUUID(), original.kind, bytes, this.options.ffmpeg, undefined, nextType)
+      try {
+        const current = getResource(id, roomId)
+        if (!current || this.stopped) throw new Error('El audio ya no está disponible para reemplazarlo.')
+        assertResourceUnused(roomId, id)
+        const metadata: AudioMetadata = JSON.parse(current.metadataJSON)
+        db.exec('SAVEPOINT replace_audio')
+        try {
+          completeResource(id, media)
+          db.run('UPDATE audioResources SET metadataJSON=? WHERE id=?', [JSON.stringify({ ...metadata, category: category === undefined ? metadata.category : original.kind === 'effect' ? effectCategoryValue(category) : category, effectType: nextType, family: nextType === 'transition' ? 'manual' : metadata.family, originalName: path.basename(originalName) }), id])
+          db.exec('RELEASE replace_audio')
+        } catch (error) {
+          db.exec('ROLLBACK TO replace_audio; RELEASE replace_audio')
+          throw error
+        }
+        catalogChanged()
+        this.onPublished(roomId)
+        if (current.filename) await removeUnreferencedFile(current.filename).catch(error => getLogger('animation-production').warn('Retired upload cleanup: %s', error.message))
+      } catch (error) {
+        await removeUnreferencedFile(media.filename).catch(() => {})
+        throw error
+      }
+    }
+    const work = prepareReplacement()
+    this.uploads.add(work)
+    try {
+      await work
+    } finally {
+      this.uploads.delete(work)
+      this.replacements.delete(id)
+    }
+    const updated = getResource(id, roomId)
+    if (!updated) throw new Error('El audio ya no está disponible.')
+    return resourceDTO(updated)
+  }
+
   async upload (roomId: number, id: string, kind: AudioKind, title: string, metadata: Partial<AudioMetadata>, bytes: Buffer, originalName: string) {
     if (!this.processorAvailable || this.stopped) throw new Error('El servidor no puede preparar audios. Revise FFmpeg.')
     if (!/\.(mp3|wav|ogg)$/i.test(originalName)) throw new Error('Use un archivo MP3, WAV u OGG.')
     if (getResource(id, roomId)) return resourceDTO(getResource(id, roomId)!)
     if (this.uploads.size >= 2) throw new Error('Hay otras cargas en preparación. Espere y vuelva a intentar.')
-    const clean = validateMetadata(kind, { text: metadata.text, family: metadata.family, modes: metadata.modes, category: metadata.category,
+    const clean = validateMetadata(kind, { text: metadata.text, celebrationMode: metadata.celebrationMode, effectType: metadata.effectType, family: metadata.family, modes: metadata.modes, category: metadata.category,
       language: metadata.language, voiceName: metadata.voiceName, style: metadata.style, loop: metadata.loop, validUntil: metadata.validUntil,
       origin: 'uploaded', automatic: true, originalName: path.basename(originalName) })
     createResource({ id, roomId, kind, title, metadata: clean })
-    const work = prepareAudio(this.directory, id, kind, bytes, this.options.ffmpeg).then((media) => {
+    const work = prepareAudio(this.directory, id, kind, bytes, this.options.ffmpeg, undefined, clean.effectType).then((media) => {
       completeResource(id, media)
       catalogChanged()
       this.onPublished(roomId)

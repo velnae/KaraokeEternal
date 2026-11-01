@@ -5,26 +5,34 @@ import HttpApi from 'lib/HttpApi'
 import { familyLabels, VOICE_FAMILIES, type RoomProfile } from 'shared/animation'
 import type { AudioMetadata, AudioResource, ResourceState } from 'shared/audioCatalog'
 import styles from './AudioLibrary.css'
+import AudioReplacementForm from './AudioReplacementForm'
+import EffectTypeSelect from './EffectTypeSelect'
+import EffectCategorySelect from './EffectCategorySelect'
+import { effectCategory } from 'shared/effectCategories'
+import CelebrationModeSelect from './CelebrationModeSelect'
 
 const api = new HttpApi('animation/')
-export default function AudioResourceDetails ({ resource, onClose, onChange, onVersion, onDelete }: {
+export default function AudioResourceDetails ({ resource, onClose, onChange, onVersion, onDelete, onReplaced }: {
   resource: AudioResource
   onClose: () => void
   onChange: () => void
   onVersion: () => void
   onDelete: () => void
+  onReplaced: () => void
 }) {
   const [title, setTitle] = useState(resource.title)
   const [metadata, setMetadata] = useState(resource.metadata)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [replacing, setReplacing] = useState(false)
   const deleteId = useId()
+  const replaceId = useId()
   const formId = useId()
-  const returnFocus = useRef(false)
+  const returnFocus = useRef<string | null>(null)
   useEffect(() => {
-    if (!confirming && returnFocus.current) document.getElementById(deleteId)?.focus()
-  }, [confirming, deleteId])
+    if (!confirming && !replacing && returnFocus.current) document.getElementById(returnFocus.current)?.focus()
+  }, [confirming, replacing])
   const readOnly = resource.roomId === null
   const set = <K extends keyof AudioMetadata>(key: K, value: AudioMetadata[K]) => setMetadata(previous => ({ ...previous, [key]: value }))
   const mutate = async (patch: object) => {
@@ -52,8 +60,8 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
   }
   const save = (event: React.FormEvent) => {
     event.preventDefault()
-    const { text, family, modes, category, language, style, loop, voiceName, validUntil } = metadata
-    void mutate({ title, metadata: { text, family, modes, category, language, style, loop, voiceName, validUntil } })
+    const { text, family, celebrationMode, effectType, modes, category, language, style, loop, voiceName, validUntil } = metadata
+    void mutate({ title, metadata: { text, family, celebrationMode, effectType, modes, category, language, style, loop, voiceName, validUntil } })
   }
   const remove = async () => {
     setBusy(true)
@@ -65,6 +73,7 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
       setError((error as Error).message)
     } finally { setBusy(false) }
   }
+  if (replacing) return <AudioReplacementForm resource={{ ...resource, metadata: { ...resource.metadata, effectType: metadata.effectType, category: metadata.category } }} onClose={() => setReplacing(false)} onSaved={onReplaced} />
   if (confirming) return (
     <Modal className={styles.dialog} title='Eliminar audio' onClose={() => { if (!busy) setConfirming(false) }}>
       <div className={styles.form}>
@@ -93,7 +102,7 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
                 className={`${styles.secondary} ${styles.deleteButton}`}
                 disabled={busy}
                 onClick={() => {
-                  returnFocus.current = true
+                  returnFocus.current = deleteId
                   setError('')
                   setConfirming(true)
                 }}
@@ -101,12 +110,27 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
                 Eliminar audio
               </Button>
             </div>
-            {!readOnly && <Button variant='primary' type='submit' form={formId} disabled={busy || !title.trim()}>Guardar cambios</Button>}
+            {!readOnly && metadata.origin === 'uploaded' && (
+              <Button
+                id={replaceId}
+                variant={resource.preparation === 'failed' ? 'primary' : 'default'}
+                className={resource.preparation === 'failed' ? undefined : styles.secondary}
+                disabled={busy}
+                onClick={() => {
+                  returnFocus.current = replaceId
+                  setReplacing(true)
+                }}
+              >
+                Reemplazar archivo
+              </Button>
+            )}
+            {!readOnly && <Button variant={resource.preparation === 'failed' ? 'default' : 'primary'} type='submit' form={formId} disabled={busy || !title.trim()}>Guardar cambios</Button>}
           </div>
         </div>
       )}
     >
       <form id={formId} className={styles.form} onSubmit={save}>
+        {resource.error && <p role='alert' className={styles.notice}>{resource.error}</p>}
         <label>
           Nombre
           <input value={title} disabled={readOnly || busy} maxLength={120} onChange={event => setTitle(event.target.value)} />
@@ -117,6 +141,7 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
         </label>
         <fieldset disabled={readOnly || busy}>
           <legend>Características</legend>
+          {resource.kind === 'effect' && <EffectTypeSelect value={metadata.effectType} onChange={value => setMetadata(previous => ({ ...previous, effectType: value, category: effectCategory(previous.category) && effectCategory(previous.category)!.effectType !== value ? '' : previous.category }))} />}
           <div className={styles.fields}>
             {resource.kind === 'voice'
               ? (
@@ -139,10 +164,15 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
                   </>
                 )
               : (
-                  <label>
-                    Categoría
-                    <input value={metadata.category ?? ''} onChange={event => set('category', event.target.value)} />
-                  </label>
+                  <>
+                    {resource.kind === 'effect' && <EffectCategorySelect value={metadata.category} onChange={value => setMetadata(previous => ({ ...previous, category: value, effectType: effectCategory(value)?.effectType ?? previous.effectType }))} />}
+                    {resource.kind === 'ambience' && (
+                      <label>
+                        Categoría
+                        <input value={metadata.category ?? ''} onChange={event => set('category', event.target.value)} />
+                      </label>
+                    )}
+                  </>
                 )}
             {metadata.family === 'promotion' && (
               <label>
@@ -151,6 +181,7 @@ export default function AudioResourceDetails ({ resource, onClose, onChange, onV
               </label>
             )}
           </div>
+          {resource.kind === 'voice' && metadata.family === 'celebration' && <CelebrationModeSelect value={metadata.celebrationMode} onChange={value => set('celebrationMode', value)} />}
           {resource.kind === 'ambience' && (
             <label className={styles.check}>
               <input type='checkbox' checked={!!metadata.loop} onChange={event => set('loop', event.target.checked)} />

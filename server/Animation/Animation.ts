@@ -9,7 +9,7 @@ import {
 } from '../../shared/animation.js'
 import { catalogClips, catalogVersion } from './catalog.js'
 import { currentSession, operateSession, pendingEvent } from './sessions.js'
-import { profileIntervals, selectAnnouncement, voiceBudget } from './selection.js'
+import { categoryEffects, heardAt, profileIntervals, selectAnnouncement, supportingEffects, voiceBudget } from './selection.js'
 import { backfillAudioUsage, leastUsedAudio, recordAudioUsage } from './usage.js'
 
 type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[] }
@@ -284,7 +284,7 @@ export default class Animation {
     return result
   }
 
-  static automatic (identity: AnimationIdentity, input: Reservation, status: { queueId?: number, isAtQueueEnd?: boolean, isErrored?: boolean }) {
+  static automaticPlan (identity: AnimationIdentity, input: Reservation) {
     const roomId = identity.roomId
     Animation.sweep()
     const prefs = animationPrefs(Animation.room(roomId).prefs.animation)
@@ -294,50 +294,74 @@ export default class Animation {
     if (owner?.socketId !== identity.socketId || owner.epoch !== input.playerEpoch) throw new Error('Reproductor sin autoridad')
     const now = Date.now()
     const state = Animation.state(roomId)
-    if (state.blockedUntil > now || Animation.ambience(roomId) || !owner.unlocked) return null
+    if (state.blockedUntil > now || !owner.unlocked) return null
     const signal = pendingEvent(roomId)
-    let family: VoiceFamily | undefined
-    let key = ''
-    if (session.status === 'CLOSING') {
-      if (signal?.family === 'goodbye') {
-        family = 'goodbye'
-        key = signal.key
-      }
-    } else if (input.expectedNextQueueId !== null && input.boundary !== 'idle' && prefs.events.turn) {
-      family = 'turn'
-      key = `${session.sessionId}:turn:${input.expectedNextQueueId}`
-    } else if (signal && signal.expiresAt > now) {
-      family = signal.family
-      key = signal.key
-    } else if (input.boundary === 'ended' && input.sourceQueueId !== null && prefs.events.closing) {
-      family = 'closing'
-      key = `${session.sessionId}:closing:${input.sourceQueueId}`
-    } else if (input.boundary === 'idle' && now - session.openedAt >= profileIntervals[prefs.profile]) {
-      const slot = Math.floor((now - session.openedAt) / profileIntervals[prefs.profile])
-      const choices: VoiceFamily[] = ['invitation', 'booth', 'promotion']
-      family = choices.filter(value => prefs.events[value])[slot % choices.filter(value => prefs.events[value]).length]
-      key = `${session.sessionId}:idle:${slot}`
-    }
-    if (!family || !prefs.events[family]) return null
-    if (db.get('SELECT interventionId FROM animationInterventions WHERE roomId=? AND sourceEventKey=?', [roomId, key])) return null
     const history = Animation.selectionHistory(roomId)
     const recentSessions = db.all<{ sessionId: string }>('SELECT sessionId FROM animationSessions WHERE roomId=? AND sessionId!=? ORDER BY openedAt DESC LIMIT 2', [roomId, session.sessionId]).map(row => row.sessionId)
-    const selected = selectAnnouncement({ clips: catalogClips(roomId), family, profile: prefs.profile, history, sessionId: session.sessionId, recentSessions, ready: owner.readyClips, now })
-    if (!selected.clip) {
-      Animation.omit(roomId, selected.reason)
-      return null
+    const lastUse = (family: VoiceFamily) => Math.max(0, ...history.filter(row => row.origin === 'AUTO' && row.family === family).map(heardAt))
+    const cues: { family: VoiceFamily, key: string, confirmed?: boolean }[] = []
+    const naturalKey = input.boundary === 'ended' && input.sourceQueueId !== null ? `${session.sessionId}:ended:${input.sourceQueueId}` : null
+    if (naturalKey && db.get('SELECT interventionId FROM animationInterventions WHERE roomId=? AND sourceEventKey=?', [roomId, naturalKey])) return null
+    if (session.status === 'CLOSING') {
+      if (signal?.family === 'goodbye') cues.push({ family: 'goodbye', key: naturalKey ?? signal.key, confirmed: true })
+    } else if (input.expectedNextQueueId !== null && input.boundary === 'start' && prefs.events.turn) {
+      cues.push({ family: 'turn', key: `${session.sessionId}:turn:${input.expectedNextQueueId}` })
+    } else if (signal && signal.expiresAt > now) {
+      cues.push({ family: signal.family, key: naturalKey ?? signal.key, confirmed: true })
+    } else {
+      if (naturalKey && input.expectedNextQueueId === null) cues.push({ family: 'closing', key: naturalKey })
+      // Environmental messages also get opportunities between songs, not only on an empty queue.
+      if ((input.boundary === 'idle' || naturalKey) && now - session.openedAt >= profileIntervals[prefs.profile]) {
+        const slot = Math.floor((now - session.openedAt) / profileIntervals[prefs.profile])
+        const families: VoiceFamily[] = ['invitation', 'booth', 'promotion']
+        for (const family of families.sort((a, b) => lastUse(a) - lastUse(b))) cues.push({ family, key: naturalKey ?? `${session.sessionId}:idle:${slot}` })
+      }
+      if (naturalKey) {
+        const families: VoiceFamily[] = input.expectedNextQueueId === null ? ['celebration'] : ['closing', 'celebration', 'turn']
+        for (const family of families.sort((a, b) => lastUse(a) - lastUse(b))) cues.push({ family, key: naturalKey })
+      }
     }
-    const clip = selected.clip
+    let reason = ''
+    for (const { family, key, confirmed } of cues) {
+      if (!prefs.events[family] || db.get('SELECT interventionId FROM animationInterventions WHERE roomId=? AND sourceEventKey=?', [roomId, key])) continue
+      const clips = catalogClips(roomId).filter(clip => family !== 'celebration' || confirmed || clip.celebrationMode === 'song_end')
+      const selected = selectAnnouncement({ clips, family, profile: prefs.profile, history, sessionId: session.sessionId, recentSessions, ready: owner.readyClips, now })
+      if (selected.clip) return { clip: selected.clip, family, key, session, signal: confirmed ? signal : null, history, prefs, owner, now }
+      reason = selected.reason
+    }
+    if (reason) Animation.omit(roomId, reason)
+    return null
+  }
+
+  static automatic (identity: AnimationIdentity, input: Reservation, status: { queueId?: number, isAtQueueEnd?: boolean, isErrored?: boolean }) {
+    const roomId = identity.roomId
+    if (Animation.ambience(roomId)) return null
+    const plan = Animation.automaticPlan(identity, input)
+    if (!plan) return null
+    const { clip, family, key, session, signal, history, prefs, owner, now } = plan
     const sequence = [clip]
-    if (family === 'celebration' && prefs.profile !== 'dinner') {
-      const effect = leastUsedAudio(roomId, catalogClips(roomId).filter(asset => asset.kind === 'effect' && asset.family === 'celebration' && asset.approvedForAuto && asset.modes?.includes(prefs.profile) && owner.readyClips.includes(asset.checksum)))
-      if (effect && clip.durationMs + effect.durationMs <= voiceBudget(history, now)) sequence.push(effect)
+    const addEffect = (candidates: AnimationClip[], before = false) => {
+      const duration = sequence.reduce((sum, asset) => sum + asset.durationMs, 0)
+      const effect = leastUsedAudio(roomId, candidates.filter(asset => duration + asset.durationMs <= Math.min(25000, voiceBudget(history, now))))
+      if (effect) {
+        if (before) sequence.unshift(effect)
+        else sequence.push(effect)
+      }
     }
+    if (family === 'closing' || family === 'celebration') {
+      const lastClosing = db.get<{ at: number | null }>(`SELECT max(u.startedAt) at FROM audioUsage u JOIN animationInterventions i
+        ON i.roomId=u.roomId AND u.sourceId='intervention:'||i.interventionId
+        WHERE u.roomId=? AND i.family='closing' AND u.clipId!=i.clipId`, [roomId])?.at ?? 0
+      addEffect(supportingEffects(catalogClips(roomId), family, prefs.profile, owner.readyClips, history, now, lastClosing))
+    }
+    if (family === 'celebration') addEffect(categoryEffects(catalogClips(roomId), 'anticipation', prefs.profile, owner.readyClips, now), true)
+    if (family === 'turn') addEffect(categoryEffects(catalogClips(roomId), 'transition', prefs.profile, owner.readyClips, now))
+    if (['invitation', 'promotion'].includes(family)) addEffect(categoryEffects(catalogClips(roomId), 'notification', prefs.profile, owner.readyClips, now), true)
     const id = randomUUID()
     db.run(`INSERT INTO animationInterventions(interventionId,roomId,requestId,requestedByUserId,clipId,clipChecksum,displayText,durationMs,status,requestedAt,expiresAt,origin,sessionId,sourceEventKey,family,sequenceJSON)
       VALUES(?,?,?,?,?,?,?,?,'PENDING',?,?,'AUTO',?,?,?,?)`, [id, roomId, key, identity.userId, clip.id, clip.checksum, clip.displayText,
       sequence.reduce((sum, asset) => sum + asset.durationMs, 0), now, Math.min(now + 1000, clip.validUntil ?? Infinity), session.sessionId, key, family, JSON.stringify(sequence)])
-    if (signal?.key === key) db.run('UPDATE animationRoomState SET pendingEventJSON=NULL WHERE roomId=?', [roomId])
+    if (signal) db.run('UPDATE animationRoomState SET pendingEventJSON=NULL WHERE roomId=?', [roomId])
     db.run('UPDATE animationRoomState SET lastOmission=NULL WHERE roomId=?', [roomId])
     try {
       return Animation.reserve(identity, { ...input, interventionId: id }, status)
@@ -359,12 +383,13 @@ export default class Animation {
       || snapshot.blockedUntil > Date.now() || (snapshot.active && snapshot.active.status !== 'PENDING')
       || snapshot.ambience || !owner.unlocked) return null
     const clips = catalogClips(roomId).filter(clip => clip.kind === 'ambience' && clip.approvedForAuto && clip.modes?.includes(prefs.profile) && owner.readyClips.includes(clip.checksum))
-    const clip = clips.find(clip => clip.id === clipId) ?? leastUsedAudio(roomId, clips)
+    const previous = clips.find(clip => clip.id === clipId)
+    const completed = previous && offsetMs >= previous.durationMs
+    const clip = completed ? leastUsedAudio(roomId, clips.filter(clip => clip.id !== clipId)) ?? (previous.loop !== false ? previous : undefined) : previous ?? leastUsedAudio(roomId, clips)
     if (!clip) return null
-    if (clip.loop === false && clip.id === clipId && offsetMs >= clip.durationMs) return null
-    const offset = Math.max(0, Math.min(clip.durationMs - 1, offsetMs))
+    const offset = completed || clip.id !== clipId ? 0 : Math.max(0, Math.min(clip.durationMs - 1, offsetMs))
     const durationMs = Math.min(10000, clip.durationMs - offset)
-    const grant: AmbienceGrant = { id: randomUUID(), clip, ownerSocketId: identity.socketId, playerEpoch: epoch,
+    const grant: AmbienceGrant = { id: randomUUID(), clip, rotate: new Set(clips.map(clip => clip.checksum)).size > 1, ownerSocketId: identity.socketId, playerEpoch: epoch,
       until: Date.now() + durationMs + 1000, durationMs, offsetMs: offset }
     db.run('UPDATE animationRoomState SET ambienceJSON=? WHERE roomId=?', [JSON.stringify(grant), roomId])
     Animation.publish(roomId)
@@ -376,6 +401,26 @@ export default class Animation {
     if (!grant || grant.id !== id || grant.ownerSocketId !== identity.socketId) return
     db.run('UPDATE animationRoomState SET ambienceJSON=NULL WHERE roomId=?', [identity.roomId])
     Animation.publish(identity.roomId)
+  }
+
+  static renewAmbience (identity: AnimationIdentity, epoch: number, id: string, status: { queueId?: number, isAtQueueEnd?: boolean, isErrored?: boolean }) {
+    const snapshot = Animation.snapshot(identity.roomId)
+    const grant = snapshot.ambience
+    const owner = owners.get(identity.roomId)
+    if (owner?.socketId !== identity.socketId || owner.epoch !== epoch) throw new Error('Reproductor sin autoridad')
+    const prefs = snapshot.prefs
+    if (!grant || grant.id !== id || grant.ownerSocketId !== identity.socketId || grant.playerEpoch !== epoch || !owner.unlocked
+      || !prefs.enabled || !prefs.automation || !prefs.ambienceEnabled || !prefs.ambienceVolume
+      || snapshot.session?.status !== 'OPEN' || Animation.room(identity.roomId).status !== 'open'
+      || status.isErrored || !(status.isAtQueueEnd || status.queueId === -1) || snapshot.blockedUntil > Date.now()
+      || (snapshot.active && (snapshot.active.status !== 'PENDING' || (owner.readyClips.includes(snapshot.active.clipChecksum) && snapshot.active.durationMs <= (snapshot.voiceBudgetRemainingMs ?? 0))))) return null
+    const clip = catalogClips(identity.roomId).find(clip => clip.id === grant.clip.id && clip.checksum === grant.clip.checksum && clip.modes?.includes(prefs.profile ?? 'mixed'))
+    if (!clip || !owner.readyClips.includes(clip.checksum)) return null
+    const available = catalogClips(identity.roomId).filter(clip => clip.kind === 'ambience' && clip.approvedForAuto && clip.modes?.includes(prefs.profile ?? 'mixed') && owner.readyClips.includes(clip.checksum))
+    const renewed = { ...grant, rotate: new Set(available.map(clip => clip.checksum)).size > 1, until: Date.now() + 10000 }
+    db.run('UPDATE animationRoomState SET ambienceJSON=? WHERE roomId=?', [JSON.stringify(renewed), identity.roomId])
+    Animation.publish(identity.roomId)
+    return renewed
   }
 
   static ambienceStarted (identity: AnimationIdentity, id: string, runId: string) {
@@ -404,7 +449,7 @@ export default class Animation {
         throw new Error('El contexto cambió antes del inicio')
       }
       db.run('UPDATE animationInterventions SET status = \'PLAYING\', startedAt = ? WHERE interventionId = ?', [now, id])
-      recordAudioUsage(row.roomId, `intervention:${id}`, row.clipId, 'intervention', now, row.sessionId)
+      recordAudioUsage(row.roomId, `intervention:${id}`, interventionAssets(row)[0].id, 'intervention', now, row.sessionId)
     } else {
       const status = event === 'ENDED' && row.startedAt && !row.stopRequestedAt
         ? 'PLAYED'

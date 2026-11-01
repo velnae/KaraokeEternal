@@ -34,6 +34,18 @@ it('paginates a complete typed inventory beyond legacy limits and scopes queries
   expect(() => listResources(1, { sort: 'title;DROP TABLE rooms' })).toThrow('Orden')
 })
 
+it('normalizes known legacy categories without changing files, generation inputs or unknown labels', async () => {
+  createResource({ id: 'legacy-effect', roomId: 1, kind: 'effect', title: 'Separador', metadata: { ...metadata, category: 'separador', origin: 'generated', generationInput: { category: 'separador', effectType: 'short' } } })
+  createResource({ id: 'legacy-custom', roomId: 1, kind: 'effect', title: 'Custom', metadata: { ...metadata, category: 'Etiqueta anterior' } })
+  db.run('UPDATE audioResources SET metadataJSON=json_set(metadataJSON,\'$.category\',\'SEPARADOR\') WHERE id=\'legacy-effect\'')
+  await loadCatalog(directory)
+  const migrated = resourceDTO(getResource('legacy-effect')!)
+  expect(migrated.metadata).toMatchObject({ category: 'transition', generationInput: { category: 'separador', effectType: 'short' } })
+  expect(listResources(1, { kind: 'effect', category: 'Transición musical' }).items.map(row => row.id)).toEqual(['legacy-effect'])
+  expect(resourceDTO(getResource('legacy-custom')!).metadata.category).toBe('Etiqueta anterior')
+  expect(migrated.metadata.family).toBe('manual')
+})
+
 it('preserves edits/inactive state across reimport and previews inactive audio', async () => {
   const demo = catalogClips()[0]
   const original = getResource(demo.id)!
@@ -80,4 +92,18 @@ it('bounds preparation while prioritizing a manual resource beyond the first inv
   Animation.request({ roomId: 1, userId: 1, socketId: 'test-player' }, 'manual', catalogClips(1).find(clip => clip.id === 'voice-099')!)
   expect(preparationClips(1)[0].id).toBe('voice-099')
   expect(preparationClips(1).length).toBeLessThanOrEqual(24)
+})
+
+it('prepares enabled automatic events before disabled families and optional manual effects', () => {
+  for (const [id, family, kind, category] of [
+    ['a-promotion', 'promotion', 'voice', ''], ['b-roll', 'celebration', 'effect', 'anticipation'],
+    ['z-close', 'closing', 'voice', ''], ['z-applause', 'celebration', 'effect', 'appreciation'],
+  ] as const) {
+    createResource({ id, roomId: 1, kind, title: id, metadata: { ...metadata, family, category, automatic: true } })
+    completeResource(id, { filename: 'test.mp3', mime: 'audio/mpeg', checksum: id, durationMs: 1000, size: 100 })
+  }
+  Animation.control(1, Animation.state(1).controlVersion, { enabled: true, automation: true, events: { celebration: false, promotion: false } })
+  const ids = preparationClips(1).map(clip => clip.id)
+  expect(ids.indexOf('z-close')).toBeLessThan(ids.indexOf('a-promotion'))
+  expect(ids.indexOf('z-applause')).toBeLessThan(ids.indexOf('b-roll'))
 })

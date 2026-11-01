@@ -96,6 +96,14 @@ with a room identity:
 - `POST /resources/upload`: one bounded multipart file plus typed metadata and
   a request ID. Authentication occurs before multipart parsing. Temporary upload
   files are removed after handling.
+- `POST /resources/:id/replace`: one bounded multipart file for an owned uploaded
+  resource. It uses the same pre-parser authentication and 20 MB limit. Validation
+  completes before an atomic update of the existing resource's media and original
+  filename. Metadata, disabled/archived state and usage remain intact. In-flight
+  replacements are serialized per resource and share the upload concurrency bound.
+  Playback is checked before preparation and again before publication. A deleted
+  resource cannot be resurrected; rejected candidates and unreferenced old files
+  are cleaned up. Invalid replacements do not discard a previously valid file.
 - `GET /providers`, `POST /production/check`: compatible provider configuration.
 - `POST /production/jobs`: durable generation requests.
 - `POST /production/:jobId/register`: retry local registration only.
@@ -107,18 +115,51 @@ resource lookup, preview and mutation cannot disclose private resources.
 
 ## Playback memory and readiness
 
+Effects carry an optional `effectType` in metadata and runtime clip snapshots:
+`short` (the legacy default, 4.5 s) or `transition` (12 s). The classification is
+validated independently of the descriptive category. Transition clips participate
+after presentations, never as automatic celebration applause. Contextual category
+placements also support anticipation before celebrations and soft notification
+before invitation/promotion voices.
+Generation, media preparation, startup reconciliation, replacements and browser
+decoding use the same subtype-aware bound. Changing to a shorter subtype cannot
+leave a ready file above that bound. Replacement can change subtype and file
+together after validation. Ready generated files can be reclassified when their
+measured duration fits; the original job and generationInput remain unchanged.
+Actual sound changes still require a new version.
+Explicit `short` and the omitted legacy subtype share a generation cache key.
+
+Effect categories have stable values (`appreciation`, `celebration`, `transition`,
+`anticipation`, `notification`) and Spanish labels/recommended times in
+`shared/effectCategories.ts`. Known historical labels are normalized idempotently
+on startup and in new requests; generation-key canonicalization recognizes the
+same aliases to avoid synthesizing an already produced request again. Unknown or
+ambiguous labels such as generic applause remain intact for operator review.
+Category editing does not rewrite files, historical generation inputs or usage.
+
 The full management inventory has no legacy 30-active/200-total manifest cap.
 The player fetches a window of at most 24 distinct checksums, balancing resource
 kinds/event families and least-recently-used candidates. Pending manual requests
 and active interventions/ambience have preparation priority. This prevents the
 newest inventory page from defining what can ever play.
+Enabled automatic voice families and their applicable effects are prepared before
+disabled families and optional manual demos, keeping the useful real-audio set
+inside the existing decoded-memory bound.
 
-The decoded buffer cache is bounded to 32 MiB. Playback pins its active buffer;
+The decoded buffer cache is bounded to 64 MiB. Playback pins its active buffer;
 higher-priority candidates are retained before lower-priority ones. Preparation
 is serialized and checks context generation before and after asynchronous work.
-The 32 MiB bound describes retained decoded audio, not all browser memory: one
+The 64 MiB bound describes retained decoded audio, not all browser memory: one
 incoming decode, compressed responses, music/video and browser overhead are
 additional allocations. Long-file ambience requires a separate transport design.
+Two ambience candidates receive preparation priority, and their current selection
+refreshes preparation. This allows automatic rotation of the real 30-second beds
+alongside the enabled voice/effect families without needing all inventory decoded.
+
+`celebrationMode` defaults to `confirmed`. Only explicitly generic `song_end`
+voices participate in automatic natural-ending celebrations. Prefix effects are
+acknowledged individually; usage backfill uses the actual first sequence asset,
+not the main voice ID, so an interrupted drumroll cannot invent a heard voice.
 
 Catalog changes, pending interventions, completed playback and profile changes
 refresh preparation. Server-side ready hashes and finite authority remain
@@ -262,3 +303,84 @@ persistence and continued access in another room. Updated 18-scenario runs passe
 in development (`/tmp/karaoke-phase2-e2e-luJrG8`) and production
 (`/tmp/karaoke-phase2-e2e-uAApNq`); screenshots were inspected. The 91 focused
 animation/migration tests, typecheck, scoped lint and both builds also passed.
+
+### Follow-up: replace uploaded files
+
+An overlong effect rejection is reproduced through the upload UI, then repaired
+using **Detalles → Reemplazar archivo**. Effects now allow 4.5 seconds; the updated
+case accepts 4.1 seconds and rejects 4.6 seconds without shortening playback.
+Browser coverage checks repeat rejection,
+successful recovery under the same resource ID, preservation of a previously valid
+file, preview shutdown, keyboard focus/cancellation, room isolation and restart.
+The file selector receives focus after the replacement dialog opens; relying on
+React's initial autofocus before `showModal()` did not preserve keyboard focus.
+
+Validation: 446 tests in 54 files, typecheck, scoped lint and both builds passed.
+Inventory E2E passed 19 scenarios in development
+(`/tmp/karaoke-phase2-e2e-OJ1bTg`) and production
+(`/tmp/karaoke-phase2-e2e-EtIsHw`). Replacement/error screenshots at 390×844 and
+1440×768 were inspected. All provider calls were simulated, and replacement itself
+made no provider calls. The original venue upload was not modified or auditioned.
+
+Short-effect limit update: the shared maximum is 4.5 seconds for generation,
+upload, replacement and catalog validation. Independent playback clipping is deferred.
+The 95 animation tests, typecheck, scoped lint and builds passed. The updated
+19-scenario browser suite passed in development (`/tmp/karaoke-phase2-e2e-96t9Gq`)
+and production (`/tmp/karaoke-phase2-e2e-adEayj`), accepting an untrimmed 4.1-second
+replacement and rejecting 4.6 seconds. Mobile/desktop limit messages were inspected.
+
+Musical transitions now have their own 12-second bound. The 105 focused animator
+and browser-audio unit tests passed, including legacy cache compatibility,
+subtype changes and bounds. The 20-scenario E2E suite passed in production
+(`/tmp/karaoke-phase2-e2e-IRO1Ux`) and development
+(`/tmp/karaoke-phase2-e2e-ro3iQf`). It generates an 8-second transition through a
+simulated provider, replaces an upload with 11.5 seconds, rejects 12.1 seconds,
+restarts and verifies full manual playback beyond 11 seconds. Typecheck, scoped
+lint and builds passed; mobile/desktop selector screenshots were inspected.
+The first development attempt requested playback before the restarted player
+reclaimed authority; the harness now waits for player presence and unlocked audio.
+
+Category follow-up: 38 focused resource/production tests, typecheck, scoped lint
+and both builds passed. The expanded 21-scenario E2E suite passed in development
+(`/tmp/karaoke-phase2-e2e-vEdVgz`) and production
+(`/tmp/karaoke-phase2-e2e-95Ouh7`), covering selectors, recommended times,
+category/type coordination, replacement, filtering and generated-audio
+reclassification without changing its checksum or generation history. Screenshots
+were inspected at 390 and 1440 pixels. The five current room-1 effects were
+classified by their operator-provided names/descriptions with a database backup;
+their media files, durations and production records were preserved.
+
+Ambience update: local uploads, replacements, catalog validation and player
+decoding accept up to 35 seconds. Providers may advertise `maxDurationSeconds`;
+generation uses the smaller of the provider and local limits. ElevenLabs Sound
+Effects still accepts at most 30 seconds per request, as documented in its
+[API reference](https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert).
+The generation form explains the difference and permits longer local uploads.
+
+Validation: 43 focused production/player-audio tests, typecheck, scoped lint and
+builds passed. E2E passed 22 scenarios in production
+(`/tmp/karaoke-phase2-e2e-usUb9A`) and development
+(`/tmp/karaoke-phase2-e2e-5cfjfK`), including a 34-second upload, 34.8-second
+replacement, restart and browser preparation. Provider-limit screenshots were
+inspected at mobile/desktop sizes. The development rerun used a 360-second
+command allowance after the enlarged suite exceeded the previous 240-second
+allowance near its final case. No live provider calls or venue playback were used.
+
+## Sustained-program follow-up
+
+The former last-phrase exclusion and per-jornada environmental exhaustion could
+silence a catalog with one voice per family. Selection now reuses content after
+finite cooldowns and tries other eligible families. Natural boundaries have one
+stable event key, independent of the chosen voice family, and rotate program
+voices while the queue remains populated. Environmental families also receive
+between-song opportunities; expiring promotions cannot stall other families.
+
+The real-catalog rehearsal now queues twelve songs without manual announcement
+requests, checks repeated presentation/closing/generic-celebration use, all five
+existing effects and both ambiences. Four isolated aged-history windows cover
+invitation → booth → promotion → invitation. No live history is reset for testing.
+The run passed in production (`/tmp/karaoke-real-rehearsal-fw4iX7`) and development
+(`/tmp/karaoke-real-rehearsal-GI3Eym`), with no audio/music overlap or provider calls.
+The full suite passed 465 tests; 23 catalog/automatic browser scenarios passed in
+each mode. See [the updated rehearsal guide](ANIMATION-REHEARSAL.md) for timing,
+contextual effect placements and remaining operator-listening acceptance.

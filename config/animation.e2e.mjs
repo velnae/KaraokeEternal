@@ -71,9 +71,9 @@ try {
     sock.once('connect', resolve)
     sock.once('connect_error', reject)
   })
-  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, headless: true })
+  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, headless: true, args: ['--autoplay-policy=document-user-activation-required', '--disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplay'] })
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
-  await context.addInitScript(() => {
+  const installAudioProbes = () => {
     window.voiceStarts = []
     window.audioProbes = []
     window.duplicateAudioCloses = 0
@@ -101,7 +101,8 @@ try {
       window.voiceStarts.push({ at: Date.now(), overlapping: !!video && !video.paused && !video.ended })
       return start.apply(this, args)
     }
-  })
+  }
+  await context.addInitScript(installAudioProbes)
   context.on('page', page => page.on('pageerror', error => errors.push(error.message)))
   const admin = await context.newPage()
   await admin.goto(`${base}account?roomId=1`)
@@ -114,7 +115,7 @@ try {
   await expect(admin).toHaveURL(`${base}admin/settings/animator`)
   await expect(admin.getByRole('heading', { name: 'Animador', exact: true, level: 1 })).toBeVisible()
   await expect(admin.getByLabel('Clip', { exact: true }).locator('option')).toHaveCount(3)
-  const player = await context.newPage()
+  let player = await context.newPage()
   // Exercise the cold mount before Socket.IO has assigned a socket ID.
   await player.route('**/socket.io/**', async (route) => {
     await new Promise(resolve => setTimeout(resolve, 600))
@@ -130,7 +131,7 @@ try {
       analyser.getFloatTimeDomainData(samples)
       return Math.max(...samples.map(Math.abs))
     })))
-  const transport = player.getByRole('toolbar', { name: 'Controles de reproducción' })
+  let transport = player.getByRole('toolbar', { name: 'Controles de reproducción' })
   const enqueueFromLibrary = async (title, status = 'APPROVED') => {
     await admin.getByRole('link', { name: 'Biblioteca', exact: true }).click()
     await admin.getByRole('radio', { name: 'Archivos locales', exact: true }).check()
@@ -185,6 +186,24 @@ try {
   assert.deepEqual(errors, [])
   pass('Leaving/reentering player, skipping, natural exhaustion and enqueueing again preserve playable audio without double close')
 
+  // A fresh browser context has no origin engagement or player-tab activation.
+  const blockedContext = await browser.newContext({ storageState: await context.storageState(), viewport: { width: 1440, height: 1000 } })
+  await blockedContext.addInitScript(installAudioProbes)
+  blockedContext.on('page', page => page.on('pageerror', error => errors.push(error.message)))
+  await player.close()
+  player = await blockedContext.newPage()
+  await player.goto(`${base}player`)
+  // Playwright locator assertions/evaluate grant user activation in Chromium.
+  // Observe the restrictive case through CDP without synthesizing a gesture.
+  const playerCDP = await blockedContext.newCDPSession(player)
+  const inspect = async (cdp, expression) => (await cdp.send('Runtime.evaluate', { expression, returnByValue: true, userGesture: false })).result.value
+  transport = player.getByRole('toolbar', { name: 'Controles de reproducción' })
+  await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.playerPresent).toBe(true)
+  await emit('server/PLAYER_REQ_NEXT')
+  await expect.poll(() => inspect(playerCDP, 'document.body.innerText.includes("No se pudo reproducir")')).toBe(true)
+  await emit('server/PLAYER_REQ_NEXT')
+  await expect.poll(() => inspect(playerCDP, 'document.body.innerText.includes("Sin canciones")')).toBe(true)
+
   await admin.getByRole('navigation', { name: 'Secciones de administración' }).getByRole('link', { name: 'Animador', exact: true }).click()
   const announce = admin.getByRole('button', { name: 'Anunciar en la próxima pausa' })
   await expect(announce).toBeDisabled()
@@ -193,17 +212,26 @@ try {
   await admin.getByLabel('Activado', { exact: true }).press('Space')
   await expect(admin.getByLabel('Activado', { exact: true })).toBeChecked()
   await expect(announce).toBeEnabled()
-  await expect(admin.getByText('Puede dejar el anuncio en espera. Habilite el audio en el reproductor del local.', { exact: true })).toBeVisible()
+  await expect(admin.getByText('Puede dejar el anuncio en espera. El sonido se habilita automáticamente o al usar Reproducir en el reproductor.', { exact: true })).toBeVisible()
   await announce.focus()
   await announce.press('Enter')
   await expect.poll(() => latest()?.status).toBe('PENDING')
-  await expect(admin.getByText('Solicitud en espera de audio', { exact: true })).toBeVisible()
-  assert.equal(await player.evaluate(() => window.voiceStarts.length), 0)
+  await expect.poll(() => inspect(playerCDP, 'document.body.innerText.includes("Permitir sonido")')).toBe(true)
+  assert.equal(await inspect(playerCDP, 'navigator.userActivation.hasBeenActive'), false)
+  assert.equal(await inspect(playerCDP, 'window.voiceStarts.length'), 0)
   for (const width of [390, 1440]) {
     await admin.setViewportSize({ width, height: 1600 })
     await expect.poll(() => admin.locator('#animator').evaluate(element => Math.round(element.getBoundingClientRect().width))).toBeGreaterThan(width <= 1100 ? width - 100 : width - 360)
     await admin.getByRole('heading', { name: 'Animador', exact: true, level: 1 }).scrollIntoViewIfNeeded()
     await admin.locator('#animator').screenshot({ path: path.join(data, `animation-awaiting-audio-${width}.png`) })
+    await player.setViewportSize({ width, height: 1000 })
+    await expect.poll(() => inspect(playerCDP, `(() => {
+      const button = [...document.querySelectorAll('button')].find(node => node.textContent === 'Permitir sonido');
+      const rect = button?.getBoundingClientRect();
+      return !!rect && rect.left >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+    })()`)).toBe(true)
+    const screenshot = await playerCDP.send('Page.captureScreenshot', { format: 'png' })
+    fs.writeFileSync(path.join(data, `player-audio-recovery-${width}.png`), Buffer.from(screenshot.data, 'base64'))
   }
   await admin.getByRole('button', { name: 'Cancelar solicitud', exact: true }).focus()
   await admin.getByRole('button', { name: 'Cancelar solicitud', exact: true }).press('Enter')
@@ -212,7 +240,9 @@ try {
   await announce.click()
   await expect.poll(() => latest()?.status).toBe('PENDING')
   pass('Enabled animator accepts and cancels requests by keyboard before unlocking audio, without public playback')
-  await player.getByRole('button', { name: 'Habilitar audio del animador' }).click()
+  // Ordinary keyboard interaction in the player unlocks audio; no special CTA.
+  await transport.getByRole('slider', { name: 'Volumen', exact: true }).focus()
+  await player.keyboard.press('End')
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.audioUnlocked).toBe(true)
   await expect(player.getByTestId('announcement-overlay')).toBeVisible()
   await expect.poll(() => latest()?.status, { timeout: 10000 }).toBe('PLAYED')
@@ -220,12 +250,10 @@ try {
   pass('Empty queue: real Web Audio clip, coordinated text, confirmed end')
 
   await player.evaluate(() => window.voiceContext.suspend())
-  await expect(player.getByRole('button', { name: 'Habilitar audio del animador' })).toBeVisible()
-  await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.audioUnlocked).toBe(false)
-  await player.getByRole('button', { name: 'Habilitar audio del animador' }).click()
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.audioUnlocked).toBe(true)
+  await expect(player.getByRole('button', { name: 'Permitir sonido' })).toHaveCount(0)
   assert.equal(await player.evaluate(() => window.voiceStarts.length), 1)
-  pass('Suspended audio requires a fresh gesture without replaying a finished clip')
+  pass('Suspended audio recovers automatically after prior activation without replaying a finished clip')
 
   await admin.getByRole('button', { name: 'Ajustes', exact: true }).click()
   const voiceVolume = admin.getByRole('slider', { name: 'Volumen de voz', exact: true })
@@ -288,15 +316,19 @@ try {
 
   await emit('server/PLAYER_REQ_NEXT')
   await expect.poll(() => player.locator('video').count()).toBe(0)
-  const standby = await context.newPage()
+  const standbyContext = await browser.newContext({ storageState: await context.storageState() })
+  await standbyContext.addInitScript(installAudioProbes)
+  standbyContext.on('page', page => page.on('pageerror', error => errors.push(error.message)))
+  const standby = await standbyContext.newPage()
   await standby.goto(`${base}player`)
-  await expect(standby.getByRole('heading', { name: 'Ya hay un reproductor activo' })).toBeVisible()
+  const standbyCDP = await standbyContext.newCDPSession(standby)
+  await expect.poll(() => inspect(standbyCDP, 'document.body.innerText.includes("Ya hay un reproductor activo")')).toBe(true)
   await requestClip()
   await expect(player.getByTestId('announcement-overlay')).toBeVisible()
   await admin.getByRole('button', { name: 'Detener anuncio', exact: true }).click()
   await expect.poll(() => latest()?.status).toBe('INTERRUPTED')
   await expect(player.getByTestId('announcement-overlay')).toBeHidden()
-  assert.equal(await standby.evaluate(() => window.voiceStarts.length), 0)
+  assert.equal(await inspect(standbyCDP, 'window.voiceStarts.length'), 0)
   pass('Explicit stop interrupts voice and standby player never emits')
 
   let controls = (await emit('server/ANIMATION_SYNC')).payload
@@ -325,14 +357,14 @@ try {
   const interruptedId = latest().interventionId
   const leaseUntil = latest().leaseUntil
   await player.close()
-  await expect(standby.getByRole('button', { name: 'Habilitar audio del animador' })).toBeVisible()
+  await expect.poll(() => inspect(standbyCDP, 'document.body.innerText.includes("Permitir sonido")')).toBe(true)
   await expect.poll(() => latest()?.status).toBe('UNCERTAIN')
   const rejected = await sock.timeout(3000).emitWithAck('action', { type: 'server/ANIMATION_REQUEST', payload: { clipId: 'demo-welcome', requestId: crypto.randomUUID(), expiresAt: Date.now() + 2000 } })
   assert.ok(rejected.error?.includes('recuperación'), rejected.error)
   await standby.waitForTimeout(Math.max(0, leaseUntil - Date.now()) + 200)
   assert.equal(latest().interventionId, interruptedId)
-  assert.equal(await standby.evaluate(() => window.voiceStarts.length), 0)
-  await standby.getByRole('button', { name: 'Habilitar audio del animador' }).click()
+  assert.equal(await inspect(standbyCDP, 'window.voiceStarts.length'), 0)
+  await standby.getByRole('button', { name: 'Permitir sonido' }).click()
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.audioUnlocked).toBe(true)
   pass('Disconnect fences takeover; uncertain audio is never replayed')
 
@@ -350,7 +382,6 @@ try {
   pass('Server restart stops voice, restores authority and retains uncertain delivery')
 
   await standby.waitForTimeout(Math.max(0, latest().leaseUntil - Date.now()) + 200)
-  await standby.getByRole('button', { name: 'Habilitar audio del animador' }).click()
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.audioUnlocked).toBe(true)
   await requestClip()
   // Recovered music may still be playing the eight-second fixture after restart.
@@ -359,7 +390,7 @@ try {
   await standby.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
   await expect(standby.getByRole('link', { name: 'Abrir reproductor', exact: true })).toBeVisible()
   await standby.goBack()
-  await expect(standby.getByRole('button', { name: 'Habilitar audio del animador' })).toBeVisible()
+  await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.audioUnlocked).toBe(true)
   await expect(standby.getByTestId('announcement-overlay')).toBeHidden()
   assert.equal(await standby.evaluate(() => window.voiceStarts.length), startsBeforeExit)
   assert.equal(await standby.evaluate(() => window.duplicateAudioCloses), 0)

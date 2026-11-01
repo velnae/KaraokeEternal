@@ -16,8 +16,8 @@ export function backfillAudioUsage () {
   // Old history proves only the first asset started, never a later effect or ambience.
   db.exec('SAVEPOINT audio_usage_backfill')
   try {
-    for (const row of db.all<{ roomId: number, interventionId: string, clipId: string, startedAt: number, sessionId: string | null }>(`SELECT i.roomId,i.interventionId,i.clipId,i.startedAt,i.sessionId FROM animationInterventions i
-      JOIN rooms r ON r.roomId=i.roomId WHERE i.startedAt IS NOT NULL AND NOT EXISTS(SELECT 1 FROM audioUsage u WHERE u.roomId=i.roomId AND u.sourceId='intervention:'||i.interventionId AND u.clipId=i.clipId)`)) {
+    for (const row of db.all<{ roomId: number, interventionId: string, clipId: string, startedAt: number, sessionId: string | null }>(`SELECT i.roomId,i.interventionId,coalesce(json_extract(i.sequenceJSON,'$[0].id'),i.clipId) clipId,i.startedAt,i.sessionId FROM animationInterventions i
+      JOIN rooms r ON r.roomId=i.roomId WHERE i.startedAt IS NOT NULL AND NOT EXISTS(SELECT 1 FROM audioUsage u WHERE u.roomId=i.roomId AND u.sourceId='intervention:'||i.interventionId AND u.clipId=coalesce(json_extract(i.sequenceJSON,'$[0].id'),i.clipId))`)) {
       recordAudioUsage(row.roomId, `intervention:${row.interventionId}`, row.clipId, 'intervention', row.startedAt, row.sessionId)
     }
     db.exec('RELEASE audio_usage_backfill')

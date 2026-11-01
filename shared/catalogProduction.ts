@@ -1,8 +1,10 @@
-import type { AudioKind, VoiceFamily, RoomProfile } from './animation.js'
+import type { AudioKind, CelebrationMode, EffectType, VoiceFamily, RoomProfile } from './animation.js'
 
 export type VoiceStyle = 'warm' | 'cheerful' | 'celebration'
 export const voicePrompt = (text: string, style: VoiceStyle) => `${{ warm: '[warmly]', cheerful: '[cheerfully]', celebration: '[excited]' }[style]} ${text.normalize('NFC').replace(/\s+/g, ' ').trim()}`
 export interface ProductionInput {
+  celebrationMode?: CelebrationMode
+  effectType?: EffectType
   providerId?: string
   category?: string
   language?: string

@@ -1,4 +1,4 @@
-import type { AudioKind, RoomProfile, VoiceFamily } from './animation.js'
+import type { AudioKind, CelebrationMode, EffectType, RoomProfile, VoiceFamily } from './animation.js'
 
 export type ResourceState = 'active' | 'disabled' | 'archived'
 export type PreparationState = 'queued' | 'generating' | 'preparing' | 'ready' | 'failed' | 'uncertain' | 'cancelled'
@@ -9,6 +9,8 @@ export interface AudioUsage {
   businessDate: string
 }
 export interface AudioMetadata {
+  celebrationMode?: CelebrationMode
+  effectType?: EffectType
   text: string
   family: VoiceFamily | 'manual'
   modes: RoomProfile[]
@@ -59,6 +61,7 @@ export interface ProviderCapabilities {
   configured: boolean
   kinds: AudioKind[]
   models: Partial<Record<AudioKind, string>>
+  maxDurationSeconds?: Partial<Record<AudioKind, number>>
   styles: string[]
   languages: string[]
   loop: boolean

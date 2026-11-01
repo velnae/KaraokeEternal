@@ -3,12 +3,14 @@ import { Link, useSearchParams } from 'react-router'
 import { useAppSelector } from 'store/hooks'
 import HttpApi from 'lib/HttpApi'
 import Button from 'components/Button/Button'
-import { familyLabels, VOICE_FAMILIES, type AudioKind } from 'shared/animation'
+import { effectTypeLabels, familyLabels, VOICE_FAMILIES, type AudioKind } from 'shared/animation'
 import { resourceKindLabels, resourceStatus, type AudioResource, type ProviderCapabilities, type ResourcePage } from 'shared/audioCatalog'
 import AudioResourceForm from './AudioResourceForm'
 import AudioResourceDetails from './AudioResourceDetails'
 import UrlTextInput from './UrlTextInput'
 import styles from './AudioLibrary.css'
+import EffectCategorySelect from './EffectCategorySelect'
+import { effectCategoryLabel } from 'shared/effectCategories'
 
 const api = new HttpApi('animation/')
 function resourceQuery (search: string, kind: AudioKind) {
@@ -25,6 +27,7 @@ const characteristic = (resource: AudioResource, column: Column) => {
   const value = resource.metadata[column]
   if (column === 'family') return value === 'manual' ? 'Anuncio puntual' : familyLabels[value as keyof typeof familyLabels]
   if (column === 'loop') return value === undefined ? 'Sin especificar' : value ? 'Sí' : 'No'
+  if (column === 'category' && resource.kind === 'effect') return effectCategoryLabel(resource.metadata.category) || 'Sin especificar'
   return String(value || 'Sin especificar')
 }
 
@@ -173,10 +176,15 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
                 </>
               )
             : (
-                <label>
-                  Categoría
-                  <UrlTextInput value={params.get('category') || ''} onValueChange={value => change('category', value)} placeholder='Todas' />
-                </label>
+                <>
+                  {kind === 'effect' && <EffectCategorySelect filter value={params.get('category') ?? ''} onChange={value => change('category', value)} />}
+                  {kind === 'ambience' && (
+                    <label>
+                      Categoría
+                      <UrlTextInput value={params.get('category') || ''} onValueChange={value => change('category', value)} placeholder='Todas' />
+                    </label>
+                  )}
+                </>
               )}
           {kind === 'ambience' && (
             <label>
@@ -253,6 +261,7 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
                 <tr key={resource.id} data-resource-id={resource.id} data-state={resource.preparation} aria-label={resource.title}>
                   <td className={styles.title}>
                     <strong>{resource.title}</strong>
+                    {resource.kind === 'effect' && <small>{effectTypeLabels[resource.metadata.effectType ?? 'short']}</small>}
                     <small className={styles.mobileSummary}>{[resource.durationMs ? `${(resource.durationMs / 1000).toFixed(1)} s` : '', ...columns.map(column => characteristic(resource, column)), origin(resource)].filter(Boolean).join(' · ')}</small>
                     {resource.id === highlight && <small>Última solicitud</small>}
                     {resource.error && <small className={styles.error}>{resource.error}</small>}
@@ -304,6 +313,14 @@ export default function CatalogProductionPanel ({ visible }: { visible: boolean 
           resource={page?.items.find(resource => resource.id === details.id) ?? details}
           onClose={() => setDetails(null)}
           onChange={fresh}
+          onReplaced={() => {
+            if (preview?.id === details.id) {
+              audio.current?.pause()
+              setPreview(null)
+            }
+            setNotice('Archivo reemplazado.')
+            fresh()
+          }}
           onDelete={() => {
             if (preview?.id === details.id) {
               audio.current?.pause()

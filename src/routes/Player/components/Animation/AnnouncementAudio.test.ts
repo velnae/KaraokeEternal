@@ -5,6 +5,89 @@ import { createHash } from 'node:crypto'
 
 afterEach(() => vi.unstubAllGlobals())
 
+it('prepares while autoplay is blocked and resumes the same decoded audio after a gesture', async () => {
+  const audio = new AnnouncementAudio()
+  const context = { state: 'suspended', resume: vi.fn(async () => {
+    context.state = 'running'
+  }), close: async () => {},
+  decodeAudioData: vi.fn(async () => ({ duration: 1, length: 44100, numberOfChannels: 1 })) }
+  audio.context = context as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('voice')))
+  const checksum = createHash('sha256').update('voice').digest('hex')
+  await expect(audio.prepare([{ id: 'voice', checksum, durationMs: 1000, kind: 'voice' } as AnimationClip])).resolves.toEqual([checksum])
+  expect(context.resume).not.toHaveBeenCalled()
+  expect(audio.ready).toBe(false)
+  expect(() => audio.play(checksum, 0.5)).toThrow('no está disponible')
+  await audio.resume()
+  expect(audio.ready).toBe(true)
+  expect(context.decodeAudioData).toHaveBeenCalledTimes(1)
+  audio.close()
+})
+
+it('bounds a blocked resume attempt and can retry without replacing the context', async () => {
+  vi.useFakeTimers()
+  const audio = new AnnouncementAudio()
+  const context = { state: 'suspended', resume: vi.fn(() => new Promise<void>(() => {})), close: async () => {} }
+  audio.context = context as unknown as AudioContext
+  try {
+    const blocked = expect(audio.resume()).rejects.toThrow('no habilitó')
+    await vi.advanceTimersByTimeAsync(750)
+    await blocked
+    context.resume.mockImplementation(async () => {
+      context.state = 'running'
+    })
+    await audio.resume()
+    expect(audio.ready).toBe(true)
+  } finally {
+    audio.close()
+    vi.useRealTimers()
+  }
+})
+
+it('renews one looping source without restarting it and cannot extend after stop or lease expiry', async () => {
+  const audio = new AnnouncementAudio()
+  const source = { connect: vi.fn(node => node), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null as (() => void) | null, loop: false }
+  const gain = { connect: vi.fn(), disconnect: vi.fn(), gain: { value: 0.2, cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() } }
+  const context = { state: 'running', currentTime: 0, destination: {}, createBufferSource: () => source, createGain: () => gain, addEventListener: vi.fn(), removeEventListener: vi.fn(), close: async () => {} }
+  audio.context = context as unknown as AudioContext
+  audio.buffers.set('loop', { duration: 30 } as AudioBuffer)
+  expect(() => audio.play('loop', 0.2, { offsetMs: 0, durationMs: 0, renewable: true, loop: true })).toThrow('Tramo')
+  expect(source.start).not.toHaveBeenCalled()
+  const playing = audio.play('loop', 0.2, { offsetMs: 0, durationMs: 10000, renewable: true, loop: true })
+  expect(source.loop).toBe(true)
+  context.currentTime = 7
+  expect(audio.renewAmbience(10000)).toBe(true)
+  expect(source.start).toHaveBeenCalledExactlyOnceWith(0, 0)
+  expect(source.stop).toHaveBeenLastCalledWith(17)
+  context.currentTime = 17
+  expect(audio.renewAmbience(10000)).toBe(false)
+  source.onended!()
+  await expect(playing).resolves.toBe('STOPPED')
+  const again = audio.play('loop', 0.2, { offsetMs: 0, durationMs: 10000, renewable: true, loop: true })
+  audio.stop()
+  expect(audio.renewAmbience(10000)).toBe(false)
+  source.onended!()
+  await expect(again).resolves.toBe('STOPPED')
+  audio.close()
+})
+
+it.each([
+  ['effect', 'transition', 12, true], ['effect', 'transition', 12.1, false], ['effect', 'short', 8, false],
+  ['ambience', undefined, 35, true], ['ambience', undefined, 35.1, false],
+] as const)('validates %s/%s preparation at %s seconds in the player', async (kind, effectType, duration, allowed) => {
+  const audio = new AnnouncementAudio()
+  audio.context = { state: 'running', resume: async () => {}, close: async () => {}, decodeAudioData: async () => ({ duration, length: Math.round(duration * 44100), numberOfChannels: 2 }) } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('transition')))
+  const checksum = createHash('sha256').update('transition').digest('hex')
+  const clip = { id: 'transition', checksum, durationMs: duration * 1000, kind, effectType } as AnimationClip
+  const preparing = audio.unlock([clip])
+  if (allowed) await expect(preparing).resolves.toEqual([checksum])
+  else await expect(preparing).rejects.toThrow('duración')
+  audio.close()
+})
+
 it('releases a voice context only once', () => {
   const audio = new AnnouncementAudio()
   const context = { state: 'running', close: vi.fn(() => Promise.resolve()) }

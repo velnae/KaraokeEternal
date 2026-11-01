@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { db } from '../lib/Database.js'
 import { catalogChanged, catalogRoot } from './catalog.js'
-import { getResource } from './Resources.js'
+import { assertResourceUnused, getResource } from './Resources.js'
 import getLogger from '../lib/Log.js'
 
 export function deleteResource (roomId: number, id: string) {
@@ -12,12 +12,7 @@ export function deleteResource (roomId: number, id: string) {
   const job = db.get<{ status: string }>('SELECT status FROM catalogGenerationJobs WHERE jobId=? AND roomId=?', [jobId, roomId])
   if (['queued', 'generating', 'preparing'].includes(row.preparation) || ['queued', 'generating', 'publishing'].includes(job?.status ?? '')) throw new Error('El audio sigue en preparación. Espere a que termine e intente de nuevo.')
   const now = Date.now()
-  const intervention = db.get(`SELECT interventionId FROM animationInterventions WHERE roomId=?
-    AND (status IN ('PENDING','RESERVED','PLAYING') OR leaseUntil>?)
-    AND (clipId=? OR EXISTS(SELECT 1 FROM json_each(sequenceJSON) WHERE json_extract(value,'$.id')=?))`, [roomId, now, id, id])
-  const ambience = db.get(`SELECT roomId FROM animationRoomState WHERE roomId=?
-    AND json_extract(ambienceJSON,'$.clip.id')=? AND json_extract(ambienceJSON,'$.until')>?`, [roomId, id, now])
-  if (intervention || ambience) throw new Error('El audio está en uso o tiene un anuncio pendiente. Deténgalo o cancele el anuncio y vuelva a intentar.')
+  assertResourceUnused(roomId, id)
 
   if (row.roomId === null) {
     // Included files remain available to other rooms, but cannot reappear here.

@@ -32,6 +32,7 @@
     "test:queue:cleanup": "node config/queue-cleanup.e2e.mjs",
     "test:animation:e2e": "node config/animation.e2e.mjs",
     "test:animation:phase2": "node config/animation-phase2.e2e.mjs",
+    "test:animation:rehearsal": "node config/animation-rehearsal.e2e.mjs",
     "test:greetings:e2e": "node config/greetings.e2e.mjs",
     "typecheck": "tsc -b --noEmit",
     "build": "npm run build:server ; npm run build:client",

@@ -101,8 +101,8 @@ const PlayerController = (props: PlayerControllerProps) => {
       return ordered.result.slice(index + 1).map(id => ordered.entities[id]).find(item => item.status === 'APPROVED')
     }
     try {
-      await animationRef.current.stopAmbience()
       const upcoming = selection()
+      if (upcoming || boundary !== 'idle') await animationRef.current.stopAmbience()
       const greeted = upcoming && controlVersion === animationRef.current.controlVersion()
         ? await greetingsRef.current.attempt(upcoming.queueId)
         : false
@@ -287,8 +287,16 @@ const PlayerController = (props: PlayerControllerProps) => {
       {animation.blocked && !animation.busy && <div className={animationStyles.overlay} role='status'><p>Esperando el cierre de la intervención anterior…</p></div>}
       {animation.snapshot?.prefs.enabled && !animation.unlocked && (
         <div className={animationStyles.unlock}>
-          <Button onClick={() => void animation.unlock()}>Habilitar audio del animador</Button>
+          {animation.needsGesture
+            ? (
+                <>
+                  <p>El navegador requiere una interacción en esta pestaña para permitir el sonido. Puede usar Reproducir.</p>
+                  <Button onClick={animation.unlock}>Permitir sonido</Button>
+                </>
+              )
+            : <p role='status'>{animation.preparingAudio ? 'Preparando audio…' : 'Conectando audio…'}</p>}
           {animation.error && <p role='alert'>{animation.error}</p>}
+          {animation.error && !animation.needsGesture && <Button onClick={animation.unlock}>Reintentar audio</Button>}
         </div>
       )}
       <PlayerTextOverlay

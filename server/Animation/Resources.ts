@@ -1,8 +1,9 @@
 import { db } from '../lib/Database.js'
-import { VOICE_FAMILIES, type AudioKind, type AnimationClip } from '../../shared/animation.js'
+import { clipDurationLimit, normalizeEffectType, VOICE_FAMILIES, type AudioKind, type AnimationClip } from '../../shared/animation.js'
 import type { AudioMetadata, AudioResource, PreparationState, ResourcePage, ResourceState } from '../../shared/audioCatalog.js'
 import { withoutAudioTags } from '../../shared/audioTags.js'
 import { audioUsage } from './usage.js'
+import { effectCategoryValue } from '../../shared/effectCategories.js'
 
 export interface StoredResource extends Omit<AudioResource, 'metadata'> { metadataJSON: string, filename: string | null, deletedAt: number | null }
 export const resourceDTO = ({ filename, metadataJSON, deletedAt, ...row }: StoredResource, usageRoom?: number): AudioResource => {
@@ -17,9 +18,20 @@ export function getResource (id: string, roomId?: number): StoredResource | unde
 }
 export const isResourceDeleted = (id: string) => !!db.get('SELECT id FROM audioResources WHERE id=? AND deletedAt IS NOT NULL', [id])
 export const resourceRoomFilter = '(roomId=? OR roomId IS NULL) AND NOT EXISTS (SELECT 1 FROM audioRoomDeletions WHERE resourceId=audioResources.id AND roomId=?)'
+export function assertResourceUnused (roomId: number, id: string) {
+  const now = Date.now()
+  const intervention = db.get(`SELECT interventionId FROM animationInterventions WHERE roomId=?
+    AND (status IN ('PENDING','RESERVED','PLAYING') OR leaseUntil>?)
+    AND (clipId=? OR EXISTS(SELECT 1 FROM json_each(sequenceJSON) WHERE json_extract(value,'$.id')=?))`, [roomId, now, id, id])
+  const ambience = db.get(`SELECT roomId FROM animationRoomState WHERE roomId=?
+    AND json_extract(ambienceJSON,'$.clip.id')=? AND json_extract(ambienceJSON,'$.until')>?`, [roomId, id, now])
+  if (intervention || ambience) throw new Error('El audio está en uso o tiene un anuncio pendiente. Deténgalo o cancele el anuncio y vuelva a intentar.')
+}
 export function validateMetadata (kind: AudioKind, value: Partial<AudioMetadata>): AudioMetadata {
   if (!['voice', 'effect', 'ambience'].includes(kind)) throw new Error('Tipo de audio no válido.')
-  const family = value.family ?? 'manual'
+  const effectType = normalizeEffectType(kind, value.effectType)
+  const family = effectType === 'transition' ? 'manual' : value.family ?? 'manual'
+  if (value.celebrationMode !== undefined && !['confirmed', 'song_end'].includes(value.celebrationMode)) throw new Error('Uso de celebración no válido.')
   if (family !== 'manual' && !VOICE_FAMILIES.includes(family)) throw new Error('Uso del audio no válido.')
   const modes = value.modes ?? ['dinner', 'mixed', 'party']
   if (!Array.isArray(modes) || !modes.length || modes.some(mode => !['dinner', 'mixed', 'party'].includes(mode))) throw new Error('Seleccione al menos un perfil válido.')
@@ -28,7 +40,7 @@ export function validateMetadata (kind: AudioKind, value: Partial<AudioMetadata>
   }
   if (value.loop !== undefined && (kind !== 'ambience' || typeof value.loop !== 'boolean')) throw new Error('El bucle solo corresponde a ambientes.')
   if (family === 'promotion' && (!Number.isFinite(value.validUntil) || value.validUntil! <= Date.now())) throw new Error('Indique una vigencia futura para la promoción.')
-  return { ...value, origin: value.origin ?? 'uploaded', text: value.text?.trim() ?? '', family, modes: [...new Set(modes)] }
+  return { ...value, celebrationMode: kind === 'voice' && family === 'celebration' ? value.celebrationMode : undefined, effectType, category: kind === 'effect' ? effectCategoryValue(value.category) : value.category, origin: value.origin ?? 'uploaded', text: value.text?.trim() ?? '', family, modes: [...new Set(modes)] }
 }
 export function createResource (input: { id: string, roomId: number | null, kind: AudioKind, title: string, metadata: AudioMetadata, state?: ResourceState, preparation?: PreparationState, createdAt?: number }) {
   if (isResourceDeleted(input.id)) throw new Error('Este audio fue eliminado. Use una nueva solicitud para subir otro archivo.')
@@ -39,8 +51,9 @@ export function createResource (input: { id: string, roomId: number | null, kind
     return existing
   }
   const now = Date.now()
+  const metadata = input.kind === 'effect' ? { ...input.metadata, category: effectCategoryValue(input.metadata.category) } : input.metadata
   db.run(`INSERT INTO audioResources(id,roomId,kind,title,state,preparation,metadataJSON,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)`,
-    [input.id, input.roomId, input.kind, input.title.trim(), input.state ?? 'active', input.preparation ?? 'preparing', JSON.stringify(input.metadata), input.createdAt ?? now, now])
+    [input.id, input.roomId, input.kind, input.title.trim(), input.state ?? 'active', input.preparation ?? 'preparing', JSON.stringify(metadata), input.createdAt ?? now, now])
   return getResource(input.id)!
 }
 export function prepareResource (id: string, preparation: PreparationState, error: string | null = null) {
@@ -57,10 +70,16 @@ export function editResource (roomId: number, id: string, patch: { title?: strin
   const title = patch.title ?? row.title
   if (typeof title !== 'string' || !title.trim() || title.length > 120) throw new Error('Indique un nombre de hasta 120 caracteres.')
   if (patch.state !== undefined && !['active', 'disabled', 'archived'].includes(patch.state)) throw new Error('Estado no válido.')
-  if (patch.metadata && (!Object.keys(patch.metadata).every(key => ['family', 'modes', 'category', 'language', 'style', 'loop', 'voiceName', 'validUntil', 'text'].includes(key)))) throw new Error('No se puede cambiar la procedencia del audio.')
+  if (patch.metadata && (!Object.keys(patch.metadata).every(key => ['celebrationMode', 'effectType', 'family', 'modes', 'category', 'language', 'style', 'loop', 'voiceName', 'validUntil', 'text'].includes(key)))) throw new Error('No se puede cambiar la procedencia del audio.')
   const old: AudioMetadata = JSON.parse(row.metadataJSON)
   if (row.kind === 'voice' && old.origin === 'generated' && patch.metadata?.text !== undefined && patch.metadata.text !== old.text) throw new Error('Cree otra versión para cambiar el texto hablado.')
   const metadata = patch.metadata ? validateMetadata(row.kind, { ...old, ...patch.metadata }) : old
+  if (row.kind === 'effect' && (old.effectType ?? 'short') !== (metadata.effectType ?? 'short')) {
+    if (old.origin === 'generated' && row.preparation !== 'ready') throw new Error('El audio generado debe estar disponible antes de cambiar su tipo.')
+    if (['queued', 'generating', 'preparing'].includes(row.preparation)) throw new Error('Espere a que termine la preparación del audio.')
+    assertResourceUnused(roomId, id)
+    if (row.preparation === 'ready' && row.durationMs! > clipDurationLimit(row.kind, metadata.effectType)) throw new Error(old.origin === 'generated' ? 'El archivo supera el límite del nuevo tipo. Cree otra versión más corta.' : 'El archivo supera el límite del nuevo tipo. Use Reemplazar archivo para cambiar el tipo y el audio juntos.')
+  }
   db.run('UPDATE audioResources SET title=?,state=?,metadataJSON=?,updatedAt=? WHERE id=?', [title.trim(), patch.state ?? row.state, JSON.stringify(metadata), Date.now(), id])
   return resourceDTO(getResource(id)!)
 }
@@ -88,7 +107,7 @@ export function listResources (roomId: number, query: Record<string, unknown>): 
   for (const field of ['family', 'category', 'language', 'providerId', 'origin', 'style', 'voiceName'] as const) {
     if (query[field]) {
       clauses.push(`json_extract(metadataJSON,'$.${field}')=?`)
-      params.push(String(query[field]).slice(0, 120))
+      params.push(field === 'category' && kind === 'effect' ? effectCategoryValue(String(query[field]).slice(0, 120)) : String(query[field]).slice(0, 120))
     }
   }
   if (query.profile) {
@@ -114,8 +133,8 @@ export function listResources (roomId: number, query: Record<string, unknown>): 
 }
 export function resourceClip (row: StoredResource): AnimationClip {
   const m: AudioMetadata = JSON.parse(row.metadataJSON)
-  return { id: row.id, title: row.title, kind: row.kind, displayText: row.kind === 'voice' ? withoutAudioTags(m.text) || row.title : row.title,
+  return { id: row.id, title: row.title, kind: row.kind, effectType: m.effectType, category: m.category, displayText: row.kind === 'voice' ? withoutAudioTags(m.text) || row.title : row.title,
     checksum: row.checksum!, durationMs: row.durationMs!, source: m.source ?? m.providerId ?? m.origin, license: m.license ?? 'Local audio',
-    family: m.family, modes: m.modes, approvedForAuto: m.automatic === true, validUntil: m.validUntil, loop: m.loop,
+    family: m.effectType === 'transition' ? 'manual' : m.family, celebrationMode: m.celebrationMode, modes: m.modes, approvedForAuto: m.automatic === true, validUntil: m.validUntil, loop: m.loop,
     ...(row.roomId !== null ? { roomId: row.roomId } : {}) }
 }

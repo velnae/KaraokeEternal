@@ -5,31 +5,64 @@ export default class AnnouncementAudio {
   context: AudioContext | null = null
   buffers = new Map<string, AudioBuffer>()
   onUnavailable: (() => void) | null = null
+  onAvailable: (() => void) | null = null
   private stopSource: (() => void) | null = null
   private finishSource: (() => void) | null = null
+  private renewSource: ((milliseconds: number, loop?: boolean) => boolean) | null = null
   private gain: GainNode | null = null
   private generation = 0
   private preparing: Promise<string[]> = Promise.resolve([])
   private playingChecksum: string | null = null
-  readonly maxDecodedBytes = 32 * 1024 * 1024
+  readonly maxDecodedBytes = 64 * 1024 * 1024
 
   get decodedBytes () { return [...this.buffers.values()].reduce((total, buffer) => total + buffer.length * buffer.numberOfChannels * 4, 0) }
 
-  async unlock (clips: AnimationClip[]) {
+  private ensureContext () {
     if (!this.context || this.context.state === 'closed') this.context = new AudioContext()
     const context = this.context
+    context.onstatechange = () => {
+      if (this.context !== context) return
+      if (this.ready) this.onAvailable?.()
+      else this.onUnavailable?.()
+    }
+    return context
+  }
+
+  async resume () {
+    const context = this.ensureContext()
+    const generation = this.generation
+    // Chromium can leave resume pending until a gesture. Bound each attempt so
+    // ordinary player interactions cannot accumulate unresolved subscriptions.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        context.resume(),
+        new Promise<never>((resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('El navegador no habilitó el audio')), 750)
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
+    if (this.context !== context || generation !== this.generation) throw new Error('La preparación de audio fue cancelada')
+    if (context.state !== 'running') throw new Error('El navegador no habilitó el audio')
+  }
+
+  async unlock (clips: AnimationClip[]) {
+    await this.resume()
+    return this.prepare(clips)
+  }
+
+  // Decoding does not require autoplay permission; prepare before a possible gesture.
+  async prepare (clips: AnimationClip[]) {
+    const context = this.ensureContext()
     const generation = this.generation
     const assertCurrent = () => {
       if (this.context !== context || generation !== this.generation || context.state === 'closed') {
         throw new Error('La preparación de audio fue cancelada')
       }
     }
-    context.onstatechange = () => {
-      if (!this.ready) this.onUnavailable?.()
-    }
-    await context.resume()
     assertCurrent()
-    if (context.state !== 'running') throw new Error('El navegador no habilitó el audio')
     const prepare = async () => {
       assertCurrent()
       const desired = new Set(clips.slice(0, 24).map(clip => clip.checksum))
@@ -51,7 +84,7 @@ export default class AnnouncementAudio {
         assertCurrent()
         const buffer = await context.decodeAudioData(bytes)
         assertCurrent()
-        if (buffer.duration <= 0 || buffer.duration * 1000 > clipDurationLimit(clip.kind) || Math.abs(buffer.duration * 1000 - clip.durationMs) > 100) throw new Error('La duración del clip no es válida')
+        if (buffer.duration <= 0 || buffer.duration * 1000 > clipDurationLimit(clip.kind, clip.effectType) || Math.abs(buffer.duration * 1000 - clip.durationMs) > 100) throw new Error('La duración del clip no es válida')
         const size = buffer.length * buffer.numberOfChannels * 4
         if (size > this.maxDecodedBytes) throw new Error('El audio supera la memoria disponible para este canal.')
         for (const hash of this.buffers.keys()) {
@@ -70,23 +103,26 @@ export default class AnnouncementAudio {
 
   get ready () { return this.context?.state === 'running' }
 
-  play (checksum: string, volume: number, segment?: { offsetMs: number, durationMs: number }): Promise<'ENDED' | 'STOPPED'> {
+  play (checksum: string, volume: number, segment?: { offsetMs: number, durationMs: number, renewable?: boolean, loop?: boolean }): Promise<'ENDED' | 'STOPPED'> {
     const context = this.context
     const buffer = this.buffers.get(checksum)
     if (!context || context.state !== 'running' || !buffer || this.stopSource) throw new Error('El canal de voz no está disponible')
     const offset = Math.max(0, (segment?.offsetMs ?? 0) / 1000)
-    const duration = Math.min(buffer.duration - offset, (segment?.durationMs ?? buffer.duration * 1000) / 1000)
-    if (duration <= 0) throw new Error('Tramo de audio no válido')
+    const duration = segment?.renewable ? buffer.duration - offset : Math.min(buffer.duration - offset, (segment?.durationMs ?? buffer.duration * 1000) / 1000)
+    if (duration <= 0 || (segment?.renewable && (!Number.isFinite(segment.durationMs) || segment.durationMs <= 0))) throw new Error('Tramo de audio no válido')
     this.playingChecksum = checksum
     return new Promise((resolve) => {
       const source = context.createBufferSource()
       const gain = context.createGain()
       this.gain = gain
       source.buffer = buffer
+      source.loop = segment?.renewable === true && segment.loop === true
       gain.gain.value = volume
       source.connect(gain).connect(context.destination)
       let stopped = false
       let settled = false
+      let watchdog: ReturnType<typeof setTimeout>
+      let leaseEnd = 0
       const finish = () => {
         if (settled) return
         settled = true
@@ -97,6 +133,7 @@ export default class AnnouncementAudio {
         source.onended = null
         this.stopSource = null
         this.finishSource = null
+        this.renewSource = null
         this.gain = null
         this.playingChecksum = null
         resolve(stopped ? 'STOPPED' : 'ENDED')
@@ -117,17 +154,36 @@ export default class AnnouncementAudio {
       const stateChanged = () => {
         if (context.state !== 'running') stop()
       }
-      const watchdog = setTimeout(stop, duration * 1000 + 100)
-      source.onended = finish
+      const renew = (milliseconds: number, loop?: boolean) => {
+        if (stopped || settled || !Number.isFinite(milliseconds) || milliseconds <= 0 || (leaseEnd && context.currentTime >= leaseEnd)) return false
+        if (loop !== undefined) source.loop = loop
+        clearTimeout(watchdog)
+        leaseEnd = context.currentTime + milliseconds / 1000
+        source.stop(leaseEnd)
+        watchdog = setTimeout(stop, milliseconds + 100)
+        return true
+      }
+      source.onended = () => {
+        if (segment?.renewable && context.currentTime >= leaseEnd - 0.001) stopped = true
+        finish()
+      }
       context.addEventListener('statechange', stateChanged)
       this.stopSource = stop
       this.finishSource = finish
-      source.start(0, offset, duration)
-      source.stop(context.currentTime + duration)
+      if (segment?.renewable) {
+        source.start(0, offset)
+        this.renewSource = renew
+        if (!renew(segment.durationMs)) stop()
+      } else {
+        watchdog = setTimeout(stop, duration * 1000 + 100)
+        source.start(0, offset, duration)
+        source.stop(context.currentTime + duration)
+      }
     })
   }
 
   stop () { this.stopSource?.() }
+  renewAmbience (milliseconds: number, loop?: boolean) { return this.renewSource?.(milliseconds, loop) ?? false }
 
   volume (value: number) {
     if (this.context && this.gain) this.gain.gain.setTargetAtTime(value, this.context.currentTime, 0.02)

@@ -7,14 +7,14 @@ import { open, close, db } from '../lib/Database.js'
 import { CatalogProduction, type ProductionOptions } from './Production.js'
 import { loadCatalog, catalogAsset, catalogClips } from './catalog.js'
 import type { ProductionInput } from '../../shared/catalogProduction.js'
-import { getResource, resourceDTO } from './Resources.js'
+import { editResource, getResource, resourceDTO } from './Resources.js'
 import type { AudioProvider } from './AudioProvider.js'
 import * as catalog from './catalog.js'
 import { execFileSync } from 'node:child_process'
 import { deleteResource } from './deletion.js'
 
 function wav (seconds = 1, silent = false) {
-  const samples = 24000 * seconds
+  const samples = Math.round(24000 * seconds)
   const buffer = Buffer.alloc(44 + samples * 2)
   buffer.write('RIFF', 0)
   buffer.writeUInt32LE(buffer.length - 8, 4)
@@ -98,6 +98,134 @@ afterEach(async () => {
 })
 
 describe('catalog production', () => {
+  it('accepts local ambience up to 35 seconds while enforcing the provider generation maximum', async () => {
+    const ambience = await production.upload(1, 'uploaded-long-ambience', 'ambience', 'Ambiente', { loop: true }, wav(34), 'ambience.wav')
+    expect(ambience.preparation).toBe('ready')
+    const replaced = await production.replaceUpload(1, ambience.id, wav(34.8), 'longer.wav')
+    expect(replaced.durationMs).toBeGreaterThan(34000)
+    expect(replaced.durationMs).toBeLessThanOrEqual(35000)
+    await expect(production.replaceUpload(1, ambience.id, wav(35.1), 'too-long.wav')).rejects.toThrow('35 s')
+    await loadCatalog(directory)
+    expect(getResource(ambience.id)?.preparation).toBe('ready')
+    expect(requests).toHaveLength(0)
+    expect(() => production.enqueue(1, 1, [{ ...input, kind: 'ambience', durationSeconds: 35 }])).toThrow('máximo 30 s')
+    production.enqueue(1, 1, [{ ...input, kind: 'ambience', durationSeconds: 30 }])
+    await production.drain()
+    expect(requests).toHaveLength(1)
+    expect(requests[0].body.duration_seconds).toBe(30)
+  })
+
+  it('supports a long transition upload and replacement without widening short effects or automatic celebrations', async () => {
+    const direct = await production.upload(1, 'uploaded-direct-transition', 'effect', 'Cortina', { effectType: 'transition', family: 'celebration' }, wav(6), 'transition.wav')
+    expect(direct).toMatchObject({ preparation: 'ready', metadata: { effectType: 'transition', family: 'manual' } })
+    const failed = await production.upload(1, 'uploaded-transition', 'effect', 'Separador', { family: 'celebration', category: 'Separador musical' }, wav(8), 'transition.wav')
+    expect(failed.preparation).toBe('failed')
+    const transition = await production.replaceUpload(1, failed.id, wav(11.9), 'transition.wav', 'transition')
+    expect(transition).toMatchObject({ preparation: 'ready', metadata: { effectType: 'transition', family: 'manual' } })
+    expect(transition.durationMs).toBeGreaterThan(10000)
+    expect(transition.durationMs).toBeLessThanOrEqual(12000)
+    expect(catalogAsset(failed.id)?.clip).toMatchObject({ effectType: 'transition', approvedForAuto: true, family: 'manual' })
+    await loadCatalog(directory)
+    expect(getResource(failed.id)?.preparation).toBe('ready')
+    expect(() => editResource(1, failed.id, { metadata: { effectType: 'short' } })).toThrow('Reemplazar archivo')
+    await expect(production.replaceUpload(1, failed.id, wav(12.1), 'long.wav', 'transition')).rejects.toThrow('12 s')
+    await expect(production.replaceUpload(1, failed.id, wav(8), 'short.wav', 'short')).rejects.toThrow('4.5 s')
+    expect(getResource(failed.id)?.checksum).toBe(transition.checksum)
+    const short = await production.replaceUpload(1, failed.id, wav(2), 'short.wav', 'short')
+    expect(short.metadata.effectType).toBe('short')
+    expect(requests).toHaveLength(0)
+  })
+
+  it('generates transitions with distinct cache identity while legacy short requests remain deduplicated', async () => {
+    const effect = { ...input, kind: 'effect' as const, text: 'Warm musical transition.', durationSeconds: 2, category: 'Celebración' }
+    const [legacy] = production.enqueue(1, 1, [effect])
+    const [short] = production.enqueue(1, 1, [{ ...effect, category: 'celebration', effectType: 'short' }])
+    expect(short.jobId).toBe(legacy.jobId)
+    const [transition] = production.enqueue(1, 1, [{ ...effect, effectType: 'transition', durationSeconds: 12 }])
+    await production.drain()
+    expect(requests).toHaveLength(2)
+    expect(requests[1].body).toMatchObject({ duration_seconds: 12 })
+    expect(catalogAsset(`generated-${transition.jobId}`)?.clip).toMatchObject({ effectType: 'transition', family: 'manual', approvedForAuto: true })
+    expect(() => production.enqueue(1, 1, [{ ...effect, durationSeconds: 8 }])).toThrow('Duración')
+    expect(() => production.enqueue(1, 1, [{ ...effect, effectType: 'transition', durationSeconds: 12.5 }])).toThrow('Duración')
+    expect(() => production.enqueue(1, 1, [{ ...input, effectType: 'transition' }])).toThrow('Tipo de efecto')
+    const beforeClassification = getResource(`generated-${transition.jobId}`)!
+    const classified = editResource(1, beforeClassification.id, { metadata: { category: 'Expectativa', effectType: 'short' } })
+    expect(classified.metadata).toMatchObject({ category: 'anticipation', effectType: 'short', generationInput: { effectType: 'transition', category: 'celebration' } })
+    expect(classified.checksum).toBe(beforeClassification.checksum)
+    await production.stop()
+    db.run('UPDATE catalogGenerationJobs SET generationKey=\'legacy-category-key\',configJSON=json_set(configJSON,\'$.category\',\'Celebración\') WHERE jobId=?', [legacy.jobId])
+    await loadCatalog(directory)
+    production = new CatalogProduction(directory, options, published)
+    await production.start()
+    await production.check()
+    expect(production.enqueue(1, 1, [effect])[0].jobId).toBe(legacy.jobId)
+    expect(requests).toHaveLength(2)
+  })
+
+  it('replaces an overlong upload in place while retaining its metadata and using no provider', async () => {
+    const failed = await production.upload(1, 'uploaded-applause', 'effect', 'Aplausos', { category: 'Celebración', family: 'celebration', modes: ['mixed'] }, wav(5), 'long.wav')
+    expect(failed).toMatchObject({ preparation: 'failed', error: expect.stringContaining('máximo') })
+    const replaced = await production.replaceUpload(1, failed.id, wav(4.1), 'short.wav')
+    expect(replaced).toMatchObject({ id: failed.id, title: 'Aplausos', preparation: 'ready', error: null, metadata: { category: 'celebration', family: 'celebration', modes: ['mixed'], originalName: 'short.wav' } })
+    expect(replaced.durationMs).toBeGreaterThanOrEqual(4100)
+    expect(replaced.durationMs).toBeLessThanOrEqual(4500)
+    await loadCatalog(directory)
+    expect(getResource(failed.id)?.preparation).toBe('ready')
+    expect(db.get<{ n: number }>('SELECT count(*) n FROM audioResources WHERE roomId=1')?.n).toBe(1)
+    expect(requests).toHaveLength(0)
+  })
+
+  it('preserves valid media on rejection and keeps disabled state and usage after successful replacement', async () => {
+    await production.upload(1, 'uploaded-existing', 'effect', 'Aplausos', {}, wav(), 'original.wav')
+    db.run('UPDATE audioResources SET state=\'disabled\' WHERE id=\'uploaded-existing\'')
+    db.run('INSERT INTO audioUsage(roomId,sourceId,clipId,sourceType,businessDate,startedAt) VALUES(1,\'heard\',\'uploaded-existing\',\'intervention\',\'2026-10-29\',1)')
+    const before = getResource('uploaded-existing')!
+    const bytes = await fs.readFile(path.join(directory, before.filename!))
+    await expect(production.replaceUpload(1, before.id, wav(4.6), 'too-long.wav')).rejects.toThrow('máximo')
+    expect(getResource(before.id)).toEqual(before)
+    expect(await fs.readFile(path.join(directory, before.filename!))).toEqual(bytes)
+    const result = await production.replaceUpload(1, before.id, wav(2), 'valid.wav')
+    expect(result).toMatchObject({ preparation: 'ready', state: 'disabled' })
+    expect(result.checksum).not.toBe(before.checksum)
+    expect(db.get<{ n: number }>('SELECT count(*) n FROM audioUsage WHERE clipId=?', [before.id])?.n).toBe(1)
+    await expect(fs.access(path.join(directory, before.filename!))).rejects.toThrow()
+    await loadCatalog(directory)
+    expect(getResource(before.id)?.checksum).toBe(result.checksum)
+  })
+
+  it('rejects foreign, included and generated replacements', async () => {
+    await production.upload(1, 'uploaded-private', 'effect', 'Private', {}, wav(), 'valid.wav')
+    await expect(production.replaceUpload(2, 'uploaded-private', wav(), 'valid.wav')).rejects.toThrow('subidos a esta sala')
+    await expect(production.replaceUpload(1, 'demo-welcome', wav(), 'valid.wav')).rejects.toThrow('subidos a esta sala')
+    const [job] = production.enqueue(1, 1, [input])
+    await production.drain()
+    await expect(production.replaceUpload(1, `generated-${job.jobId}`, wav(), 'valid.wav')).rejects.toThrow('subidos a esta sala')
+    expect(requests).toHaveLength(1)
+  })
+
+  it('rejects concurrent replacements and never resurrects a deleted upload', async () => {
+    await production.upload(1, 'uploaded-changing', 'effect', 'Changing', {}, wav(), 'valid.wav')
+    const replacing = production.replaceUpload(1, 'uploaded-changing', wav(2), 'new.wav')
+    await expect(production.replaceUpload(1, 'uploaded-changing', wav(), 'other.wav')).rejects.toThrow('preparación')
+    deleteResource(1, 'uploaded-changing')
+    await expect(replacing).rejects.toThrow('ya no está disponible')
+    expect(getResource('uploaded-changing')).toBeUndefined()
+    expect(await fs.readdir(path.join(directory, 'production'))).toEqual([])
+  })
+
+  it('rechecks playback at publication so a newly pending announcement keeps its original audio', async () => {
+    await production.upload(1, 'uploaded-in-use', 'effect', 'In use', {}, wav(), 'valid.wav')
+    const original = getResource('uploaded-in-use')!
+    const replacing = production.replaceUpload(1, original.id, wav(2), 'new.wav')
+    db.run(`INSERT INTO animationInterventions(interventionId,roomId,requestId,requestedByUserId,clipId,clipChecksum,displayText,durationMs,status,requestedAt,expiresAt)
+      VALUES('pending',1,'pending',1,?,?,'Aplauso',1000,'PENDING',0,?)`, [original.id, original.checksum, Date.now() + 10000])
+    await expect(replacing).rejects.toThrow('en uso')
+    await expect(production.replaceUpload(1, original.id, wav(), 'new.wav')).rejects.toThrow('en uso')
+    expect(getResource(original.id)).toEqual(original)
+    expect(await fs.readdir(path.join(directory, 'production'))).toEqual([path.basename(original.filename!)])
+  })
+
   it('keeps deleted generation history without resurrecting audio or charging until a new explicit request', async () => {
     const [job] = production.enqueue(1, 1, [input])
     await production.drain()
@@ -155,15 +283,15 @@ describe('catalog production', () => {
 
   it('uses Sound Effects for effects and looping ambience, not the speech model', async () => {
     production.enqueue(1, 1, [
-      { ...input, kind: 'effect', text: 'A short gentle applause.', durationSeconds: 2 },
+      { ...input, kind: 'effect', text: 'A short gentle applause.', durationSeconds: 4.5 },
       { ...input, kind: 'ambience', text: 'Quiet room ambience.', durationSeconds: 8 },
     ])
     await production.drain()
     expect(requests).toHaveLength(2)
     expect(requests.every(request => request.url.startsWith('/v1/sound-generation'))).toBe(true)
-    expect(requests[0].body).toMatchObject({ model_id: 'eleven_text_to_sound_v2', loop: false, duration_seconds: 2 })
+    expect(requests[0].body).toMatchObject({ model_id: 'eleven_text_to_sound_v2', loop: false, duration_seconds: 4.5 })
     expect(requests[1].body).toMatchObject({ loop: true, duration_seconds: 8 })
-    expect(production.status().usedEffectSeconds).toBe(10)
+    expect(production.status().usedEffectSeconds).toBe(12.5)
   })
 
   it('changes cache keys for explicit audio tags and deliberate regenerations', async () => {
@@ -272,7 +400,7 @@ describe('catalog production', () => {
     production = new CatalogProduction(directory, { ...options, key: '' }, published)
     await production.start()
     const result = await production.upload(1, 'uploaded-test', 'effect', 'Aplauso', { category: 'Celebración', family: 'celebration' }, wav(), 'aplauso.wav')
-    expect(result).toMatchObject({ preparation: 'ready', state: 'active', kind: 'effect', metadata: { origin: 'uploaded', category: 'Celebración' } })
+    expect(result).toMatchObject({ preparation: 'ready', state: 'active', kind: 'effect', metadata: { origin: 'uploaded', category: 'celebration' } })
     expect(catalogClips(1).some(clip => clip.id === result.id)).toBe(true)
     expect(getResource(result.id, 2)).toBeUndefined()
     expect(requests).toHaveLength(0)

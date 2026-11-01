@@ -20,6 +20,13 @@ export const ANIMATION_LIMITS = { clipMs: 10000, requestMs: 600000, startMs: 100
 export const VOICE_FAMILIES = ['welcome', 'turn', 'closing', 'invitation', 'celebration', 'goodbye', 'booth', 'promotion'] as const
 export type VoiceFamily = typeof VOICE_FAMILIES[number]
 export type AudioKind = 'voice' | 'effect' | 'ambience'
+export type EffectType = 'short' | 'transition'
+export type CelebrationMode = 'confirmed' | 'song_end'
+export const effectTypeLabels: Record<EffectType, string> = { short: 'Efecto breve (aplausos, redobles)', transition: 'Separador musical' }
+export function normalizeEffectType (kind: AudioKind, value: unknown): EffectType | undefined {
+  if (value !== undefined && (kind !== 'effect' || (value !== 'short' && value !== 'transition'))) throw new Error('Tipo de efecto no válido.')
+  return kind === 'effect' ? (value ?? 'short') as EffectType : undefined
+}
 export type RoomProfile = 'dinner' | 'mixed' | 'party'
 export const familyLabels: Record<VoiceFamily, string> = {
   welcome: 'Bienvenida', turn: 'Presentación', closing: 'Cierre neutral', invitation: 'Invitación',
@@ -45,9 +52,9 @@ export const animationPrefs = (value?: Partial<AnimationPrefs>) => ({
   ambienceEnabled: value?.ambienceEnabled === true,
   ambienceVolume: typeof value?.ambienceVolume === 'number' && Number.isFinite(value.ambienceVolume) ? Math.max(0, Math.min(1, value.ambienceVolume)) : 0.2,
   cutoffHour: Number.isInteger(value?.cutoffHour) && value!.cutoffHour! >= 0 && value!.cutoffHour! <= 23 ? value!.cutoffHour! : 4,
-  events: Object.fromEntries(VOICE_FAMILIES.map(family => [family, value?.events?.[family] ?? !['booth', 'promotion'].includes(family)])) as Record<VoiceFamily, boolean>,
+  events: Object.fromEntries(VOICE_FAMILIES.map(family => [family, value?.events?.[family] ?? true])) as Record<VoiceFamily, boolean>,
 })
-export const clipDurationLimit = (kind: AudioKind = 'voice') => kind === 'ambience' ? 30000 : kind === 'effect' ? 3000 : 10000
+export const clipDurationLimit = (kind: AudioKind = 'voice', effectType?: EffectType) => kind === 'ambience' ? 35000 : kind === 'effect' ? effectType === 'transition' ? 12000 : 4500 : 10000
 
 export interface AnimationClip {
   id: string
@@ -58,6 +65,9 @@ export interface AnimationClip {
   source: string
   license: string
   kind?: AudioKind
+  effectType?: EffectType
+  category?: string
+  celebrationMode?: CelebrationMode
   family?: VoiceFamily | 'manual'
   modes?: RoomProfile[]
   approvedForAuto?: boolean
@@ -116,6 +126,7 @@ export interface AnimationSession {
   openedBy: number
 }
 export interface AmbienceGrant {
+  rotate?: boolean
   id: string
   clip: AnimationClip
   ownerSocketId: string
@@ -138,6 +149,7 @@ export interface AnimationSnapshot extends AnimationRoomState {
   voiceBudgetRemainingMs?: number
 }
 export interface AnimationReply {
+  eligible?: boolean
   type: string
   error?: string
   payload?: AnimationSnapshot

@@ -84,7 +84,7 @@ export default function AnimationPanel () {
         {active
           ? <Button className={styles.mainAction} variant='danger' disabled={busy || !connected || !!active.stopRequestedAt} onClick={() => void execute(ANIMATION_CANCEL, { interventionId: active.interventionId })}>{active.stopRequestedAt ? 'Deteniendo…' : active.status === 'PENDING' ? 'Cancelar solicitud' : 'Detener anuncio'}</Button>
           : <Button className={styles.mainAction} variant='primary' disabled={busy || !!blocker} aria-describedby='announcement-help' onClick={() => void execute(ANIMATION_REQUEST, { clipId: selected, requestId: crypto.randomUUID() })}>{busy ? 'Guardando…' : 'Anunciar en la próxima pausa'}</Button>}
-        <p id='announcement-help' className={styles.actionHelp}>{active ? 'La solicitud espera una pausa disponible.' : blocker ?? (audioPending ? 'Puede dejar el anuncio en espera. Habilite el audio en el reproductor del local.' : '')}</p>
+        <p id='announcement-help' className={styles.actionHelp}>{active ? audioPending ? 'El audio se prepara automáticamente. Si el navegador lo bloquea, pulse Reproducir en el reproductor.' : 'La solicitud espera una pausa disponible.' : blocker ?? (audioPending ? 'Puede dejar el anuncio en espera. El sonido se habilita automáticamente o al usar Reproducir en el reproductor.' : '')}</p>
         {!clips.length && <Link className={styles.recoveryLink} to='?view=audio'>Ir a Audios</Link>}
       </div>
       <details className={styles.historyDetails}>

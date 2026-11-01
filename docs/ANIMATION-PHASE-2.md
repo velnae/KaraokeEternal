@@ -15,8 +15,9 @@ The queue remains dedicated to music.
    at a time; leaving Audios releases it.
 4. In **Control**, enable the animator. Choose a resource for an announcement
    at the next available pause, or choose **Automático** and **Iniciar jornada**.
-5. Open the venue player and use **Habilitar audio del animador** when requested
-   by the browser. A pending manual request can wait for this gesture.
+5. Open the venue player. Audio prepares and activates automatically when allowed.
+   If the browser blocks it, use **Reproducir** in that tab or the recovery button
+   **Permitir sonido**. A pending manual request can wait for this gesture.
 
 Preview is optional. Generating/uploading does not immediately broadcast audio.
 Automatic operation still respects configured usage, profiles, sessions and
@@ -33,8 +34,25 @@ duplicated inside the animator panel.
 | Type | Characteristics |
 | --- | --- |
 | Voice | Tagged script, usage/event, voice, profiles and promotion expiry |
-| Effect | Description, category and profiles |
+| Effect | Effect type (short/transition), description, category and profiles |
 | Ambience | Description, category, loop setting and profiles |
+
+Effect categories use the same selector in generation, upload, Details, replacement
+and inventory filters:
+
+| Category | Recommended duration | Compatible type / maximum |
+| --- | --- | --- |
+| Agradecimiento | 2–3 s | Short / 4.5 s |
+| Celebración | 3–4 s | Short / 4.5 s |
+| Transición musical | 6–10 s | Transition / 12 s |
+| Expectativa | 1.5–3 s | Short / 4.5 s |
+| Aviso suave | 0.5–1.5 s | Short / 4.5 s |
+
+Selecting a category selects its compatible type in the form. Recommendations
+do not trim files, impose minimum durations or schedule playback. Existing audio
+keeps its measured duration and generation history. Unrecognized legacy labels
+remain readable until an operator assigns a standard category. Ambience retains
+its separate descriptive categories.
 
 **Detalles** provides metadata editing, download, activation/deactivation,
 archiving and another generated version when applicable. Renaming does not
@@ -51,6 +69,19 @@ their own access. Unlike archiving, deletion cannot be restored. Preparation, pe
 announcements and active playback must finish or be stopped first; a blocked
 deletion explains the next action. Usage and production history remain intact.
 Deleting the currently previewed resource closes that local preview.
+
+For uploaded resources, **Detalles → Reemplazar archivo** accepts a corrected
+MP3, WAV or OGG without recreating the catalog entry. The original validation
+error and the type's duration/size limits appear next to the file selector.
+Short effects allow up to 4.5 seconds, so the previously rejected 4.1-second applause
+can be submitted again through replacement. Files are not automatically trimmed;
+an independently configured playback duration is deferred.
+
+Replacement preserves the name, category, profiles, administrative state and usage
+history. The server validates a separate candidate before switching files. If a
+replacement fails, an existing valid file remains available. Successful replacement
+closes a matching local preview. Generated resources continue to use **Crear otra
+versión** so their synthesis provenance is not overwritten by an uploaded file.
 
 Unknown metadata from uploaded or legacy files appears as **Sin especificar**.
 Disabled resources can still be previewed/downloaded without becoming eligible
@@ -127,8 +158,9 @@ historical first-asset starts are imported idempotently. Historical secondary
 effects and ambience were not individually acknowledged, so their tracking starts
 with this version rather than inventing retrospective counts.
 
-Effects register when their own segment starts. Ambience counts once per idle
-episode across renewable permits and no-op announcement probes; real music,
+Effects register when their own segment starts, including cues before a voice.
+Ambience counts once per selected-file episode across renewable permits and no-op
+announcement probes. Switching to another file records its own start; real music,
 speech, disable or loss of authority ends the episode. Interrupted audio with a
 confirmed start still counts as heard. Uncertain unconfirmed starts remain
 conservative scheduling evidence, but are not reported as confirmed usage.
@@ -144,9 +176,27 @@ Lima cutoff. The UI cannot edit these statistics.
 Voice generation uses the configured speech model; effects/ambience use the
 ElevenLabs Sound Effects endpoint. Only compatible capabilities appear in each
 form. Upload accepts MP3, WAV or OGG, up to 20 MB, and verifies actual decodable
-audio. Current duration limits remain **voice 10 s, effects 3 s, ambience 30 s**.
-Longer ambience has not been approved or implemented. Files are never silently
+audio. Current duration limits are **voice 10 s, short effects 4.5 s, musical
+transitions 12 s, ambience 35 s**. ElevenLabs Sound Effects generation remains
+limited to 30 s per request; use upload/replacement for longer local ambience.
+Files are never silently
 trimmed or accelerated to satisfy these limits.
+
+For longer musical separators, choose **Efectos de apoyo → Tipo de efecto →
+Separador musical** when generating, uploading or replacing the file. Choosing the
+**Transición musical** category also selects that type. Duration validation uses
+the selected type, not the recommended range. Older effects default to
+**Efecto breve**. Separators accompany presentations in the automatic program and
+can also be requested from **Control**. They are never selected as celebration
+applause. Each plays for its
+full duration. Independent playback clipping remains deferred.
+
+Uploaded effects can change type in **Detalles**. To change to a shorter type when
+the current file is too long, use **Reemplazar archivo** and select both the new
+type and a compatible file. Ready generated effects can also be reclassified when
+the existing file fits the new type. Their original generation inputs remain
+unchanged. Producing different sound or a shorter generated file uses **Crear otra
+versión**.
 
 FFmpeg rejects corrupt/silent/overlong media and prepares local MP3 output at
 the existing target loudness: voice −16, effects −20, ambience −24 LUFS with
@@ -160,17 +210,40 @@ the existing target loudness: voice −16, effects −20, ambience −24 LUFS wi
   and reload do not open another session or erase history.
 - Real first/next-song boundaries can introduce a participant. Natural ending
   can produce a closing message. Skip/replay/errors are not natural endings.
-- **Confirmar celebración** requests the configured celebration voice and
-  optional supporting effect. **Cerrar jornada** allows a bounded farewell.
+- After the first presentation, natural song endings rotate eligible presentations,
+  closings and generic celebrations even while more songs are queued. One voice
+  is selected per boundary, preferring the least recently used family.
+- Reuse of the same phrase has a finite 120/60/30-second cooldown in Cena/Mixto/
+  Fiesta. Another eligible wording is preferred, but a single variant can return
+  after cooldown. Environmental phrases are not exhausted for the whole jornada.
+- In **Detalles**, generic celebration voices can use **Automática al finalizar
+  canción**. Specific occasions retain **Solo con confirmación**;
+  **Confirmar celebración** remains available for those events. **Cerrar jornada**
+  allows a bounded farewell.
+- Closing support uses category **Agradecimiento**, at most once per rolling
+  ten minutes. Celebrations use **Expectativa → voice → Celebración**; presentations
+  use **voice → Transición musical**; invitations/promotions can use **Aviso suave
+  → voice**. Missing effect categories are simply omitted. Cena has
+  no automatic support effects; missing/unprepared effects never block the voice.
 - The rolling 120-second/10-minute voice/effect allowance and profile intervals
   remain internal scheduling controls. They do not describe provider credits.
-- Promotions require expiry; the existing non-repetition/session rules remain.
+- Invitations, booth messages and valid promotions rotate at the profile's
+  environmental interval (20/12/8 minutes), both in idle time and between songs.
+  Booth messages and promotions remain at most hourly; booth messages stay off in
+  Cena. Promotions require expiry. A blocked family does not starve eligible ones.
 - Session dates use `America/Lima`, initially with a 04:00 cutoff.
 
 **Ambiente entre canciones** requires automatic mode and an open session.
 It uses short renewable authority permits and yields to songs/announcements.
-A loop-enabled resource can repeat; a non-looping resource ends at its boundary.
+With multiple ready resources, each file advances to another at its natural end,
+including non-looping files. With only one resource, its own loop setting applies.
 A paused/errored/loading song is not an idle room.
+The player renews the permit on the same audio source, rather than restarting
+every ten seconds. Empty automatic-announcement probes do not interrupt ambience;
+an expired permit still stops its audio on the Web Audio clock.
+
+See [the real-audio rehearsal and operator acceptance record](ANIMATION-REHEARSAL.md)
+for the scene sequence, configured development-room baseline and variant drafts.
 
 There is no physical microphone state/control. Use the animator enable switch
 and **Detener anuncio** for the audio the application actually controls.

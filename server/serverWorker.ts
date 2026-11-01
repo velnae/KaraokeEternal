@@ -193,7 +193,8 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   const parseBody = koaBody({ multipart: true })
   const parseAudio = koaBody({ multipart: true, formidable: { maxFileSize: 20 * 1024 * 1024, maxTotalFileSize: 20 * 1024 * 1024, maxFiles: 1, maxFieldsSize: 64 * 1024 } })
   app.use((ctx, next) => {
-    if (ctx.path === `${urlPath}api/animation/resources/upload`) {
+    const audioPath = ctx.path.slice(`${urlPath}api/animation/resources/`.length)
+    if (ctx.path.startsWith(`${urlPath}api/animation/resources/`) && (audioPath === 'upload' || /^[\w-]+\/replace\/?$/.test(audioPath))) {
       if (!ctx.user?.isAdmin || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
       return parseAudio(ctx, next)
     }

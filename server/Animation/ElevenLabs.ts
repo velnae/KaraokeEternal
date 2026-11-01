@@ -49,6 +49,7 @@ export class ElevenLabs implements AudioProvider {
 
   get capabilities () {
     return { id: 'elevenlabs', name: 'ElevenLabs', configured: !!this.key, kinds: ['voice', 'effect', 'ambience'] as AudioKind[], models: { voice: this.voiceModel, effect: 'eleven_text_to_sound_v2', ambience: 'eleven_text_to_sound_v2' }, styles: [], languages: ['es'], loop: true,
+      maxDurationSeconds: { effect: 30, ambience: 30 },
       audioTags: ['eleven_v4', 'eleven_v4_turbo', 'eleven_v3'].includes(this.voiceModel), defaultVoiceId: this.defaultVoiceId }
   }
 

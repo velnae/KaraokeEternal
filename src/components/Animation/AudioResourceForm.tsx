@@ -1,12 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useId, useRef, useState } from 'react'
 import Button from 'components/Button/Button'
 import Modal from 'components/Modal/Modal'
 import HttpApi from 'lib/HttpApi'
-import { clipDurationLimit, familyLabels, VOICE_FAMILIES, type AudioKind, type RoomProfile } from 'shared/animation'
+import { clipDurationLimit, familyLabels, VOICE_FAMILIES, type AudioKind, type CelebrationMode, type EffectType, type RoomProfile } from 'shared/animation'
 import type { AudioResource, ProviderCapabilities } from 'shared/audioCatalog'
 import type { GenerationJob, ProductionInput } from 'shared/catalogProduction'
 import styles from './AudioLibrary.css'
 import AudioTagEditor from './AudioTagEditor'
+import EffectTypeSelect from './EffectTypeSelect'
+import EffectCategorySelect from './EffectCategorySelect'
+import { effectCategory } from 'shared/effectCategories'
+import CelebrationModeSelect from './CelebrationModeSelect'
 import { DEFAULT_ANIMATOR_VOICE_ID, DEFAULT_ANIMATOR_VOICE_NAME } from 'shared/audioTags'
 
 const api = new HttpApi('animation/')
@@ -26,11 +30,15 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
   const [voice, setVoice] = useState(source?.metadata.voiceId ?? '')
   const [title, setTitle] = useState(source?.title ?? '')
   const [text, setText] = useState(source?.metadata.text ?? '')
+  const [effectType, setEffectType] = useState<EffectType>(source?.metadata.effectType ?? 'short')
+  const generationLimit = Math.min(clipDurationLimit(kind, effectType) / 1000, provider?.maxDurationSeconds?.[kind] ?? Infinity)
+  const durationHelpId = useId()
   const [family, setFamily] = useState(source?.metadata.family ?? (kind === 'voice' ? 'turn' : kind === 'effect' ? 'celebration' : 'manual'))
+  const [celebrationMode, setCelebrationMode] = useState<CelebrationMode>(source?.metadata.celebrationMode ?? 'confirmed')
   const [category, setCategory] = useState(source?.metadata.category ?? '')
   const [language, setLanguage] = useState(source?.metadata.language ?? '')
   const [style, setStyle] = useState(source?.metadata.style ?? 'warm')
-  const [duration, setDuration] = useState(kind === 'effect' ? 2 : 8)
+  const [duration, setDuration] = useState(kind === 'effect' && effectType !== 'transition' ? 2 : 8)
   const [loop, setLoop] = useState(source?.metadata.loop ?? false)
   const [modes, setModes] = useState<RoomProfile[]>(source?.metadata.modes ?? ['dinner', 'mixed', 'party'])
   const [expires, setExpires] = useState('')
@@ -89,11 +97,11 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
         body.set('title', title)
         body.set('kind', kind)
         body.set('requestId', requestId.current)
-        body.set('metadata', JSON.stringify({ text, family, category, language, modes, ...(kind === 'ambience' ? { loop } : {}), validUntil: family === 'promotion' ? Date.parse(expires) : undefined }))
+        body.set('metadata', JSON.stringify({ text, family, category, celebrationMode: kind === 'voice' && family === 'celebration' ? celebrationMode : undefined, effectType: kind === 'effect' ? effectType : undefined, language, modes, ...(kind === 'ambience' ? { loop } : {}), validUntil: family === 'promotion' ? Date.parse(expires) : undefined }))
         const resource = await api.post<AudioResource>('resources/upload', { body })
         if (mounted.current) onSaved(resource.id)
       } else {
-        const input: ProductionInput = { kind, title, text, providerId, family, category, voiceId: selectedVoice,
+        const input: ProductionInput = { kind, title, text, providerId, family, category, celebrationMode: kind === 'voice' && family === 'celebration' ? celebrationMode : undefined, effectType: kind === 'effect' ? effectType : undefined, voiceId: selectedVoice,
           language: kind === 'voice' ? providerId === 'elevenlabs' ? 'es' : language || provider?.languages[0] : undefined,
           style: providerId === 'elevenlabs' ? undefined : (provider?.styles.includes(style) ? style : provider?.styles[0]) as ProductionInput['style'],
           modes, durationSeconds: kind === 'voice' ? undefined : duration, loop: kind === 'ambience' && provider?.loop ? loop : undefined,
@@ -114,11 +122,21 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
           Nombre
           <input autoFocus value={title} maxLength={80} onChange={event => setTitle(event.target.value)} />
         </label>
+        {kind === 'effect' && (
+          <EffectTypeSelect
+            value={effectType}
+            onChange={(value) => {
+              setEffectType(value)
+              setDuration(value === 'transition' ? 8 : 2)
+              if (effectCategory(category) && effectCategory(category)!.effectType !== value) setCategory('')
+            }}
+          />
+        )}
         {mode === 'upload' && (
           <label>
             Archivo de audio
             <input type='file' aria-label='Archivo de audio' accept='.mp3,.wav,.ogg' onChange={event => setFile(event.target.files?.[0] ?? null)} />
-            <small>{`MP3, WAV u OGG · Hasta ${clipDurationLimit(kind) / 1000} s y 20 MB`}</small>
+            <small>{`MP3, WAV u OGG · Hasta ${clipDurationLimit(kind, effectType) / 1000} s y 20 MB`}</small>
           </label>
         )}
         {mode === 'generate' && available.length > 1 && (
@@ -145,6 +163,7 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
                     {VOICE_FAMILIES.map(value => <option key={value} value={value}>{familyLabels[value]}</option>)}
                   </select>
                 </label>
+                {family === 'celebration' && <CelebrationModeSelect value={celebrationMode} onChange={setCelebrationMode} />}
                 {mode === 'generate' && (
                   <label>
                     Voz
@@ -157,15 +176,33 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
               </>
             )
           : (
-              <label>
-                Categoría
-                <input value={category} placeholder={kind === 'effect' ? 'Aplausos, celebración…' : 'Restaurante, naturaleza…'} maxLength={120} onChange={event => setCategory(event.target.value)} />
-              </label>
+              <>
+                {kind === 'effect' && (
+                  <EffectCategorySelect
+                    value={category}
+                    onChange={(value) => {
+                      setCategory(value)
+                      const selected = effectCategory(value)
+                      if (selected) {
+                        setEffectType(selected.effectType)
+                        if (selected.effectType !== effectType) setDuration(selected.effectType === 'transition' ? 8 : 2)
+                      }
+                    }}
+                  />
+                )}
+                {kind === 'ambience' && (
+                  <label>
+                    Categoría
+                    <input value={category} placeholder='Restaurante, naturaleza…' maxLength={120} onChange={event => setCategory(event.target.value)} />
+                  </label>
+                )}
+              </>
             )}
         {kind !== 'voice' && mode === 'generate' && (
           <label>
             Duración (segundos)
-            <input type='number' min='0.5' max={clipDurationLimit(kind) / 1000} step='0.5' value={duration} onChange={event => setDuration(Number(event.target.value))} />
+            <input aria-label='Duración (segundos)' aria-describedby={generationLimit < clipDurationLimit(kind, effectType) / 1000 ? durationHelpId : undefined} type='number' min='0.5' max={generationLimit} step='0.5' value={duration} onChange={event => setDuration(Number(event.target.value))} />
+            {generationLimit < clipDurationLimit(kind, effectType) / 1000 && <small id={durationHelpId}>{`${provider?.name} permite generar hasta ${generationLimit} s. Puede subir archivos de hasta ${clipDurationLimit(kind, effectType) / 1000} s.`}</small>}
           </label>
         )}
         {family === 'promotion' && (

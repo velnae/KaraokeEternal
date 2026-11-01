@@ -17,19 +17,20 @@ const choose = (clips: AnimationClip[], history: Intervention[] = [], family: Vo
 })
 
 describe('persistent announcement selection', () => {
-  it('prefers unused variants and never repeats the last spoken content', () => {
+  it('prefers unused variants and recovers a single variant after its cooldown', () => {
     const clips = [clip('a'), clip('b'), clip('c')]
     expect(choose(clips, [played(clips[0], 1000)]).clip?.id).toBe('b')
     expect(choose([clips[0]], [played(clips[0], 1000)]).clip).toBeUndefined()
+    expect(choose([clips[0]], [played(clips[0], 60001)]).clip?.id).toBe('a')
   })
   it('treats the same phrase with another style as the same spoken content', () => {
     const first = clip('a')
     expect(choose([{ ...clip('b'), displayText: first.displayText }], [played(first, 1000)]).clip).toBeUndefined()
     expect(choose([{ ...clip('b'), displayText: `[excited] ${first.displayText} [laughs]` }], [played(first, 1000)]).clip).toBeUndefined()
   })
-  it('does not repeat environmental phrases in the current session', () => {
+  it('reuses environmental phrases in the same session after the interval', () => {
     const first = clip('a', 'invitation')
-    expect(choose([first], [played(first, 3600000)], 'invitation').clip).toBeUndefined()
+    expect(choose([first], [played(first, 3600000)], 'invitation').clip?.id).toBe('a')
   })
   it('favours environmental variants not heard in recent sessions', () => {
     const clips = [clip('a', 'invitation'), clip('b', 'invitation')]
@@ -69,16 +70,16 @@ describe('persistent announcement selection', () => {
     expect(choose([first, older], [played(first, 3600000), played(older, 7200000), played(last, 1000)]).clip?.id).toBe('b')
   })
 
-  it('enforces zero, one and two booth messages per session and hourly separation', () => {
+  it('keeps booth messages off in dinner and recurring hourly in other profiles', () => {
     const clips = [clip('a', 'booth'), clip('b', 'booth'), clip('c', 'booth')]
     const select = (profile: 'dinner' | 'mixed' | 'party', history: Intervention[]) => selectAnnouncement({
       clips, history, family: 'booth', profile, sessionId: 'current', recentSessions: [], ready: clips.map(item => item.checksum), now, random: () => 0,
     })
     expect(select('dinner', []).clip).toBeUndefined()
-    expect(select('mixed', [played(clips[0], 3600001)]).clip).toBeUndefined()
+    expect(select('mixed', [played(clips[0], 3600001)]).clip?.id).toBe('b')
     expect(select('party', [played(clips[0], 3599999)]).clip).toBeUndefined()
     expect(select('party', [played(clips[0], 3600001)]).clip?.id).toBe('b')
-    expect(select('party', [played(clips[0], 7200000), played(clips[1], 3600001)]).clip).toBeUndefined()
+    expect(select('party', [played(clips[0], 7200000), played(clips[1], 3600001)]).clip?.id).toBe('c')
   })
 
   it('keeps promotions at least one hour apart even after their environmental interval', () => {
