@@ -27,7 +27,8 @@ it('upgrades a populated pre-table database without changing rooms, users or que
     })
     expect(database.all('PRAGMA foreign_key_check')).toHaveLength(0)
     database.migrate({ migrationsPath: schemas })
-    expect(database.get<{ count: number }>('SELECT COUNT(*) AS count FROM migrations')?.count).toBe(19)
+    const migrationCount = fs.readdirSync(schemas).filter(file => /^\d+-.*\.sql$/.test(file)).length
+    expect(database.get<{ count: number }>('SELECT COUNT(*) AS count FROM migrations')?.count).toBe(migrationCount)
   } finally {
     database.close()
     fs.rmSync(temp, { recursive: true, force: true })

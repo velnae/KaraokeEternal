@@ -33,7 +33,7 @@ it.each(['early', 'current'] as const)('upgrades %s migration 016 without losing
     if (revision === 'early') database.exec('INSERT INTO greetingTurnItems(queueId,turnKey) VALUES(7,9),(9,9)')
     else database.exec('INSERT INTO greetingTurnItems(queueId,turnKey,position) VALUES(7,9,1),(9,9,0)')
     const requests = database.all('SELECT * FROM queue ORDER BY queueId')
-    const greetings = database.all('SELECT * FROM greetings ORDER BY greetingId')
+    const greetings = database.all<Record<string, unknown>>('SELECT * FROM greetings ORDER BY greetingId')
     const turns = database.all('SELECT * FROM greetingTurns')
     const recorded = database.get<{ up: string }>('SELECT up FROM migrations WHERE id=16')!.up
 
@@ -42,7 +42,7 @@ it.each(['early', 'current'] as const)('upgrades %s migration 016 without losing
     expect(database.get<{ count: number }>('SELECT count(*) count FROM migrations WHERE id=17')!.count).toBe(1)
     expect(database.get<{ up: string }>('SELECT up FROM migrations WHERE id=16')!.up).toBe(recorded)
     expect(database.all('SELECT * FROM queue ORDER BY queueId')).toEqual(requests)
-    expect(database.all('SELECT * FROM greetings ORDER BY greetingId')).toEqual(greetings)
+    expect(database.all('SELECT * FROM greetings ORDER BY greetingId')).toEqual(greetings.map(row => ({ ...row, audioJobId: null, audioReason: null })))
     expect(database.all('SELECT * FROM greetingTurns')).toEqual(turns)
     expect(database.all('SELECT queueId,turnKey,position FROM greetingTurnItems ORDER BY queueId')).toEqual([
       { queueId: 7, turnKey: 9, position: revision === 'early' ? 0 : 1 },

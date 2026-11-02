@@ -8,13 +8,14 @@ import { clipDurationLimit, type AudioKind, type EffectType } from '../../shared
 
 const run = promisify(execFile)
 export class AudioValidationError extends Error {}
-export async function prepareAudio (directory: string, id: string, kind: AudioKind, bytes: Buffer, ffmpeg: string, signal?: AbortSignal, effectType?: EffectType) {
+export async function prepareAudio (directory: string, id: string, kind: AudioKind, bytes: Buffer, ffmpeg: string, signal?: AbortSignal, effectType?: EffectType, limits?: { durationMs: number }) {
+  const durationLimit = limits?.durationMs ?? clipDurationLimit(kind, effectType)
   if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new AudioValidationError('Use un archivo de hasta 20 MB.')
   const metadata = await parseBuffer(bytes, undefined, { duration: true }).catch(() => null)
   if (!['wave', 'mpeg', 'ogg'].includes(metadata?.format.container?.toLowerCase() ?? '')) throw new AudioValidationError('El contenido debe ser audio MP3, WAV u OGG.')
   const duration = metadata?.format.duration
   if (!duration) throw new AudioValidationError('El archivo no contiene audio válido.')
-  if (duration * 1000 > clipDurationLimit(kind, effectType)) throw new AudioValidationError(`El audio dura ${duration.toFixed(1)} s; el máximo para este tipo es ${clipDurationLimit(kind, effectType) / 1000} s.`)
+  if (duration * 1000 > durationLimit) throw new AudioValidationError(`El audio dura ${duration.toFixed(1)} s; el máximo para este tipo es ${durationLimit / 1000} s.`)
   await fs.mkdir(path.join(directory, 'production'), { recursive: true })
   const raw = path.join(directory, 'production', `${id}.download`)
   const temporary = path.join(directory, 'production', `${id}.part`)
@@ -29,7 +30,7 @@ export async function prepareAudio (directory: string, id: string, kind: AudioKi
     const output = await fs.readFile(temporary)
     const prepared = await parseBuffer(output, { mimeType: 'audio/mpeg' }, { duration: true })
     const durationMs = Math.ceil((prepared.format.duration ?? 0) * 1000)
-    if (!durationMs || durationMs > clipDurationLimit(kind, effectType) || output.length > 5 * 1024 * 1024) throw new AudioValidationError('El audio preparado supera la duración o tamaño permitido.')
+    if (!durationMs || durationMs > durationLimit || output.length > 5 * 1024 * 1024) throw new AudioValidationError('El audio preparado supera la duración o tamaño permitido.')
     await fs.rename(temporary, path.join(directory, filename))
     return { filename, durationMs, size: output.length, mime: 'audio/mpeg', checksum: createHash('sha256').update(output).digest('hex') }
   } finally {

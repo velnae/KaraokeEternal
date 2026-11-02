@@ -21,9 +21,12 @@
 .notice { color: var(--cyan); line-height: 1.5; }
 .error { color: var(--btn-danger-bg-color); line-height: 1.5; overflow-wrap: anywhere; }
 .scope { margin: 0; padding: 16px 24px; border-top: 1px solid var(--edge); font-size: 13px; line-height: 1.6; color: var(--secondary); }
+.preparation { padding: 20px 24px; border-top: 1px solid var(--edge); }
+.preparation h3 { margin: 0; font-size: 16px; }
+.preparation .check { margin-top: 12px; }
 @media (max-width: 680px) {
   .heading, .form { padding: 20px 16px; }
-  .status, .scope { padding: 16px; }
+  .status, .scope, .preparation { padding: 16px; }
   .heading h2 { font-size: 22px; }
   .actions { display: grid; grid-template-columns: 1fr; }
   .actions button { width: 100%; }

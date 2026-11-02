@@ -5,7 +5,7 @@ export interface LocalTtsConfig {
 }
 
 export const defaultLocalTtsConfig: LocalTtsConfig = { installationPath: '', autoStart: false, revision: 0 }
-export type LocalTtsState = 'unconfigured' | 'unchecked' | 'checking' | 'starting' | 'ready' | 'busy' | 'unavailable' | 'error'
+export type LocalTtsState = 'unconfigured' | 'unchecked' | 'checking' | 'starting' | 'ready' | 'busy' | 'generating' | 'recovering' | 'unavailable' | 'error'
 export interface LocalTtsSnapshot {
   config: LocalTtsConfig
   activePath: string
@@ -20,5 +20,6 @@ export interface LocalTtsSnapshot {
 export const localTtsLabels: Record<LocalTtsState, string> = {
   unconfigured: 'Sin configurar', unchecked: 'Pendiente de comprobar', checking: 'Comprobando conexión',
   starting: 'Cargando modelo', ready: 'Modelo listo', busy: 'Ocupado o sin respuesta',
+  generating: 'Generando saludo', recovering: 'Comprobando una generación anterior',
   unavailable: 'Sin conexión', error: 'Requiere atención',
 }

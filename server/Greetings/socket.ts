@@ -24,7 +24,10 @@ export default {
       if (!Number.isFinite(payload?.expiresAt) || payload.expiresAt < Date.now() || payload.expiresAt > Date.now() + 10000) throw new Error('La orden venció. Actualiza e intenta nuevamente.')
       if (operation === 'attach' || operation === 'inspect') throw new Error('Los saludos se agregan al pedir la canción.')
       if (operation === 'remove') Greetings.remove(identity, number('greetingId'))
-      else if (operation === 'pause') {
+      else if (operation === 'prepareAudio') {
+        if (!identity.isAdmin || typeof payload.enabled !== 'boolean') throw new Error('Solo el operador puede configurar la preparación de voz')
+        Greetings.prepareAudio(roomId, payload.enabled)
+      } else if (operation === 'pause') {
         if (!identity.isAdmin || typeof payload.paused !== 'boolean') throw new Error('Solo el operador puede pausar los saludos')
         Greetings.pause(roomId, payload.paused)
       } else if (['reserve', 'start', 'end', 'finish'].includes(operation)) {

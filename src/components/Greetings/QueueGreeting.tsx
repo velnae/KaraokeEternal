@@ -1,6 +1,6 @@
 import React from 'react'
 import Button from 'components/Button/Button'
-import { greetingLabels, type Greeting } from 'shared/greetings'
+import { greetingLabels, greetingAudioLabels, type Greeting } from 'shared/greetings'
 import styles from './Greetings.css'
 
 export default function QueueGreeting ({ greeting, paused, busy, onRemove, descriptionId }: {
@@ -32,6 +32,17 @@ export default function QueueGreeting ({ greeting, paused, busy, onRemove, descr
                     )
                   : !pending && <span className={styles.delivery} role='status'>{greetingLabels[greeting.status]}</span>}
                 {pending && paused && <span className={styles.notice}>Saludos pausados</span>}
+                {pending && greeting.audio && (
+                  <div className={styles.audio} data-audio-status={greeting.audio.status}>
+                    <span role='status'>{greetingAudioLabels[greeting.audio.status]}</span>
+                    {greeting.audio.reason && (
+                      <details className={styles.outcome}>
+                        <summary>Detalle de la voz</summary>
+                        <p>{greeting.audio.reason}</p>
+                      </details>
+                    )}
+                  </div>
+                )}
               </>
             )}
       </div>

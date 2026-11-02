@@ -17,6 +17,8 @@
 .inline[data-greeting-status='DISPLAYING'] { border-color: var(--cyan, #76e0ec); }
 .inline[data-greeting-status='DISPLAYING'] .remove { color: #f29dad; }
 .delivery { display: inline-block; color: var(--secondary, #a6b2c7); font-size: 12px; margin-top: 4px; }
+.audio { margin-top: 8px; color: var(--secondary, #a6b2c7); font-size: 12px; }
+.audio[data-audio-status='ready'] { color: var(--cyan, #76e0ec); }
 .inline[data-greeting-status='DISPLAYING'] .delivery { color: var(--cyan, #76e0ec); }
 .outcome { margin-top: 4px; font-size: 12px; color: var(--amber, #edc47c); }
 .outcome summary { cursor: pointer; padding: 6px 0; }

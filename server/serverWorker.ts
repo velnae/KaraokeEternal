@@ -30,6 +30,7 @@ import Animation from './Animation/Animation.js'
 import { loadCatalog } from './Animation/catalog.js'
 import { startProduction } from './Animation/Production.js'
 import localTtsRouter, { startLocalTts } from './Greetings/ttsRouter.js'
+import greetingAudioRouter, { startGreetingAudio } from './Greetings/audioRouter.js'
 import pushQueuesAndLibrary from './lib/pushQueuesAndLibrary.js'
 import { Server as SocketIO } from 'socket.io'
 import socketActions from './socket.js'
@@ -76,6 +77,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     const stopAnimation = Animation.initialize(io)
     const stopProduction = await startProduction(path.join(env.KES_PATH_DATA, 'animation'), roomId => Animation.publish(roomId))
     const stopLocalTts = startLocalTts()
+    const stopGreetingAudio = startGreetingAudio(path.join(env.KES_PATH_DATA, 'greetings'))
     socketActions(io, jwtKey)
     const stopHousePlaylists = startHousePlaylists(io)
 
@@ -107,7 +109,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     shutdownHandlers.push(async () => {
       stopAnimation()
       stopHousePlaylists()
-      await stopLocalTts()
+      await Promise.allSettled([stopGreetingAudio(), stopLocalTts()])
       await stopProduction()
       return new Promise((resolve) => {
       // also calls http server's close method, which ultimately handles the callback
@@ -213,6 +215,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(mediaRouter.routes())
   baseRouter.use(prefsRouter.routes())
   baseRouter.use(localTtsRouter.routes())
+  baseRouter.use(greetingAudioRouter.routes())
   baseRouter.use(roomsRouter.routes())
   baseRouter.use(userRouter.routes())
   baseRouter.use(tablesRouter.routes())

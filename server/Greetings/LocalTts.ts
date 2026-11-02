@@ -4,7 +4,7 @@ import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
 import { defaultLocalTtsConfig, type LocalTtsConfig, type LocalTtsSnapshot, type LocalTtsState } from '../../shared/localTts.js'
-import { readTtsStatus, TtsConnectionError } from './TtsClient.js'
+import { readTtsStatus, synthesizeGreeting, TtsConnectionError } from './TtsClient.js'
 
 export class TtsSettingsError extends Error {
   constructor (message: string, readonly status = 422) { super(message) }
@@ -29,7 +29,7 @@ export async function validateTtsInstallation (directory: string) {
   }
 }
 
-/** Configuration and process ownership only; greeting generation belongs to the next block. */
+/** One resident connection operation at a time, including synthesis and recovery. */
 export default class LocalTts {
   private config: LocalTtsConfig
   private active: LocalTtsConfig
@@ -42,8 +42,9 @@ export default class LocalTts {
   private owned?: ChildProcess
   private closed = false
   private startRequested = false
+  private speechInFlight = false
 
-  constructor (stored: unknown, private persist: (config: LocalTtsConfig) => void, private timing = timings) {
+  constructor (stored: unknown, private persist: (config: LocalTtsConfig) => void, private timing = timings, private generationTimeoutMs = 120000) {
     const value = stored as Partial<LocalTtsConfig> | undefined
     this.config = typeof value?.installationPath === 'string' && typeof value.autoStart === 'boolean' && Number.isSafeInteger(value.revision) && value.revision! >= 0
       ? { installationPath: value.installationPath, autoStart: value.autoStart, revision: value.revision! }
@@ -71,7 +72,7 @@ export default class LocalTts {
     const next = { installationPath, autoStart: value.autoStart, revision: this.config.revision + 1 }
     this.persist(next)
     this.config = next
-    if (next.installationPath === this.active.installationPath) this.active = next
+    if (next.installationPath === this.active.installationPath && !this.speechInFlight) this.active = next
     // Inspect the old worker before switching; a timed-out socket is not proof of idleness.
     this.check(next.autoStart && next.installationPath === this.active.installationPath)
     return this.snapshot()
@@ -104,6 +105,63 @@ export default class LocalTts {
     } })
   }
 
+  canGenerate (revision: number) {
+    return !this.closed && !this.operation && this.state === 'ready' && this.config.revision === revision && this.active.revision === revision
+  }
+
+  generate (text: string, output: string, reference: string, revision: number): Promise<void> {
+    if (!this.canGenerate(revision)) return Promise.reject(new TtsConnectionError('El modelo todavía no está disponible para este saludo.', 'NOT_READY'))
+    this.controller = new AbortController()
+    this.speechInFlight = true
+    this.state = 'generating'
+    this.message = 'Preparando un saludo mientras su pedido espera. La música continúa.'
+    const installationPath = this.active.installationPath
+    const signal = this.controller.signal
+    const result = Promise.resolve().then(() => synthesizeGreeting(installationPath, text, output, reference, {
+      ...this.timing, timeoutMs: this.generationTimeoutMs, signal, onWaiting: () => {},
+    })).then(() => {
+      if (!this.closed) {
+        this.state = 'ready'
+        this.message = 'La generación terminó. El audio se está validando.'
+      }
+      return undefined
+    }).catch((error: TtsConnectionError) => {
+      if (!this.closed) {
+        this.state = error.uncertain ? 'recovering' : error.code === 'REJECTED' ? 'ready' : 'unavailable'
+        this.message = error.uncertain ? 'Esperando que termine la solicitud anterior antes de generar otro saludo.' : error.message
+      }
+      throw error
+    })
+    this.operation = result.then(() => undefined, () => undefined).finally(() => {
+      this.speechInFlight = false
+      this.operation = null
+      if (!this.closed && this.state === 'ready' && (this.active.revision !== this.config.revision || this.startRequested)) this.check()
+    })
+    return result
+  }
+
+  /** Fence the original installation after a lost reply or a server restart. */
+  settleGeneration (installationPath: string): Promise<boolean> {
+    if (this.closed || this.operation) return Promise.resolve(false)
+    this.controller = new AbortController()
+    this.speechInFlight = true
+    this.state = 'recovering'
+    this.message = 'Comprobando que la generación anterior terminó antes de continuar.'
+    const result = readTtsStatus(installationPath, { ...this.timing, signal: this.controller.signal, onWaiting: () => {} })
+      .then(() => true).catch((error: TtsConnectionError) => error.code === 'MISSING')
+    this.operation = result.then((settled) => {
+      if (this.closed) return undefined
+      this.state = settled ? 'unchecked' : 'error'
+      this.message = settled ? 'La solicitud anterior terminó.' : 'El modelo anterior no confirmó su estado. Los saludos continúan en pantalla.'
+      return undefined
+    }).finally(() => {
+      this.speechInFlight = false
+      this.operation = null
+      if (!this.closed && this.state === 'unchecked') this.check(this.config.autoStart)
+    })
+    return result
+  }
+
   private async inspect (signal: AbortSignal) {
     while (!this.closed) {
       let missing = !this.active.installationPath
@@ -123,7 +181,7 @@ export default class LocalTts {
       }
       if (signal.aborted) return
       if (this.active.revision !== this.config.revision) {
-        await this.releaseOwned()
+        if (this.active.installationPath !== this.config.installationPath) await this.releaseOwned()
         if (signal.aborted) return
         this.active = this.config
         this.pid = null

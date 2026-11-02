@@ -33,10 +33,11 @@ const invoke = (operation: string, payload: object = {}, socket = actor) => {
 it('returns only owned greetings and rejects participant moderation/player actions', () => {
   expect(invoke('read').payload.items.map(item => item.message)).toEqual(['Own'])
   expect(invoke('remove', { greetingId: 2 }).error).toBeTruthy()
-  for (const operation of ['pause', 'reserve', 'start', 'end', 'finish']) {
-    expect(invoke(operation, { paused: true, queueId: 1, greetingId: 1, turnKey: 1 }).error).toBeTruthy()
+  for (const operation of ['pause', 'prepareAudio', 'reserve', 'start', 'end', 'finish']) {
+    expect(invoke(operation, { paused: true, enabled: true, queueId: 1, greetingId: 1, turnKey: 1 }).error).toBeTruthy()
   }
   expect(Greetings.paused(1)).toBe(false)
+  expect(Greetings.audioEnabled(1)).toBe(false)
   expect(invoke('remove', { greetingId: 1 }).payload.items[0].status).toBe('CANCELLED')
 })
 
@@ -45,6 +46,8 @@ it('requires player authority even for administrators and rejects expired comman
   expect(invoke('reserve', { queueId: 1 }, admin).error).toContain('autoridad')
   expect(invoke('pause', { paused: true, expiresAt: 1 }, admin).error).toContain('venció')
   expect(invoke('pause', { paused: true }, admin).payload.paused).toBe(true)
+  expect(invoke('prepareAudio', { enabled: true }, admin).payload.audioEnabled).toBe(true)
+  expect(Greetings.audioEnabled(2)).toBe(false)
 })
 
 it('rejects revoked table membership before reading or changing messages', () => {

@@ -25,6 +25,7 @@ const log = initLogger('server', {
 
 const refs: { scanner?: childProcess.ChildProcess, watcher?: childProcess.ChildProcess } = {}
 const shutdownHandlers: Array<() => Promise<void>> = []
+let closeDatabase: (() => void) | undefined
 let IPC
 
 process.on(PREFS_PATHS_CHANGED, startWatcher)
@@ -61,7 +62,7 @@ process.on('unhandledRejection', (reason) => {
 ;(async function () {
   // init database
   const { open, close } = await import('./lib/Database.js')
-  shutdownHandlers.push(async () => close())
+  closeDatabase = close
 
   open({
     file: path.join(env.KES_PATH_DATA, 'database.sqlite3'),
@@ -153,5 +154,6 @@ async function shutdown (signal) {
   log.info('Received %s', signal)
 
   await Promise.allSettled(shutdownHandlers.map(f => f()))
+  closeDatabase?.()
   process.exit(0) // eslint-disable-line n/no-process-exit
 }

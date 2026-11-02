@@ -2,6 +2,12 @@ export const GREETINGS = 'server/GREETINGS'
 export const GREETING_LIMIT = 220
 export interface GreetingDraft { recipient: string, message: string }
 export type GreetingStatus = 'QUEUED' | 'RESERVED' | 'DISPLAYING' | 'DISPLAYED' | 'CANCELLED' | 'REMOVED' | 'SKIPPED' | 'INTERRUPTED'
+export type GreetingAudioStatus = 'queued' | 'generating' | 'preparing' | 'ready' | 'uncertain' | 'failed' | 'cancelled' | 'unavailable'
+export interface GreetingAudio { status: GreetingAudioStatus, reason: string | null, durationMs: number | null }
+export const greetingAudioLabels: Record<GreetingAudioStatus, string> = {
+  queued: 'Voz en espera', generating: 'Generando voz', preparing: 'Preparando audio', ready: 'Audio preparado',
+  uncertain: 'Solo pantalla', failed: 'Solo pantalla', cancelled: 'Solo pantalla', unavailable: 'Solo pantalla',
+}
 export interface Greeting extends GreetingDraft {
   greetingId: number
   queueId: number
@@ -14,10 +20,12 @@ export interface Greeting extends GreetingDraft {
   createdAt: number
   turnKey: number | null
   title: string
+  audio?: GreetingAudio
 }
 export interface GreetingSnapshot {
   items: Greeting[]
   paused: boolean
+  audioEnabled: boolean
   turns: { key: number, queueIds: number[], userId: number }[]
 }
 export interface GreetingGrant { turnKey: number, items: Greeting[], until: number }

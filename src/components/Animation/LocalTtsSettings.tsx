@@ -3,6 +3,7 @@ import Button from 'components/Button/Button'
 import HttpApi from 'lib/HttpApi'
 import { defaultLocalTtsConfig, localTtsLabels, type LocalTtsConfig, type LocalTtsSnapshot } from 'shared/localTts'
 import styles from './LocalTtsSettings.css'
+import useGreetings from 'components/Greetings/useGreetings'
 
 const api = new HttpApi('prefs/local-tts')
 
@@ -17,6 +18,7 @@ export default function LocalTtsSettings () {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const greetings = useGreetings()
 
   useEffect(() => {
     mounted.current = true
@@ -68,12 +70,12 @@ export default function LocalTtsSettings () {
         setDirty(false)
         setDraft(result.config)
       }
-      if (action === 'save') setNotice(result.pending ? 'Ruta guardada. Se aplicará cuando el modelo actual responda.' : 'Configuración guardada.')
+      if (action === 'save') setNotice('Configuración guardada.')
     } catch (error) {
       if (mounted.current) setError((error as Error).message)
     } finally { if (mounted.current) setBusy(false) }
   }
-  const processing = !!snapshot && ['checking', 'starting', 'busy'].includes(snapshot.state)
+  const processing = !!snapshot && ['checking', 'starting', 'busy', 'generating', 'recovering'].includes(snapshot.state)
   const changedElsewhere = !!snapshot && dirty && draft.revision !== snapshot.config.revision
   let help = 'Comprobar conexión consulta el estado del modelo sin generar audio.'
   if (!snapshot) help = 'Espere a que carguen los ajustes. Si la conexión falla, pulse Recargar ajustes.'
@@ -129,11 +131,26 @@ export default function LocalTtsSettings () {
           {snapshot?.state !== 'ready' && <Button disabled={!snapshot?.config.installationPath || busy || dirty || processing || snapshot.pending} aria-describedby={`${id}-help`} onClick={() => void execute('start')}>Iniciar modelo</Button>}
         </div>
         <p id={`${id}-help`} className={styles.hint} role='status'>{help}</p>
-        {notice && <p className={styles.notice} role='status'>{notice}</p>}
+        {notice && <p className={styles.notice} role='status'>{snapshot?.pending ? 'Ruta guardada. Se aplicará cuando el modelo actual responda.' : notice}</p>}
         {error && <p className={styles.error} role='alert'>{error}</p>}
         {(error || changedElsewhere) && <Button onClick={() => void execute('reload')} disabled={busy}>Recargar ajustes</Button>}
       </form>
-      <p className={styles.scope}>Esta conexión prepara el motor local. Los saludos siguen mostrándose en pantalla; su generación y lectura se incorporan en los siguientes bloques.</p>
+      <div className={styles.preparation}>
+        <h3>Preparación de saludos en esta sala</h3>
+        <label className={styles.check}>
+          <input
+            type='checkbox'
+            checked={greetings.snapshot?.audioEnabled ?? false}
+            disabled={!greetings.snapshot || greetings.busy}
+            aria-describedby={`${id}-preparation-help`}
+            onChange={event => void greetings.execute('prepareAudio', { enabled: event.target.checked })}
+          />
+          Preparar voz mientras los pedidos esperan
+        </label>
+        <p id={`${id}-preparation-help`} className={styles.hint}>{!greetings.snapshot ? 'Conectando con la sala para cargar esta opción.' : 'Se genera únicamente el saludo, de uno en uno. Si la voz falla o tarda, su entrega en pantalla continúa.'}</p>
+        {greetings.error && <p className={styles.error} role='alert'>{greetings.error}</p>}
+      </div>
+      <p className={styles.scope}>Los audios preparados se guardan para la siguiente etapa. La lectura en voz alta y su combinación con el catálogo se incorporan en el próximo bloque.</p>
     </section>
   )
 }

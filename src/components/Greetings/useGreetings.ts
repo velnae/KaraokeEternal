@@ -50,7 +50,7 @@ export default function useGreetings (enabled = true) {
     }
   }, [enabled, roomId, userId, connected])
 
-  const execute = async (operation: 'remove' | 'pause', payload: object) => {
+  const execute = async (operation: 'remove' | 'pause' | 'prepareAudio', payload: object) => {
     if (inFlight.current || !enabled || !connected) return
     const token = generation.current
     revision.current++

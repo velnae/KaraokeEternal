@@ -4,7 +4,7 @@ import Rooms from '../Rooms/Rooms.js'
 import { buildRoundRobinQueue } from '../../shared/roundRobin.js'
 import { buildPlayerHistory } from '../../shared/playerHistory.js'
 import { normalizeQueuePrefs } from '../../shared/queueRules.js'
-import { greetingDuration, validateGreeting, type Greeting, type GreetingGrant, type GreetingSnapshot } from '../../shared/greetings.js'
+import { greetingDuration, validateGreeting, type Greeting, type GreetingGrant, type GreetingSnapshot, type GreetingAudioStatus } from '../../shared/greetings.js'
 
 export interface GreetingPlayerStatus { queueId?: number, historyJSON?: string, nextUserId?: number | null, isAtQueueEnd?: boolean }
 interface Identity { roomId: number, userId: number, isAdmin?: boolean }
@@ -66,14 +66,23 @@ export default class Greetings {
 
   static items (roomId: number): Greeting[] {
     Greetings.reconcile(roomId)
-    return db.all<Greeting>(`SELECT g.*,q.title FROM greetings g JOIN queue q USING(queueId)
-      WHERE g.roomId=? ORDER BY g.greetingId`, [roomId])
+    const enabled = Greetings.audioEnabled(roomId)
+    return db.all<Greeting & { audioJobId: string | null, audioReason: string | null, jobStatus: GreetingAudioStatus | null, jobError: string | null, durationMs: number | null, cancelRequested: number | null }>(
+      `SELECT g.*,q.title,j.status jobStatus,j.error jobError,j.durationMs,j.cancelRequested FROM greetings g JOIN queue q USING(queueId)
+      LEFT JOIN greetingAudioJobs j ON j.jobId=g.audioJobId WHERE g.roomId=? ORDER BY g.greetingId`, [roomId])
+      .map(({ audioJobId, audioReason, jobStatus, jobError, durationMs, cancelRequested, ...item }) => {
+        void audioJobId
+        if (!enabled) return item
+        return { ...item, audio: { status: cancelRequested ? 'cancelled' as const : jobStatus ?? 'unavailable' as const,
+          reason: audioReason ?? jobError ?? (!jobStatus ? 'La entrega en pantalla está disponible mientras se prepara la voz.' : null), durationMs } }
+      })
   }
 
   static snapshot (identity: Identity, status: GreetingPlayerStatus = {}): GreetingSnapshot {
     const order = Greetings.order(identity.roomId, status)
     return {
       paused: Greetings.paused(identity.roomId),
+      audioEnabled: Greetings.audioEnabled(identity.roomId),
       items: Greetings.items(identity.roomId).filter(item => identity.isAdmin || item.userId === identity.userId),
       turns: order.turns.filter(turn => identity.isAdmin || order.entities[turn.ids[0]].userId === identity.userId)
         .map(turn => ({ key: turn.ids[0], queueIds: turn.ids, userId: order.entities[turn.ids[0]].userId })),
@@ -81,6 +90,12 @@ export default class Greetings {
   }
 
   static paused (roomId: number) { return db.get<{ paused: number }>('SELECT paused FROM greetingControls WHERE roomId=?', [roomId])?.paused === 1 }
+
+  static audioEnabled (roomId: number) { return db.get<{ audioEnabled: number }>('SELECT audioEnabled FROM greetingControls WHERE roomId=?', [roomId])?.audioEnabled === 1 }
+
+  static prepareAudio (roomId: number, enabled: boolean) {
+    db.run('INSERT INTO greetingControls(roomId,audioEnabled) VALUES(?,?) ON CONFLICT(roomId) DO UPDATE SET audioEnabled=excluded.audioEnabled', [roomId, enabled ? 1 : 0])
+  }
 
   static pause (roomId: number, paused: boolean) {
     db.run('INSERT INTO greetingControls(roomId,paused) VALUES(?,?) ON CONFLICT(roomId) DO UPDATE SET paused=excluded.paused', [roomId, paused ? 1 : 0])
