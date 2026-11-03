@@ -66,7 +66,6 @@
 .qrPaper p { margin: 0 0 6px; font-size: 17px; font-weight: 700; }
 .qrPaper strong, .qrPaper span { font-size: 13px; font-weight: 400; }
 .qrPaper canvas { max-width: 100%; height: auto !important; }
-.printSheet { display: none; }
 @media (max-width: 520px) {
   .heading { align-items: flex-start; flex-wrap: wrap; }
   .heading .primary { width: 100%; }
@@ -79,12 +78,4 @@
   .row { padding: 14px; grid-template-columns: 1fr; gap: 14px; }
   .tools { width: 100%; }
   .dialogActions > button { flex: 1; }
-}
-@media print {
-  :global(html), :global(body) { background: #fff !important; color: #000 !important; height: auto !important; overflow: visible !important; }
-  :global(body) > *, :global(dialog[open]) { display: none !important; }
-  :global(body) > .printSheet { display: grid !important; grid-template-columns: repeat(2, 1fr); gap: 12mm; color: #000; background: #fff; }
-  .card { text-align: center; border: 1px solid #333; padding: 8mm; break-inside: avoid; font-family: sans-serif; }
-  .card h1 { font-size: 22pt; color: #000; text-shadow: none; }
-  .card p { color: #000; }
 }

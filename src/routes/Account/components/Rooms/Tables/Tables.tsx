@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { QRCode } from 'react-qrcode-logo'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { fetchRooms } from 'store/modules/rooms'
@@ -7,6 +6,7 @@ import HttpApi from 'lib/HttpApi'
 import Button from 'components/Button/Button'
 import Panel from 'components/Panel/Panel'
 import Modal from 'components/Modal/Modal'
+import TablePrint from './TablePrint'
 import type { Room } from 'shared/types'
 import { tableMode, type RoomTable, type TableMode } from 'shared/tableAccess'
 import styles from './Tables.css'
@@ -57,11 +57,6 @@ export default function Tables ({ room, onClose }: { room: Room, onClose: () => 
   useEffect(() => {
     void load().catch((err: Error) => setError(err.message)).finally(() => setLoading(false))
   }, [load])
-  useEffect(() => {
-    if (!cards.length) return
-    const timer = setTimeout(() => window.print(), 150)
-    return () => clearTimeout(timer)
-  }, [cards])
 
   const run = async (operation: () => Promise<void>) => {
     setBusy(true)
@@ -321,23 +316,27 @@ export default function Tables ({ room, onClose }: { room: Room, onClose: () => 
                 >
                   Descargar QR
                 </Button>
-                <Button className={styles.primary} variant='primary' onClick={() => setCards([qr])}>Imprimir esta mesa</Button>
+                <Button
+                  className={styles.primary}
+                  variant='primary'
+                  onClick={() => {
+                    setCards([qr])
+                    setQR(null)
+                  }}
+                >
+                  Imprimir esta mesa
+                </Button>
               </div>
             </div>
           </Modal>
         )}
-        {cards.length > 0 && createPortal(
-          <div className={styles.printSheet}>
-            {cards.map(card => (
-              <section className={styles.card} key={card.table.tableId}>
-                <p>{branding?.name || 'Karaoke'}</p>
-                <p>{room.name}</p>
-                <h1>{label(card.table)}</h1>
-                <QRCode value={joinURL(card.token)} size={220} quietZone={20} />
-                <p>Escanee para elegir su canción</p>
-              </section>
-            ))}
-          </div>, document.body)}
+        {cards.length > 0 && (
+          <TablePrint
+            roomName={room.name}
+            cards={cards.map(({ table, token }) => ({ tableId: table.tableId, code: table.code, url: joinURL(token) }))}
+            onClose={() => setCards([])}
+          />
+        )}
       </>
     </Panel>
   )

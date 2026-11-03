@@ -1,0 +1,26 @@
+.dialog { width: min(760px, calc(100vw - 24px)); box-sizing: border-box; }
+.settings { display: flex; align-items: end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.settings label { display: grid; gap: 6px; font-size: 14px; }
+.settings select { min-height: 44px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: 9px; background: var(--stage); color: var(--lyrics); font-size: 16px; }
+.settings p, .help { font-size: 13px; line-height: 1.5; color: var(--secondary); }
+.settings p { margin: 0; }
+.help { margin: 12px 0 16px; }
+.cancel { border: 1px solid var(--edge); border-radius: 9px; color: var(--lyrics); background: var(--stage); }
+.preview { container-type: inline-size; display: grid; gap: 16px; }
+.page { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); gap: 1.9cqw; padding: 4.7619cqw; box-sizing: border-box; aspect-ratio: 210 / 297; background: #fff; color: #000; }
+.page[data-per-page='4'] { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.page[data-per-page='12'] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.card { margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; break-inside: avoid; font-family: sans-serif; text-align: center; }
+.card canvas { display: block; width: 21.4286cqw !important; height: 21.4286cqw !important; }
+.card figcaption { max-width: 100%; padding: 0 1cqw; box-sizing: border-box; font-size: 1.51cqw; line-height: 1.2; overflow-wrap: anywhere; }
+.printSheets { display: none; }
+@media print {
+  @page { size: A4 portrait; margin: 10mm; }
+  :global(html), :global(body) { background: #fff !important; color: #000 !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
+  :global(body) > *, :global(dialog[open]) { display: none !important; }
+  :global(body) > .printSheets { display: block !important; }
+  .page { width: 190mm; height: 276mm; gap: 4mm; padding: 0; aspect-ratio: auto; break-inside: avoid; break-after: page; }
+  .page:last-child { break-after: auto; }
+  .card canvas { width: 45mm !important; height: 45mm !important; }
+  .card figcaption { font-size: 9pt; padding: 0 2mm; }
+}
