@@ -4,7 +4,7 @@ import type {
   SongSourceAdapter,
   SongSourceContext,
 } from '../../shared/songSource.js'
-import { youtubeVideoId } from '../../shared/youtubeSearch.js'
+import { YOUTUBE_MAX_DURATION_SECONDS, youtubeVideoId, youtubeVideoRequirements } from '../../shared/youtubeSearch.js'
 
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3'
 const configuredMaxResults = Number.parseInt(process.env.KES_YOUTUBE_MAX_RESULTS ?? '', 10)
@@ -21,6 +21,8 @@ interface YouTubeVideo {
   snippet?: {
     title?: string
     channelTitle?: string
+    categoryId?: string
+    liveBroadcastContent?: string
     thumbnails?: Record<string, YouTubeThumbnail>
   }
   contentDetails?: {
@@ -52,7 +54,7 @@ interface YouTubeSearchItem {
 }
 
 export class YouTubeApiError extends Error {
-  code: 'YOUTUBE_API' | 'YOUTUBE_QUOTA' | 'YOUTUBE_SEARCH_QUOTA' | 'YOUTUBE_RATE_LIMIT' | 'YOUTUBE_UNCONFIGURED'
+  code: 'YOUTUBE_API' | 'YOUTUBE_QUOTA' | 'YOUTUBE_SEARCH_QUOTA' | 'YOUTUBE_RATE_LIMIT' | 'YOUTUBE_UNCONFIGURED' | 'YOUTUBE_VIDEO_UNSUPPORTED'
 
   constructor (message: string, code: YouTubeApiError['code']) {
     super(message)
@@ -139,6 +141,7 @@ export const createYouTubeSongSource = ({
       && video.contentDetails?.contentRating?.ytRating !== 'ytAgeRestricted'
       && isRegionAllowed
       && !isRegionBlocked
+      && isEligibleMusicVideo(video)
 
     return {
       source: 'YOUTUBE',
@@ -179,10 +182,13 @@ export const createYouTubeSongSource = ({
           : await request<YouTubeSearchItem>('search', {
               part: 'snippet', type: 'video', q: normalizedQuery,
               maxResults: String(Math.min(Math.max(maxResults, 1), 50)), regionCode,
-              safeSearch: 'moderate', videoEmbeddable: 'true', videoSyndicated: 'true',
+              safeSearch: 'moderate', videoEmbeddable: 'true', videoSyndicated: 'true', videoCategoryId: '10',
             })
         const ids = videoId ? [videoId] : (search?.items ?? []).flatMap(item => item.id?.videoId ? [item.id.videoId] : [])
         const videos = await fetchVideos(ids, 5000)
+        if (videoId && videos[0] && !isEligibleMusicVideo(videos[0])) {
+          throw new YouTubeApiError(youtubeVideoRequirements, 'YOUTUBE_VIDEO_UNSUPPORTED')
+        }
         const byId = new Map(videos.map(video => [video.id, video]))
         return ids.map(id => byId.get(id)).map(video => video ? normalizeVideo(video) : null)
           .filter((song): song is ResolvedSong => song !== null && song.isPlayable)
@@ -203,6 +209,9 @@ export const createYouTubeSongSource = ({
       const videoId = sourceId.trim()
       if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null
       const video = (await fetchVideos([videoId]))[0]
+      if (video && !isEligibleMusicVideo(video)) {
+        throw new YouTubeApiError(youtubeVideoRequirements, 'YOUTUBE_VIDEO_UNSUPPORTED')
+      }
       return video ? normalizeVideo(video) : null
     },
   }
@@ -216,6 +225,13 @@ export const parseIsoDuration = (value?: string): number | null => {
   if (!match) return null
   const [, days = '0', hours = '0', minutes = '0', seconds = '0'] = match
   return Number(days) * 86400 + Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds)
+}
+
+const isEligibleMusicVideo = (video: YouTubeVideo): boolean => {
+  const duration = parseIsoDuration(video.contentDetails?.duration)
+  return video.snippet?.categoryId === '10'
+    && !['live', 'upcoming'].includes(video.snippet.liveBroadcastContent ?? '')
+    && duration !== null && duration > 0 && duration <= YOUTUBE_MAX_DURATION_SECONDS
 }
 
 const selectThumbnail = (thumbnails?: Record<string, YouTubeThumbnail>): string | null => {

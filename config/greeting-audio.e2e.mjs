@@ -47,7 +47,7 @@ const provider = createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost')
   res.setHeader('Content-Type', 'application/json')
   res.end(JSON.stringify({ items: (url.searchParams.get('id') || videoIds[0]).split(',').map(id => ({
-    id, snippet: { title: `Canción ${id}`, channelTitle: 'Fixture', thumbnails: {} },
+    id, snippet: { title: `Canción ${id}`, channelTitle: 'Fixture', categoryId: '10', liveBroadcastContent: 'none', thumbnails: {} },
     contentDetails: { duration: 'PT5S' }, status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
   })) }))
 })
@@ -152,9 +152,10 @@ const ready = greetingId => expect.poll(() => job(greetingId)?.status, { timeout
 const submit = async (index, message, intent = 'LISTEN') => {
   await guest.goto(`${base}requests`)
   await guest.goto(`${base}library`)
+  await guest.getByRole('radio', { name: intent === 'SING' ? 'Cantar karaoke' : 'Escuchar música', exact: true }).check()
   await guest.getByRole('searchbox', { name: 'Buscar canción o artista' }).fill(`https://youtu.be/${videoIds[index]}`)
+  await guest.getByRole('searchbox', { name: 'Buscar canción o artista' }).press('Enter')
   const card = guest.locator(`[data-source-id="${videoIds[index]}"]`)
-  await card.getByRole('radio', { name: intent === 'SING' ? 'Cantar karaoke' : 'Escuchar música', exact: true }).check()
   await card.getByRole('checkbox', { name: /Agregar saludo/ }).check()
   await card.getByLabel('Para (opcional)').fill('Rocío')
   await card.getByLabel('Mensaje', { exact: true }).fill(message)
@@ -252,7 +253,7 @@ try {
   await guest.goto(`${base}join#${invitation}`)
   await guest.getByLabel('Tu nombre').fill('Ana')
   await guest.getByRole('button', { name: 'Entrar', exact: true }).click()
-  await expect(guest.getByRole('heading', { name: '¿Qué quieres cantar?' })).toBeVisible()
+  await expect(guest.getByRole('heading', { name: '¿Qué quieres pedir?' })).toBeVisible()
   held = true
   const first = await submit(0, '¡Feliz cumpleaños!', playbackMode ? 'SING' : 'LISTEN')
   const second = await submit(1, '¡Feliz cumpleaños!')

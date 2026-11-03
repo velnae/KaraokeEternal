@@ -16,8 +16,6 @@ import Button from 'components/Button/Button'
 import Icon from 'components/Icon/Icon'
 import { useSongRequests } from 'components/SongSearch/useSongRequests'
 import SongResultCard from 'components/SongSearch/SongResultCard'
-import VideoTypeFilter from 'components/SongSearch/VideoTypeFilter'
-import { setYouTubeMode } from 'routes/Library/modules/library'
 import { estimatedWait, isPendingRequest, requestPriority, requestStatusLabels } from './model'
 import { useConnection } from './useConnection'
 import { useYouTubeSearch } from './useYouTubeSearch'
@@ -26,8 +24,9 @@ import theme from 'styles/karaokeTheme.css'
 import styles from './ParticipantView.css'
 import QueueGreeting from 'components/Greetings/QueueGreeting'
 import useGreetings from 'components/Greetings/useGreetings'
-import { youtubeSearchCanRetry, youtubeSearchError } from 'shared/youtubeSearch'
-import { requestIntentLabels } from 'shared/requestIntent'
+import { YOUTUBE_MAX_DURATION_SECONDS, youtubeSearchCanRetry, youtubeSearchError } from 'shared/youtubeSearch'
+import { requestIntentLabels, type RequestIntent } from 'shared/requestIntent'
+import searchStyles from 'components/SongSearch/SongSearch.css'
 
 const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | 'room' }) => {
   const dispatch = useAppDispatch()
@@ -39,9 +38,10 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
   const status = useAppSelector(state => state.status)
   const { headerHeight, footerHeight } = useAppSelector(state => state.ui)
   const [query, setQuery] = useState('')
-  const mode = useAppSelector(state => state.library.youtubeMode)
-  const [retry, setRetry] = useState(0)
-  const search = useYouTubeSearch(query, mode, retry, page === 'search')
+  const [intent, setIntent] = useState<RequestIntent>('LISTEN')
+  const [submitted, setSubmitted] = useState<{ query: string, intent: RequestIntent } | null>(null)
+  const search = useYouTubeSearch(page === 'search')
+  const matchesSubmission = submitted?.query === query.trim() && submitted.intent === intent
   const [cancelling, setCancelling] = useState<number | null>(null)
   const [cancelMessage, setCancelMessage] = useState('')
   const { controller, receipts } = useSongRequests()
@@ -137,7 +137,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
       {activePlayer && next?.userId === user.userId && <p role='status' className={styles.notice}>Tu turno sigue</p>}
 
       <div className={styles.pageHeading}>
-        <h1>{page === 'search' ? '¿Qué quieres cantar?' : page === 'requests' ? 'Mis pedidos' : 'En la sala'}</h1>
+        <h1>{page === 'search' ? '¿Qué quieres pedir?' : page === 'requests' ? 'Mis pedidos' : 'En la sala'}</h1>
         {page !== 'room' && ready && (
           <Link
             to='/requests'
@@ -157,38 +157,54 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             role='search'
             onSubmit={(event) => {
               event.preventDefault()
-              setRetry(value => value + 1)
+              if (query.trim().length < 2) return
+              setSubmitted({ query: query.trim(), intent })
+              void search.submit(query, intent === 'SING' ? 'karaoke' : 'all')
             }}
           >
+            <fieldset className={styles.searchIntent}>
+              <legend>Quiero</legend>
+              <div className={searchStyles.options}>
+                <label>
+                  <input type='radio' name='request-intent' checked={intent === 'SING'} onChange={() => setIntent('SING')} />
+                  Cantar karaoke
+                </label>
+                <label>
+                  <input type='radio' name='request-intent' checked={intent === 'LISTEN'} onChange={() => setIntent('LISTEN')} />
+                  Escuchar música
+                </label>
+              </div>
+            </fieldset>
             <div className={styles.searchRow}>
-              <input id='youtube-query' type='search' aria-label='Buscar canción o artista' value={query} onChange={event => setQuery(event.target.value)} placeholder='Canción, artista o enlace de YouTube' maxLength={200} enterKeyHint='search' />
-              <Button type='submit' icon='MAGNIFIER' size={24} aria-label='Buscar' disabled={!connected || query.trim().length < 2} />
+              <input id='youtube-query' type='search' aria-label='Buscar canción o artista' aria-describedby='youtube-search-help' value={query} onChange={event => setQuery(event.target.value)} placeholder='Canción, artista o enlace' maxLength={200} enterKeyHint='search' />
+              <Button type='submit' disabled={!connected || query.trim().length < 2}>Buscar</Button>
             </div>
-            <VideoTypeFilter value={mode} onChange={value => dispatch(setYouTubeMode(value))} />
+            <p id='youtube-search-help' className={styles.searchHelp}>{`Canciones de hasta ${YOUTUBE_MAX_DURATION_SECONDS / 60} minutos. Escribe al menos 2 caracteres y pulsa Buscar.`}</p>
           </form>
           <div aria-live='polite'>
-            {query.trim().length < 2 && <p>Escribe al menos 2 caracteres para buscar.</p>}
-            {search.isLoading && <p>Buscando…</p>}
-            {search.error && (
+            {!matchesSubmission && query.trim().length >= 2 && <p>Pulsa Buscar para ver los resultados.</p>}
+            {matchesSubmission && search.isLoading && <p>Buscando…</p>}
+            {matchesSubmission && search.error && (
               <div className={styles.notice}>
                 <p>{youtubeSearchError(search.code)}</p>
-                {youtubeSearchCanRetry(search.code) && <Button disabled={!connected} onClick={() => setRetry(value => value + 1)}>Reintentar</Button>}
+                {youtubeSearchCanRetry(search.code) && <Button disabled={!connected} onClick={() => { void search.submit(search.query) }}>Reintentar</Button>}
               </div>
             )}
-            {search.query && !search.isLoading && !search.error && search.results.length === 0 && (
+            {matchesSubmission && search.query && !search.isLoading && !search.error && search.results.length === 0 && (
               <div className={styles.empty}>
-                <p>Sin resultados</p>
-                {mode !== 'all' && <Button onClick={() => dispatch(setYouTubeMode('all'))}>Buscar todos los tipos</Button>}
+                <p>{`No encontramos canciones de hasta ${YOUTUBE_MAX_DURATION_SECONDS / 60} minutos.`}</p>
+                <p>Prueba otro título, artista o un enlace de YouTube.</p>
               </div>
             )}
           </div>
-          {search.results.map((result) => {
+          {matchesSubmission && search.results.map((result) => {
             const receipt = receipts[result.sourceId]
             const active = own.find(item => item.externalId === result.sourceId && (isPendingRequest(item) || item.status === 'PLAYING'))
             return (
               <SongResultCard
                 key={result.sourceId}
                 result={result}
+                requestIntent={submitted.intent}
                 receipt={receipt}
                 active={active}
                 connected={connected}

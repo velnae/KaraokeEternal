@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { open, close, db } from '../lib/Database.js'
 import { QUEUE_ADD, QUEUE_REMOVE } from '../../shared/actionTypes.js'
-import { youtubeSongSource } from '../SongSources/YouTubeSongSource.js'
+import { createYouTubeSongSource, youtubeSongSource } from '../SongSources/YouTubeSongSource.js'
 import type { ResolvedSong } from '../../shared/songSource.js'
 import handlers from './socket.js'
 import Queue from './Queue.js'
@@ -74,6 +74,26 @@ describe('durable participant request receipts', () => {
     const ack = vi.fn()
     await handlers[QUEUE_ADD](socket, request('request-intent-01'), ack)
     expect(Queue.get(1).entities[1]).toMatchObject({ title: 'Karaoke', requestIntent: 'UNKNOWN' })
+  })
+
+  it.each([420, 421])('revalidates the duration at enqueue, even without a prior search (%i seconds)', async (duration) => {
+    const source = createYouTubeSongSource({ apiKey: 'test', fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [{
+      id: song.sourceId,
+      snippet: { title: 'Song', channelTitle: 'Singer', categoryId: '10', liveBroadcastContent: 'none' },
+      contentDetails: { duration: `PT${duration}S` },
+      status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
+    }] }))) })
+    vi.mocked(youtubeSongSource.resolve).mockImplementation(source.resolve)
+    const ack = vi.fn()
+    await handlers[QUEUE_ADD](socket, { payload: { ...request('duration-request-01').payload, requestIntent: 'SING' } }, ack)
+    if (duration === 420) {
+      expect(ack.mock.calls[0][0].payload.requestIntent).toBe('SING')
+      expect(Queue.countPending(1, 1)).toBe(1)
+    } else {
+      expect(ack.mock.calls[0][0].error).toContain('7 minutos')
+      expect(Queue.get(1).result).toHaveLength(0)
+      expect(Queue.getRequest(1, 1, 'duration-request-01')).toBeUndefined()
+    }
   })
 
   it('rolls back an invalid greeting without leaving a partially accepted music request', async () => {

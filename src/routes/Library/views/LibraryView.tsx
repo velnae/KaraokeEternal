@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React from 'react'
 import { useAppSelector } from 'store/hooks'
 import { Link } from 'react-router'
 import useResizeObserver from 'use-resize-observer'
@@ -13,16 +13,15 @@ export default function LibraryView () {
   const { isLoading, filterStr, filterStarred, searchSource, youtubeMode } = useAppSelector(state => state.library)
   const songs = useAppSelector(state => state.songs.result)
   const ui = useAppSelector(state => state.ui)
-  const [retry, setRetry] = useState(0)
-  const search = useYouTubeSearch(filterStr, youtubeMode, retry, searchSource === 'youtube')
+  const search = useYouTubeSearch(searchSource === 'youtube')
   const { ref, height = 0, width = 0 } = useResizeObserver<HTMLDivElement>()
   const listUI = { ...ui, innerHeight: height, innerWidth: width, headerHeight: 0, footerHeight: 0 }
   return (
     <main className={styles.container} style={{ paddingTop: ui.headerHeight, paddingBottom: ui.footerHeight }}>
-      <LibraryHeader onSearch={() => setRetry(value => value + 1)} />
+      <LibraryHeader onSearch={(query) => { void search.submit(query, youtubeMode) }} />
       <div ref={ref} className={styles.content}>
         {searchSource === 'youtube'
-          ? <div className={styles.youtube}><YouTubeSearchResults {...search} onRetry={() => setRetry(value => value + 1)} /></div>
+          ? <div className={styles.youtube}><YouTubeSearchResults {...search} onRetry={() => { void search.submit(search.query) }} /></div>
           : isLoading
             ? <p className={styles.notice} role='status'>Cargando archivos locales…</p>
             : !songs.length

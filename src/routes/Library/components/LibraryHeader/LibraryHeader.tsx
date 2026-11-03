@@ -3,10 +3,12 @@ import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { resetFilterStr, setFilterStr, setSearchSource, setYouTubeMode, toggleFilterStarred } from '../../modules/library'
 import Button from 'components/Button/Button'
 import VideoTypeFilter from 'components/SongSearch/VideoTypeFilter'
+import { useConnection } from 'routes/Participant/useConnection'
 import styles from './LibraryHeader.css'
 
-export default function LibraryHeader ({ onSearch }: { onSearch: () => void }) {
+export default function LibraryHeader ({ onSearch }: { onSearch: (query: string) => void }) {
   const dispatch = useAppDispatch()
+  const connected = useConnection()
   const { filterStr, filterStarred, searchSource, youtubeMode } = useAppSelector(state => state.library)
   const [value, setValue] = useState(filterStr)
   const input = useRef<HTMLInputElement>(null)
@@ -29,7 +31,8 @@ export default function LibraryHeader ({ onSearch }: { onSearch: () => void }) {
         className={styles.search}
         onSubmit={(event) => {
           event.preventDefault()
-          onSearch()
+          if (searchSource === 'youtube' && !connected) return
+          onSearch(value)
         }}
       >
         <input
@@ -60,8 +63,9 @@ export default function LibraryHeader ({ onSearch }: { onSearch: () => void }) {
             }}
           />
         )}
-        <Button className={styles.searchButton} type='submit' icon='MAGNIFIER' size={22} aria-label='Buscar canciones' disabled={searchSource === 'youtube' && value.trim().length < 2} />
+        <Button className={styles.searchButton} type='submit' icon='MAGNIFIER' size={22} aria-label='Buscar canciones' disabled={searchSource === 'youtube' && (!connected || value.trim().length < 2)} />
       </form>
+      {searchSource === 'youtube' && !connected && <p role='status'>Sin conexión. Espera a reconectar para buscar.</p>}
       {searchSource === 'youtube'
         ? <VideoTypeFilter value={youtubeMode} onChange={mode => dispatch(setYouTubeMode(mode))} />
         : (

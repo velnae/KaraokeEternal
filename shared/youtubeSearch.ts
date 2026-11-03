@@ -1,3 +1,6 @@
+export const YOUTUBE_MAX_DURATION_SECONDS = 7 * 60
+export const youtubeVideoRequirements = `Elige un video de la categoría Música, de hasta ${YOUTUBE_MAX_DURATION_SECONDS / 60} minutos y sin emisiones en directo.`
+
 export const youtubeSearchModes = [
   { value: 'karaoke', label: 'Karaoke' },
   { value: 'lyrics', label: 'Con letras' },
@@ -22,6 +25,7 @@ export function youtubeVideoId (query: string): string | null {
 }
 
 export function youtubeSearchError (code: string | null, admin = false): string {
+  if (code === 'YOUTUBE_VIDEO_UNSUPPORTED') return youtubeVideoRequirements
   if (code === 'YOUTUBE_SEARCH_QUOTA') return 'Se agotó el límite diario de búsquedas de YouTube. Puedes pegar el enlace de un video en este buscador.'
     + (admin ? ' La búsqueda por texto vuelve al restablecerse la cuota; revisa el límite de search.list en Google Cloud.' : '')
   if (code === 'YOUTUBE_QUOTA') return admin ? 'Se agotó la cuota de YouTube. Puedes usar Archivos locales y revisar la cuota en Google Cloud.' : 'Se agotó la cuota de YouTube. Consulta al organizador.'
@@ -31,7 +35,7 @@ export function youtubeSearchError (code: string | null, admin = false): string 
   return 'No se pudo buscar en YouTube. Intenta nuevamente.'
 }
 
-export const youtubeSearchCanRetry = (code: string | null) => !['YOUTUBE_SEARCH_QUOTA', 'YOUTUBE_QUOTA', 'YOUTUBE_UNCONFIGURED'].includes(code ?? '')
+export const youtubeSearchCanRetry = (code: string | null) => !['YOUTUBE_SEARCH_QUOTA', 'YOUTUBE_QUOTA', 'YOUTUBE_UNCONFIGURED', 'YOUTUBE_VIDEO_UNSUPPORTED'].includes(code ?? '')
 
 // These are search intents, not verified classifications of a video's content.
 export function youtubeQuery (query: string, mode: YouTubeSearchMode) {

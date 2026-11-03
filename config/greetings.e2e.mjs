@@ -24,7 +24,7 @@ const provider = createServer((req, res) => {
   const items = url.pathname.endsWith('/search')
     ? ids.map(videoId => ({ id: { videoId } }))
     : url.searchParams.get('id').split(',').map(id => ({
-        id, snippet: { title: `Canción ${ids.indexOf(id) + 1}`, channelTitle: 'Fixture', thumbnails: {} },
+        id, snippet: { title: `Canción ${ids.indexOf(id) + 1}`, channelTitle: 'Fixture', categoryId: '10', liveBroadcastContent: 'none', thumbnails: {} },
         contentDetails: { duration: 'PT5S' }, status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
       }))
   res.end(JSON.stringify({ items }))
@@ -157,9 +157,10 @@ try {
   await guest.goto(`${base}join#${invitation}`)
   await guest.getByLabel('Tu nombre').fill('Ana')
   await guest.getByRole('button', { name: 'Entrar', exact: true }).click()
-  await expect(guest.getByRole('heading', { name: '¿Qué quieres cantar?' })).toBeVisible()
+  await expect(guest.getByRole('heading', { name: '¿Qué quieres pedir?' })).toBeVisible()
   for (const [index, message] of ['¡Feliz cumpleaños!', '¡Que disfruten la noche!'].entries()) {
     await guest.getByRole('searchbox', { name: 'Buscar canción o artista' }).fill(`https://youtu.be/${ids[index]}`)
+    await guest.getByRole('searchbox', { name: 'Buscar canción o artista' }).press('Enter')
     await expect(guest.locator('article[data-source-id]')).toHaveCount(1)
     const card = guest.locator(`[data-source-id="${ids[index]}"]`)
     await card.getByRole('checkbox', { name: /Agregar saludo/ }).focus()

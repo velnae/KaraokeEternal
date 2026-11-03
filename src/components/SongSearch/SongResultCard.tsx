@@ -46,8 +46,9 @@ function RequestAction ({ receipt, active, onRequest, admin, house = false, conn
       )
 }
 
-export default function SongResultCard ({ result, receipt, active, admin = false, house, connected, blocker, onRequest }: RequestState & {
+export default function SongResultCard ({ result, receipt, active, admin = false, house, connected, blocker, onRequest, requestIntent }: RequestState & {
   result: SongSearchResult
+  requestIntent?: RequestIntent
   admin?: boolean
   house?: RequestState
   connected: boolean
@@ -88,7 +89,7 @@ export default function SongResultCard ({ result, receipt, active, admin = false
         <h2 id={`${id}-title`} translate='no'>{result.title}</h2>
         <p translate='no'>{result.artistOrChannel}</p>
       </div>
-      {!confirmed && (
+      {!confirmed && !requestIntent && (
         <fieldset className={styles.intent} disabled={sending || uncertain} aria-label='Tipo de pedido'>
           <legend>Este pedido es para</legend>
           <div className={styles.options}>
@@ -106,7 +107,7 @@ export default function SongResultCard ({ result, receipt, active, admin = false
       {confirmed && active.requestIntent && <span className={styles.intentLabel}>{requestIntentLabels[active.requestIntent]}</span>}
       {!admin && !confirmed && <GreetingComposer value={greeting} onChange={setGreeting} locked={sending || uncertain} />}
       <div className={styles.resultActions}>
-        <div className={styles.primaryAction} aria-live='polite'><RequestAction receipt={receipt} active={active} onRequest={() => onRequest(admin ? undefined : greeting, intent)} admin={admin} connected={connected} blocker={blocker ?? greetingError} description={description} /></div>
+        <div className={styles.primaryAction} aria-live='polite'><RequestAction receipt={receipt} active={active} onRequest={() => onRequest(admin ? undefined : greeting, requestIntent ?? intent)} admin={admin} connected={connected} blocker={blocker ?? greetingError} description={description} /></div>
         {admin && <button ref={moreButton} type='button' className={styles.moreButton} aria-label={`Más opciones para ${result.title}`} title='Más opciones' aria-expanded={moreOpen} aria-controls={`${id}-options`} onClick={() => setMoreOpen(value => !value)}><Icon icon='MORE_HORIZ' size={24} /></button>}
       </div>
       {admin && moreOpen && (

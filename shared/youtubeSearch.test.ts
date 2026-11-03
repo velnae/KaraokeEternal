@@ -23,6 +23,12 @@ describe('YouTube search intent', () => {
     expect(youtubeSearchCanRetry('YOUTUBE_SEARCH_QUOTA')).toBe(false)
     expect(youtubeSearchCanRetry('YOUTUBE_RATE_LIMIT')).toBe(true)
   })
+
+  it('explains ineligible links without offering a futile retry', () => {
+    expect(youtubeSearchError('YOUTUBE_VIDEO_UNSUPPORTED')).toContain('7 minutos')
+    expect(youtubeSearchError('YOUTUBE_VIDEO_UNSUPPORTED')).toContain('Música')
+    expect(youtubeSearchCanRetry('YOUTUBE_VIDEO_UNSUPPORTED')).toBe(false)
+  })
   it('distinguishes formats without changing the local search text', () => {
     expect(youtubeQuery('  Mi canción  ', 'karaoke')).toBe('Mi canción karaoke')
     expect(youtubeQuery('Mi canción', 'lyrics')).toBe('Mi canción letra lyrics')

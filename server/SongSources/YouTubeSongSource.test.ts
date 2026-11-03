@@ -11,6 +11,8 @@ const playableVideo = (id: string, overrides: Record<string, unknown> = {}) => (
   snippet: {
     title: 'Song &amp; Dance',
     channelTitle: 'Singer &quot;Official&quot;',
+    categoryId: '10',
+    liveBroadcastContent: 'none',
     thumbnails: { high: { url: `https://img.youtube.com/${id}.jpg` } },
   },
   contentDetails: { duration: 'PT3M5S' },
@@ -113,6 +115,7 @@ describe('YouTubeSongSource', () => {
       safeSearch: 'moderate',
       videoEmbeddable: 'true',
       videoSyndicated: 'true',
+      videoCategoryId: '10',
     })
     expect(new URL(fetchImpl.mock.calls[1][0]).searchParams.get('part')).toBe('snippet,contentDetails,status')
     expect(JSON.stringify(results)).not.toContain('server-secret')
@@ -162,14 +165,14 @@ describe('YouTubeSongSource', () => {
   it('resolves a video but marks non-embeddable and region-blocked videos unplayable', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({
       items: [playableVideo('AAAAAAAAAAA', {
-        contentDetails: { duration: 'PT1H2M3S', regionRestriction: { blocked: ['PE'] } },
+        contentDetails: { duration: 'PT3M5S', regionRestriction: { blocked: ['PE'] } },
         status: { embeddable: false, privacyStatus: 'public', uploadStatus: 'processed' },
       })],
     }))
     const source = createYouTubeSongSource({ apiKey: 'secret', fetchImpl, regionCode: 'PE' })
 
     await expect(source.resolve('AAAAAAAAAAA', { roomId: 1 })).resolves.toMatchObject({
-      durationSeconds: 3723,
+      durationSeconds: 185,
       isPlayable: false,
     })
     await expect(source.resolve('not-a-video-id', { roomId: 1 })).resolves.toBeNull()
@@ -200,6 +203,34 @@ describe('YouTubeSongSource', () => {
       code: 'YOUTUBE_API',
       message: 'YouTube no está disponible temporalmente',
     })
+  })
+
+  it.each([
+    { name: 'exactly seven minutes', duration: 'PT7M', categoryId: '10', liveBroadcastContent: 'none', eligible: true },
+    { name: 'seven minutes and one second', duration: 'PT7M1S', categoryId: '10', liveBroadcastContent: 'none', eligible: false },
+    { name: 'unknown duration', duration: undefined, categoryId: '10', liveBroadcastContent: 'none', eligible: false },
+    { name: 'malformed duration', duration: 'invalid', categoryId: '10', liveBroadcastContent: 'none', eligible: false },
+    { name: 'zero duration', duration: 'PT0S', categoryId: '10', liveBroadcastContent: 'none', eligible: false },
+    { name: 'live broadcast', duration: 'PT3M', categoryId: '10', liveBroadcastContent: 'live', eligible: false },
+    { name: 'upcoming broadcast', duration: 'PT3M', categoryId: '10', liveBroadcastContent: 'upcoming', eligible: false },
+    { name: 'non-music category', duration: 'PT3M', categoryId: '22', liveBroadcastContent: 'none', eligible: false },
+    { name: 'unknown category', duration: 'PT3M', categoryId: undefined, liveBroadcastContent: 'none', eligible: false },
+  ])('enforces music eligibility on search, links and fresh resolution: $name', async ({ duration, categoryId, liveBroadcastContent, eligible }) => {
+    const video = playableVideo('AAAAAAAAAAA')
+    const candidate = { ...video, snippet: { ...video.snippet, categoryId, liveBroadcastContent }, contentDetails: { duration } }
+    const fetchImpl = vi.fn(async (url: URL) => url.pathname.endsWith('/search')
+      ? jsonResponse({ items: [{ id: { videoId: video.id } }] })
+      : jsonResponse({ items: [candidate] }))
+    const source = createYouTubeSongSource({ apiKey: 'secret', fetchImpl })
+    expect(await source.search('song', { roomId: 1 })).toHaveLength(eligible ? 1 : 0)
+    if (eligible) {
+      await expect(source.search(`https://youtu.be/${video.id}`, { roomId: 1 })).resolves.toMatchObject([{ durationSeconds: 420 }])
+      await expect(source.resolve(video.id, { roomId: 1 })).resolves.toMatchObject({ isPlayable: true, durationSeconds: 420 })
+    } else {
+      await expect(source.search(`https://youtu.be/${video.id}`, { roomId: 1 })).rejects.toMatchObject({ code: 'YOUTUBE_VIDEO_UNSUPPORTED', message: expect.stringContaining('7 minutos') })
+      await expect(source.resolve(video.id, { roomId: 1 })).rejects.toMatchObject({ code: 'YOUTUBE_VIDEO_UNSUPPORTED' })
+    }
+    expect(fetchImpl.mock.calls.filter(([url]) => url.pathname.endsWith('/search'))).toHaveLength(1)
   })
 
   it('parses ISO 8601 durations used by YouTube', () => {

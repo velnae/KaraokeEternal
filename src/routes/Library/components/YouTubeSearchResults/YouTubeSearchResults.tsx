@@ -32,13 +32,13 @@ export default function YouTubeSearchResults ({ code, error, isLoading, query, r
         {!query && (
           <>
             <h2>Encuentra la versión que buscas</h2>
-            <p>Escribe al menos 2 caracteres del título o artista, o pega un enlace de YouTube.</p>
+            <p>Escribe al menos 2 caracteres del título o artista, o pega un enlace de YouTube y pulsa Buscar.</p>
           </>
         )}
         {isLoading && <p>Buscando en YouTube…</p>}
         {error && (
           <>
-            <p>{!connected ? 'Sin conexión. La búsqueda continuará al reconectar.' : youtubeSearchError(code, true)}</p>
+            <p>{!connected ? 'Sin conexión. Espera a reconectar para volver a buscar.' : youtubeSearchError(code, true)}</p>
             {connected && onRetry && youtubeSearchCanRetry(code) && <Button variant='default' onClick={onRetry}>Reintentar búsqueda</Button>}
           </>
         )}
