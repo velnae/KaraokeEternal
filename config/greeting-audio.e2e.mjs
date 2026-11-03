@@ -9,9 +9,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
+import { runGreetingPlaybackChecks } from './greeting-playback-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
+const playbackMode = process.env.KARAOKE_E2E_GREETING_PLAYBACK === '1'
+const localDuration = playbackMode ? 2 : 5
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'g-audio-e2e-'))
 const installation = path.join(data, 'tts')
 const log = fs.openSync(path.join(data, 'server.log'), 'a')
@@ -56,7 +59,15 @@ fs.mkdirSync(path.join(installation, 'reference'))
 fs.symlinkSync(process.execPath, path.join(installation, '.venv/bin/python'))
 for (const name of ['model.sh', 'resident.py', 'speak.py']) fs.writeFileSync(path.join(installation, name), '# External socket fixture\n')
 execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=24000', '-t', '0.5', path.join(installation, 'reference/es_mx_f1.wav')])
-const wave = fs.readFileSync(path.join(installation, 'reference/es_mx_f1.wav'))
+let wave = fs.readFileSync(path.join(installation, 'reference/es_mx_f1.wav'))
+let speechDuration = 0.5
+const setSpeech = (seconds, source) => {
+  const file = path.join(data, 'speech-fixture.wav')
+  const input = source ? ['-i', source] : ['-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=24000', '-t', String(seconds)]
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...input, file])
+  wave = fs.readFileSync(file)
+  speechDuration = seconds
+}
 const drainWorker = async () => {
   if (workerRunning) return
   workerRunning = true
@@ -71,7 +82,7 @@ const drainWorker = async () => {
         const output = payload.args[payload.args.indexOf('--output') + 1]
         fs.writeFileSync(output, corrupt ? 'invalid audio' : wave)
         fs.writeFileSync(output.replace(/\.wav$/, '.json'), '{}')
-        result = { output, audio_seconds: 0.5, sample_rate: 24000 }
+        result = { output, audio_seconds: speechDuration, sample_rate: 24000 }
       }
       if (!socket.destroyed) socket.end(JSON.stringify({ ok: true, result }) + '\n')
     }
@@ -138,11 +149,12 @@ const emit = async (socket, type, payload) => {
 const records = () => db.prepare('SELECT * FROM greetings ORDER BY greetingId').all()
 const job = greetingId => db.prepare('SELECT j.* FROM greetingAudioJobs j JOIN greetings g ON g.audioJobId=j.jobId WHERE g.greetingId=?').get(greetingId)
 const ready = greetingId => expect.poll(() => job(greetingId)?.status, { timeout: 10000 }).toBe('ready')
-const submit = async (index, message) => {
+const submit = async (index, message, intent = 'LISTEN') => {
   await guest.goto(`${base}requests`)
   await guest.goto(`${base}library`)
   await guest.getByRole('searchbox', { name: 'Buscar canción o artista' }).fill(`https://youtu.be/${videoIds[index]}`)
   const card = guest.locator(`[data-source-id="${videoIds[index]}"]`)
+  await card.getByRole('radio', { name: intent === 'SING' ? 'Cantar karaoke' : 'Escuchar música', exact: true }).check()
   await card.getByRole('checkbox', { name: /Agregar saludo/ }).check()
   await card.getByLabel('Para (opcional)').fill('Rocío')
   await card.getByLabel('Mensaje', { exact: true }).fill(message)
@@ -152,11 +164,11 @@ const submit = async (index, message) => {
 }
 
 try {
-  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180:r=10', '-f', 'lavfi', '-i', 'sine=frequency=220:sample_rate=44100', '-t', '5', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(data, 'song.mp4')])
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180:r=10', '-f', 'lavfi', '-i', 'sine=frequency=220:sample_rate=44100', '-t', String(localDuration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(data, 'song.mp4')])
   await start()
   await call(api, 'setup', { username: 'admin', newPassword: 'greeting-audio-test', newPasswordConfirm: 'greeting-audio-test', name: 'Operator' })
   const room = (await call(api, 'rooms/1')).entities[1]
-  await call(api, 'rooms/1', { name: room.name, status: 'open', prefs: { ...room.prefs, roles: { 4: { allowNew: true } }, tables: { mode: 'OPTIONAL' }, queue: { maxPendingPerParticipant: 10, maxSongsPerParticipantRound: 1, houseTracksBeforeParticipant: 0, approvalMode: 'AUTO' } } }, 'PUT')
+  await call(api, 'rooms/1', { name: room.name, status: 'open', prefs: { ...room.prefs, roles: { 4: { allowNew: true } }, tables: { mode: 'OPTIONAL' }, queue: { maxPendingPerParticipant: 10, maxSongsPerParticipantRound: playbackMode ? 2 : 1, houseTracksBeforeParticipant: 0, approvalMode: 'AUTO' } } }, 'PUT')
   await call(api, 'rooms', { name: 'Other room', status: 'open' })
   const tables = await call(api, 'rooms/1/tables', { code: '4', name: 'Terraza', status: 'active' })
   const { invitation } = await call(api, `rooms/1/tables/${tables[0].tableId}/qr`)
@@ -165,10 +177,34 @@ try {
   db = new DatabaseSync(path.join(data, 'database.sqlite3'))
   db.exec(`INSERT INTO artists(artistId,name,nameNorm) VALUES(1,'Fixture','fixture'); INSERT INTO songs(songId,artistId,title,titleNorm) VALUES(1,1,'Local song','local song');`)
   db.prepare('INSERT INTO paths(pathId,path,priority,data) VALUES(1,?,1,?)').run(data, '{"prefs":{"isWatching":false}}')
-  db.exec(`INSERT INTO media(mediaId,songId,pathId,relPath,duration,isPreferred) VALUES(1,1,1,'song.mp4',5,1)`)
+  db.exec(`INSERT INTO media(mediaId,songId,pathId,relPath,duration,isPreferred) VALUES(1,1,1,'song.mp4',${localDuration},1)`)
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, headless: true })
   adminContext = await browser.newContext({ viewport: { width: 1440, height: 1100 } })
   guestContext = await browser.newContext({ viewport: { width: 390, height: 1000 }, isMobile: true, hasTouch: true })
+  let preparationDelay = 'reply'
+  let delayedPreparations = 0
+  await adminContext.routeWebSocket(/\/socket\.io\//, (socket) => {
+    const upstream = socket.connectToServer()
+    const delayedReplies = new Set()
+    socket.onMessage((message) => {
+      const packet = typeof message === 'string' && message.match(/^42(\d+)(\[.*)$/)
+      const action = packet && JSON.parse(packet[2])[1]
+      if (action?.type === 'server/GREETINGS' && action.payload?.operation === 'prepareAudio' && preparationDelay) {
+        delayedPreparations++
+        if (preparationDelay === 'request') {
+          setTimeout(() => upstream.send(message), 2200)
+          return
+        }
+        delayedReplies.add(packet[1])
+      }
+      upstream.send(message)
+    })
+    upstream.onMessage((message) => {
+      const packet = typeof message === 'string' && message.match(/^43(\d+)\[/)
+      if (packet && delayedReplies.delete(packet[1])) setTimeout(() => socket.send(message), 2200)
+      else socket.send(message)
+    })
+  })
   for (const context of [adminContext, guestContext]) context.on('page', page => page.on('pageerror', error => errors.push(error.message)))
   admin = await adminContext.newPage()
   await admin.goto(`${base}account?roomId=1`)
@@ -185,6 +221,27 @@ try {
   await admin.getByRole('checkbox', { name: 'Preparar voz mientras los pedidos esperan' }).focus()
   await admin.keyboard.press('Space')
   await expect.poll(() => db.prepare('SELECT audioEnabled FROM greetingControls WHERE roomId=1').get()?.audioEnabled).toBe(1)
+  await admin.waitForTimeout(1700)
+  const preparation = admin.getByRole('checkbox', { name: 'Preparar voz mientras los pedidos esperan' })
+  assert.equal(delayedPreparations, 1)
+  await expect(preparation).toBeDisabled({ timeout: 100 })
+  await expect(admin.getByText('Esperando la confirmación del servidor…', { exact: true })).toBeVisible()
+  await expect(preparation).toBeEnabled()
+  await expect(preparation).toBeChecked()
+  assert.equal(await admin.getByRole('alert').count(), 0)
+  preparationDelay = 'request'
+  await preparation.focus()
+  await admin.keyboard.press('Space')
+  await expect.poll(() => db.prepare('SELECT audioEnabled FROM greetingControls WHERE roomId=1').get()?.audioEnabled).toBe(0)
+  await expect(preparation).not.toBeChecked()
+  await expect(preparation).toBeEnabled()
+  assert.equal(await admin.getByRole('alert').count(), 0)
+  assert.equal(delayedPreparations, 2)
+  preparationDelay = ''
+  await preparation.focus()
+  await admin.keyboard.press('Space')
+  await expect(preparation).toBeChecked()
+  pass('Preparation settings tolerate delayed requests and acknowledgements without false timeouts or expired commands')
   for (const width of [390, 1440]) {
     await admin.setViewportSize({ width, height: 1100 })
     await admin.getByRole('checkbox', { name: 'Preparar voz mientras los pedidos esperan' }).scrollIntoViewIfNeeded()
@@ -197,7 +254,7 @@ try {
   await guest.getByRole('button', { name: 'Entrar', exact: true }).click()
   await expect(guest.getByRole('heading', { name: '¿Qué quieres cantar?' })).toBeVisible()
   held = true
-  const first = await submit(0, '¡Feliz cumpleaños!')
+  const first = await submit(0, '¡Feliz cumpleaños!', playbackMode ? 'SING' : 'LISTEN')
   const second = await submit(1, '¡Feliz cumpleaños!')
   await expect.poll(() => requests.length).toBe(1)
   await expect.poll(() => job(first.greetingId)?.status).toBe('generating')
@@ -235,71 +292,78 @@ try {
   assert.ok(decoded > 0 && decoded <= 20)
   pass('Real QR orders prepare one validated private audio for two separate greetings; keyboard and responsive UI')
 
-  held = true
-  const cancelled = await submit(2, 'Este saludo se cancela')
-  await expect.poll(() => job(cancelled.greetingId)?.status).toBe('generating')
-  await guest.goto(`${base}requests`)
-  await guest.locator(`[data-queue-id="${cancelled.queueId}"]`).getByRole('button', { name: 'Quitar saludo', exact: true }).click()
-  await expect.poll(() => job(cancelled.greetingId)?.cancelRequested).toBe(1)
-  release()
-  await expect.poll(() => job(cancelled.greetingId)?.status).toBe('cancelled')
-  assert.equal((await api.get(`${base}api/greetings/${cancelled.greetingId}/audio`)).status(), 404)
-  pass('Cancellation discards a late generation without cancelling the musical request')
+  if (playbackMode) {
+    await runGreetingPlaybackChecks({ api, admin, adminContext, guestContext, db, base, data, first, second, call, connect, emit, job, ready, start, stop, setSpeech, installation, setPlayer: (page) => {
+      player = page
+    } })
+  } else {
+    held = true
+    const cancelled = await submit(2, 'Este saludo se cancela')
+    await expect.poll(() => job(cancelled.greetingId)?.status).toBe('generating')
+    await guest.goto(`${base}requests`)
+    await guest.locator(`[data-queue-id="${cancelled.queueId}"]`).getByRole('button', { name: 'Quitar saludo', exact: true }).click()
+    await expect.poll(() => job(cancelled.greetingId)?.cancelRequested).toBe(1)
+    release()
+    await expect.poll(() => job(cancelled.greetingId)?.status).toBe('cancelled')
+    assert.equal((await api.get(`${base}api/greetings/${cancelled.greetingId}/audio`)).status(), 404)
+    pass('Cancellation discards a late generation without cancelling the musical request')
 
-  held = true
-  const interrupted = await submit(3, 'Recuperar esta preparación')
-  await expect.poll(() => job(interrupted.greetingId)?.status).toBe('generating')
-  const beforeRestart = requests.length
-  await stop()
-  assert.equal(job(interrupted.greetingId).status, 'uncertain')
-  await start()
-  await sleep(1000)
-  assert.equal(requests.length, beforeRestart)
-  release()
-  await ready(interrupted.greetingId)
-  assert.equal(job(interrupted.greetingId).attempts, 2)
-  assert.equal(job(first.greetingId).jobId, job(second.greetingId).jobId)
-  assert.equal((await api.get(audioPath)).status(), 200)
-  assert.doesNotMatch(fs.readFileSync(path.join(data, 'server.log'), 'utf8'), /database is (?:not open|closed)/i)
-  pass('SQLite preserves interrupted work and ready cache; restart waits for the old external worker before its single retry')
+    held = true
+    const interrupted = await submit(3, 'Recuperar esta preparación')
+    await expect.poll(() => job(interrupted.greetingId)?.status).toBe('generating')
+    const beforeRestart = requests.length
+    await stop()
+    assert.equal(job(interrupted.greetingId).status, 'uncertain')
+    await start()
+    await sleep(1000)
+    assert.equal(requests.length, beforeRestart)
+    release()
+    await ready(interrupted.greetingId)
+    assert.equal(job(interrupted.greetingId).attempts, 2)
+    assert.equal(job(first.greetingId).jobId, job(second.greetingId).jobId)
+    assert.equal((await api.get(audioPath)).status(), 200)
+    assert.doesNotMatch(fs.readFileSync(path.join(data, 'server.log'), 'utf8'), /database is (?:not open|closed)/i)
+    pass('SQLite preserves interrupted work and ready cache; restart waits for the old external worker before its single retry')
 
-  corrupt = true
-  const fallback = await submit(4, 'Este saludo sigue en pantalla')
-  await expect.poll(() => job(fallback.greetingId)?.status).toBe('failed')
-  const operator = await connect(api)
-  await emit(operator, 'server/QUEUE_REMOVE', { queueId: records().filter(row => row.greetingId !== fallback.greetingId).map(row => row.queueId) })
-  db.prepare(`UPDATE queue SET source='LOCAL',songId=1,externalId=NULL WHERE queueId=?`).run(fallback.queueId)
-  await admin.goto(`${base}queue`)
-  await expect(admin.locator(`[data-queue-id="${fallback.queueId}"]`).getByText('Solo pantalla', { exact: true })).toBeVisible()
-  player = await adminContext.newPage()
-  await player.goto(`${base}player`)
-  await player.getByRole('toolbar', { name: 'Controles de reproducción' }).getByRole('button', { name: 'Reproducir', exact: true }).click()
-  await expect(player.getByTestId('greeting-overlay')).toContainText(fallback.message)
-  await player.screenshot({ path: path.join(data, 'visual-fallback.png') })
-  await expect.poll(() => records().find(row => row.greetingId === fallback.greetingId).status, { timeout: 20000 }).toBe('DISPLAYED')
-  await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(fallback.queueId).status, { timeout: 12000 }).toBe('PLAYED')
-  await player.close()
-  pass('Failed voice preparation still delivers the visual greeting and continues real local music')
+    corrupt = true
+    const fallback = await submit(4, 'Este saludo sigue en pantalla')
+    await expect.poll(() => job(fallback.greetingId)?.status).toBe('failed')
+    const operator = await connect(api)
+    await emit(operator, 'server/QUEUE_REMOVE', { queueId: records().filter(row => row.greetingId !== fallback.greetingId).map(row => row.queueId) })
+    db.prepare(`UPDATE queue SET source='LOCAL',songId=1,externalId=NULL WHERE queueId=?`).run(fallback.queueId)
+    await admin.goto(`${base}queue`)
+    await expect(admin.locator(`[data-queue-id="${fallback.queueId}"]`).getByText('Solo pantalla', { exact: true })).toBeVisible()
+    player = await adminContext.newPage()
+    await player.goto(`${base}player`)
+    await player.getByRole('toolbar', { name: 'Controles de reproducción' }).getByRole('button', { name: 'Reproducir', exact: true }).click()
+    await expect(player.getByTestId('greeting-overlay')).toContainText(fallback.message)
+    await player.screenshot({ path: path.join(data, 'visual-fallback.png') })
+    await expect.poll(() => records().find(row => row.greetingId === fallback.greetingId).status, { timeout: 20000 }).toBe('DISPLAYED')
+    await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(fallback.queueId).status, { timeout: 12000 }).toBe('PLAYED')
+    await player.close()
+    pass('Failed voice preparation still delivers the visual greeting and continues real local music')
 
-  if (process.env.KES_TTS_TEST_INSTALLATION) {
-    const local = (await call(api, 'prefs/local-tts')).config
-    await call(api, 'prefs/local-tts', { ...local, installationPath: process.env.KES_TTS_TEST_INSTALLATION, autoStart: true }, 'PUT')
-    await expect.poll(async () => (await call(api, 'prefs/local-tts')).state, { timeout: 125000 }).toBe('ready')
-    const real = await submit(5, 'Que disfrutes la noche.')
-    await expect.poll(() => job(real.greetingId)?.status, { timeout: 150000 }).toBe('ready')
-    const result = await api.get(`${base}api/greetings/${real.greetingId}/audio`)
-    assert.equal(result.status(), 200)
-    fs.writeFileSync(path.join(data, 'real-greeting.mp3'), await result.body())
-    assert.equal(records().find(row => row.greetingId === real.greetingId).status, 'QUEUED')
-    console.log(`PASS Real Chatterbox greeting generated and validated: ${job(real.greetingId).durationMs} ms; no voice playback`)
+    if (process.env.KES_TTS_TEST_INSTALLATION) {
+      const local = (await call(api, 'prefs/local-tts')).config
+      await call(api, 'prefs/local-tts', { ...local, installationPath: process.env.KES_TTS_TEST_INSTALLATION, autoStart: true }, 'PUT')
+      await expect.poll(async () => (await call(api, 'prefs/local-tts')).state, { timeout: 125000 }).toBe('ready')
+      const real = await submit(5, 'Que disfrutes la noche.')
+      await expect.poll(() => job(real.greetingId)?.status, { timeout: 150000 }).toBe('ready')
+      const result = await api.get(`${base}api/greetings/${real.greetingId}/audio`)
+      assert.equal(result.status(), 200)
+      fs.writeFileSync(path.join(data, 'real-greeting.mp3'), await result.body())
+      assert.equal(records().find(row => row.greetingId === real.greetingId).status, 'QUEUED')
+      console.log(`PASS Real Chatterbox greeting generated and validated: ${job(real.greetingId).durationMs} ms; no voice playback`)
+    }
   }
   assert.deepEqual(errors, [])
-  console.log(`Greeting audio ${development ? 'development StrictMode' : 'production'} E2E passed. Artifacts: ${data}`)
+  console.log(`Greeting ${playbackMode ? 'playback' : 'audio'} ${development ? 'development StrictMode' : 'production'} E2E passed. Artifacts: ${data}`)
 } catch (error) {
   for (const [name, page] of [['admin', admin], ['guest', guest], ['player', player]]) {
     if (page && !page.isClosed()) {
       await page.screenshot({ path: path.join(data, `failure-${name}.png`) }).catch(() => {})
       fs.writeFileSync(path.join(data, `failure-${name}.json`), JSON.stringify({ url: page.url(), errors, accessibility: await page.locator('body').ariaSnapshot().catch(() => '') }, null, 2))
+      if (name === 'player') fs.writeFileSync(path.join(data, 'failure-audio-trace.json'), JSON.stringify(await page.evaluate(() => window.audioTrace ?? null), null, 2))
     }
   }
   throw error

@@ -48,24 +48,31 @@ it('closes the post-request window at reservation even before the first song sta
   expect(Queue.get(1).entities[queueId].status).toBe('APPROVED')
 })
 
-it('delivers both requests before the first song, once across the entire turn', () => {
+it('delivers each greeting before its own song once, while retaining the canonical turn', () => {
   const first = song()
   attach(first)
   const second = song()
   attach(second)
   const grant = Greetings.reserve(1, 'screen', first, {})!
-  expect(grant.items.map(item => item.queueId)).toEqual([first, second])
+  expect(grant.items.map(item => item.queueId)).toEqual([first])
   for (const item of grant.items) {
     Greetings.event(1, 'screen', grant.turnKey, item.greetingId, 'start')
     expect(() => Greetings.event(1, 'screen', grant.turnKey, item.greetingId, 'end')).toThrow('completó')
     vi.advanceTimersByTime(greetingDuration(item))
     Greetings.event(1, 'screen', grant.turnKey, item.greetingId, 'end')
   }
-  expect(Greetings.items(1).map(item => item.status)).toEqual(['DISPLAYED', 'DISPLAYED'])
+  expect(Greetings.items(1).map(item => item.status)).toEqual(['DISPLAYED', 'QUEUED'])
+  Greetings.finish(1, 'screen', grant.turnKey)
   expect(Greetings.reserve(1, 'replacement', first, {})).toBeNull()
   Queue.transition(1, first, 'PLAYING')
   Queue.transition(1, first, 'PLAYED')
-  expect(Greetings.reserve(1, 'screen', second, { queueId: first, historyJSON: `[${first}]` })).toBeNull()
+  const next = Greetings.reserve(1, 'screen', second, { queueId: first, historyJSON: `[${first}]` })!
+  expect(next.items.map(item => item.queueId)).toEqual([second])
+  Greetings.event(1, 'screen', next.turnKey, next.items[0].greetingId, 'start')
+  vi.advanceTimersByTime(next.displayMs)
+  Greetings.event(1, 'screen', next.turnKey, next.items[0].greetingId, 'end')
+  expect(Greetings.items(1).map(item => item.status)).toEqual(['DISPLAYED', 'DISPLAYED'])
+  expect(Greetings.reserve(1, 'replacement', second, { queueId: first, historyJSON: `[${first}]` })).toBeNull()
 })
 
 it('retains a long-waiting greeting and moves the remaining greeting when the first song is removed', () => {
@@ -116,10 +123,14 @@ it('allows moderation before and during display without changing music', () => {
   attach(second)
   const grant = Greetings.reserve(1, 'screen', first, {})!
   Greetings.remove({ ...identity, isAdmin: true }, grant.items[0].greetingId)
-  Greetings.event(1, 'screen', first, grant.items[1].greetingId, 'start')
-  Greetings.remove({ ...identity, isAdmin: true }, grant.items[1].greetingId)
+  Greetings.finish(1, 'screen', first)
+  Queue.transition(1, first, 'PLAYING')
+  Queue.transition(1, first, 'PLAYED')
+  const next = Greetings.reserve(1, 'screen', second, { queueId: first, historyJSON: `[${first}]` })!
+  Greetings.event(1, 'screen', second, next.items[0].greetingId, 'start')
+  Greetings.remove({ ...identity, isAdmin: true }, next.items[0].greetingId)
   expect(Greetings.items(1).map(item => item.status)).toEqual(['REMOVED', 'REMOVED'])
-  expect(Object.values(Queue.get(1).entities).map(item => item.status)).toEqual(['APPROVED', 'APPROVED'])
+  expect(Object.values(Queue.get(1).entities).map(item => item.status)).toEqual(['PLAYED', 'APPROVED'])
 })
 
 it('skips a paused turn rather than publishing its greeting later', () => {
@@ -190,7 +201,8 @@ it('preserves the musical ordering of greetings after a pre-turn reorder', () =>
   attach(second)
   Queue.move({ roomId: 1, queueId: second, prevQueueId: null })
   const grant = Greetings.reserve(1, 'screen', second, {})!
-  expect(grant.items.map(item => item.queueId)).toEqual([second, first])
+  expect(grant.items.map(item => item.queueId)).toEqual([second])
+  expect(Greetings.items(1).find(item => item.queueId === first)?.status).toBe('QUEUED')
   expect(() => Greetings.event(1, 'screen', grant.turnKey, grant.items[0].greetingId, 'start')).not.toThrow()
 })
 

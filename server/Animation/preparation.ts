@@ -8,6 +8,7 @@ import { effectCategoryValue } from '../../shared/effectCategories.js'
 // This is a preparation window, not the complete management inventory.
 export function preparationClips (roomId: number) {
   const prefs = animationPrefs(Animation.room(roomId).prefs.animation)
+  const catalogIds = new Set(catalogClips(roomId).map(clip => clip.id))
   const clips = catalogClips(roomId).filter(clip => (!clip.validUntil || clip.validUntil > Date.now()) && (clip.modes?.includes(prefs.profile) || clip.family === 'manual'))
   const usage = audioUsage(roomId, clips.map(clip => clip.id))
   clips.sort((a, b) => (usage[a.id].lastStartedAt ?? 0) - (usage[b.id].lastStartedAt ?? 0) || a.id.localeCompare(b.id))
@@ -30,7 +31,7 @@ export function preparationClips (roomId: number) {
     }
   }
   const active = Animation.active(roomId)
-  if (active) for (const clip of interventionAssets(active)) add(clip)
+  if (active) for (const clip of interventionAssets(active)) if (catalogIds.has(clip.id)) add(clip)
   const ambient = Animation.ambience(roomId)
   if (ambient) add(ambient.clip)
   if (prefs.automation && prefs.ambienceEnabled) {

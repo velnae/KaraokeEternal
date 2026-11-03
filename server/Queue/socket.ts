@@ -20,6 +20,7 @@ import {
 import { getSongSource } from '../SongSources/index.js'
 import { cleanupQueue, cleanupReceipt } from './cleanup.js'
 import Greetings from '../Greetings/Greetings.js'
+import { requestIntent } from '../../shared/requestIntent.js'
 import { db } from '../lib/Database.js'
 
 // ------------------------------------
@@ -66,7 +67,7 @@ const ACTION_HANDLERS = {
       const matches = receipt.source === source && receipt.origin === origin
         && (source === 'YOUTUBE' ? receipt.externalId : String(receipt.songId)) === sourceId
       acknowledge(matches
-        ? { type: QUEUE_ADD + '_SUCCESS', payload: { requestId, queueId: receipt.queueId, status: receipt.status, queue: Queue.get(roomId), greetingId: receipt.greetingId } }
+        ? { type: QUEUE_ADD + '_SUCCESS', payload: { requestId, queueId: receipt.queueId, status: receipt.status, queue: Queue.get(roomId), greetingId: receipt.greetingId, requestIntent: receipt.requestIntent } }
         : { type: QUEUE_ADD + '_ERROR', error: 'El identificador ya pertenece a otro pedido' })
       return true
     }
@@ -154,6 +155,7 @@ const ACTION_HANDLERS = {
         song,
         userId: sock.user.userId,
         origin,
+        ...(payload.requestIntent !== undefined ? { requestIntent: requestIntent(payload.requestIntent) } : {}),
         ...(requestId ? { requestId } : {}),
         status: origin === 'PARTICIPANT' && !sock.user.isAdmin && queuePrefs.approvalMode === 'MANUAL'
           ? 'PENDING_APPROVAL'

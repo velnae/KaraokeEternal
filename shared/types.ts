@@ -32,6 +32,7 @@ export interface QueueItem {
   isOptimistic?: false
   isVideoKeyingEnabled: boolean
   origin: QueueItemOrigin
+  requestIntent?: import('./requestIntent.js').RequestIntent
   source: SongSource
   status: QueueItemStatus
   externalId: string | null

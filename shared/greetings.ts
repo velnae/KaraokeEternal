@@ -1,9 +1,25 @@
+import type { AnimationClip, Intervention } from './animation.js'
+import type { RequestIntent } from './requestIntent.js'
+
 export const GREETINGS = 'server/GREETINGS'
 export const GREETING_LIMIT = 220
+// Greetings validate the visible card before starting audio: allow two network
+// round trips inside the existing 25-second transition, not extra playback time.
+export const GREETING_START_MS = 3000
 export interface GreetingDraft { recipient: string, message: string }
 export type GreetingStatus = 'QUEUED' | 'RESERVED' | 'DISPLAYING' | 'DISPLAYED' | 'CANCELLED' | 'REMOVED' | 'SKIPPED' | 'INTERRUPTED'
 export type GreetingAudioStatus = 'queued' | 'generating' | 'preparing' | 'ready' | 'uncertain' | 'failed' | 'cancelled' | 'unavailable'
 export interface GreetingAudio { status: GreetingAudioStatus, reason: string | null, durationMs: number | null }
+export interface GreetingPlaybackPrefs { enabled: boolean, introClipId: string | null, ambienceEnabled: boolean }
+export const defaultGreetingPlayback: GreetingPlaybackPrefs = { enabled: false, introClipId: null, ambienceEnabled: true }
+export type GreetingVoiceStatus = 'SCREEN' | 'SCHEDULED' | 'PLAYING' | 'PLAYED' | 'FAILED' | 'INTERRUPTED'
+export const greetingVoiceLabels: Record<GreetingVoiceStatus, string> = {
+  SCREEN: 'Solo pantalla', SCHEDULED: 'Lectura programada', PLAYING: 'Leyendo saludo', PLAYED: 'Voz reproducida', FAILED: 'Voz no completada', INTERRUPTED: 'Voz interrumpida',
+}
+export interface GreetingAsset extends AnimationClip { role: 'greeting' | 'intro' | 'bed', url: string }
+export interface GreetingPerformer { name: string, tableLabel: string | null, requestIntent: RequestIntent, title: string }
+export interface GreetingPreparation { queueId: number, greetingId: number, assets: GreetingAsset[], playbackVersion: number, performer: GreetingPerformer }
+export interface GreetingTransition { assets: GreetingAsset[], durationMs: number, voiceMs: number, displayMs: number }
 export const greetingAudioLabels: Record<GreetingAudioStatus, string> = {
   queued: 'Voz en espera', generating: 'Generando voz', preparing: 'Preparando audio', ready: 'Audio preparado',
   uncertain: 'Solo pantalla', failed: 'Solo pantalla', cancelled: 'Solo pantalla', unavailable: 'Solo pantalla',
@@ -21,14 +37,24 @@ export interface Greeting extends GreetingDraft {
   turnKey: number | null
   title: string
   audio?: GreetingAudio
+  playback?: { status: GreetingVoiceStatus, reason: string | null }
 }
 export interface GreetingSnapshot {
   items: Greeting[]
   paused: boolean
   audioEnabled: boolean
+  playback: GreetingPlaybackPrefs
+  playbackVersion: number
   turns: { key: number, queueIds: number[], userId: number }[]
 }
-export interface GreetingGrant { turnKey: number, items: Greeting[], until: number }
+export interface GreetingGrant {
+  turnKey: number
+  items: Greeting[]
+  until: number
+  displayMs: number
+  performer: GreetingPerformer
+  transition?: GreetingTransition & { intervention: Intervention }
+}
 export const greetingLabels: Record<GreetingStatus, string> = {
   QUEUED: 'Esperando tu turno', RESERVED: 'Preparando el turno', DISPLAYING: 'En pantalla', DISPLAYED: 'Mostrado',
   CANCELLED: 'Cancelado', REMOVED: 'Retirado', SKIPPED: 'No mostrado', INTERRUPTED: 'Interrumpido',

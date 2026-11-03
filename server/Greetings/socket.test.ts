@@ -33,7 +33,7 @@ const invoke = (operation: string, payload: object = {}, socket = actor) => {
 it('returns only owned greetings and rejects participant moderation/player actions', () => {
   expect(invoke('read').payload.items.map(item => item.message)).toEqual(['Own'])
   expect(invoke('remove', { greetingId: 2 }).error).toBeTruthy()
-  for (const operation of ['pause', 'prepareAudio', 'reserve', 'start', 'end', 'finish']) {
+  for (const operation of ['pause', 'prepareAudio', 'playback', 'prepare', 'reserve', 'start', 'end', 'finish', 'audioStarted', 'audioEnded', 'audioFailed']) {
     expect(invoke(operation, { paused: true, enabled: true, queueId: 1, greetingId: 1, turnKey: 1 }).error).toBeTruthy()
   }
   expect(Greetings.paused(1)).toBe(false)

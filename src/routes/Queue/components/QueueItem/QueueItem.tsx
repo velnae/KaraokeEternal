@@ -16,6 +16,7 @@ import type { QueueItemOrigin, QueueItemStatus, SongSource } from 'shared/queueL
 import styles from './QueueItem.css'
 import QueueGreeting from 'components/Greetings/QueueGreeting'
 import type { Greeting } from 'shared/greetings'
+import { requestIntentLabels, type RequestIntent } from 'shared/requestIntent'
 
 const LONG_PRESS_THRESHOLD_MS = 700
 
@@ -42,6 +43,7 @@ interface QueueItemProps {
   isUpcoming: boolean
   pctPlayed: number
   origin: QueueItemOrigin
+  requestIntent?: RequestIntent
   queueId: number
   songId: number | null
   source: SongSource
@@ -82,6 +84,7 @@ const QueueItem = ({
   onMoveClick,
   onRemoveUpcoming,
   origin,
+  requestIntent = 'UNKNOWN',
   pctPlayed,
   queueId,
   songId,
@@ -114,8 +117,8 @@ const QueueItem = ({
     setExpanded(false)
   }
   const handleRequeueClick = () => {
-    if (isLocal) dispatch(queueSong(songId, origin))
-    else if (source === 'YOUTUBE' && externalId) dispatch(queueYouTubeSong(externalId, origin))
+    if (isLocal) dispatch(queueSong(songId, origin, requestIntent))
+    else if (source === 'YOUTUBE' && externalId) dispatch(queueYouTubeSong(externalId, origin, requestIntent))
     setExpanded(false)
   }
   const handleSkipClick = () => {
@@ -209,6 +212,7 @@ const QueueItem = ({
           <div className={styles.badges}>
             <div className={clsx(styles.status, (status === 'REJECTED' || status === 'FAILED') && styles.rejected)}>
               {statusLabel[status]}
+              {requestIntent !== 'UNKNOWN' && ` · ${requestIntentLabels[requestIntent]}`}
             </div>
             {origin !== 'PARTICIPANT' && <div className={clsx(styles.origin, styles[origin.toLowerCase()])}>{origin === 'HOUSE' ? 'De la casa' : 'Operador'}</div>}
             <div className={clsx(styles.source, source === 'YOUTUBE' && styles.youtube)}>

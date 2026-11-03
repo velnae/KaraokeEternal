@@ -1,4 +1,5 @@
 import { clipDurationLimit, type AnimationClip } from '../../../../../shared/animation.js'
+import type { GreetingAsset } from '../../../../../shared/greetings.js'
 
 /** A finite, isolated voice channel. It never changes music gain or playback. */
 export default class AnnouncementAudio {
@@ -13,6 +14,13 @@ export default class AnnouncementAudio {
   private generation = 0
   private preparing: Promise<string[]> = Promise.resolve([])
   private playingChecksum: string | null = null
+  private catalogKeys = new Set<string>()
+  private greetingKeys = new Set<string>()
+  private bedChecksum: string | null = null
+  private bedStop: ((fadeMs: number) => void) | null = null
+  private bedFinish: (() => void) | null = null
+  private bedVolumeChange: ((volume: number) => void) | null = null
+  private bedCompletion: Promise<'ENDED' | 'STOPPED'> | null = null
   readonly maxDecodedBytes = 64 * 1024 * 1024
 
   get decodedBytes () { return [...this.buffers.values()].reduce((total, buffer) => total + buffer.length * buffer.numberOfChannels * 4, 0) }
@@ -66,8 +74,9 @@ export default class AnnouncementAudio {
     const prepare = async () => {
       assertCurrent()
       const desired = new Set(clips.slice(0, 24).map(clip => clip.checksum))
+      this.catalogKeys = desired
       for (const hash of this.buffers.keys()) {
-        if (!desired.has(hash) && hash !== this.playingChecksum) this.buffers.delete(hash)
+        if (!desired.has(hash) && !this.greetingKeys.has(hash) && hash !== this.playingChecksum && hash !== this.bedChecksum) this.buffers.delete(hash)
       }
       const retained = new Set<string>()
       for (const clip of clips.slice(0, 24)) {
@@ -75,10 +84,8 @@ export default class AnnouncementAudio {
           retained.add(clip.checksum)
           continue
         }
-        const response = await fetch(`${document.baseURI}api/animation/assets/${encodeURIComponent(clip.id)}`)
+        const bytes = await this.download(`api/animation/assets/${encodeURIComponent(clip.id)}`)
         assertCurrent()
-        if (!response.ok) throw new Error('No se pudo descargar el clip')
-        const bytes = await response.arrayBuffer()
         const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
         if (checksum !== clip.checksum) throw new Error('La versión del clip cambió')
         assertCurrent()
@@ -89,7 +96,7 @@ export default class AnnouncementAudio {
         if (size > this.maxDecodedBytes) throw new Error('El audio supera la memoria disponible para este canal.')
         for (const hash of this.buffers.keys()) {
           if (this.decodedBytes + size <= this.maxDecodedBytes) break
-          if (hash !== this.playingChecksum && !retained.has(hash)) this.buffers.delete(hash)
+          if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.greetingKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
         }
         if (this.decodedBytes + size > this.maxDecodedBytes) continue
         this.buffers.set(clip.checksum, buffer)
@@ -102,6 +109,135 @@ export default class AnnouncementAudio {
   }
 
   get ready () { return this.context?.state === 'running' }
+
+  private async download (url: string) {
+    if (!url.startsWith('api/')) throw new Error('Ruta de audio no válida')
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 4000)
+    try {
+      const response = await fetch(`${document.baseURI}${url}`, { signal: controller.signal })
+      if (!response.ok) throw new Error('No se pudo descargar el clip')
+      return await response.arrayBuffer()
+    } finally { clearTimeout(timeout) }
+  }
+
+  /** A separate preparation group keeps catalog refreshes from evicting a greeting. */
+  async prepareGreetingAssets (assets: GreetingAsset[]) {
+    const context = this.ensureContext()
+    const generation = this.generation
+    const current = () => this.context === context && this.generation === generation && context.state !== 'closed'
+    const prepare = async () => {
+      if (!current()) return []
+      const desired = new Set(assets.slice(0, 3).map(asset => asset.checksum))
+      for (const hash of this.greetingKeys) {
+        if (!desired.has(hash) && !this.catalogKeys.has(hash) && hash !== this.playingChecksum && hash !== this.bedChecksum) this.buffers.delete(hash)
+      }
+      this.greetingKeys = desired
+      const retained = new Set<string>()
+      const ordered = [...assets].sort((a, b) => Number(b.role === 'greeting') - Number(a.role === 'greeting'))
+      for (const asset of ordered.slice(0, 3)) {
+        try {
+          if (!current()) break
+          if (!this.buffers.has(asset.checksum)) {
+            const bytes = await this.download(asset.url)
+            const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
+            if (checksum !== asset.checksum || !current()) continue
+            const buffer = await context.decodeAudioData(bytes)
+            if (!current()) break
+            const limit = asset.role === 'greeting' ? 20000 : clipDurationLimit(asset.kind, asset.effectType)
+            if (buffer.duration <= 0 || buffer.duration * 1000 > limit || Math.abs(buffer.duration * 1000 - asset.durationMs) > 100) continue
+            const size = buffer.length * buffer.numberOfChannels * 4
+            for (const hash of this.buffers.keys()) {
+              if (this.decodedBytes + size <= this.maxDecodedBytes) break
+              if (hash !== this.playingChecksum && hash !== this.bedChecksum && !retained.has(hash)) this.buffers.delete(hash)
+            }
+            if (this.decodedBytes + size > this.maxDecodedBytes) continue
+            this.buffers.set(asset.checksum, buffer)
+          }
+          retained.add(asset.checksum)
+        } catch { /* Optional intro/bed failure must not discard a valid greeting. */ }
+      }
+      return [...retained]
+    }
+    this.preparing = this.preparing.catch((): string[] => []).then(prepare)
+    return this.preparing
+  }
+
+  /** A bounded second source under the voice, never a continuation into the song. */
+  playBed (checksum: string, volume: number, durationMs: number, loop = false) {
+    const context = this.context
+    const buffer = this.buffers.get(checksum)
+    if (!context || context.state !== 'running' || !buffer || this.bedStop || durationMs <= 0) throw new Error('El fondo no está disponible')
+    const duration = Math.min(25, durationMs / 1000, loop ? Infinity : buffer.duration)
+    const until = context.currentTime + duration
+    this.bedChecksum = checksum
+    this.bedCompletion = new Promise<'ENDED' | 'STOPPED'>((resolve) => {
+      const source = context.createBufferSource()
+      const gain = context.createGain()
+      source.buffer = buffer
+      source.loop = loop
+      source.connect(gain).connect(context.destination)
+      gain.gain.setValueAtTime(0, context.currentTime)
+      gain.gain.linearRampToValueAtTime(volume, Math.min(until, context.currentTime + 0.2))
+      gain.gain.setValueAtTime(volume, Math.max(context.currentTime, until - 0.25))
+      gain.gain.linearRampToValueAtTime(0, until)
+      let settled = false
+      let stopped = false
+      const timer = setTimeout(() => stop(0), duration * 1000 + 100)
+      const finish = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        context.removeEventListener('statechange', stateChanged)
+        source.disconnect()
+        gain.disconnect()
+        source.onended = null
+        this.bedStop = null
+        this.bedFinish = null
+        this.bedVolumeChange = null
+        this.bedChecksum = null
+        this.bedCompletion = null
+        resolve(stopped ? 'STOPPED' : 'ENDED')
+      }
+      const stop = (fadeMs: number) => {
+        if (settled || stopped) return
+        stopped = true
+        // Repeated stop() replaces the scheduled deadline; never extend it.
+        const end = Math.min(until, context.currentTime + Math.max(0, fadeMs) / 1000)
+        gain.gain.cancelScheduledValues(context.currentTime)
+        gain.gain.setValueAtTime(gain.gain.value, context.currentTime)
+        gain.gain.linearRampToValueAtTime(0, Math.max(context.currentTime, end))
+        source.stop(Math.max(context.currentTime, end))
+        if (context.state !== 'running') finish()
+      }
+      const stateChanged = () => {
+        if (context.state !== 'running') stop(0)
+      }
+      this.bedStop = stop
+      this.bedFinish = finish
+      this.bedVolumeChange = (value) => {
+        if (stopped || settled || context.currentTime >= until - 0.25) return
+        gain.gain.cancelScheduledValues(context.currentTime)
+        gain.gain.setValueAtTime(gain.gain.value, context.currentTime)
+        gain.gain.linearRampToValueAtTime(value, Math.min(until - 0.25, context.currentTime + 0.02))
+        gain.gain.setValueAtTime(value, until - 0.25)
+        gain.gain.linearRampToValueAtTime(0, until)
+      }
+      context.addEventListener('statechange', stateChanged)
+      source.onended = finish
+      source.start()
+      source.stop(until)
+    })
+    return this.bedCompletion
+  }
+
+  stopBed (fadeMs = 250) {
+    const completion = this.bedCompletion ?? Promise.resolve<'STOPPED'>('STOPPED')
+    this.bedStop?.(fadeMs)
+    return completion
+  }
+
+  bedVolume (value: number) { this.bedVolumeChange?.(value) }
 
   play (checksum: string, volume: number, segment?: { offsetMs: number, durationMs: number, renewable?: boolean, loop?: boolean }): Promise<'ENDED' | 'STOPPED'> {
     const context = this.context
@@ -182,7 +318,11 @@ export default class AnnouncementAudio {
     })
   }
 
-  stop () { this.stopSource?.() }
+  stop () {
+    this.stopSource?.()
+    this.bedStop?.(30)
+  }
+
   renewAmbience (milliseconds: number, loop?: boolean) { return this.renewSource?.(milliseconds, loop) ?? false }
 
   volume (value: number) {
@@ -194,10 +334,13 @@ export default class AnnouncementAudio {
     // Closing the context may prevent a scheduled `ended` event altogether.
     // Resolve the owned playback before disposing its audio clock.
     this.finishSource?.()
+    this.bedFinish?.()
     const context = this.context
     this.generation++
     this.context = null
     this.buffers.clear()
+    this.catalogKeys.clear()
+    this.greetingKeys.clear()
     if (context && context.state !== 'closed') {
       context.onstatechange = null
       void context.close().catch((error) => {

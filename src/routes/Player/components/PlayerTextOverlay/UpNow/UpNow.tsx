@@ -53,7 +53,9 @@ const UpNow = ({ queueItem }: UpNowProps) => {
             className={styles.userImage}
           />
           <div className={styles.user}>
-            {queueItem.userDisplayName}
+            <small>{queueItem.origin === 'HOUSE' ? 'Música de la casa' : queueItem.requestIntent === 'SING' ? 'Karaoke' : 'Pedido musical'}</small>
+            {queueItem.origin !== 'HOUSE' && queueItem.userDisplayName}
+            {queueItem.origin !== 'HOUSE' && queueItem.tableLabelSnapshot && <small>{queueItem.tableLabelSnapshot}</small>}
           </div>
         </div>
       </div>

@@ -99,7 +99,8 @@ export interface Intervention {
   finishedAt: number | null
   stopRequestedAt: number | null
   reason: string | null
-  origin?: 'MANUAL' | 'AUTO'
+  origin?: 'MANUAL' | 'AUTO' | 'GREETING'
+  voiceDurationMs?: number | null
   sessionId?: string | null
   sourceEventKey?: string | null
   family?: string | null
@@ -147,6 +148,7 @@ export interface AnimationSnapshot extends AnimationRoomState {
   ambience?: AmbienceGrant | null
   catalogVersion?: number
   voiceBudgetRemainingMs?: number
+  greetingVoiceEnabled?: boolean
 }
 export interface AnimationReply {
   eligible?: boolean
@@ -170,7 +172,7 @@ export function animationContext (queue: { entities: Record<number, QueueItem | 
   return JSON.stringify([
     Object.values(queue.entities).filter((item): item is QueueItem => item.isOptimistic !== true && (item.status === 'APPROVED' || item.status === 'PLAYING'))
       .sort((a, b) => a.queueId - b.queueId)
-      .map(item => [item.queueId, item.prevQueueId, item.status, item.userId, item.origin]),
+      .map(item => [item.queueId, item.prevQueueId, item.status, item.userId, item.origin, item.requestIntent ?? 'UNKNOWN', item.userDisplayName, item.tableLabelSnapshot]),
     normalizeQueuePrefs(prefs),
   ])
 }

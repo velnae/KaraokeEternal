@@ -2,8 +2,58 @@ import { afterEach, expect, it, vi } from 'vitest'
 import AnnouncementAudio from './AnnouncementAudio'
 import type { AnimationClip } from '../../../../../shared/animation.js'
 import { createHash } from 'node:crypto'
+import type { GreetingAsset } from '../../../../../shared/greetings.js'
 
 afterEach(() => vi.unstubAllGlobals())
+
+it('preloads a private twenty-second greeting independently of catalog refresh', async () => {
+  const audio = new AnnouncementAudio()
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration: 20, length: 480000, numberOfChannels: 1 }) } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/karaoke/' })
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('private voice')))
+  const checksum = createHash('sha256').update('private voice').digest('hex')
+  const privateClip = { id: 'greeting', role: 'greeting', url: 'api/greetings/1/audio', checksum, durationMs: 20000, kind: 'voice' } as GreetingAsset
+  expect(await audio.prepareGreetingAssets([privateClip])).toEqual([checksum])
+  await audio.prepare([])
+  expect(audio.buffers.has(checksum)).toBe(true)
+  await audio.prepareGreetingAssets([])
+  expect(audio.buffers.has(checksum)).toBe(false)
+  audio.close()
+})
+
+it('mixes a separate quiet bed and stops both sources without extending the hard deadline', async () => {
+  const audio = new AnnouncementAudio()
+  const sources: Array<{ connect: ReturnType<typeof vi.fn>, disconnect: ReturnType<typeof vi.fn>, start: ReturnType<typeof vi.fn>, stop: ReturnType<typeof vi.fn>, onended: (() => void) | null }> = []
+  const gains: Array<{ connect: ReturnType<typeof vi.fn>, disconnect: ReturnType<typeof vi.fn>, gain: { value: number, cancelScheduledValues: ReturnType<typeof vi.fn>, setValueAtTime: ReturnType<typeof vi.fn>, linearRampToValueAtTime: ReturnType<typeof vi.fn> } }> = []
+  const context = { state: 'running', currentTime: 0, destination: {}, addEventListener: vi.fn(), removeEventListener: vi.fn(), close: async () => {},
+    createBufferSource: () => {
+      const source = { connect: vi.fn(node => node), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null as (() => void) | null }
+      sources.push(source)
+      return source
+    },
+    createGain: () => {
+      const gain = { connect: vi.fn(), disconnect: vi.fn(), gain: { value: 0.1, cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() } }
+      gains.push(gain)
+      return gain
+    },
+  }
+  audio.context = context as unknown as AudioContext
+  audio.buffers.set('voice', { duration: 4 } as AudioBuffer)
+  audio.buffers.set('bed', { duration: 35 } as AudioBuffer)
+  const voice = audio.play('voice', 0.5)
+  const bed = audio.playBed('bed', 0.1, 25000)
+  expect(sources).toHaveLength(2)
+  expect(sources[1].stop).toHaveBeenLastCalledWith(25)
+  expect(gains[1].gain.linearRampToValueAtTime).toHaveBeenCalledWith(0.1, 0.2)
+  context.currentTime = 24.9
+  const stopping = audio.stopBed(500)
+  expect(sources[1].stop).toHaveBeenLastCalledWith(25)
+  audio.close()
+  await expect(voice).resolves.toBe('STOPPED')
+  await expect(bed).resolves.toBe('STOPPED')
+  await expect(stopping).resolves.toBe('STOPPED')
+  expect(sources.every(source => source.disconnect.mock.calls.length > 0)).toBe(true)
+})
 
 it('prepares while autoplay is blocked and resumes the same decoded audio after a gesture', async () => {
   const audio = new AnnouncementAudio()

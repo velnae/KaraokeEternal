@@ -43,7 +43,7 @@ export default function AnimationPanel () {
   const clip = clips.find(item => item.id === selected)
   const blocker = announcementBlocker({ snapshot: current, connected, hasClip: !!clip, expired: !!clip?.validUntil && clip.validUntil <= animationTime(), roomClosed: room?.status === 'closed', now: animationTime() })
   const audioPending = !!current?.prefs.enabled && current.playerPresent && !current.audioUnlocked
-  const status = !connected || !current ? 'Conectando con la sala' : !current.prefs.enabled ? 'Desactivado' : active?.stopRequestedAt ? 'Deteniendo anuncio…' : active ? audioPending ? 'Solicitud en espera de audio' : interventionLabels[active.status] : audioPending ? 'Audio pendiente en el reproductor' : blocker ? 'Requiere atención' : 'Listo para la próxima pausa'
+  const status = !connected || !current ? 'Conectando con la sala' : active?.stopRequestedAt ? 'Deteniendo anuncio…' : active?.origin === 'GREETING' ? 'Lectura de saludo' : !current.prefs.enabled ? 'Desactivado' : active ? audioPending ? 'Solicitud en espera de audio' : interventionLabels[active.status] : audioPending ? 'Audio pendiente en el reproductor' : blocker ? 'Requiere atención' : 'Listo para la próxima pausa'
   const execute = async (type: string, payload: object) => {
     if (inFlight.current) return
     inFlight.current = true

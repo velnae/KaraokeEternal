@@ -142,7 +142,8 @@ export default function (io, jwtKey) {
 
       try {
         if (!checkAdmission()) return acknowledge?.({ type: type + _ERROR, error: 'Escanee el QR de su mesa para continuar' })
-        if (sock.user.isAdmin && ['server/PLAYER_REQ_NEXT', 'server/PLAYER_REQ_REPLAY', 'server/PLAYER_REQ_PAUSE', 'server/PLAYER_REQ_PLAY', 'server/PLAYER_EMIT_LEAVE'].includes(type)) {
+        if (sock.user.isAdmin && ['server/PLAYER_REQ_NEXT', 'server/PLAYER_REQ_REPLAY', 'server/PLAYER_REQ_PAUSE', 'server/PLAYER_REQ_PLAY', 'server/PLAYER_EMIT_LEAVE'].includes(type)
+          && (type !== 'server/PLAYER_EMIT_LEAVE' || Rooms.isAuthoritativePlayer(sock))) {
           Greetings.interrupt(sock.user.roomId, 'Orden musical del operador')
         }
         await handlers[type](sock, action, acknowledge)

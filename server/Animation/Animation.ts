@@ -11,6 +11,7 @@ import { catalogClips, catalogVersion } from './catalog.js'
 import { currentSession, operateSession, pendingEvent } from './sessions.js'
 import { categoryEffects, heardAt, profileIntervals, selectAnnouncement, supportingEffects, voiceBudget } from './selection.js'
 import { backfillAudioUsage, leastUsedAudio, recordAudioUsage } from './usage.js'
+import { GREETING_START_MS } from '../../shared/greetings.js'
 
 type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[] }
 export interface AnimationIdentity { roomId: number, userId: number, socketId: string }
@@ -75,7 +76,33 @@ export default class Animation {
     return { ...state, microphoneOccupied: 0, prefs: animationPrefs(Animation.room(roomId).prefs.animation), active: Animation.active(roomId),
       history: Animation.history(roomId), playerPresent: !!owner, audioUnlocked: owner?.unlocked ?? false,
       readyClips: owner?.readyClips ?? [], serverTime: Date.now(), session: currentSession(roomId), ambience: Animation.ambience(roomId),
-      catalogVersion: catalogVersion(), voiceBudgetRemainingMs: voiceBudget(Animation.selectionHistory(roomId), Date.now()) }
+      catalogVersion: catalogVersion(), voiceBudgetRemainingMs: voiceBudget(Animation.selectionHistory(roomId), Date.now()), greetingVoiceEnabled: Animation.greetingEnabled(roomId) }
+  }
+
+  static greetingEnabled (roomId: number) {
+    return !!db.get(`SELECT 1 FROM greetingControls WHERE roomId=? AND audioEnabled=1 AND paused=0 AND json_extract(playbackJSON,'$.enabled')=1`, [roomId])
+  }
+
+  /** Greetings share the same exclusive intervention, epoch and persisted room fence. */
+  static reserveGreeting (identity: AnimationIdentity, queueId: number, assets: AnimationClip[], durationMs: number, voiceMs: number, text: string): Intervention | null {
+    const owner = owners.get(identity.roomId)
+    const snapshot = Animation.snapshot(identity.roomId)
+    const now = Date.now()
+    if (!owner || owner.socketId !== identity.socketId || !owner.unlocked || !Animation.greetingEnabled(identity.roomId)
+      || snapshot.active || snapshot.blockedUntil > now || snapshot.ambience || snapshot.prefs.volume <= 0
+      || Animation.room(identity.roomId).status !== 'open' || voiceMs > (snapshot.voiceBudgetRemainingMs ?? 0)) return null
+    if (!assets.length || durationMs <= 0 || durationMs > 25000 - GREETING_START_MS || voiceMs <= 0 || voiceMs > durationMs) throw new Error('La transición supera el tiempo disponible.')
+    const id = randomUUID()
+    const startBefore = now + GREETING_START_MS
+    const until = now + 25000
+    const room = Animation.room(identity.roomId)
+    db.run(`INSERT INTO animationInterventions(interventionId,roomId,requestId,requestedByUserId,clipId,clipChecksum,displayText,durationMs,voiceDurationMs,status,
+      playerEpoch,ownerSocketId,contextKey,transitionId,requestedAt,expiresAt,startBefore,leaseUntil,origin,sourceEventKey,family,sequenceJSON)
+      VALUES(?,?,?,?,?,?,?,?,?,'RESERVED',?,?,?,?,?,?,?,?,'GREETING',?,'greeting',?)`,
+    [id, identity.roomId, `greeting-${queueId}`, identity.userId, assets[0].id, assets[0].checksum, text, durationMs, voiceMs,
+      owner.epoch, identity.socketId, animationContext(Queue.get(identity.roomId), room.prefs.queue), id, now, until, startBefore, until, `greeting-${queueId}`, JSON.stringify(assets)])
+    db.run('UPDATE animationRoomState SET blockedUntil=?,pendingEventJSON=NULL WHERE roomId=?', [until, identity.roomId])
+    return Animation.active(identity.roomId)
   }
 
   static publish (roomId: number) {
@@ -210,7 +237,7 @@ export default class Animation {
       db.exec('RELEASE animation_control')
       throw error
     }
-    if (!prefs.enabled || prefs.volume === 0) {
+    if ((!prefs.enabled && Animation.active(roomId)?.origin !== 'GREETING') || prefs.volume === 0) {
       Animation.cancel(roomId, 'Animador bloqueado por el operador')
     }
     const active = Animation.active(roomId)
@@ -297,6 +324,7 @@ export default class Animation {
     if (state.blockedUntil > now || !owner.unlocked) return null
     const signal = pendingEvent(roomId)
     const history = Animation.selectionHistory(roomId)
+    const greetingIntro = db.get<{ id: string | null }>(`SELECT json_extract(playbackJSON,'$.introClipId') id FROM greetingControls WHERE roomId=?`, [roomId])?.id
     const recentSessions = db.all<{ sessionId: string }>('SELECT sessionId FROM animationSessions WHERE roomId=? AND sessionId!=? ORDER BY openedAt DESC LIMIT 2', [roomId, session.sessionId]).map(row => row.sessionId)
     const lastUse = (family: VoiceFamily) => Math.max(0, ...history.filter(row => row.origin === 'AUTO' && row.family === family).map(heardAt))
     const cues: { family: VoiceFamily, key: string, confirmed?: boolean }[] = []
@@ -324,7 +352,7 @@ export default class Animation {
     let reason = ''
     for (const { family, key, confirmed } of cues) {
       if (!prefs.events[family] || db.get('SELECT interventionId FROM animationInterventions WHERE roomId=? AND sourceEventKey=?', [roomId, key])) continue
-      const clips = catalogClips(roomId).filter(clip => family !== 'celebration' || confirmed || clip.celebrationMode === 'song_end')
+      const clips = catalogClips(roomId).filter(clip => clip.id !== greetingIntro && (family !== 'celebration' || confirmed || clip.celebrationMode === 'song_end'))
       const selected = selectAnnouncement({ clips, family, profile: prefs.profile, history, sessionId: session.sessionId, recentSessions, ready: owner.readyClips, now })
       if (selected.clip) return { clip: selected.clip, family, key, session, signal: confirmed ? signal : null, history, prefs, owner, now }
       reason = selected.reason
@@ -443,7 +471,10 @@ export default class Animation {
       if (row.stopRequestedAt || now > row.startBefore! || owners.get(identity.roomId)?.epoch !== epoch) throw new Error('El permiso de inicio venció')
       const room = Animation.room(identity.roomId)
       const state = Animation.snapshot(identity.roomId)
-      if (room.status !== 'open' || !state.prefs.enabled || state.prefs.volume <= 0
+      const greeting = row.origin === 'GREETING'
+      const control = greeting ? db.get<{ playbackVersion: number }>('SELECT playbackVersion FROM greetingControls WHERE roomId=?', [identity.roomId]) : null
+      const delivery = greeting ? db.get<{ playbackVersion: number }>('SELECT playbackVersion FROM greetingTurns WHERE interventionId=?', [id]) : null
+      if (room.status !== 'open' || (greeting ? !Animation.greetingEnabled(identity.roomId) || control?.playbackVersion !== delivery?.playbackVersion : !state.prefs.enabled) || state.prefs.volume <= 0
         || animationContext(Queue.get(identity.roomId), room.prefs.queue) !== row.contextKey) {
         Animation.cancel(identity.roomId, 'El contexto cambió antes del inicio')
         throw new Error('El contexto cambió antes del inicio')

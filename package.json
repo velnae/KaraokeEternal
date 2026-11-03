@@ -36,6 +36,7 @@
     "test:greetings:e2e": "node config/greetings.e2e.mjs",
     "test:tts:e2e": "node config/local-tts.e2e.mjs",
     "test:greetings:audio": "node config/greeting-audio.e2e.mjs",
+    "test:greetings:playback": "node config/greeting-playback.e2e.mjs",
     "typecheck": "tsc -b --noEmit",
     "build": "npm run build:server ; npm run build:client",
     "build:client": "webpack --config config/webpack.config.js",

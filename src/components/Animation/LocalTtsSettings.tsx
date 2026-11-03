@@ -4,6 +4,7 @@ import HttpApi from 'lib/HttpApi'
 import { defaultLocalTtsConfig, localTtsLabels, type LocalTtsConfig, type LocalTtsSnapshot } from 'shared/localTts'
 import styles from './LocalTtsSettings.css'
 import useGreetings from 'components/Greetings/useGreetings'
+import GreetingPlaybackControls from 'components/Greetings/GreetingPlaybackControls'
 
 const api = new HttpApi('prefs/local-tts')
 
@@ -147,10 +148,11 @@ export default function LocalTtsSettings () {
           />
           Preparar voz mientras los pedidos esperan
         </label>
-        <p id={`${id}-preparation-help`} className={styles.hint}>{!greetings.snapshot ? 'Conectando con la sala para cargar esta opción.' : 'Se genera únicamente el saludo, de uno en uno. Si la voz falla o tarda, su entrega en pantalla continúa.'}</p>
+        <p id={`${id}-preparation-help`} className={styles.hint}>{!greetings.snapshot ? 'Conectando con la sala para cargar esta opción.' : greetings.busy ? 'Esperando la confirmación del servidor…' : 'Se genera únicamente el saludo, de uno en uno. Si la voz falla o tarda, su entrega en pantalla continúa.'}</p>
         {greetings.error && <p className={styles.error} role='alert'>{greetings.error}</p>}
       </div>
-      <p className={styles.scope}>Los audios preparados se guardan para la siguiente etapa. La lectura en voz alta y su combinación con el catálogo se incorporan en el próximo bloque.</p>
+      <GreetingPlaybackControls snapshot={greetings.snapshot} busy={greetings.busy} save={(settings, version) => void greetings.execute('playback', { settings, version })} />
+      <p className={styles.scope}>Chatterbox genera únicamente el saludo. La presentación y el fondo provienen del catálogo. Desactivar la preparación también desactiva la lectura en voz alta.</p>
     </section>
   )
 }

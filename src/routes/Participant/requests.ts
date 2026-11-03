@@ -1,5 +1,6 @@
 import type { QueueItemStatus } from '../../../shared/queueLifecycle'
 import type { GreetingDraft } from '../../../shared/greetings'
+import { requestIntent, type RequestIntent } from '../../../shared/requestIntent'
 
 export interface RequestReceipt {
   requestId: string
@@ -11,19 +12,20 @@ export interface RequestReceipt {
   status?: QueueItemStatus
   greeting?: GreetingDraft
   greetingId?: number
+  requestIntent?: RequestIntent
 }
 
 interface Reply {
   type: string
   error?: string
-  payload?: { queueId: number, status: QueueItemStatus, requestId: string, greetingId?: number }
+  payload?: { queueId: number, status: QueueItemStatus, requestId: string, greetingId?: number, requestIntent?: RequestIntent }
 }
 
 // Keep the same identifier after a lost acknowledgment, including after a reload.
 export const createRequestController = ({ storage, key, send, makeId }: {
   storage: Pick<Storage, 'getItem' | 'setItem'>
   key: string
-  send: (sourceId: string, requestId: string, greeting?: GreetingDraft) => Promise<Reply>
+  send: (sourceId: string, requestId: string, greeting?: GreetingDraft, intent?: RequestIntent) => Promise<Reply>
   makeId: () => string
 }) => {
   let receipts: Record<string, RequestReceipt> = {}
@@ -32,7 +34,7 @@ export const createRequestController = ({ storage, key, send, makeId }: {
     for (const value of Object.values(saved) as RequestReceipt[]) {
       if (!value || typeof value.sourceId !== 'string' || typeof value.requestId !== 'string') continue
       const { requestId, sourceId, title, phase, message, queueId, status, greeting, greetingId } = value
-      receipts[sourceId] = { requestId, sourceId, title, phase: phase === 'sending' ? 'uncertain' : phase, message, queueId, status, greeting, greetingId }
+      receipts[sourceId] = { requestId, sourceId, title, phase: phase === 'sending' ? 'uncertain' : phase, message, queueId, status, greeting, greetingId, requestIntent: requestIntent(value.requestIntent) }
     }
   } catch { /* Storage may be unavailable; do not send until persistence succeeds. */ }
   const listeners = new Set<() => void>()
@@ -50,7 +52,7 @@ export const createRequestController = ({ storage, key, send, makeId }: {
         listeners.delete(listener)
       }
     },
-    async request (sourceId: string, title: string, greeting?: GreetingDraft | null) {
+    async request (sourceId: string, title: string, greeting?: GreetingDraft | null, intent?: RequestIntent) {
       const previous = receipts[sourceId]
       if (previous?.phase === 'sending') return
       const receipt: RequestReceipt = {
@@ -58,6 +60,7 @@ export const createRequestController = ({ storage, key, send, makeId }: {
         requestId: previous && previous.phase !== 'confirmed' ? previous.requestId : makeId(),
         phase: 'sending',
         greeting: previous?.phase === 'uncertain' ? previous.greeting : greeting === null ? undefined : greeting ?? (previous?.phase === 'error' ? previous.greeting : undefined),
+        requestIntent: previous?.phase === 'uncertain' ? previous.requestIntent : intent ?? previous?.requestIntent ?? 'UNKNOWN',
       }
       update(receipt)
       try {
@@ -67,12 +70,12 @@ export const createRequestController = ({ storage, key, send, makeId }: {
         return
       }
       try {
-        const response = await send(sourceId, receipt.requestId, receipt.greeting)
+        const response = await send(sourceId, receipt.requestId, receipt.greeting, receipt.requestIntent)
         if (response.error) update({ ...receipt, phase: 'error', message: response.error })
         else if (response.payload?.requestId === receipt.requestId) {
           // The acknowledgment also carries the room queue; only persist the receipt.
           const { queueId, status, greetingId } = response.payload
-          update({ ...receipt, queueId, status, greetingId, phase: 'confirmed' })
+          update({ ...receipt, queueId, status, greetingId, requestIntent: response.payload.requestIntent ?? receipt.requestIntent, phase: 'confirmed' })
         } else update({ ...receipt, phase: 'uncertain' })
       } catch {
         update({ ...receipt, phase: 'uncertain' })

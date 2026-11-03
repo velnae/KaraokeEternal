@@ -4,3 +4,4 @@
 .exitActive { opacity: 0; }
 .user { color: var(--lyrics); font-size: clamp(18px, 3vh, 36px); line-height: 1.2; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
 .userImage { width: clamp(40px, 6vh, 64px); height: clamp(40px, 6vh, 64px); border-radius: 10px; flex-shrink: 0; }
+.user small { display: block; font-size: .6em; line-height: 1.5; color: var(--secondary); }

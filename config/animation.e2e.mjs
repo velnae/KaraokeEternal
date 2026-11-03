@@ -136,9 +136,14 @@ try {
     await admin.getByRole('link', { name: 'Biblioteca', exact: true }).click()
     await admin.getByRole('radio', { name: 'Archivos locales', exact: true }).check()
     await admin.getByRole('searchbox', { name: 'buscar canciones', exact: true }).fill(title)
-    await admin.getByText(title, { exact: true }).last().click()
+    const intent = title === 'Local test' ? 'SING' : 'LISTEN'
+    await admin.getByLabel(`Tipo de pedido para ${title}`, { exact: true }).selectOption(intent)
+    const add = admin.getByRole('button', { name: `Pedir ${intent === 'SING' ? 'karaoke' : 'música'}: ${title}`, exact: true })
+    await add.focus()
+    await add.press('Enter')
     await admin.getByRole('link', { name: 'Cola', exact: true }).click()
     await expect(admin.locator(`[data-status="${status}"]`).filter({ hasText: title })).toBeVisible()
+    assert.equal(db.prepare('SELECT requestIntent FROM queue WHERE title=? ORDER BY queueId DESC LIMIT 1').get(title).requestIntent, intent)
   }
   await enqueueFromLibrary('Local test')
   await enqueueFromLibrary('Second test')

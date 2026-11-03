@@ -9,12 +9,12 @@ import { prepareAudio, AudioValidationError } from '../Animation/AudioPreparatio
 import type LocalTts from './LocalTts.js'
 import { TtsConnectionError } from './TtsClient.js'
 import { greetingAudioKey, greetingSpeechText, loadGreetingVoiceProfile, type GreetingVoiceProfile } from './voiceProfile.js'
-import type { Greeting, GreetingAudioStatus } from '../../shared/greetings.js'
+import type { Greeting, GreetingAudioStatus, GreetingAsset } from '../../shared/greetings.js'
 
 const run = promisify(execFile)
 const log = getLogger('greeting-audio')
 const eligible = `g.status='QUEUED' AND q.status='APPROVED' AND r.status='open' AND c.audioEnabled=1 AND c.paused=0
-  AND NOT EXISTS(SELECT 1 FROM greetingTurnItems t WHERE t.queueId=g.queueId)`
+  AND NOT EXISTS(SELECT 1 FROM greetingTurns t WHERE t.turnKey=g.queueId)`
 const joins = 'FROM greetings g JOIN queue q USING(queueId) JOIN rooms r ON r.roomId=g.roomId LEFT JOIN greetingControls c ON c.roomId=g.roomId'
 interface PendingGreeting extends Greeting { audioJobId: string | null, audioReason: string | null }
 export interface GreetingAudioJob {
@@ -293,6 +293,15 @@ export default class GreetingAudioJobs {
       db.run(`UPDATE greetingAudioJobs SET status='failed',error='El archivo de voz ya no está disponible.',updatedAt=? WHERE jobId=? AND status='ready'`, [Date.now(), job.jobId])
       return null
     }
+  }
+
+  async asset (roomId: number, greetingId: number): Promise<GreetingAsset | null> {
+    const bytes = await this.audio(roomId, greetingId)
+    if (!bytes) return null
+    const job = db.get<GreetingAudioJob>(`SELECT j.* FROM greetingAudioJobs j JOIN greetings g ON g.audioJobId=j.jobId WHERE g.greetingId=? AND g.roomId=?`, [greetingId, roomId])
+    if (!job || job.status !== 'ready' || !job.durationMs || createHash('sha256').update(bytes).digest('hex') !== job.checksum) return null
+    return { id: `greeting-${greetingId}-${job.jobId}`, role: 'greeting', url: `api/greetings/${greetingId}/audio`, kind: 'voice',
+      checksum: job.checksum!, durationMs: job.durationMs, displayText: job.spokenText, title: 'Saludo', source: 'Local Chatterbox', license: 'Private participant greeting', roomId }
   }
 
   private async preparedBytes (job: GreetingAudioJob) {

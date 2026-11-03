@@ -221,7 +221,7 @@ it('discards a cancelled generation after completion before sending the next req
   await waitReady(next.greetingId)
   expect(allJobs().find(job => job.jobId === original.jobId)?.status).toBe('cancelled')
   expect(await jobs.audio(1, first.greetingId)).toBeNull()
-  expect(await fs.readdir(path.join(data, 'staging'))).toEqual([])
+  await expect.poll(() => fs.readdir(path.join(data, 'staging'))).toEqual([])
 })
 
 it('keeps visual reservation available while generation is pending and discards its late result', async () => {

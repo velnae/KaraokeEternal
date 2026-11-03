@@ -6,10 +6,14 @@ import { interventionAssets } from '../../shared/animation.js'
 export const profileIntervals: Record<RoomProfile, number> = { dinner: 20 * 60000, mixed: 12 * 60000, party: 8 * 60000 }
 export const repeatIntervals: Record<RoomProfile, number> = { dinner: 120000, mixed: 60000, party: 30000 }
 const semanticText = (text: string) => withoutAudioTags(text).normalize('NFC').toLocaleLowerCase('es')
-export const heardAt = (row: Intervention) => row.startedAt ?? (row.status === 'UNCERTAIN' && row.startBefore ? row.startBefore - 1000 : 0)
+export function heardAt (row: Intervention) {
+  if (typeof row.startedAt === 'number') return row.startedAt
+  if (row.status !== 'UNCERTAIN' || !row.startBefore) return 0
+  return row.origin === 'GREETING' ? row.requestedAt : row.startBefore - 1000
+}
 export const voiceBudget = (history: Intervention[], now: number) => Math.max(0, 120000 - history
   .filter(row => heardAt(row) > now - 600000 && heardAt(row) <= now)
-  .reduce((total, row) => total + row.durationMs, 0))
+  .reduce((total, row) => total + (row.voiceDurationMs ?? row.durationMs), 0))
 
 export function supportingEffects (clips: AnimationClip[], family: VoiceFamily, profile: RoomProfile, ready: string[], history: Intervention[], now: number, lastClosingEffectAt = 0) {
   if (profile === 'dinner' || !['closing', 'celebration'].includes(family)) return []

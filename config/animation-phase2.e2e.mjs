@@ -773,10 +773,13 @@ try {
   await celebrationMode.focus()
   await celebrationMode.press('ArrowDown')
   await expect(celebrationMode).toHaveValue('song_end')
+  await celebrationMode.press('Tab')
   for (const [width, height] of [[390, 844], [1440, 1000]]) {
     await admin.setViewportSize({ width, height })
     await celebrationMode.scrollIntoViewIfNeeded()
-    await detail.screenshot({ path: path.join(data, `automatic-celebration-${width}.png`) })
+    await expect(celebrationMode).toBeInViewport()
+    // Capture the visible control without scrolling the overflowing dialog again.
+    await admin.screenshot({ path: path.join(data, `automatic-celebration-${width}.png`), animations: 'disabled', timeout: 10000 })
   }
   await detail.getByRole('button', { name: 'Guardar cambios', exact: true }).click()
   const automaticCelebration = (await call('animation/catalog')).find(clip => clip.title === 'celebration 1')

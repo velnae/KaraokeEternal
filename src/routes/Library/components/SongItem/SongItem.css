@@ -44,6 +44,7 @@
   text-align: right;
   width: 40px;
 }
+.intent { max-width: 110px; min-width: 0; min-height: 44px; margin-inline: 8px; padding: 6px; border: 1px solid var(--edge); border-radius: 8px; color: var(--lyrics); background: var(--stage); font: inherit; font-size: 13px; }
 
 .primary {
   flex: 1;

@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useRef } from 'react'
+import React, { useEffect, useCallback, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import Player from '../Player/Player'
 import PlayerTextOverlay from '../PlayerTextOverlay/PlayerTextOverlay'
@@ -41,9 +41,10 @@ const PlayerController = (props: PlayerControllerProps) => {
     .find(item => item.status === 'APPROVED')
   const settlement = useRef<PlaybackSettlementState>({ token: null, outcome: null })
   const advancing = useRef(false)
+  const [advanceRevision, retryAdvance] = useState(0)
   const mounted = useRef(true)
   const animation = useAnimationPlayer()
-  const greetings = useGreetingPlayer()
+  const greetings = useGreetingPlayer(animation.channel, animation.refreshReadiness, animation.markStopped)
   const greetingsRef = useRef(greetings)
   greetingsRef.current = greetings
   const animationRef = useRef(animation)
@@ -109,9 +110,9 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (!greeted && announce && controlVersion === animationRef.current.controlVersion()) {
         await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, selection()?.queueId ?? null)
       }
-      if (!mounted.current) return
+      if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       const current = store.getState().player
-      if (!socket.connected || current._authority !== 'GRANTED' || current._isReplayingQueueId !== null || animationRef.current.blocked) return
+      if (!socket.connected || current._authority !== 'GRANTED' || current._isReplayingQueueId !== null || animationRef.current.isBlocked()) return
       // Read the current intent, never restore the pre-announcement pause state.
       if (!current.isPlaying && !current._isPlayingNext) return
       const next = selection()
@@ -124,7 +125,12 @@ const PlayerController = (props: PlayerControllerProps) => {
         isPlaying: true, isVideoKeyingEnabled: next.isVideoKeyingEnabled, mediaType: next.mediaType,
         position: 0, queueId: next.queueId, nextUserId: null, _isPlayingNext: false, _isBetweenTracks: false, _isReplayPlayback: false,
       }))
-    } finally { advancing.current = false }
+    } finally {
+      advancing.current = false
+      // A command received during an idle probe must get a fresh transition,
+      // including its greeting, after the previous async owner releases it.
+      if (mounted.current && controlVersion !== animationRef.current.controlVersion()) retryAdvance(value => value + 1)
+    }
   }, [dispatch])
 
   const handleEnd = useCallback(() => {
@@ -193,25 +199,25 @@ const PlayerController = (props: PlayerControllerProps) => {
       const first = player.queueId === -1 && !player._isPlayingNext
       void handleLoadNext(!player._isBetweenTracks, first, first ? 'start' : 'ended')
     }
-  }, [handleLoadNext, player.isPlaying, player.queueId, player._isPlayingNext, player._isBetweenTracks, animation.busy, animation.blocked])
+  }, [handleLoadNext, player.isPlaying, player.queueId, player._isPlayingNext, player._isBetweenTracks, animation.busy, animation.blocked, advanceRevision])
 
   // replaying?
   useEffect(() => {
     if (player._isReplayingQueueId !== null) {
       handleReplay(player._isReplayingQueueId)
     }
-  }, [handleReplay, player._isReplayingQueueId, animation.busy, animation.blocked])
+  }, [handleReplay, player._isReplayingQueueId, animation.busy, animation.blocked, advanceRevision])
 
   // queue was exhausted, but is no longer?
   useEffect(() => {
     if (!animation.busy && !animation.blocked && player.isAtQueueEnd && nextQueueItem && player.isPlaying) {
       void handleLoadNext(false, true, 'start')
     }
-  }, [handleLoadNext, player.isPlaying, player.isAtQueueEnd, nextQueueItem, animation.busy, animation.blocked])
+  }, [handleLoadNext, player.isPlaying, player.isAtQueueEnd, nextQueueItem, animation.busy, animation.blocked, advanceRevision])
 
   const pendingIdleVoice = animation.snapshot?.active?.status === 'PENDING'
     && animation.snapshot.active.durationMs <= (animation.snapshot.voiceBudgetRemainingMs ?? 120000)
-  const automaticIdleVoice = !animation.snapshot?.active && animation.snapshot?.prefs.automation && animation.snapshot?.session?.sessionId
+  const automaticIdleVoice = !animation.snapshot?.active && animation.snapshot?.prefs.enabled && animation.snapshot?.prefs.automation && animation.snapshot?.session?.sessionId
   useEffect(() => {
     if (!animation.busy && !animation.blocked && animation.unlocked && (pendingIdleVoice || automaticIdleVoice)
       && !player.isErrored && (player.isAtQueueEnd || player.queueId === -1)) {
@@ -221,7 +227,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     animation.snapshot?.session?.sessionId, animation.snapshot?.session?.status, animation.snapshot?.pendingEventJSON,
     animation.snapshot?.microphoneOccupied, animation.snapshot?.prefs.enabled, animation.snapshot?.prefs.volume,
     animation.snapshot?.active?.durationMs, animation.snapshot?.voiceBudgetRemainingMs,
-    animation.busy, animation.blocked, animation.unlocked, animation.idleTick, player.isErrored, player.isAtQueueEnd, player.queueId, handleLoadNext])
+    animation.busy, animation.blocked, animation.unlocked, animation.idleTick, player.isErrored, player.isAtQueueEnd, player.queueId, handleLoadNext, advanceRevision])
 
   const { startAmbience, ambientPlaying, ambientTick } = animation
   useEffect(() => {
@@ -276,16 +282,23 @@ const PlayerController = (props: PlayerControllerProps) => {
         height={props.height}
       />
       {animation.text && <div className={animationStyles.overlay} role='status' data-testid='announcement-overlay'><p>{animation.text}</p></div>}
+      {greetings.intro && (
+        <section className={greetingStyles.screen} role='status' data-testid='greeting-intro'>
+          {greetings.performer && <div className={greetingStyles.performer} translate='no'>{`${greetings.performer.requestIntent === 'SING' ? 'Karaoke' : 'Pedido'}: ${greetings.performer.name}${greetings.performer.tableLabel ? ` · ${greetings.performer.tableLabel}` : ''}`}</div>}
+          <p>{greetings.intro}</p>
+        </section>
+      )}
       {greetings.active && (
         <section key={greetings.active.greetingId} ref={greetings.confirmMounted} className={greetingStyles.screen} role='status' data-testid='greeting-overlay' data-greeting-id={greetings.active.greetingId}>
+          {greetings.performer && <div className={greetingStyles.performer} translate='no'>{`${greetings.performer.requestIntent === 'SING' ? 'Karaoke' : 'Pedido'}: ${greetings.performer.name}${greetings.performer.tableLabel ? ` · ${greetings.performer.tableLabel}` : ''}`}</div>}
           {greetings.active.recipient && <h2 translate='no'>{`Para ${greetings.active.recipient}`}</h2>}
           <p translate='no'>{greetings.active.message}</p>
           <footer translate='no'>{`De ${greetings.active.sender}`}</footer>
         </section>
       )}
       {greetings.error && <p className={greetingStyles.playerNotice} role='status'>{greetings.error}</p>}
-      {animation.blocked && !animation.busy && <div className={animationStyles.overlay} role='status'><p>Esperando el cierre de la intervención anterior…</p></div>}
-      {animation.snapshot?.prefs.enabled && !animation.unlocked && (
+      {animation.blocked && !animation.busy && !greetings.busy && <div className={animationStyles.overlay} role='status'><p>Esperando el cierre de la intervención anterior…</p></div>}
+      {(animation.snapshot?.prefs.enabled || animation.snapshot?.greetingVoiceEnabled) && !animation.unlocked && (
         <div className={animationStyles.unlock}>
           {animation.needsGesture
             ? (

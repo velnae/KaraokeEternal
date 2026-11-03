@@ -9,6 +9,7 @@ import Icon from 'components/Icon/Icon'
 import ToggleAnimation from 'components/ToggleAnimation/ToggleAnimation'
 import { formatDuration } from 'lib/dateTime'
 import type { QueueItemOrigin } from 'shared/queueLifecycle'
+import type { RequestIntent } from 'shared/requestIntent'
 import styles from './SongItem.css'
 import SaveToPlaylist from 'components/Playlists/SaveToPlaylist'
 
@@ -19,7 +20,7 @@ interface SongItemProps {
   artist?: string
   title: string
   duration: number
-  onSongQueue(songId: number, origin?: QueueItemOrigin): void
+  onSongQueue(songId: number, origin?: QueueItemOrigin, intent?: RequestIntent): void
   onSongStarClick(songId: number): void
   onSongInfo(songId: number): void
   isPlayed: boolean
@@ -48,15 +49,16 @@ const SongItem = ({
   filterKeywords,
 }: SongItemProps) => {
   const [isExpanded, setExpanded] = useState(false)
+  const [intent, setIntent] = useState<RequestIntent>('LISTEN')
 
   const handleClick = () => {
     if (ignoreMouseup) ignoreMouseup = false
-    else if (!isUpcoming) onSongQueue(songId)
+    else if (!isUpcoming) onSongQueue(songId, 'PARTICIPANT', intent)
   }
   const handleInfoClick = () => onSongInfo(songId)
   const handleStarClick = () => onSongStarClick(songId)
   const handleAdminQueue = (origin: 'HOUSE' | 'OPERATOR') => {
-    onSongQueue(songId, origin)
+    onSongQueue(songId, origin, origin === 'HOUSE' ? 'LISTEN' : intent)
     setExpanded(false)
   }
 
@@ -89,7 +91,20 @@ const SongItem = ({
         <div className={styles.duration}>
           {formatDuration(duration)}
         </div>
-        <div onClick={handleClick} className={styles.primary}>
+        <div
+          onClick={handleClick}
+          className={styles.primary}
+          role='button'
+          tabIndex={isUpcoming ? -1 : 0}
+          aria-disabled={isUpcoming}
+          aria-label={isUpcoming ? `${title}, en la cola` : `Pedir ${intent === 'SING' ? 'karaoke' : 'música'}: ${title}`}
+          onKeyDown={(event) => {
+            if (!isUpcoming && (event.key === 'Enter' || event.key === ' ')) {
+              event.preventDefault()
+              onSongQueue(songId, 'PARTICIPANT', intent)
+            }
+          }}
+        >
           <div className={styles.title}>
             {filterKeywords?.length ? <Highlighter autoEscape textToHighlight={title} searchWords={filterKeywords} /> : title}
             {isAdmin && numMedia > 1 && (
@@ -104,6 +119,14 @@ const SongItem = ({
           </div>
         </div>
       </ToggleAnimation>
+
+      {isUpcoming && <span className={styles.intent}>En la cola</span>}
+      {!isUpcoming && (
+        <select className={styles.intent} aria-label={`Tipo de pedido para ${title}`} value={intent} onChange={event => setIntent(event.target.value as RequestIntent)}>
+          <option value='LISTEN'>Escuchar</option>
+          <option value='SING'>Cantar</option>
+        </select>
+      )}
 
       <Buttons btnWidth={56} isExpanded={isExpanded}>
         {isAdmin && <SaveToPlaylist compact source='LOCAL' sourceId={String(songId)} title={title} />}

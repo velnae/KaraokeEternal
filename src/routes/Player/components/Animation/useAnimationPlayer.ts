@@ -7,12 +7,14 @@ import { animationRequest, animationTime, fetchPreparedAnimationClips, syncAnima
 import {
   ANIMATION_CANCEL, ANIMATION_EVENT, ANIMATION_READY, ANIMATION_RESERVE,
   ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED,
-  animationContext, interventionAssets, type Intervention, type AmbienceGrant,
+  animationContext, interventionAssets, type Intervention, type AmbienceGrant, type AnimationSnapshot,
 } from 'shared/animation'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, PLAYER_EMIT_STATUS } from 'shared/actionTypes'
 import { playerStatusCancel, playerUpdate } from '../../modules/player'
 import AnnouncementAudio from './AnnouncementAudio'
 import { hasLocalPlaybackProof } from './playbackFence'
+
+const voiceRequested = (snapshot?: AnimationSnapshot | null) => !!snapshot && (snapshot.prefs.enabled || snapshot.greetingVoiceEnabled === true)
 
 function audioOwnerKey () {
   const state = store.getState()
@@ -24,6 +26,7 @@ function audioOwnerKey () {
 
 export default function useAnimationPlayer () {
   const snapshot = useAppSelector(state => state.animation.snapshot)
+  const needsVoice = voiceRequested(snapshot)
   const authority = useAppSelector(state => state.player._authority)
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
@@ -61,7 +64,7 @@ export default function useAnimationPlayer () {
 
   const publishReadiness = useCallback(async () => {
     const owner = audioOwnerKey()
-    if (!mounted.current || !owner || preparedOwner.current !== owner || !store.getState().animation.snapshot?.prefs.enabled) return
+    if (!mounted.current || !owner || preparedOwner.current !== owner || !voiceRequested(store.getState().animation.snapshot)) return
     const ready = audio.current.ready
     try {
       await animationRequest(ANIMATION_READY, { audioUnlocked: ready, readyClips: ready ? [...audio.current.buffers.keys()] : [] })
@@ -77,7 +80,7 @@ export default function useAnimationPlayer () {
 
   const resumeAudio = useCallback(() => {
     const owner = audioOwnerKey()
-    if (!owner || !mounted.current || !store.getState().animation.snapshot?.prefs.enabled) return
+    if (!owner || !mounted.current || !voiceRequested(store.getState().animation.snapshot)) return
     if (audio.current.ready && store.getState().animation.snapshot?.audioUnlocked && preparedOwner.current === owner) return
     // Called synchronously by the local click/keydown, before network requests.
     const resumed = audio.current.resume()
@@ -132,6 +135,7 @@ export default function useAnimationPlayer () {
         || (player && !player.isAtQueueEnd && player.queueId !== -1)) ambientUse.current = null
       const grant = grantRef.current
       if (current) audio.current.volume(ambientRun.current ? current.prefs.ambienceVolume ?? 0.2 : current.prefs.volume)
+      if (current) audio.current.bedVolume(Math.min(current.prefs.ambienceVolume ?? 0.2, current.prefs.volume * 0.4))
       if (grant && (!current?.prefs.enabled || current.prefs.volume === 0
         || current.playerEpoch !== grant.playerEpoch || current.active?.interventionId !== grant.interventionId || current.active?.stopRequestedAt)) audio.current.stop()
       const ambient = ambientRun.current?.grant
@@ -173,7 +177,7 @@ export default function useAnimationPlayer () {
   useEffect(() => {
     const owner = audioOwnerKey()
     const token = ++preparationVersion.current
-    if (!owner || !snapshot?.prefs.enabled) {
+    if (!owner || !needsVoice) {
       preparedOwner.current = null
       setUnlocked(false)
       setPreparingAudio(false)
@@ -197,18 +201,18 @@ export default function useAnimationPlayer () {
     return () => {
       alive = false
     }
-  }, [snapshot?.catalogVersion, snapshot?.active?.interventionId, snapshot?.ambience?.clip.id, lastFinishedAt, snapshot?.prefs.profile, snapshot?.prefs.enabled, snapshot?.playerEpoch, authority, roomId, connected, preparationRetry, publishReadiness])
+  }, [snapshot?.catalogVersion, snapshot?.active?.interventionId, snapshot?.ambience?.clip.id, lastFinishedAt, snapshot?.prefs.profile, snapshot?.playerEpoch, needsVoice, authority, roomId, connected, preparationRetry, publishReadiness])
 
   useEffect(() => {
-    if (snapshot?.prefs.enabled && authority === 'GRANTED' && connected) resumeAudio()
-  }, [snapshot?.prefs.enabled, snapshot?.playerEpoch, authority, roomId, connected, isPlaying, availabilityVersion, resumeAudio])
+    if (needsVoice && authority === 'GRANTED' && connected) resumeAudio()
+  }, [needsVoice, snapshot?.playerEpoch, authority, roomId, connected, isPlaying, availabilityVersion, resumeAudio])
 
   useEffect(() => {
     const gesture = (event: Event) => {
       if (event.isTrusted) resumeAudio()
     }
     const foreground = () => {
-      if (document.visibilityState === 'visible' && store.getState().animation.snapshot?.prefs.enabled) resumeAudio()
+      if (document.visibilityState === 'visible' && voiceRequested(store.getState().animation.snapshot)) resumeAudio()
     }
     document.addEventListener('click', gesture, true)
     document.addEventListener('keydown', gesture, true)
@@ -425,10 +429,17 @@ export default function useAnimationPlayer () {
 
   // This tab knows it has stopped (or never started). A successor does not,
   // and must keep respecting the persisted fence until confirmation/expiry.
-  const fenced = snapshot?.history.find(item => item.leaseUntil === snapshot.blockedUntil)
-  const locallySafe = hasLocalPlaybackProof(fenced, socket.id, locallySettled.current)
-  const foreignAmbience = !!snapshot?.ambience && snapshot.ambience.ownerSocketId !== socket.id && snapshot.ambience.until > animationTime()
-  const blocked = (!!snapshot && snapshot.blockedUntil > animationTime() && !locallySafe) || foreignAmbience
+  const isBlocked = useCallback(() => {
+    const current = store.getState().animation.snapshot
+    const fenced = current?.history.find(item => item.leaseUntil === current.blockedUntil)
+    const locallySafe = hasLocalPlaybackProof(fenced, socket.id, locallySettled.current)
+    const foreignAmbience = !!current?.ambience && current.ambience.ownerSocketId !== socket.id && current.ambience.until > animationTime()
+    return (!!current && current.blockedUntil > animationTime() && !locallySafe) || foreignAmbience
+  }, [])
+  const blocked = isBlocked()
+  const markStopped = useCallback((id: string) => {
+    locallySettled.current.add(id)
+  }, [])
   return { busy, blocked, text, error, unlocked, needsGesture, preparingAudio, unlock, attempt, abort, snapshot, stopAmbience, startAmbience, ambientPlaying, controlVersion: () => version.current,
-    idleTick, ambientTick }
+    idleTick, ambientTick, channel: audio.current, refreshReadiness: publishReadiness, markStopped, isBlocked }
 }

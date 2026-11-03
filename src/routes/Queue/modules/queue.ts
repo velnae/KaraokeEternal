@@ -12,6 +12,7 @@ import {
 } from 'shared/actionTypes'
 import type { QueueItem, OptimisticQueueItem } from 'shared/types'
 import type { QueueItemOrigin } from 'shared/queueLifecycle'
+import type { RequestIntent } from 'shared/requestIntent'
 
 // ------------------------------------
 // Actions
@@ -23,13 +24,13 @@ export const rejectRequest = createAction<{ queueId: number }>(QUEUE_REJECT)
 export const removeItem = createAction<{ queueId: number | number[] }>(QUEUE_REMOVE)
 export const queuePush = createAction<QueueState>(QUEUE_PUSH)
 
-export const queueSong = createAction(QUEUE_ADD, (songId: number, origin: QueueItemOrigin = 'PARTICIPANT') => ({
-  payload: { songId, source: 'LOCAL' as const, sourceId: String(songId), origin },
+export const queueSong = createAction(QUEUE_ADD, (songId: number, origin: QueueItemOrigin = 'PARTICIPANT', requestIntent: RequestIntent = 'UNKNOWN') => ({
+  payload: { songId, source: 'LOCAL' as const, sourceId: String(songId), origin, requestIntent },
   meta: { isOptimistic: true },
 }))
 
-export const queueYouTubeSong = createAction(QUEUE_ADD, (sourceId: string, origin: QueueItemOrigin = 'PARTICIPANT') => ({
-  payload: { source: 'YOUTUBE' as const, sourceId, origin },
+export const queueYouTubeSong = createAction(QUEUE_ADD, (sourceId: string, origin: QueueItemOrigin = 'PARTICIPANT', requestIntent: RequestIntent = 'UNKNOWN') => ({
+  payload: { source: 'YOUTUBE' as const, sourceId, origin, requestIntent },
 }))
 
 export const removeUpcomingItems = (userId: number): AppThunk => (dispatch: AppDispatch, getState: () => RootState) => {

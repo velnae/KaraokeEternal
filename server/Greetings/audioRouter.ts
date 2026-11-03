@@ -4,6 +4,7 @@ import { getLocalTts } from './ttsRouter.js'
 import getLogger from '../lib/Log.js'
 
 let jobs: GreetingAudioJobs | undefined
+export const getGreetingAudioAsset = (roomId: number, greetingId: number) => jobs?.asset(roomId, greetingId) ?? Promise.resolve(null)
 export function startGreetingAudio (directory: string) {
   const worker = new GreetingAudioJobs(directory, getLocalTts(), process.env.KES_FFMPEG_PATH || 'ffmpeg')
   jobs = worker

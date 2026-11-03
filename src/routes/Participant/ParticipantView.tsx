@@ -27,6 +27,7 @@ import styles from './ParticipantView.css'
 import QueueGreeting from 'components/Greetings/QueueGreeting'
 import useGreetings from 'components/Greetings/useGreetings'
 import { youtubeSearchCanRetry, youtubeSearchError } from 'shared/youtubeSearch'
+import { requestIntentLabels } from 'shared/requestIntent'
 
 const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | 'room' }) => {
   const dispatch = useAppDispatch()
@@ -87,6 +88,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
         <div className={styles.details}>
           <div className={styles.cardStatus}>
             <span className={styles.badge}>{requestStatusLabels[item.status]}</span>
+            {item.requestIntent && item.requestIntent !== 'UNKNOWN' && <span className={styles.badge}>{requestIntentLabels[item.requestIntent]}</span>}
             {wait !== null && <span className={styles.wait} aria-label={`Espera estimada: ${wait < 1 ? 'menos de 1 minuto' : `${wait} minutos`}`}>{wait < 1 ? '< 1 min' : `≈ ${wait} min`}</span>}
           </div>
           <div className={styles.queuedSong}>
@@ -191,7 +193,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
                 active={active}
                 connected={connected}
                 blocker={!connected ? 'Sin conexión. Espera a reconectar para pedir la canción.' : !ready ? 'Actualizando la sala. Espera un momento.' : room.status === 'closed' ? 'Sala cerrada. Consulta al organizador.' : !canRequest ? 'Límite alcanzado. Revisa Mis pedidos antes de agregar otra canción.' : null}
-                onRequest={(greeting) => { void controller.request(result.sourceId, result.title, greeting) }}
+                onRequest={(greeting, intent) => { void controller.request(result.sourceId, result.title, greeting, intent) }}
               />
             )
           })}

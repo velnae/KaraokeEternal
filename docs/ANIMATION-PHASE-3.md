@@ -1,8 +1,10 @@
 # Greetings attached to song requests
 
 Participants can include one optional greeting with each musical request. Greetings
-are shown automatically before the first song of the participant's turn. The
-operator can moderate the queue without approving every message.
+are shown automatically before their associated song. The operator can moderate
+the queue without approving every message. Phase 4 block 3 changed the original
+turn-wide grouping to per-song delivery; optional voice playback is documented in
+[ANIMATION-PHASE-4.md](ANIMATION-PHASE-4.md).
 
 ## Use the feature
 
@@ -12,13 +14,13 @@ operator can moderate the queue without approving every message.
 3. In **Mis pedidos**, the greeting appears inside its song card. You can remove
    a queued greeting with **Quitar saludo**. Creating another greeting or adding
    one after the request has entered the queue is not available.
-4. Open the room's player. When the turn arrives, its greetings appear in musical
-   request order, then playback continues. Text delivery does not require enabling
+4. Open the room's player. Each greeting appears before its associated musical
+   request, then playback continues. Text delivery does not require enabling
    the animator, unlocking its audio, or installing a voice provider.
    The operator can work in the queue tab while the player remains in another tab.
 
 For a two-song FAIR turn: request A + greeting X, request B + greeting Y produces
-X → Y → A → B. Each greeting stays visible for 10–15 seconds according to its text
+X → A → Y → B. Each visual-only greeting stays visible for 10–15 seconds according to its text
 length. A greeting cannot be submitted independently of a musical request.
 
 ### Configure the actual turn
@@ -68,11 +70,12 @@ Pending messages are visible only to their author and the room's administrators.
 - The song scheduler supplies the turn boundaries. Greetings do not reorder music
   or create their own rotation. Consecutive turns by the same singer retain the
   configured capacity.
-- Canceling a song cancels its unshown greeting. Before presentation, removing the
-  first song moves surviving greetings to the new first song. There is no arbitrary
+- Canceling a song cancels its unshown greeting. Surviving greetings remain attached
+  to their own songs. There is no arbitrary
   fifteen-minute expiration while a valid musical turn is waiting.
-- A reserved turn is durably consumed, including its other songs. The second song,
-  replay, duplicate player, reconnect or server restart cannot repeat its messages.
+- Canonical turn membership closes the request-time greeting window. Delivery is
+  consumed separately for each song, so its next song can present its own greeting.
+  Replay, duplicate player, reconnect or server restart cannot repeat a consumed message.
 - Display is acknowledged only by the authoritative room player after React commits
   the matching greeting card to its DOM and completes the reading interval. This
   records delivery to the player, not proof that a person was watching that tab.
@@ -136,7 +139,7 @@ song approval, cancellation/reordering, long waits, request retries, recovery an
 stale/foreign player acknowledgments. Existing audio E2E remains a regression gate
 for changes to the shared musical transition.
 
-### Implementation verification results
+### Original phase-3 verification results (before per-song delivery)
 
 | Check | Result |
 | --- | --- |

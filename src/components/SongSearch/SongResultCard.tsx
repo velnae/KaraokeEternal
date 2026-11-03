@@ -12,11 +12,12 @@ import styles from './SongSearch.css'
 import GreetingComposer from 'components/Greetings/GreetingComposer'
 import { validateGreeting, type GreetingDraft } from 'shared/greetings'
 import { useAppSelector } from 'store/hooks'
+import { requestIntentLabels, type RequestIntent } from 'shared/requestIntent'
 
 interface RequestState {
   receipt?: RequestReceipt
   active?: QueueItem
-  onRequest: (greeting?: GreetingDraft | null) => void
+  onRequest: (greeting?: GreetingDraft | null, intent?: RequestIntent) => void
 }
 
 function RequestAction ({ receipt, active, onRequest, admin, house = false, connected, blocker, description }: RequestState & {
@@ -55,6 +56,7 @@ export default function SongResultCard ({ result, receipt, active, admin = false
   const id = useId()
   const sender = useAppSelector(state => state.user.name)
   const [greeting, setGreeting] = useState<GreetingDraft | null>(receipt?.greeting ?? null)
+  const [intent, setIntent] = useState<RequestIntent>(receipt?.requestIntent ?? 'LISTEN')
   let greetingError: string | null = null
   if (!admin && greeting) {
     try {
@@ -86,9 +88,25 @@ export default function SongResultCard ({ result, receipt, active, admin = false
         <h2 id={`${id}-title`} translate='no'>{result.title}</h2>
         <p translate='no'>{result.artistOrChannel}</p>
       </div>
+      {!confirmed && (
+        <fieldset className={styles.intent} disabled={sending || uncertain} aria-label='Tipo de pedido'>
+          <legend>Este pedido es para</legend>
+          <div className={styles.options}>
+            <label>
+              <input type='radio' name={`${id}-intent`} value='SING' checked={intent === 'SING'} onChange={() => setIntent('SING')} />
+              Cantar karaoke
+            </label>
+            <label>
+              <input type='radio' name={`${id}-intent`} value='LISTEN' checked={intent === 'LISTEN'} onChange={() => setIntent('LISTEN')} />
+              Escuchar música
+            </label>
+          </div>
+        </fieldset>
+      )}
+      {confirmed && active.requestIntent && <span className={styles.intentLabel}>{requestIntentLabels[active.requestIntent]}</span>}
       {!admin && !confirmed && <GreetingComposer value={greeting} onChange={setGreeting} locked={sending || uncertain} />}
       <div className={styles.resultActions}>
-        <div className={styles.primaryAction} aria-live='polite'><RequestAction receipt={receipt} active={active} onRequest={() => onRequest(admin ? undefined : greeting)} admin={admin} connected={connected} blocker={blocker ?? greetingError} description={description} /></div>
+        <div className={styles.primaryAction} aria-live='polite'><RequestAction receipt={receipt} active={active} onRequest={() => onRequest(admin ? undefined : greeting, intent)} admin={admin} connected={connected} blocker={blocker ?? greetingError} description={description} /></div>
         {admin && <button ref={moreButton} type='button' className={styles.moreButton} aria-label={`Más opciones para ${result.title}`} title='Más opciones' aria-expanded={moreOpen} aria-controls={`${id}-options`} onClick={() => setMoreOpen(value => !value)}><Icon icon='MORE_HORIZ' size={24} /></button>}
       </div>
       {admin && moreOpen && (

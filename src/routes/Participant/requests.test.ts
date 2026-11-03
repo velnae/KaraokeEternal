@@ -13,6 +13,15 @@ const fixture = () => {
 }
 
 describe('mobile request confirmation', () => {
+  it('freezes singing intent together with the greeting after a lost acknowledgment', async () => {
+    const { controller, options, send } = fixture()
+    send.mockRejectedValueOnce(new Error('timeout'))
+    await controller.request('video', 'Song', { recipient: '', message: 'Hello' }, 'SING')
+    const restored = createRequestController(options)
+    await restored.request('video', 'Song', null, 'LISTEN')
+    expect(send.mock.calls.map(call => call[3])).toEqual(['SING', 'SING'])
+    expect(restored.getSnapshot().video.requestIntent).toBe('SING')
+  })
   it('freezes a greeting through an uncertain acknowledgment and reload', async () => {
     const { controller, options, send } = fixture()
     const greeting = { recipient: 'Rocío', message: 'Feliz cumpleaños' }
@@ -49,7 +58,7 @@ describe('mobile request confirmation', () => {
     expect(controller.getSnapshot().video.phase).toBe('uncertain')
     const restored = createRequestController({ ...options, makeId: () => 'must-not-create-another' })
     await restored.request('video', 'Song')
-    expect(send.mock.calls).toEqual([['video', 'request-0000000001', undefined], ['video', 'request-0000000001', undefined]])
+    expect(send.mock.calls).toEqual([['video', 'request-0000000001', undefined, 'UNKNOWN'], ['video', 'request-0000000001', undefined, 'UNKNOWN']])
     expect(restored.getSnapshot().video.phase).toBe('confirmed')
   })
 

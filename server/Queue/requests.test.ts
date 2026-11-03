@@ -58,6 +58,24 @@ describe('durable participant request receipts', () => {
     expect(Queue.countPending(1, 1)).toBe(1)
   })
 
+  it('persists explicit singing intent and returns the original intent on an idempotent retry', async () => {
+    const original = { payload: { ...request('request-intent-01').payload, requestIntent: 'SING' } }
+    const ack = vi.fn()
+    await handlers[QUEUE_ADD](socket, original, ack)
+    await handlers[QUEUE_ADD](socket, { payload: { ...original.payload, requestIntent: 'LISTEN' } }, ack)
+    expect(ack.mock.calls.map(([reply]) => reply.payload.requestIntent)).toEqual(['SING', 'SING'])
+    expect(Queue.get(1).entities[1]).toMatchObject({ requestIntent: 'SING', userDisplayName: 'Test' })
+    expect(Queue.countPending(1, 1)).toBe(1)
+  })
+
+  it('does not infer karaoke from a video title and rejects invalid intent without inserting a request', async () => {
+    await expect(handlers[QUEUE_ADD](socket, { payload: { ...request('request-intent-01').payload, requestIntent: 'AUTO_DETECT' } }, vi.fn())).rejects.toThrow('Elija')
+    expect(Queue.get(1).result).toHaveLength(0)
+    const ack = vi.fn()
+    await handlers[QUEUE_ADD](socket, request('request-intent-01'), ack)
+    expect(Queue.get(1).entities[1]).toMatchObject({ title: 'Karaoke', requestIntent: 'UNKNOWN' })
+  })
+
   it('rolls back an invalid greeting without leaving a partially accepted music request', async () => {
     const action = { payload: { ...request('request-greeting-01').payload, greeting: { recipient: '', message: '' } } }
     await expect(handlers[QUEUE_ADD](socket, action, vi.fn())).rejects.toThrow('mensaje')

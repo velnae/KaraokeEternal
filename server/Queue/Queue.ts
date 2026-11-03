@@ -9,6 +9,7 @@ import {
   type SongSource,
 } from '../../shared/queueLifecycle.js'
 import { getResolvedSongValidationError, type ResolvedSong } from '../../shared/songSource.js'
+import { requestIntent, type RequestIntent } from '../../shared/requestIntent.js'
 
 const HIDDEN_QUEUE_STATUSES = ['REJECTED', 'REMOVED']
 
@@ -30,6 +31,7 @@ class Queue {
     tableContext,
     playlistItemId,
     houseRunId,
+    requestIntent: intent,
   }: {
     roomId: number
     song: ResolvedSong
@@ -40,6 +42,7 @@ class Queue {
     tableContext?: import('../../shared/tableAccess.js').TableContext
     playlistItemId?: number
     houseRunId?: string
+    requestIntent?: RequestIntent
   }): number {
     const validationError = getResolvedSongValidationError(song)
     if (validationError) throw new Error(validationError)
@@ -62,6 +65,7 @@ class Queue {
       )
     )`)
     fields.set('origin', origin)
+    fields.set('requestIntent', origin === 'HOUSE' ? 'LISTEN' : requestIntent(intent))
     fields.set('source', song.source)
     fields.set('status', status)
     fields.set('externalId', song.externalId)
@@ -92,11 +96,11 @@ class Queue {
 
   static getRequest (roomId: number, userId: number, requestId: string) {
     const query = sql`
-      SELECT queueId, status, source, externalId, songId, origin,
+      SELECT queueId, status, source, externalId, songId, origin, requestIntent,
         (SELECT greetingId FROM greetings g WHERE g.queueId=queue.queueId) AS greetingId
       FROM queue WHERE roomId = ${roomId} AND userId = ${userId} AND requestId = ${requestId}
     `
-    return db.get<Pick<QueueItem, 'queueId' | 'status' | 'source' | 'externalId' | 'songId' | 'origin'> & { greetingId?: number }>(String(query), query.parameters)
+    return db.get<Pick<QueueItem, 'queueId' | 'status' | 'source' | 'externalId' | 'songId' | 'origin' | 'requestIntent'> & { greetingId?: number }>(String(query), query.parameters)
   }
 
   /**
@@ -111,7 +115,7 @@ class Queue {
 
     const query = sql`
       SELECT queueId, songId, userId, prevQueueId,
-        queue.origin, queue.source, queue.status, queue.externalId,
+        queue.origin, queue.source, queue.status, queue.externalId, queue.requestIntent,
         queue.title, queue.artistOrChannel, queue.durationSeconds, queue.thumbnailUrl,
         queue.dateCreated, queue.dateUpdated, queue.historyClearedAt,
         queue.tableId, queue.tableLabelSnapshot,
@@ -133,6 +137,7 @@ class Queue {
       userId: number
       prevQueueId: number | null
       origin: QueueItemOrigin
+      requestIntent: RequestIntent
       source: SongSource
       status: QueueItemStatus
       externalId: string | null
