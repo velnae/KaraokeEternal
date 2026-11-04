@@ -2,7 +2,7 @@ import { db } from '../lib/Database.js'
 import Queue from '../Queue/Queue.js'
 import { catalogClips } from '../Animation/catalog.js'
 import { leastUsedAudio } from '../Animation/usage.js'
-import { animationPrefs } from '../../shared/animation.js'
+import { animationPrefs, eligibleAmbience } from '../../shared/animation.js'
 import { defaultGreetingPlayback, GREETING_START_MS, type Greeting, type GreetingPlaybackPrefs, type GreetingPreparation, type GreetingAsset, type GreetingTransition } from '../../shared/greetings.js'
 import { getGreetingAudioAsset } from './audioRouter.js'
 
@@ -23,11 +23,11 @@ export async function prepareGreetingTransition (roomId: number, queueId: number
     if (voice) {
       assets.push(voice)
       const room = db.get<{ data: string }>('SELECT data FROM rooms WHERE roomId=?', [roomId])
-      const profile = animationPrefs(room ? JSON.parse(room.data).prefs?.animation : undefined).profile
+      const prefs = animationPrefs(room ? JSON.parse(room.data).prefs?.animation : undefined)
       const clips = catalogClips(roomId).filter(clip => clip.approvedForAuto && (!clip.validUntil || clip.validUntil > Date.now()))
       const intro = clips.find(clip => clip.id === control.prefs.introClipId && (clip.kind ?? 'voice') === 'voice')
       if (intro) assets.push({ ...intro, role: 'intro', url: `api/animation/assets/${encodeURIComponent(intro.id)}` })
-      const bed = control.prefs.ambienceEnabled && leastUsedAudio(roomId, clips.filter(clip => clip.kind === 'ambience' && clip.modes?.includes(profile)))
+      const bed = control.prefs.ambienceEnabled && leastUsedAudio(roomId, eligibleAmbience(clips, prefs))
       if (bed) assets.push({ ...bed, role: 'bed', url: `api/animation/assets/${encodeURIComponent(bed.id)}` })
     }
   }

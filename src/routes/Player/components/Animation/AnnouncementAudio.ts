@@ -1,4 +1,4 @@
-import { clipDurationLimit, type AnimationClip } from '../../../../../shared/animation.js'
+import { clipDurationLimit, TRANSITION_BED_MS, type AnimationClip } from '../../../../../shared/animation.js'
 import type { GreetingAsset } from '../../../../../shared/greetings.js'
 
 /** A finite, isolated voice channel. It never changes music gain or playback. */
@@ -24,6 +24,7 @@ export default class AnnouncementAudio {
   readonly maxDecodedBytes = 64 * 1024 * 1024
 
   get decodedBytes () { return [...this.buffers.values()].reduce((total, buffer) => total + buffer.length * buffer.numberOfChannels * 4, 0) }
+  get hasBed () { return !!this.bedStop }
 
   private ensureContext () {
     if (!this.context || this.context.state === 'closed') this.context = new AudioContext()
@@ -168,7 +169,7 @@ export default class AnnouncementAudio {
     const context = this.context
     const buffer = this.buffers.get(checksum)
     if (!context || context.state !== 'running' || !buffer || this.bedStop || durationMs <= 0) throw new Error('El fondo no está disponible')
-    const duration = Math.min(25, durationMs / 1000, loop ? Infinity : buffer.duration)
+    const duration = Math.min(TRANSITION_BED_MS / 1000, durationMs / 1000, loop ? Infinity : buffer.duration)
     const until = context.currentTime + duration
     this.bedChecksum = checksum
     this.bedCompletion = new Promise<'ENDED' | 'STOPPED'>((resolve) => {
@@ -319,9 +320,11 @@ export default class AnnouncementAudio {
   }
 
   stop () {
-    this.stopSource?.()
+    this.stopForeground()
     this.bedStop?.(30)
   }
+
+  stopForeground () { this.stopSource?.() }
 
   renewAmbience (milliseconds: number, loop?: boolean) { return this.renewSource?.(milliseconds, loop) ?? false }
 

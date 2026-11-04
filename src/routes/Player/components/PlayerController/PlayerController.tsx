@@ -9,11 +9,16 @@ import store from 'store/store'
 import socket from 'lib/socket'
 import useAnimationPlayer from '../Animation/useAnimationPlayer'
 import useGreetingPlayer from '../Animation/useGreetingPlayer'
+import PlayerTransitionScene from '../Animation/PlayerTransitionScene'
+import useSelectedPlayerBackground from '../Animation/useSelectedPlayerBackground'
 import greetingStyles from 'components/Greetings/Greetings.css'
 import Button from 'components/Button/Button'
 import animationStyles from 'components/Animation/Animation.css'
 import getRoomPrefs from '../../selectors/getRoomPrefs'
 import type { QueueItem } from 'shared/types'
+import type { TransitionVideoBackground } from 'shared/transitionVideo'
+import { TRANSITION_INTRO_MS } from 'shared/animation'
+import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
 import styles from './PlayerController.css'
 import {
   appendCompletedToHistory,
@@ -27,12 +32,15 @@ interface PlayerControllerProps {
   height: number
 }
 
+type TransitionScene = { id: string, background: TransitionVideoBackground | null, phase: 'intro' | 'voice' | 'loading' }
+
 const PlayerController = (props: PlayerControllerProps) => {
   const queue = useAppSelector(getRoundRobinQueue)
   const player = useAppSelector(state => state.player)
   const playerVisualizer = useAppSelector(state => state.playerVisualizer)
   const prefs = useAppSelector(state => state.prefs)
   const roomPrefs = useAppSelector(getRoomPrefs)
+  const roomId = useAppSelector(state => state.user.roomId)
   const queueItem = queue.entities[player.queueId]
   const currentIndex = queue.result.indexOf(player.queueId)
   const nextQueueItem = queue.result
@@ -45,6 +53,15 @@ const PlayerController = (props: PlayerControllerProps) => {
   const mounted = useRef(true)
   const animation = useAnimationPlayer()
   const greetings = useGreetingPlayer(animation.channel, animation.refreshReadiness, animation.markStopped)
+  const selectedBackground = useSelectedPlayerBackground(roomId, roomPrefs?.transitionVideo, player._authority === 'GRANTED')
+  const backgroundRef = useRef(selectedBackground)
+  backgroundRef.current = selectedBackground
+  const [transition, setTransition] = useState<TransitionScene | null>(null)
+  const transitionRef = useRef<TransitionScene | null>(null)
+  const updateTransition = useCallback((value: TransitionScene | null) => {
+    transitionRef.current = value
+    if (mounted.current) setTransition(value)
+  }, [])
   const greetingsRef = useRef(greetings)
   greetingsRef.current = greetings
   const animationRef = useRef(animation)
@@ -56,7 +73,55 @@ const PlayerController = (props: PlayerControllerProps) => {
     dispatch(playerStatus(status))
   }, [dispatch, player._authority])
   const handleLoad = () => dispatch(playerLoad())
-  const handlePlay = () => dispatch(playerPlay())
+  const finishTransition = useCallback(async (fadeMs = 80) => {
+    const scene = transitionRef.current
+    await animationRef.current.stopTransition(fadeMs)
+    if (transitionRef.current === scene) updateTransition(null)
+  }, [updateTransition])
+  const handlePlay = () => {
+    if (transitionRef.current?.phase === 'loading') {
+      void finishTransition().then((): void => {
+        if (mounted.current) dispatch(playerPlay())
+        return undefined
+      })
+    } else dispatch(playerPlay())
+  }
+
+  useEffect(() => {
+    const cancel = () => {
+      updateTransition(null)
+      void animationRef.current.stopTransition(30)
+    }
+    const command = (action: { type: string }) => {
+      if ([PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY].includes(action.type)) cancel()
+    }
+    socket.on('action', command)
+    socket.on('disconnect', cancel)
+    return () => {
+      socket.off('action', command)
+      socket.off('disconnect', cancel)
+      cancel()
+    }
+  }, [roomId, updateTransition])
+
+  useEffect(() => {
+    if (player._authority !== 'GRANTED') {
+      updateTransition(null)
+      void animationRef.current.stopTransition(30)
+    }
+  }, [player._authority, updateTransition])
+
+  useEffect(() => {
+    if (transition?.phase !== 'loading') return
+    if (!player.isPlaying) {
+      void finishTransition(30)
+      return
+    }
+    // A failed/blocked media start must expose its existing controls, not leave
+    // an opaque transition over the player's recovery UI indefinitely.
+    const timer = setTimeout(() => void finishTransition(), 10000)
+    return () => clearTimeout(timer)
+  }, [transition, player.isPlaying, finishTransition])
 
   const handleReplay = useCallback((queueId: number) => {
     if (!socket.connected || advancing.current || animationRef.current.busy || animationRef.current.blocked) return
@@ -104,6 +169,22 @@ const PlayerController = (props: PlayerControllerProps) => {
     try {
       const upcoming = selection()
       if (upcoming || boundary !== 'idle') await animationRef.current.stopAmbience()
+      if (announce && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
+        && (backgroundRef.current || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)) {
+        const scene: TransitionScene = { id: crypto.randomUUID(), background: backgroundRef.current, phase: 'intro' }
+        updateTransition(scene)
+        const grant = await animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null)
+        if (grant?.background) {
+          scene.background = grant.background
+          updateTransition({ ...scene })
+        }
+        const until = performance.now() + TRANSITION_INTRO_MS
+        while (performance.now() < until && mounted.current && controlVersion === animationRef.current.controlVersion() && transitionRef.current?.id === scene.id) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+        if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
+        updateTransition({ ...scene, phase: 'voice' })
+      }
       const greeted = upcoming && controlVersion === animationRef.current.controlVersion()
         ? await greetingsRef.current.attempt(upcoming.queueId)
         : false
@@ -117,9 +198,12 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (!current.isPlaying && !current._isPlayingNext) return
       const next = selection()
       if (!next) {
+        await finishTransition()
         dispatch(playerStatus({ historyJSON: current.historyJSON, isAtQueueEnd: true, isErrored: false, mediaType: null, _isPlayingNext: false, _isBetweenTracks: false }))
+        void animationRef.current.startAmbience()
         return
       }
+      if (transitionRef.current) updateTransition({ ...transitionRef.current, phase: 'loading' })
       dispatch(playerStatus({
         errorMessage: '', historyJSON: current.historyJSON, isAtQueueEnd: false, isErrored: false,
         isPlaying: true, isVideoKeyingEnabled: next.isVideoKeyingEnabled, mediaType: next.mediaType,
@@ -131,7 +215,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       // including its greeting, after the previous async owner releases it.
       if (mounted.current && controlVersion !== animationRef.current.controlVersion()) retryAdvance(value => value + 1)
     }
-  }, [dispatch])
+  }, [dispatch, finishTransition, updateTransition])
 
   const handleEnd = useCallback(() => {
     if (!queueItem) return
@@ -142,6 +226,8 @@ const PlayerController = (props: PlayerControllerProps) => {
   }, [handleLoadNext, player._lastReplayTime, queueItem])
 
   const handleError = useCallback((msg: string, diagnostic?: { category: 'iframe' | 'api-load', code?: number }) => {
+    updateTransition(null)
+    void animationRef.current.stopTransition(30)
     if (!queueItem || (queueItem.source !== 'YOUTUBE' && queueItem.origin !== 'HOUSE')) {
       dispatch(playerError(msg))
       handleStatus()
@@ -153,7 +239,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       onFailure: () => dispatch(playerFailure({ queueId: queueItem.queueId, error: msg, ...diagnostic })),
       onAdvance: handleLoadNext,
     })
-  }, [dispatch, handleLoadNext, handleStatus, player._lastReplayTime, queueItem])
+  }, [dispatch, handleLoadNext, handleStatus, player._lastReplayTime, queueItem, updateTransition])
 
   // Lock the participant for the next participant turn. House/operator items
   // may play before it without allowing realtime changes to replace that turn.
@@ -252,6 +338,29 @@ const PlayerController = (props: PlayerControllerProps) => {
     )
   }
 
+  const foregroundScene = !!transition || !!greetings.scene || !!animation.scene || animation.blocked || animation.busy
+    || (player._isBetweenTracks && player.queueId !== -1 && !player.isAtQueueEnd)
+  const showScene = animation.connected && (foregroundScene || animation.ambientPlaying) && !player.isErrored
+  const background = transition
+    ? transition.background
+    : greetings.scene
+      ? greetings.scene.background ?? null
+      : animation.scene
+        ? animation.scene.background ?? null
+        : animation.ambientPlaying ? animation.snapshot?.ambience?.background ?? selectedBackground : selectedBackground
+  const sceneId = greetings.scene ? `greeting:${greetings.scene.turnKey}` : animation.scene?.interventionId ?? animation.snapshot?.ambience?.id ?? 'boundary'
+  const idleOverlay = (
+    <PlayerTextOverlay
+      queueItem={queueItem as QueueItem}
+      nextQueueItem={nextQueueItem as QueueItem}
+      isAtQueueEnd={player.isAtQueueEnd}
+      isQueueEmpty={!queue.result.length}
+      isErrored={player.isErrored}
+      width={props.width}
+      height={props.height}
+    />
+  )
+
   return (
     <>
       <Player
@@ -277,27 +386,33 @@ const PlayerController = (props: PlayerControllerProps) => {
         rgTrackPeak={queueItem ? queueItem.rgTrackPeak : null}
         source={queueItem?.source}
         visualizer={playerVisualizer}
-        volume={player.volume}
+        volume={transition ? 0 : player.volume}
         width={props.width}
         height={props.height}
       />
-      {animation.text && <div className={animationStyles.overlay} role='status' data-testid='announcement-overlay'><p>{animation.text}</p></div>}
-      {greetings.intro && (
-        <section className={greetingStyles.screen} role='status' data-testid='greeting-intro'>
-          {greetings.performer && <div className={greetingStyles.performer} translate='no'>{`${greetings.performer.requestIntent === 'SING' ? 'Karaoke' : 'Pedido'}: ${greetings.performer.name}${greetings.performer.tableLabel ? ` · ${greetings.performer.tableLabel}` : ''}`}</div>}
-          <p>{greetings.intro}</p>
-        </section>
-      )}
-      {greetings.active && (
-        <section key={greetings.active.greetingId} ref={greetings.confirmMounted} className={greetingStyles.screen} role='status' data-testid='greeting-overlay' data-greeting-id={greetings.active.greetingId}>
-          {greetings.performer && <div className={greetingStyles.performer} translate='no'>{`${greetings.performer.requestIntent === 'SING' ? 'Karaoke' : 'Pedido'}: ${greetings.performer.name}${greetings.performer.tableLabel ? ` · ${greetings.performer.tableLabel}` : ''}`}</div>}
-          {greetings.active.recipient && <h2 translate='no'>{`Para ${greetings.active.recipient}`}</h2>}
-          <p translate='no'>{greetings.active.message}</p>
-          <footer translate='no'>{`De ${greetings.active.sender}`}</footer>
-        </section>
+      {showScene && (
+        <PlayerTransitionScene background={background} playing={!!(transition || animation.scene || greetings.scene || animation.ambientPlaying || player.isPlaying || player._isPlayingNext)} sceneId={sceneId}>
+          {(animation.text || animation.scene) && <div className={`${animationStyles.overlay} ${styles.transitionText}`} role='status' data-testid='announcement-overlay'><p>{animation.text || animation.scene?.displayText}</p></div>}
+          {greetings.intro && (
+            <section className={`${greetingStyles.screen} ${styles.transitionText}`} role='status' data-testid='greeting-intro'>
+              {greetings.performer && <div className={greetingStyles.performer} translate='no'>{`${greetings.performer.requestIntent === 'SING' ? 'Karaoke' : 'Pedido'}: ${greetings.performer.name}${greetings.performer.tableLabel ? ` · ${greetings.performer.tableLabel}` : ''}`}</div>}
+              <p>{greetings.intro}</p>
+            </section>
+          )}
+          {greetings.active && (
+            <section key={greetings.active.greetingId} ref={greetings.confirmMounted} className={`${greetingStyles.screen} ${styles.transitionText}`} role='status' data-testid='greeting-overlay' data-greeting-id={greetings.active.greetingId}>
+              {greetings.performer && <div className={greetingStyles.performer} translate='no'>{`${greetings.performer.requestIntent === 'SING' ? 'Karaoke' : 'Pedido'}: ${greetings.performer.name}${greetings.performer.tableLabel ? ` · ${greetings.performer.tableLabel}` : ''}`}</div>}
+              {greetings.active.recipient && <h2 translate='no'>{`Para ${greetings.active.recipient}`}</h2>}
+              <p translate='no'>{greetings.active.message}</p>
+              <footer translate='no'>{`De ${greetings.active.sender}`}</footer>
+            </section>
+          )}
+          {transition?.phase !== 'intro' && !greetings.active && !greetings.intro && !animation.scene && (foregroundScene
+            ? <div className={`${animationStyles.overlay} ${styles.transitionText}`} role='status'><p>{animation.blocked ? 'Esperando el cierre de la intervención anterior…' : player.isPlaying || player._isPlayingNext ? 'Preparando la próxima canción…' : 'Reproducción en pausa'}</p></div>
+            : idleOverlay)}
+        </PlayerTransitionScene>
       )}
       {greetings.error && <p className={greetingStyles.playerNotice} role='status'>{greetings.error}</p>}
-      {animation.blocked && !animation.busy && !greetings.busy && <div className={animationStyles.overlay} role='status'><p>Esperando el cierre de la intervención anterior…</p></div>}
       {(animation.snapshot?.prefs.enabled || animation.snapshot?.greetingVoiceEnabled) && !animation.unlocked && (
         <div className={animationStyles.unlock}>
           {animation.needsGesture
@@ -312,15 +427,7 @@ const PlayerController = (props: PlayerControllerProps) => {
           {animation.error && !animation.needsGesture && <Button onClick={animation.unlock}>Reintentar audio</Button>}
         </div>
       )}
-      <PlayerTextOverlay
-        queueItem={queueItem as QueueItem}
-        nextQueueItem={nextQueueItem as QueueItem}
-        isAtQueueEnd={player.isAtQueueEnd}
-        isQueueEmpty={!queue.result.length}
-        isErrored={player.isErrored}
-        width={props.width}
-        height={props.height}
-      />
+      {!showScene && idleOverlay}
       {roomPrefs?.qr?.isEnabled && (
         <PlayerQR
           height={props.height}

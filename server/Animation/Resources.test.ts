@@ -107,3 +107,16 @@ it('prepares enabled automatic events before disabled families and optional manu
   expect(ids.indexOf('z-close')).toBeLessThan(ids.indexOf('a-promotion'))
   expect(ids.indexOf('z-applause')).toBeLessThan(ids.indexOf('b-roll'))
 })
+
+it('prepares the selected ambience beyond the bounded catalog window', () => {
+  for (let i = 0; i < 40; i++) {
+    const id = `bed-${String(i).padStart(3, '0')}`
+    createResource({ id, roomId: 1, kind: 'ambience', title: id, metadata: { ...metadata, automatic: true } })
+    completeResource(id, { filename: 'test.mp3', mime: 'audio/mpeg', checksum: id, durationMs: 1000, size: 100 })
+  }
+  Animation.control(1, Animation.state(1).controlVersion, { enabled: true, ambienceEnabled: true })
+  expect(preparationClips(1).some(clip => clip.id === 'bed-039')).toBe(false)
+  Animation.control(1, Animation.state(1).controlVersion, { ambienceClipId: 'bed-039' })
+  expect(preparationClips(1)[0].id).toBe('bed-039')
+  expect(preparationClips(1).length).toBeLessThanOrEqual(24)
+})

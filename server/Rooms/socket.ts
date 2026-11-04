@@ -1,5 +1,6 @@
-import Rooms from './Rooms.js'
+import Rooms, { STATUSES } from './Rooms.js'
 import { getQueuePrefsValidationError, normalizeQueuePrefs } from '../../shared/queueRules.js'
+import { normalizeTransitionVideoPrefs } from '../../shared/transitionVideo.js'
 import {
   ROOM_PREFS_PUSH_REQUEST,
   ROOM_PREFS_PUSH,
@@ -33,15 +34,24 @@ const ACTION_HANDLERS = {
       })
     }
 
+    const sockets = await sock.server.in(Rooms.prefix(roomId)).fetchSockets()
+    // Read after socket discovery so an intervening background save is retained.
+    const room = Rooms.get(roomId, { status: STATUSES }).entities[roomId]
+    if (!room) {
+      return acknowledge({
+        type: ROOM_PREFS_PUSH_REQUEST + _ERROR,
+        error: 'No se encontró la sala',
+      })
+    }
+
     const normalizedPayload = {
       ...payload,
       prefs: {
         ...prefs,
         queue: normalizeQueuePrefs(prefs.queue),
+        transitionVideo: normalizeTransitionVideoPrefs(room.prefs?.transitionVideo),
       },
     }
-
-    const sockets = await sock.server.in(Rooms.prefix(roomId)).fetchSockets()
 
     for (const s of sockets) {
       if (s?.user.isAdmin) {

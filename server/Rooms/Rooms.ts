@@ -4,6 +4,7 @@ import { db } from '../lib/Database.js'
 import { ValidationError } from '../lib/Errors.js'
 import { getQueuePrefsValidationError, normalizeQueuePrefs } from '../../shared/queueRules.js'
 import { TABLE_MODES, tableMode } from '../../shared/tableAccess.js'
+import { normalizeTransitionVideoPrefs } from '../../shared/transitionVideo.js'
 
 const NAME_MIN_LENGTH = 1
 const NAME_MAX_LENGTH = 50
@@ -67,6 +68,7 @@ class Rooms {
       row.prefs = {
         ...prefs,
         queue: normalizeQueuePrefs(prefs.queue),
+        transitionVideo: normalizeTransitionVideoPrefs(prefs.transitionVideo),
       }
       delete row.data
 
@@ -106,6 +108,7 @@ class Rooms {
       // Live animation controls have their own versioned update path. A stale
       // room editor must not re-enable an animator that an operator stopped.
       ...(typeof roomId === 'number' ? { animation: Rooms.get(roomId, { status: STATUSES }).entities[roomId]?.prefs?.animation } : {}),
+      transitionVideo: normalizeTransitionVideoPrefs(),
       queue: normalizeQueuePrefs(prefs?.queue),
       tables: { mode: tableMode(prefs) },
     }
@@ -129,12 +132,15 @@ class Rooms {
         // empty string unsets password
         : sql`password = ${password === '' ? null : await crypto.hash(password)},`
 
+      // Preserve the background at write time, including saves made while the
+      // password hash above was pending. Only its revision-checked store may edit it.
       query = sql`
         UPDATE rooms
         SET name = ${name},
             ${passwordSql}
             status = ${status},
-            data = json_set(data, '$.prefs', json(${JSON.stringify(normalizedPrefs)}))
+            data = json_set(data, '$.prefs', json_set(json(${JSON.stringify(normalizedPrefs)}),
+              '$.transitionVideo', json(COALESCE(json_extract(data, '$.prefs.transitionVideo'), ${JSON.stringify(normalizeTransitionVideoPrefs())}))))
         WHERE roomId = ${roomId}
       `
     } else {

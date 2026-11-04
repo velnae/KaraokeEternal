@@ -8,10 +8,11 @@ import Queue from '../Queue/Queue.js'
 import Animation from '../Animation/Animation.js'
 import { assertResourceUnused } from '../Animation/Resources.js'
 import Greetings from './Greetings.js'
-import { planGreetingTransition } from './transition.js'
+import { planGreetingTransition, prepareGreetingTransition } from './transition.js'
 import { GREETING_START_MS, type Greeting, type GreetingAsset, type GreetingPreparation } from '../../shared/greetings.js'
 import { heardAt, voiceBudget } from '../Animation/selection.js'
 import * as catalog from '../Animation/catalog.js'
+import * as audioRouter from './audioRouter.js'
 
 let directory: string
 let socketId: string
@@ -64,6 +65,38 @@ it('keeps one introduction, complete greeting and optional bed inside the transi
   expect(short.durationMs).toBe(5250)
   expect(planGreetingTransition(item, prepared(item, 19000, 3000), ready, 120000, 22500)?.assets.map(item => item.role)).toEqual(['greeting', 'bed'])
   expect(planGreetingTransition(item, prepared(item, 19000, 3000), ready, 120000, 18000)).toBeNull()
+})
+
+it('uses the room ambience selection for greeting beds without replacing unavailable sounds', async () => {
+  const { queueId } = request()
+  vi.spyOn(audioRouter, 'getGreetingAudioAsset').mockResolvedValue(asset('greeting', 3000))
+  const bed = { ...asset('bed', 10000), approvedForAuto: true, modes: ['mixed' as const] }
+  const other = { ...bed, id: 'other-bed', checksum: 'o'.repeat(64) }
+  const clips = vi.spyOn(catalog, 'catalogClips').mockReturnValue([bed, other])
+  Animation.control(1, 0, { ambienceClipId: other.id })
+  expect((await prepareGreetingTransition(1, queueId))?.assets.map(asset => asset.id)).toEqual(['greeting', 'other-bed'])
+  clips.mockReturnValue([bed])
+  expect((await prepareGreetingTransition(1, queueId))?.assets.map(asset => asset.id)).toEqual(['greeting'])
+  Animation.control(1, 1, { ambienceClipId: null })
+  expect((await prepareGreetingTransition(1, queueId))?.assets.map(asset => asset.id)).toEqual(['greeting', 'bed'])
+})
+
+it('allows a greeting over its own transition bed and leaves the bed alive for music loading', () => {
+  const { item, queueId } = request()
+  const bed = { ...asset('bed', 10000), approvedForAuto: true, modes: ['mixed' as const] }
+  vi.spyOn(catalog, 'catalogClips').mockReturnValue([bed])
+  Animation.control(1, 0, { ambienceEnabled: true })
+  const identity = { roomId: 1, userId: 1, socketId }
+  Animation.ready(identity, true, [bed.checksum], true)
+  const epoch = Animation.state(1).playerEpoch
+  const ambience = Animation.reserveTransitionAmbience(identity, epoch, { queueId: -1 }, { sourceQueueId: null, expectedNextQueueId: queueId })!
+  expect(ambience).toBeTruthy()
+  vi.advanceTimersByTime(2000)
+  const grant = Greetings.reserve(1, socketId, queueId, {}, undefined, prepared(item), ready, 1)!
+  const intervention = grant.transition!.intervention
+  Animation.event(identity, intervention.interventionId, epoch, 'STARTED')
+  Animation.event(identity, intervention.interventionId, epoch, 'ENDED')
+  expect(Animation.ambience(1)?.id).toBe(ambience.id)
 })
 
 it('prioritizes the full greeting over the intro for the shared voice budget', () => {

@@ -38,14 +38,16 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       for (const key of ['enabled', 'microphoneOccupied', 'automation', 'ambienceEnabled']) if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error('Control no válido')
       for (const key of ['volume', 'ambienceVolume']) if (input[key] !== undefined && (!Number.isFinite(input[key]) || input[key] < 0 || input[key] > 1)) throw new Error('Volumen no válido')
       if (input.profile !== undefined && !['dinner', 'mixed', 'party'].includes(input.profile)) throw new Error('Perfil no válido')
+      if (input.ambienceClipId !== undefined && input.ambienceClipId !== null && !isId(input.ambienceClipId)) throw new Error('Ambiente no válido')
       if (input.cutoffHour !== undefined && (!Number.isInteger(input.cutoffHour) || input.cutoffHour < 0 || input.cutoffHour > 23)) throw new Error('Hora de corte no válida')
       if (input.events !== undefined && (!input.events || typeof input.events !== 'object' || Array.isArray(input.events)
         || Object.entries(input.events).some(([key, value]) => !VOICE_FAMILIES.includes(key as typeof VOICE_FAMILIES[number]) || typeof value !== 'boolean'))) throw new Error('Eventos no válidos')
       Animation.control(roomId, input.controlVersion, input)
     } else if (type === ANIMATION_READY) {
-      if (typeof input.audioUnlocked !== 'boolean' || !Array.isArray(input.readyClips) || input.readyClips.length > 30) throw new Error('Preparación no válida')
+      if (typeof input.audioUnlocked !== 'boolean' || !Array.isArray(input.readyClips) || input.readyClips.length > 30
+        || (input.transitionBed !== undefined && typeof input.transitionBed !== 'boolean')) throw new Error('Preparación no válida')
       const hashes = new Set(catalogClips(roomId).map(clip => clip.checksum))
-      Animation.ready(identity, input.audioUnlocked, input.readyClips.filter(hash => hashes.has(hash)))
+      Animation.ready(identity, input.audioUnlocked, input.readyClips.filter(hash => hashes.has(hash)), input.transitionBed === true)
     } else if (type === ANIMATION_RESERVE || type === ANIMATION_AUTO) {
       if ((type === ANIMATION_RESERVE && !isId(input.interventionId)) || !isId(input.transitionId) || typeof input.contextKey !== 'string'
         || input.contextKey.length > 100000 || !Number.isInteger(input.playerEpoch)
@@ -69,9 +71,13 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
     } else if (type === ANIMATION_AMBIENCE) {
       if (!Number.isInteger(input.playerEpoch) || (input.offsetMs !== undefined && (!Number.isFinite(input.offsetMs) || input.offsetMs < 0))) throw new Error('Permiso de ambiente no válido')
       if (input.renewId !== undefined && !isId(input.renewId)) throw new Error('Permiso de ambiente no válido')
+      if (input.transition !== undefined && (!input.transition || typeof input.transition !== 'object' || Array.isArray(input.transition) || input.renewId
+        || ![input.transition.sourceQueueId, input.transition.expectedNextQueueId].every(id => id === null || (Number.isInteger(id) && id >= 0)))) throw new Error('Transición de ambiente no válida')
       ambience = input.renewId
         ? Animation.renewAmbience(identity, input.playerEpoch, input.renewId, sock._lastPlayerStatus ?? {})
-        : Animation.reserveAmbience(identity, input.playerEpoch, sock._lastPlayerStatus ?? {}, input.clipId, input.offsetMs)
+        : input.transition
+          ? Animation.reserveTransitionAmbience(identity, input.playerEpoch, sock._lastPlayerStatus ?? {}, input.transition)
+          : Animation.reserveAmbience(identity, input.playerEpoch, sock._lastPlayerStatus ?? {}, input.clipId, input.offsetMs)
     } else if (type === ANIMATION_AMBIENCE_STOP) {
       if (!isId(input.id)) throw new Error('Permiso de ambiente no válido')
       Animation.stopAmbience(identity, input.id)

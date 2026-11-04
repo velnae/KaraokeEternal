@@ -1,11 +1,11 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useAppSelector } from 'store/hooks'
 import Button from 'components/Button/Button'
-import { animationRequest, syncAnimation } from 'lib/animationApi'
-import { ANIMATION_CONTROL, ANIMATION_SESSION, animationPrefs, familyLabels, VOICE_FAMILIES } from 'shared/animation'
+import { animationRequest, fetchAnimationClips, syncAnimation } from 'lib/animationApi'
+import { ANIMATION_CONTROL, ANIMATION_SESSION, animationPrefs, eligibleAmbience, familyLabels, VOICE_FAMILIES, type AnimationClip } from 'shared/animation'
 import styles from './PhaseTwo.css'
 
-export default function OperationControls ({ settings = false }: { settings?: boolean }) {
+export default function OperationControls ({ settings = false, ambienceOnly = false }: { settings?: boolean, ambienceOnly?: boolean }) {
   const { snapshot, connected } = useAppSelector(state => state.animation)
   const roomId = useAppSelector(state => state.user.roomId)
   const current = snapshot?.roomId === roomId ? snapshot : null
@@ -14,6 +14,24 @@ export default function OperationControls ({ settings = false }: { settings?: bo
   const [busy, setBusy] = useState(false)
   const [volume, setVolume] = useState<number | null>(null)
   const [ambience, setAmbience] = useState<number | null>(null)
+  const [catalog, setCatalog] = useState<{ roomId: number, clips: AnimationClip[] } | null>(null)
+  const [catalogError, setCatalogError] = useState('')
+  const [catalogRetry, retryCatalog] = useState(0)
+  useEffect(() => {
+    if (!settings && !ambienceOnly) return
+    let alive = true
+    setCatalog(null)
+    setCatalogError('')
+    void fetchAnimationClips().then((clips): void => {
+      if (alive) setCatalog({ roomId, clips })
+      return undefined
+    }).catch(() => {
+      if (alive) setCatalogError('No se pudieron cargar los ambientes. Vuelva a intentarlo.')
+    })
+    return () => {
+      alive = false
+    }
+  }, [settings, ambienceOnly, roomId, current?.catalogVersion, connected, catalogRetry])
   const inFlight = useRef(false)
   const send = async (type: string, payload: object) => {
     if (inFlight.current) return
@@ -35,11 +53,96 @@ export default function OperationControls ({ settings = false }: { settings?: bo
   const session = current?.session
   const commit = (key: 'volume' | 'ambienceVolume', value: number) => {
     if (disabled || inFlight.current) return
+    if (value === Math.round(prefs[key] * 100)) {
+      if (key === 'volume') setVolume(null)
+      else setAmbience(null)
+      return
+    }
     void control({ [key]: value / 100 }).finally(() => {
       setVolume(null)
       setAmbience(null)
     })
   }
+  const ambienceVolume = (
+    <label>
+      Volumen de ambiente
+      <output>
+        {ambience ?? Math.round(prefs.ambienceVolume * 100)}
+        %
+      </output>
+      <input
+        type='range'
+        aria-label='Volumen de ambiente'
+        min='0'
+        max='100'
+        step='5'
+        value={ambience ?? Math.round(prefs.ambienceVolume * 100)}
+        disabled={disabled}
+        onChange={event => setAmbience(Number(event.target.value))}
+        onPointerUp={event => commit('ambienceVolume', Number(event.currentTarget.value))}
+        onBlur={event => commit('ambienceVolume', Number(event.currentTarget.value))}
+        onKeyUp={(event) => {
+          if (['Home', 'End', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(event.key)) commit('ambienceVolume', Number(event.currentTarget.value))
+        }}
+      />
+    </label>
+  )
+  const ambienceToggle = (
+    <label className={styles.check}>
+      <input type='checkbox' aria-label='Sonido de pausa' checked={prefs.ambienceEnabled} disabled={disabled} onChange={event => void control({ ambienceEnabled: event.target.checked })} />
+      Ambiente entre canciones
+    </label>
+  )
+  const catalogReady = catalog?.roomId === roomId
+  const available = eligibleAmbience(catalogReady ? catalog.clips : [], { profile: prefs.profile })
+  const selectedUnavailable = !!prefs.ambienceClipId && !available.some(clip => clip.id === prefs.ambienceClipId)
+  const ambienceSelection = (
+    <label>
+      Ambiente a reproducir
+      <select
+        aria-label='Ambiente a reproducir'
+        value={prefs.ambienceClipId ?? ''}
+        disabled={disabled || !catalogReady}
+        onChange={event => void control({ ambienceClipId: event.target.value || null })}
+      >
+        <option value=''>Todos los activos (rotación)</option>
+        {selectedUnavailable && <option value={prefs.ambienceClipId!} disabled>Ambiente seleccionado no disponible</option>}
+        {available.map(clip => <option key={clip.id} value={clip.id}>{clip.title}</option>)}
+      </select>
+    </label>
+  )
+  const ambienceAvailability = (
+    <>
+      <p className={styles.hint}>Se usan ambientes activos, preparados y habilitados para el perfil de sala. La selección también se aplica al fondo de anuncios y saludos; las voces en curso conservan su ambiente hasta terminar.</p>
+      {catalogError
+        ? (
+            <div className={styles.notice} role='alert'>
+              {catalogError}
+              <div className={styles.actions}><Button onClick={() => retryCatalog(value => value + 1)}>Reintentar carga de ambientes</Button></div>
+            </div>
+          )
+        : !catalogReady
+            ? <p role='status' className={styles.hint}>Cargando ambientes…</p>
+            : selectedUnavailable
+              ? <p role='status' className={styles.notice}>El ambiente seleccionado ya no está disponible para este perfil. Elija otro o «Todos los activos» para recuperar el sonido.</p>
+              : available.length === 0 && <p role='status' className={styles.notice}>No hay ambientes disponibles para este perfil. Active o prepare uno en Audios → Ambientes.</p>}
+    </>
+  )
+  if (ambienceOnly) return (
+    <section className={`${styles.operation} ${styles.ambienceOnly}`} aria-label='Sonido de pausa del reproductor'>
+      <h3>Sonido de pausa</h3>
+      <p className={styles.hint}>Los cambios se aplican al reproductor al terminar el ajuste. La vista previa del video sigue sin sonido.</p>
+      {ambienceToggle}
+      <div className={styles.settingsRow}>
+        {ambienceSelection}
+        {ambienceVolume}
+      </div>
+      {ambienceAvailability}
+      <p className={styles.hint}>El ambiente mantiene este volumen durante los anuncios y saludos. El volumen de voz se ajusta por separado.</p>
+      {disabled && <p role='status' className={styles.notice}>{busy ? 'Aplicando el ajuste de sonido…' : 'Conectando con la sala… Los controles se habilitarán al recuperar la conexión.'}</p>}
+      {error && <p role='alert' className={styles.notice}>{error}</p>}
+    </section>
+  )
   return (
     <section className={styles.operation} aria-label={settings ? 'Configuración del animador' : 'Funcionamiento del animador'}>
       {!settings
@@ -89,19 +192,11 @@ export default function OperationControls ({ settings = false }: { settings?: bo
                   </output>
                   <input type='range' aria-label='Volumen de voz' min='0' max='100' step='5' value={volume ?? Math.round(prefs.volume * 100)} disabled={disabled} onChange={event => setVolume(Number(event.target.value))} onPointerUp={event => commit('volume', Number(event.currentTarget.value))} onBlur={event => commit('volume', Number(event.currentTarget.value))} onKeyUp={(event) => { if (['Home', 'End', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(event.key)) commit('volume', Number(event.currentTarget.value)) }} />
                 </label>
-                <label>
-                  Volumen de ambiente
-                  <output>
-                    {ambience ?? Math.round(prefs.ambienceVolume * 100)}
-                    %
-                  </output>
-                  <input type='range' aria-label='Volumen de ambiente' min='0' max='100' step='5' value={ambience ?? Math.round(prefs.ambienceVolume * 100)} disabled={disabled} onChange={event => setAmbience(Number(event.target.value))} onPointerUp={event => commit('ambienceVolume', Number(event.currentTarget.value))} onKeyUp={(event) => { if (['Home', 'End', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) commit('ambienceVolume', Number(event.currentTarget.value)) }} />
-                </label>
+                {ambienceVolume}
+                {ambienceSelection}
               </div>
-              <label className={styles.check}>
-                <input type='checkbox' aria-label='Sonido de pausa' checked={prefs.ambienceEnabled} disabled={disabled} onChange={event => void control({ ambienceEnabled: event.target.checked })} />
-                Ambiente entre canciones
-              </label>
+              {ambienceToggle}
+              {ambienceAvailability}
               <details className={styles.settingsDetails}>
                 <summary>Eventos automáticos</summary>
                 <div className={styles.events}>

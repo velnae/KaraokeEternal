@@ -21,6 +21,13 @@
 .events input, .check input { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--cyan); }
 .settingsRow .check { display: flex; }
 .settingsRow input[type='range'] { accent-color: var(--cyan); }
+.ambienceOnly { max-width: 960px; margin-top: 24px; border: 1px solid var(--edge); border-radius: 12px; background: var(--equipment); }
+.ambienceOnly h3 { margin: 0 0 8px; font-size: 20px; font-weight: 600; }
+.ambienceOnly .settingsRow { margin-top: 12px; }
+.settingsRow select { min-height: 44px; padding: 10px 32px 10px 12px; border: 1px solid var(--edge); border-radius: 8px; background-color: var(--stage); color: var(--lyrics); font: inherit; }
+.settingsRow select { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23a6b2c7' d='M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z'/></svg>"); }
+.settingsRow select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.ambienceOnly input[type='range'] { min-height: 44px; }
 .jobs { list-style: none; margin: 20px 0 0; padding: 0; }
 .jobs li { border-top: 1px solid var(--edge); padding: 18px 0; }
 .jobs p { line-height: 1.5; overflow-wrap: anywhere; }

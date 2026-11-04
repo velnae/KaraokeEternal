@@ -5,6 +5,7 @@ import { buildRoundRobinQueue } from '../../shared/roundRobin.js'
 import { buildPlayerHistory } from '../../shared/playerHistory.js'
 import { normalizeQueuePrefs } from '../../shared/queueRules.js'
 import { greetingDuration, greetingMessageLimit, validateGreeting, type Greeting, type GreetingGrant, type GreetingSnapshot, type GreetingAudioStatus, type GreetingPreparation, type GreetingVoiceStatus, type GreetingPlaybackPrefs } from '../../shared/greetings.js'
+import { captureTransitionBackground } from '../TransitionVideo/Playback.js'
 import Animation from '../Animation/Animation.js'
 import { catalogClips } from '../Animation/catalog.js'
 import { greetingPlayback, planGreetingTransition } from './transition.js'
@@ -212,6 +213,7 @@ export default class Greetings {
     const song = order.entities[next!]
     if (reason || !selected) return null
     return { turnKey, until, displayMs, items: [{ ...selected, turnKey, status: 'RESERVED' }], transition,
+      background: transition?.intervention.background ?? captureTransitionBackground(roomId, `greeting:${roomId}:${turnKey}`, until),
       performer: { name: song.userDisplayName, tableLabel: song.tableLabelSnapshot ?? null, requestIntent: song.requestIntent ?? 'UNKNOWN', title: song.title } }
   }
 

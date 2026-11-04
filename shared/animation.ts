@@ -1,5 +1,6 @@
 import { normalizeQueuePrefs } from './queueRules.js'
 import type { QueueItem, OptimisticQueueItem } from './types.js'
+import type { TransitionVideoBackground } from './transitionVideo.js'
 
 export const ANIMATION_REQUEST = 'server/ANIMATION_REQUEST'
 export const ANIMATION_CANCEL = 'server/ANIMATION_CANCEL'
@@ -39,6 +40,7 @@ export interface AnimationPrefs {
   profile?: RoomProfile
   ambienceEnabled?: boolean
   ambienceVolume?: number
+  ambienceClipId?: string | null
   cutoffHour?: number
   events?: Partial<Record<VoiceFamily, boolean>>
 }
@@ -51,10 +53,16 @@ export const animationPrefs = (value?: Partial<AnimationPrefs>) => ({
   profile: (['dinner', 'mixed', 'party'].includes(value?.profile ?? '') ? value!.profile : 'mixed') as RoomProfile,
   ambienceEnabled: value?.ambienceEnabled === true,
   ambienceVolume: typeof value?.ambienceVolume === 'number' && Number.isFinite(value.ambienceVolume) ? Math.max(0, Math.min(1, value.ambienceVolume)) : 0.2,
+  ambienceClipId: typeof value?.ambienceClipId === 'string' && value.ambienceClipId.length > 0 ? value.ambienceClipId : null,
   cutoffHour: Number.isInteger(value?.cutoffHour) && value!.cutoffHour! >= 0 && value!.cutoffHour! <= 23 ? value!.cutoffHour! : 4,
   events: Object.fromEntries(VOICE_FAMILIES.map(family => [family, value?.events?.[family] ?? true])) as Record<VoiceFamily, boolean>,
 })
 export const clipDurationLimit = (kind: AudioKind = 'voice', effectType?: EffectType) => kind === 'ambience' ? 35000 : kind === 'effect' ? effectType === 'transition' ? 12000 : 4500 : 10000
+
+export const TRANSITION_INTRO_MS = 2000
+export const TRANSITION_BED_MS = 40000
+// The operator owns ambience level independently of the voice channel.
+export const ambienceBedVolume = (prefs: AnimationPrefs) => prefs.ambienceVolume ?? 0.2
 
 export interface AnimationClip {
   id: string
@@ -76,8 +84,16 @@ export interface AnimationClip {
   validUntil?: number
   loop?: boolean
 }
+// Input is the room-scoped active, prepared catalog; selection never falls back
+// to another sound when a fixed ambience becomes unavailable.
+export function eligibleAmbience (clips: AnimationClip[], prefs: Pick<AnimationPrefs, 'profile' | 'ambienceClipId'>, now = Date.now()) {
+  return clips.filter(clip => clip.kind === 'ambience' && clip.approvedForAuto && clip.modes?.includes(prefs.profile ?? 'mixed')
+    && (!clip.validUntil || clip.validUntil > now) && (!prefs.ambienceClipId || clip.id === prefs.ambienceClipId))
+}
+
 export type InterventionStatus = 'PENDING' | 'RESERVED' | 'PLAYING' | 'PLAYED' | 'CANCELLED' | 'EXPIRED' | 'FAILED' | 'INTERRUPTED' | 'UNCERTAIN'
 export interface Intervention {
+  background?: TransitionVideoBackground | null
   interventionId: string
   roomId: number
   requestId: string
@@ -127,6 +143,8 @@ export interface AnimationSession {
   openedBy: number
 }
 export interface AmbienceGrant {
+  transition?: { sourceQueueId: number | null, expectedNextQueueId: number | null }
+  background?: TransitionVideoBackground | null
   rotate?: boolean
   id: string
   clip: AnimationClip
@@ -165,6 +183,11 @@ export function interventionAssets (row: Intervention): AnimationClip[] {
     if (Array.isArray(sequence) && sequence.length) return sequence
   } catch { /* Legacy rows contain only a single clip snapshot. */ }
   return [{ id: row.clipId, checksum: row.clipChecksum, durationMs: row.durationMs, displayText: row.displayText, title: '', source: '', license: '' }]
+}
+
+export function interventionPlayback (row: Intervention) {
+  const assets = interventionAssets(row)
+  return { sequence: assets.filter(asset => asset.kind !== 'ambience'), bed: assets.find(asset => asset.kind === 'ambience') }
 }
 
 // Compare scheduling inputs, not computed order: the player remains the scheduler.

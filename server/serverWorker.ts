@@ -24,6 +24,8 @@ import roomsRouter from './Rooms/router.js'
 import userRouter from './User/router.js'
 import tablesRouter from './Tables/router.js'
 import animationRouter from './Animation/router.js'
+import transitionVideoRouter, { isTransitionVideoPath } from './TransitionVideo/router.js'
+import { startTransitionVideos } from './TransitionVideo/Service.js'
 import playlistsRouter from './Playlists/router.js'
 import { startHousePlaylists } from './Playlists/Playlists.js'
 import Animation from './Animation/Animation.js'
@@ -78,6 +80,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     const stopProduction = await startProduction(path.join(env.KES_PATH_DATA, 'animation'), roomId => Animation.publish(roomId))
     const stopLocalTts = startLocalTts()
     const stopGreetingAudio = startGreetingAudio(path.join(env.KES_PATH_DATA, 'greetings'))
+    const stopTransitionVideos = await startTransitionVideos(path.join(env.KES_PATH_DATA, 'transition-video'))
     socketActions(io, jwtKey)
     const stopHousePlaylists = startHousePlaylists(io)
 
@@ -109,7 +112,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     shutdownHandlers.push(async () => {
       stopAnimation()
       stopHousePlaylists()
-      await Promise.allSettled([stopGreetingAudio(), stopLocalTts()])
+      await Promise.allSettled([stopGreetingAudio(), stopLocalTts(), stopTransitionVideos()])
       await stopProduction()
       return new Promise((resolve) => {
       // also calls http server's close method, which ultimately handles the callback
@@ -159,7 +162,8 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   app.use(koaLogger((str, args) => (args.length === 6 && args[3] >= 500) ? log.error(str) : log.debug(str)))
 
   app.use(koaFavicon(path.join(env.KES_PATH_ASSETS, 'favicon.ico')))
-  app.use(koaRange)
+  // Background media owns range handling, including suffixes and 416 responses.
+  app.use((ctx, next) => isTransitionVideoPath(ctx.path, urlPath) ? next() : koaRange(ctx, next))
 
   // all http requests
   app.use(async (ctx, next) => {
@@ -198,6 +202,8 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   const parseBody = koaBody({ multipart: true })
   const parseAudio = koaBody({ multipart: true, formidable: { maxFileSize: 20 * 1024 * 1024, maxTotalFileSize: 20 * 1024 * 1024, maxFiles: 1, maxFieldsSize: 64 * 1024 } })
   app.use((ctx, next) => {
+    // This router authenticates before its own bounded parsers touch the body.
+    if (isTransitionVideoPath(ctx.path, urlPath)) return next()
     const audioPath = ctx.path.slice(`${urlPath}api/animation/resources/`.length)
     if (ctx.path.startsWith(`${urlPath}api/animation/resources/`) && (audioPath === 'upload' || /^[\w-]+\/replace\/?$/.test(audioPath))) {
       if (!ctx.user?.isAdmin || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
@@ -219,6 +225,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(roomsRouter.routes())
   baseRouter.use(userRouter.routes())
   baseRouter.use(tablesRouter.routes())
+  baseRouter.use(transitionVideoRouter.routes())
   baseRouter.use(animationRouter.routes())
   baseRouter.use(playlistsRouter.routes())
   app.use(baseRouter.routes())

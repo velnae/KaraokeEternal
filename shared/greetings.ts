@@ -1,5 +1,6 @@
 import type { AnimationClip, Intervention } from './animation.js'
 import type { RequestIntent } from './requestIntent.js'
+import type { TransitionVideoBackground } from './transitionVideo.js'
 
 export const GREETINGS = 'server/GREETINGS'
 export const GREETING_LIMIT = 220
@@ -50,6 +51,7 @@ export interface GreetingSnapshot {
   turns: { key: number, queueIds: number[], userId: number }[]
 }
 export interface GreetingGrant {
+  background?: TransitionVideoBackground | null
   turnKey: number
   items: Greeting[]
   until: number

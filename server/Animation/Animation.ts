@@ -3,17 +3,18 @@ import type { Server } from 'socket.io'
 import { db } from '../lib/Database.js'
 import Queue from '../Queue/Queue.js'
 import {
-  ANIMATION_STATE, ANIMATION_LIMITS, animationContext, animationPrefs,
+  ANIMATION_STATE, ANIMATION_LIMITS, TRANSITION_BED_MS, animationContext, animationPrefs, eligibleAmbience,
   type AnimationClip, type AnimationRoomState, type AnimationSnapshot, type Intervention,
-  type AnimationPrefs, type AmbienceGrant, type VoiceFamily, interventionAssets,
+  type AnimationPrefs, type AmbienceGrant, type VoiceFamily, interventionAssets, interventionPlayback,
 } from '../../shared/animation.js'
 import { catalogClips, catalogVersion } from './catalog.js'
 import { currentSession, operateSession, pendingEvent } from './sessions.js'
 import { categoryEffects, heardAt, profileIntervals, selectAnnouncement, supportingEffects, voiceBudget } from './selection.js'
 import { backfillAudioUsage, leastUsedAudio, recordAudioUsage } from './usage.js'
 import { GREETING_START_MS } from '../../shared/greetings.js'
+import { captureTransitionBackground, leasedTransitionBackground } from '../TransitionVideo/Playback.js'
 
-type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[] }
+type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[], transitionBed: boolean }
 export interface AnimationIdentity { roomId: number, userId: number, socketId: string }
 export interface Reservation {
   interventionId: string
@@ -46,7 +47,8 @@ export default class Animation {
   }
 
   static active (roomId: number) {
-    return db.get<Intervention>(`SELECT * FROM animationInterventions WHERE roomId = ? AND status IN ${activeStatuses}`, [roomId]) ?? null
+    const row = db.get<Intervention>(`SELECT * FROM animationInterventions WHERE roomId = ? AND status IN ${activeStatuses}`, [roomId])
+    return row ? { ...row, background: leasedTransitionBackground(`animation:${row.interventionId}`) } : null
   }
 
   static history (roomId: number) {
@@ -83,13 +85,22 @@ export default class Animation {
     return !!db.get(`SELECT 1 FROM greetingControls WHERE roomId=? AND audioEnabled=1 AND paused=0 AND json_extract(playbackJSON,'$.enabled')=1`, [roomId])
   }
 
+  static transitionAmbience (identity: AnimationIdentity, nextQueueId: number | null, sourceQueueId?: number | null) {
+    const grant = Animation.ambience(identity.roomId)
+    return grant?.transition && grant.ownerSocketId === identity.socketId && grant.playerEpoch === owners.get(identity.roomId)?.epoch
+      && grant.transition.expectedNextQueueId === nextQueueId
+      && (sourceQueueId === undefined || grant.transition.sourceQueueId === sourceQueueId)
+      ? grant
+      : null
+  }
+
   /** Greetings share the same exclusive intervention, epoch and persisted room fence. */
   static reserveGreeting (identity: AnimationIdentity, queueId: number, assets: AnimationClip[], durationMs: number, voiceMs: number, text: string): Intervention | null {
     const owner = owners.get(identity.roomId)
     const snapshot = Animation.snapshot(identity.roomId)
     const now = Date.now()
     if (!owner || owner.socketId !== identity.socketId || !owner.unlocked || !Animation.greetingEnabled(identity.roomId)
-      || snapshot.active || snapshot.blockedUntil > now || snapshot.ambience || snapshot.prefs.volume <= 0
+      || snapshot.active || snapshot.blockedUntil > now || (snapshot.ambience && !Animation.transitionAmbience(identity, queueId)) || snapshot.prefs.volume <= 0
       || Animation.room(identity.roomId).status !== 'open' || voiceMs > (snapshot.voiceBudgetRemainingMs ?? 0)) return null
     if (!assets.length || durationMs <= 0 || durationMs > 25000 - GREETING_START_MS || voiceMs <= 0 || voiceMs > durationMs) throw new Error('La transición supera el tiempo disponible.')
     const id = randomUUID()
@@ -102,6 +113,7 @@ export default class Animation {
     [id, identity.roomId, `greeting-${queueId}`, identity.userId, assets[0].id, assets[0].checksum, text, durationMs, voiceMs,
       owner.epoch, identity.socketId, animationContext(Queue.get(identity.roomId), room.prefs.queue), id, now, until, startBefore, until, `greeting-${queueId}`, JSON.stringify(assets)])
     db.run('UPDATE animationRoomState SET blockedUntil=?,pendingEventJSON=NULL WHERE roomId=?', [until, identity.roomId])
+    captureTransitionBackground(identity.roomId, `animation:${id}`, until)
     return Animation.active(identity.roomId)
   }
 
@@ -166,7 +178,7 @@ export default class Animation {
     if (owners.get(roomId)?.socketId === socketId) return
     Animation.state(roomId)
     db.run('UPDATE animationRoomState SET playerEpoch = playerEpoch + 1 WHERE roomId = ?', [roomId])
-    owners.set(roomId, { socketId, epoch: Animation.state(roomId).playerEpoch, unlocked: false, readyClips: [] })
+    owners.set(roomId, { socketId, epoch: Animation.state(roomId).playerEpoch, unlocked: false, readyClips: [], transitionBed: false })
     Animation.publish(roomId)
   }
 
@@ -179,11 +191,12 @@ export default class Animation {
     Animation.publish(roomId)
   }
 
-  static ready (identity: AnimationIdentity, unlocked: boolean, clips: string[]) {
+  static ready (identity: AnimationIdentity, unlocked: boolean, clips: string[], transitionBed?: boolean) {
     const owner = owners.get(identity.roomId)
     if (owner?.socketId !== identity.socketId) throw new Error('Reproductor sin autoridad')
     owner.unlocked = unlocked
     owner.readyClips = unlocked ? clips : []
+    if (transitionBed !== undefined) owner.transitionBed = transitionBed
     Animation.publish(identity.roomId)
   }
 
@@ -227,6 +240,9 @@ export default class Animation {
     if (version !== state.controlVersion) throw new Error('Los controles cambiaron. Revise el estado actual.')
     const old = animationPrefs(Animation.room(roomId).prefs.animation)
     const prefs = animationPrefs({ ...old, ...patch, events: { ...old.events, ...patch.events } })
+    if (patch.ambienceClipId !== undefined && patch.ambienceClipId !== null
+      && (typeof patch.ambienceClipId !== 'string' || !/^[\w-]{1,100}$/.test(patch.ambienceClipId)
+        || !eligibleAmbience(catalogClips(roomId), prefs).length)) throw new Error('Seleccione un ambiente activo y disponible para el perfil de esta sala.')
     db.exec('SAVEPOINT animation_control')
     try {
       db.run('UPDATE rooms SET data = json_set(data, \'$.prefs.animation\', json(?)) WHERE roomId = ?', [JSON.stringify(prefs), roomId])
@@ -253,9 +269,11 @@ export default class Animation {
     const row = snapshot.active
     if (!row || row.interventionId !== input.interventionId || row.status !== 'PENDING') throw new Error('La solicitud ya no está pendiente')
     if (owner?.socketId !== identity.socketId || input.playerEpoch !== owner.epoch) throw new Error('Reproductor sin autoridad')
-    if (!snapshot.prefs.enabled || snapshot.prefs.volume <= 0 || snapshot.blockedUntil > now || snapshot.ambience
+    const transitionBed = Animation.transitionAmbience(identity, input.expectedNextQueueId, input.sourceQueueId)
+    if (!snapshot.prefs.enabled || snapshot.prefs.volume <= 0 || snapshot.blockedUntil > now || (snapshot.ambience && !transitionBed)
       || input.controlVersion !== snapshot.controlVersion || Animation.room(identity.roomId).status !== 'open') throw new Error('La sala no permite intervenir')
-    if (!owner.unlocked || interventionAssets(row).some(asset => !owner.readyClips.includes(asset.checksum))) throw new Error('El audio no está preparado')
+    const foreground = interventionPlayback(row).sequence
+    if (!owner.unlocked || foreground.some(asset => !owner.readyClips.includes(asset.checksum))) throw new Error('El audio no está preparado')
     if (row.durationMs > (snapshot.voiceBudgetRemainingMs ?? 120000)) {
       Animation.omit(identity.roomId, 'Presupuesto de voz agotado; la solicitud espera sin detener la música.')
       throw new Error('Presupuesto de voz agotado')
@@ -276,12 +294,19 @@ export default class Animation {
     }
     const startBefore = Math.min(now + ANIMATION_LIMITS.startMs, row.expiresAt)
     const leaseUntil = startBefore + row.durationMs + ANIMATION_LIMITS.marginMs
+    // A bed is optional and concurrent, never another sequential track or a
+    // reason to block an otherwise ready announcement.
+    const prefs = animationPrefs(snapshot.prefs)
+    const bed = !transitionBed && owner.transitionBed && prefs.ambienceEnabled && prefs.ambienceVolume > 0
+      ? leastUsedAudio(identity.roomId, eligibleAmbience(catalogClips(identity.roomId), prefs, now).filter(asset => owner.readyClips.includes(asset.checksum)))
+      : undefined
     db.exec('SAVEPOINT animation_reserve')
     try {
       if (input.boundary === 'ended') Queue.transition(identity.roomId, input.sourceQueueId!, 'PLAYED')
       const contextKey = animationContext(Queue.get(identity.roomId), room.prefs.queue)
-      db.run('UPDATE animationInterventions SET status = \'RESERVED\', playerEpoch = ?, ownerSocketId = ?, contextKey = ?, transitionId = ?, startBefore = ?, leaseUntil = ? WHERE interventionId = ?',
-        [owner.epoch, identity.socketId, contextKey, input.transitionId, startBefore, leaseUntil, row.interventionId])
+      db.run('UPDATE animationInterventions SET status = \'RESERVED\', playerEpoch = ?, ownerSocketId = ?, contextKey = ?, transitionId = ?, startBefore = ?, leaseUntil = ?, sequenceJSON=? WHERE interventionId = ?',
+        [owner.epoch, identity.socketId, contextKey, input.transitionId, startBefore, leaseUntil, JSON.stringify([...foreground, ...(bed ? [bed] : [])]), row.interventionId])
+      captureTransitionBackground(identity.roomId, `animation:${row.interventionId}`, leaseUntil)
       db.run('UPDATE animationRoomState SET blockedUntil = ?, lastOmission = NULL WHERE roomId = ?', [leaseUntil, identity.roomId])
       const signal = pendingEvent(identity.roomId)
       if (signal && signal.key !== row.sourceEventKey) {
@@ -363,7 +388,7 @@ export default class Animation {
 
   static automatic (identity: AnimationIdentity, input: Reservation, status: { queueId?: number, isAtQueueEnd?: boolean, isErrored?: boolean }) {
     const roomId = identity.roomId
-    if (Animation.ambience(roomId)) return null
+    if (Animation.ambience(roomId) && !Animation.transitionAmbience(identity, input.expectedNextQueueId, input.sourceQueueId)) return null
     const plan = Animation.automaticPlan(identity, input)
     if (!plan) return null
     const { clip, family, key, session, signal, history, prefs, owner, now } = plan
@@ -379,12 +404,17 @@ export default class Animation {
     if (family === 'closing' || family === 'celebration') {
       const lastClosing = db.get<{ at: number | null }>(`SELECT max(u.startedAt) at FROM audioUsage u JOIN animationInterventions i
         ON i.roomId=u.roomId AND u.sourceId='intervention:'||i.interventionId
-        WHERE u.roomId=? AND i.family='closing' AND u.clipId!=i.clipId`, [roomId])?.at ?? 0
+        WHERE u.roomId=? AND i.family='closing' AND EXISTS(SELECT 1 FROM json_each(i.sequenceJSON)
+          WHERE json_extract(value,'$.id')=u.clipId AND json_extract(value,'$.kind')='effect'
+            AND COALESCE(json_extract(value,'$.category'),'')!='transition')`, [roomId])?.at ?? 0
       addEffect(supportingEffects(catalogClips(roomId), family, prefs.profile, owner.readyClips, history, now, lastClosing))
     }
     if (family === 'celebration') addEffect(categoryEffects(catalogClips(roomId), 'anticipation', prefs.profile, owner.readyClips, now), true)
     if (family === 'turn') addEffect(categoryEffects(catalogClips(roomId), 'transition', prefs.profile, owner.readyClips, now))
     if (['invitation', 'promotion'].includes(family)) addEffect(categoryEffects(catalogClips(roomId), 'notification', prefs.profile, owner.readyClips, now), true)
+    if (input.boundary === 'ended' && input.expectedNextQueueId !== null && !sequence.some(asset => asset.kind === 'effect')) {
+      addEffect(categoryEffects(catalogClips(roomId), 'transition', prefs.profile, owner.readyClips, now))
+    }
     const id = randomUUID()
     db.run(`INSERT INTO animationInterventions(interventionId,roomId,requestId,requestedByUserId,clipId,clipChecksum,displayText,durationMs,status,requestedAt,expiresAt,origin,sessionId,sourceEventKey,family,sequenceJSON)
       VALUES(?,?,?,?,?,?,?,?,'PENDING',?,?,'AUTO',?,?,?,?)`, [id, roomId, key, identity.userId, clip.id, clip.checksum, clip.displayText,
@@ -399,6 +429,32 @@ export default class Animation {
     }
   }
 
+  static reserveTransitionAmbience (identity: AnimationIdentity, epoch: number, status: { queueId?: number, isAtQueueEnd?: boolean, isErrored?: boolean }, transition: NonNullable<AmbienceGrant['transition']>) {
+    const roomId = identity.roomId
+    const snapshot = Animation.snapshot(roomId)
+    const owner = owners.get(roomId)
+    const prefs = animationPrefs(snapshot.prefs)
+    if (owner?.socketId !== identity.socketId || owner.epoch !== epoch) throw new Error('Reproductor sin autoridad')
+    if ((!prefs.enabled && !Animation.greetingEnabled(roomId)) || !prefs.ambienceEnabled || prefs.ambienceVolume === 0
+      || Animation.room(roomId).status !== 'open' || !owner.unlocked || !owner.transitionBed || status.isErrored
+      || snapshot.ambience || snapshot.blockedUntil > Date.now() || (snapshot.active && snapshot.active.status !== 'PENDING')) return null
+    if (transition.sourceQueueId === null) {
+      if (!status.isAtQueueEnd && status.queueId !== -1) throw new Error('La canción todavía ocupa el reproductor')
+    } else {
+      const source = Queue.get(roomId).entities[transition.sourceQueueId]
+      if (status.queueId !== transition.sourceQueueId || !source || !['PLAYING', 'PLAYED'].includes(source.status)) throw new Error('Cambió la canción actual')
+    }
+    if (transition.expectedNextQueueId !== null && Queue.get(roomId).entities[transition.expectedNextQueueId]?.status !== 'APPROVED') throw new Error('El siguiente turno cambió')
+    const clip = leastUsedAudio(roomId, eligibleAmbience(catalogClips(roomId), prefs).filter(clip => owner.readyClips.includes(clip.checksum)))
+    if (!clip) return null
+    const grant: AmbienceGrant = { id: randomUUID(), clip, transition, rotate: false, ownerSocketId: identity.socketId, playerEpoch: epoch,
+      until: Date.now() + TRANSITION_BED_MS, durationMs: TRANSITION_BED_MS, offsetMs: 0 }
+    grant.background = captureTransitionBackground(roomId, `ambience:${grant.id}`, grant.until)
+    db.run('UPDATE animationRoomState SET ambienceJSON=? WHERE roomId=?', [JSON.stringify(grant), roomId])
+    Animation.publish(roomId)
+    return grant
+  }
+
   static reserveAmbience (identity: AnimationIdentity, epoch: number, status: { queueId?: number, isAtQueueEnd?: boolean, isErrored?: boolean }, clipId?: string, offsetMs = 0) {
     const roomId = identity.roomId
     const snapshot = Animation.snapshot(roomId)
@@ -410,7 +466,7 @@ export default class Animation {
       || status.isErrored || !(status.isAtQueueEnd || status.queueId === -1)
       || snapshot.blockedUntil > Date.now() || (snapshot.active && snapshot.active.status !== 'PENDING')
       || snapshot.ambience || !owner.unlocked) return null
-    const clips = catalogClips(roomId).filter(clip => clip.kind === 'ambience' && clip.approvedForAuto && clip.modes?.includes(prefs.profile) && owner.readyClips.includes(clip.checksum))
+    const clips = eligibleAmbience(catalogClips(roomId), prefs).filter(clip => owner.readyClips.includes(clip.checksum))
     const previous = clips.find(clip => clip.id === clipId)
     const completed = previous && offsetMs >= previous.durationMs
     const clip = completed ? leastUsedAudio(roomId, clips.filter(clip => clip.id !== clipId)) ?? (previous.loop !== false ? previous : undefined) : previous ?? leastUsedAudio(roomId, clips)
@@ -419,6 +475,7 @@ export default class Animation {
     const durationMs = Math.min(10000, clip.durationMs - offset)
     const grant: AmbienceGrant = { id: randomUUID(), clip, rotate: new Set(clips.map(clip => clip.checksum)).size > 1, ownerSocketId: identity.socketId, playerEpoch: epoch,
       until: Date.now() + durationMs + 1000, durationMs, offsetMs: offset }
+    grant.background = captureTransitionBackground(roomId, `ambience:${grant.id}`, grant.until)
     db.run('UPDATE animationRoomState SET ambienceJSON=? WHERE roomId=?', [JSON.stringify(grant), roomId])
     Animation.publish(roomId)
     return grant
@@ -437,15 +494,16 @@ export default class Animation {
     const owner = owners.get(identity.roomId)
     if (owner?.socketId !== identity.socketId || owner.epoch !== epoch) throw new Error('Reproductor sin autoridad')
     const prefs = snapshot.prefs
-    if (!grant || grant.id !== id || grant.ownerSocketId !== identity.socketId || grant.playerEpoch !== epoch || !owner.unlocked
+    if (!grant || grant.transition || grant.id !== id || grant.ownerSocketId !== identity.socketId || grant.playerEpoch !== epoch || !owner.unlocked
       || !prefs.enabled || !prefs.automation || !prefs.ambienceEnabled || !prefs.ambienceVolume
       || snapshot.session?.status !== 'OPEN' || Animation.room(identity.roomId).status !== 'open'
       || status.isErrored || !(status.isAtQueueEnd || status.queueId === -1) || snapshot.blockedUntil > Date.now()
       || (snapshot.active && (snapshot.active.status !== 'PENDING' || (owner.readyClips.includes(snapshot.active.clipChecksum) && snapshot.active.durationMs <= (snapshot.voiceBudgetRemainingMs ?? 0))))) return null
-    const clip = catalogClips(identity.roomId).find(clip => clip.id === grant.clip.id && clip.checksum === grant.clip.checksum && clip.modes?.includes(prefs.profile ?? 'mixed'))
-    if (!clip || !owner.readyClips.includes(clip.checksum)) return null
-    const available = catalogClips(identity.roomId).filter(clip => clip.kind === 'ambience' && clip.approvedForAuto && clip.modes?.includes(prefs.profile ?? 'mixed') && owner.readyClips.includes(clip.checksum))
+    const available = eligibleAmbience(catalogClips(identity.roomId), prefs).filter(clip => owner.readyClips.includes(clip.checksum))
+    const clip = available.find(clip => clip.id === grant.clip.id && clip.checksum === grant.clip.checksum)
+    if (!clip) return null
     const renewed = { ...grant, rotate: new Set(available.map(clip => clip.checksum)).size > 1, until: Date.now() + 10000 }
+    renewed.background = captureTransitionBackground(identity.roomId, `ambience:${grant.id}`, renewed.until)
     db.run('UPDATE animationRoomState SET ambienceJSON=? WHERE roomId=?', [JSON.stringify(renewed), identity.roomId])
     Animation.publish(identity.roomId)
     return renewed

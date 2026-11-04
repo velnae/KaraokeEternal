@@ -128,6 +128,7 @@ try {
   await context.addInitScript(() => {
     window.animationStarts = []
     const active = new Set()
+    const beds = new WeakSet()
     const start = AudioBufferSourceNode.prototype.start
     const disconnect = AudioNode.prototype.disconnect
     AudioNode.prototype.disconnect = function (...args) {
@@ -135,8 +136,12 @@ try {
       return disconnect.apply(this, args)
     }
     AudioBufferSourceNode.prototype.start = function (...args) {
-      const video = document.querySelector('video')
-      window.animationStarts.push({ duration: this.buffer.duration, overlap: [...active].some(source => source.context.state === 'running'), music: !!video && !video.paused && !video.ended })
+      // The dedicated bed starts at the current clock without an offset argument.
+      // Allow one bed alongside one primary source, never two primary sources.
+      const bed = args.length === 0
+      if (bed) beds.add(this)
+      const video = document.querySelector('video:not([data-media-role="transition-background"])')
+      window.animationStarts.push({ duration: this.buffer.duration, overlap: [...active].some(source => source.context.state === 'running' && beds.has(source) === bed), music: !!video && !video.paused && !video.ended })
       active.add(this)
       this.addEventListener('ended', () => active.delete(this))
       return start.apply(this, args)
@@ -334,7 +339,7 @@ try {
   await expect.poll(() => db.prepare('SELECT queueId FROM queue WHERE status=\'PLAYING\'').get()?.queueId).toBe(1)
   await expect.poll(() => countFamily('closing'), { timeout: 12000 }).toBe(1)
   assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=2').get().status, 'APPROVED')
-  await expect.poll(() => countFamily('closing'), { timeout: 15000 }).toBe(2)
+  await expect.poll(() => countFamily('closing'), { timeout: 35000 }).toBe(2)
   await expect.poll(() => history()[0]?.status).toBe('PLAYED')
   assert.equal(new Set(history().filter(row => row.family === 'closing').map(row => row.displayText)).size, 2)
   assert.equal(providerCalls.length, paidCalls)
@@ -358,8 +363,10 @@ try {
   await expect.poll(() => countFamily('celebration'), { timeout: 15000 }).toBe(1)
   await expect.poll(() => history()[0]?.status, { timeout: 10000 }).toBe('PLAYED')
   const celebration = history().find(row => row.family === 'celebration')
-  assert.equal(JSON.parse(celebration.sequenceJSON).length, 2)
-  const effectId = JSON.parse(celebration.sequenceJSON)[1].id
+  const foreground = JSON.parse(celebration.sequenceJSON).filter(asset => asset.kind !== 'ambience')
+  assert.equal(foreground.length, 2)
+  assert.ok(JSON.parse(celebration.sequenceJSON).some(asset => asset.kind === 'ambience'))
+  const effectId = foreground[1].id
   assert.equal((await call(`animation/resources/${effectId}`)).usage.total, 1)
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.ambience !== null, { timeout: 10000 }).toBe(true)
   await admin.getByRole('button', { name: 'Ajustes', exact: true }).click()

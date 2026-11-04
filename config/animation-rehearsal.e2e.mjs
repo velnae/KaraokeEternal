@@ -126,7 +126,7 @@ try {
     }
     const start = AudioBufferSourceNode.prototype.start
     AudioBufferSourceNode.prototype.start = function (...args) {
-      const video = document.querySelector('video')
+      const video = document.querySelector('video:not([data-media-role="transition-background"])')
       const entry = { checksum: buffers.get(this.buffer), duration: this.buffer.duration, loop: this.loop, startedAt: performance.now(), endedAt: null,
         overlap: [...active].some(source => source.context.state === 'running'), music: !!video && !video.paused && !video.ended }
       window.rehearsalAudio.push(entry)

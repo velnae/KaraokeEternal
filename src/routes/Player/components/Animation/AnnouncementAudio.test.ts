@@ -45,6 +45,11 @@ it('mixes a separate quiet bed and stops both sources without extending the hard
   expect(sources).toHaveLength(2)
   expect(sources[1].stop).toHaveBeenLastCalledWith(25)
   expect(gains[1].gain.linearRampToValueAtTime).toHaveBeenCalledWith(0.1, 0.2)
+  audio.stopForeground()
+  sources[0].onended!()
+  await expect(voice).resolves.toBe('STOPPED')
+  expect(audio.hasBed).toBe(true)
+  expect(sources[1].stop).toHaveBeenCalledTimes(1)
   context.currentTime = 24.9
   const stopping = audio.stopBed(500)
   expect(sources[1].stop).toHaveBeenLastCalledWith(25)
@@ -52,6 +57,7 @@ it('mixes a separate quiet bed and stops both sources without extending the hard
   await expect(voice).resolves.toBe('STOPPED')
   await expect(bed).resolves.toBe('STOPPED')
   await expect(stopping).resolves.toBe('STOPPED')
+  expect(audio.hasBed).toBe(false)
   expect(sources.every(source => source.disconnect.mock.calls.length > 0)).toBe(true)
 })
 

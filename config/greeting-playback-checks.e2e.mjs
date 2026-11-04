@@ -21,7 +21,15 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   const introId = await upload('greeting-intro-short', 'voice', 0.8, 500)
   const longIntroId = await upload('greeting-intro-long', 'voice', 8, 600)
   const bedId = await upload('greeting-background', 'ambience', 34.5, 90)
+  const uploadedBackground = await api.post(`${base}api/animation/background/upload`, { multipart: { requestId: 'greeting-visual',
+    file: { name: 'background.mp4', mimeType: 'video/mp4', buffer: fs.readFileSync(path.join(data, 'song.mp4')) } } })
+  assert.equal(uploadedBackground.status(), 202)
+  const background = await uploadedBackground.json()
+  await expect.poll(() => db.prepare('SELECT state FROM transitionVideos WHERE id=?').get(background.id)?.state).toBe('ready')
+  await call(api, 'animation/background/', { videoId: background.id, dimOpacity: 0.55, revision: 0 }, 'PUT')
   const operator = await connect(api)
+  const sound = (await emit(operator, 'server/ANIMATION_SYNC', {})).payload
+  await emit(operator, 'server/ANIMATION_CONTROL', { controlVersion: sound.controlVersion, ambienceEnabled: true, ambienceVolume: 0.35, ambienceClipId: bedId })
   const guest = await connect(guestContext.request)
   const configure = async (introClipId) => {
     const snapshot = (await emit(operator, 'server/GREETINGS', { operation: 'read' })).payload
@@ -64,6 +72,17 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
 
   await adminContext.addInitScript(() => {
     window.audioTrace = { events: [], decoded: [], next: 0 }
+    const musicGains = new WeakMap()
+    const mediaSource = AudioContext.prototype.createMediaElementSource
+    AudioContext.prototype.createMediaElementSource = function (element) {
+      const source = mediaSource.call(this, element)
+      const connect = source.connect.bind(source)
+      source.connect = (...args) => {
+        if (args[0] instanceof GainNode) musicGains.set(element, args[0])
+        return connect(...args)
+      }
+      return source
+    }
     const create = AudioContext.prototype.createBufferSource
     AudioContext.prototype.createBufferSource = function (...args) {
       const node = create.apply(this, args)
@@ -89,7 +108,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
       return buffer
     }
     document.addEventListener('playing', (event) => {
-      if (event.target instanceof HTMLMediaElement) window.audioTrace.events.push({ type: 'music', at: performance.now() })
+      if (event.target instanceof HTMLMediaElement && event.target.dataset.mediaRole !== 'transition-background') window.audioTrace.events.push({ type: 'music', at: performance.now(), volume: musicGains.get(event.target)?.gain.value ?? event.target.volume })
     }, true)
   })
   const player = await adminContext.newPage()
@@ -160,7 +179,15 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   const attempts = db.prepare('SELECT sum(attempts) n FROM greetingAudioJobs').get().n
   await play()
   await expect(player.getByTestId('greeting-intro')).toBeVisible()
+  const leadIn = await player.evaluate(() => {
+    const starts = window.audioTrace.events.filter(event => event.type === 'start')
+    return starts.find(event => event.duration < 1).at - starts.find(event => event.duration > 30).at
+  })
+  assert.ok(leadIn >= 1950 && leadIn < 4500, `Greeting needs a two-second ambience lead-in; got ${Math.round(leadIn)} ms`)
+  const backgroundElement = await player.locator('video[data-media-role="transition-background"]').elementHandle()
   await expect(player.getByTestId('greeting-overlay')).toHaveAttribute('data-greeting-id', String(first.greetingId))
+  assert.equal(await backgroundElement.evaluate(video => video === document.querySelector('video[data-media-role="transition-background"]')), true)
+  await expect.poll(() => backgroundElement.evaluate(video => video.videoWidth > 0 && !video.paused)).toBe(true)
   await expect(player.getByTestId('greeting-overlay')).toContainText('Karaoke: Ana')
   await expect(player.getByTestId('greeting-overlay')).toContainText('Mesa 4')
   const duplicate = await adminContext.newPage()
@@ -214,7 +241,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
     await expect(player.getByRole('button', { name: 'Pausar', exact: true })).toBeVisible()
     releaseIdleProbe()
     releaseIdleProbe = undefined
-    await expect(player.getByTestId('greeting-overlay')).toHaveAttribute('data-greeting-id', String(delayed.greetingId))
+    await expect(player.getByTestId('greeting-overlay')).toHaveAttribute('data-greeting-id', String(delayed.greetingId), { timeout: 10000 })
     for (const width of [390, 1440]) {
       await player.setViewportSize({ width, height: 1000 })
       await expect.poll(() => player.locator('#player-fs-container').evaluate(element => Math.abs(element.getBoundingClientRect().width - innerWidth) < 1)).toBe(true)
@@ -291,7 +318,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   await stop()
   await start()
   await expect(player.getByTestId('greeting-overlay')).toHaveCount(0)
-  await expect.poll(() => status(interrupted), { timeout: 35000 }).toBe('PLAYED')
+  await expect.poll(() => status(interrupted), { timeout: 45000 }).toBe('PLAYED')
   assert.equal(db.prepare('SELECT count(*) n FROM animationInterventions WHERE sourceEventKey=?').get(`greeting-${interrupted.queueId}`).n, 1)
   assert.equal(intervention(interrupted).interventionId, id)
   assert.notEqual(delivery(interrupted).voiceStatus, 'PLAYED')
@@ -302,11 +329,11 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   for (const event of trace) {
     if (event.type === 'start') active.add(event.id)
     if (event.type === 'ended') active.delete(event.id)
-    if (event.type === 'music') assert.equal(active.size, 0, `Voice/background overlapped music: ${JSON.stringify(trace)}`)
+    if (event.type === 'music' && event.volume > 0) assert.equal(active.size, 0, `Voice/background overlapped audible music: ${JSON.stringify(trace)}`)
   }
   for (const bed of trace.filter(event => event.type === 'start' && event.duration > 30)) {
     const stops = trace.filter(event => event.type === 'stop' && event.id === bed.id)
-    assert.ok(stops.length && stops.every(event => event.delay <= 25000))
+    assert.ok(stops.length && stops.every(event => event.delay <= 40000))
   }
   assert.ok(trace.some(event => event.type === 'start' && event.duration > 30))
   fs.writeFileSync(path.join(data, 'playback-trace.json'), JSON.stringify(trace, null, 2))

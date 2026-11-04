@@ -1,6 +1,6 @@
 import Animation from './Animation.js'
 import { catalogClips } from './catalog.js'
-import { animationPrefs, interventionAssets, type AnimationClip } from '../../shared/animation.js'
+import { animationPrefs, eligibleAmbience, interventionAssets, type AnimationClip } from '../../shared/animation.js'
 import { audioUsage } from './usage.js'
 import { effectCategoryValue } from '../../shared/effectCategories.js'
 
@@ -34,9 +34,9 @@ export function preparationClips (roomId: number) {
   if (active) for (const clip of interventionAssets(active)) if (catalogIds.has(clip.id)) add(clip)
   const ambient = Animation.ambience(roomId)
   if (ambient) add(ambient.clip)
-  if (prefs.automation && prefs.ambienceEnabled) {
+  if (prefs.ambienceEnabled) {
     let remaining = ambient ? 1 : 2
-    for (const clip of clips.filter(clip => clip.kind === 'ambience' && clip.approvedForAuto)) {
+    for (const clip of eligibleAmbience(clips, prefs)) {
       if (selected.has(clip.checksum)) continue
       add(clip)
       if (--remaining === 0) break

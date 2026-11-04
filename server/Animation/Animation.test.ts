@@ -10,7 +10,7 @@ import Rooms from '../Rooms/Rooms.js'
 import handlers from './socket.js'
 import { loadCatalog, catalogClips, saveCatalogRecord } from './catalog.js'
 import { audioUsage, backfillAudioUsage } from './usage.js'
-import { animationContext, ANIMATION_CONTROL, ANIMATION_SYNC, type AnimationClip } from '../../shared/animation.js'
+import { animationContext, ANIMATION_CONTROL, ANIMATION_SYNC, interventionPlayback, type AnimationClip } from '../../shared/animation.js'
 
 const identity = { roomId: 1, userId: 1, socketId: 'player-a' }
 const clip: AnimationClip = { id: 'welcome', title: 'Welcome', displayText: 'Hello', checksum: 'abc', durationMs: 4000, source: 'test', license: 'test' }
@@ -66,6 +66,163 @@ function autoInput (overrides: Partial<Reservation> = {}): Reservation {
 }
 
 describe('automatic sessions and ambient authority', () => {
+  it('keeps a bounded transition bed through the matching announcement without adding another bed', async () => {
+    await automaticCatalog()
+    Animation.ready(identity, true, catalogClips(1).map(asset => asset.checksum), true)
+    const epoch = Animation.state(1).playerEpoch
+    const bed = Animation.reserveTransitionAmbience(identity, epoch, { queueId: -1 }, { sourceQueueId: null, expectedNextQueueId: null })!
+    expect(bed.until - Date.now()).toBe(40000)
+    expect(Animation.renewAmbience(identity, epoch, bed.id, { queueId: -1 })).toBeNull()
+    Animation.ambienceStarted(identity, bed.id, bed.id)
+    vi.advanceTimersByTime(2000)
+    const voice = Animation.automatic(identity, autoInput(), { queueId: -1 })!
+    expect(voice).toBeTruthy()
+    expect(interventionPlayback(voice).bed).toBeUndefined()
+    Animation.event(identity, voice.interventionId, epoch, 'STARTED')
+    Animation.event(identity, voice.interventionId, epoch, 'ENDED')
+    expect(Animation.ambience(1)?.id).toBe(bed.id)
+    expect(audioUsage(1, [bed.clip.id])[bed.clip.id].total).toBe(1)
+    Animation.stopAmbience(identity, bed.id)
+    expect(Animation.ambience(1)).toBeNull()
+  })
+
+  it('rejects transition beds for stale boundaries and preserves their fence across takeover', async () => {
+    await automaticCatalog()
+    Animation.ready(identity, true, catalogClips(1).map(asset => asset.checksum), true)
+    const epoch = Animation.state(1).playerEpoch
+    expect(() => Animation.reserveTransitionAmbience(identity, epoch, { queueId: 1 }, { sourceQueueId: null, expectedNextQueueId: null })).toThrow('ocupa')
+    expect(() => Animation.reserveTransitionAmbience(identity, epoch, { queueId: -1 }, { sourceQueueId: null, expectedNextQueueId: 999 })).toThrow('turno')
+    const bed = Animation.reserveTransitionAmbience(identity, epoch, { queueId: -1 }, { sourceQueueId: null, expectedNextQueueId: null })!
+    expect(Animation.transitionAmbience(identity, 999)).toBeNull()
+    expect(Animation.transitionAmbience(identity, null, 999)).toBeNull()
+    const successor = { ...identity, socketId: 'successor' }
+    Animation.claim(1, successor.socketId)
+    Animation.ready(successor, true, catalogClips(1).map(asset => asset.checksum), true)
+    expect(Animation.transitionAmbience(successor, null)).toBeNull()
+    expect(Animation.reserveTransitionAmbience(successor, Animation.state(1).playerEpoch, { queueId: -1 }, { sourceQueueId: null, expectedNextQueueId: null })).toBeNull()
+    Animation.stopAmbience(successor, bed.id)
+    expect(Animation.ambience(1)?.id).toBe(bed.id)
+    vi.advanceTimersByTime(40001)
+    expect(Animation.reserveTransitionAmbience(successor, Animation.state(1).playerEpoch, { queueId: -1 }, { sourceQueueId: null, expectedNextQueueId: null })).toBeTruthy()
+  })
+
+  it('persists a fixed ambience per room and rejects stale or foreign selections', async () => {
+    await automaticCatalog()
+    await saveCatalogRecord({ id: 'foreign-bed', roomId: 2, filename: 'voice.wav', active: true, kind: 'ambience', approvedForAuto: true })
+    const version = Animation.state(1).controlVersion
+    Animation.control(1, version, { ambienceClipId: 'ambience' })
+    expect(Animation.room(1).prefs.animation.ambienceClipId).toBe('ambience')
+    expect(Animation.snapshot(2).prefs.ambienceClipId).toBeNull()
+    expect(() => Animation.control(1, version, { ambienceClipId: null })).toThrow('cambiaron')
+    for (const id of ['foreign-bed', 'welcome-1', 'missing']) {
+      expect(() => Animation.control(1, version + 1, { ambienceClipId: id })).toThrow('ambiente')
+    }
+    cleanup()
+    cleanup = Animation.initialize(server)
+    expect(Animation.snapshot(1).prefs.ambienceClipId).toBe('ambience')
+    Animation.control(1, version + 1, { ambienceClipId: null })
+    expect(Animation.snapshot(1).prefs.ambienceClipId).toBeNull()
+  })
+
+  it('restricts idle playback and renewals to the fixed sound, then restores rotation', async () => {
+    await automaticCatalog()
+    fs.copyFileSync(path.resolve('assets/animation/thanks.wav'), path.join(directory, 'other.wav'))
+    await saveCatalogRecord({ id: 'other-bed', roomId: 1, filename: 'other.wav', active: true, kind: 'ambience', approvedForAuto: true })
+    Animation.ready(identity, true, catalogClips(1).map(asset => asset.checksum), true)
+    Animation.control(1, Animation.state(1).controlVersion, { ambienceClipId: 'other-bed' })
+    const epoch = Animation.state(1).playerEpoch
+    const fixed = Animation.reserveAmbience(identity, epoch, { queueId: -1 }, 'ambience', 500)!
+    expect(fixed).toMatchObject({ clip: { id: 'other-bed' }, rotate: false, offsetMs: 0 })
+    expect(Animation.renewAmbience(identity, epoch, fixed.id, { queueId: -1 })?.rotate).toBe(false)
+    Animation.control(1, Animation.state(1).controlVersion, { ambienceClipId: 'ambience' })
+    expect(Animation.renewAmbience(identity, epoch, fixed.id, { queueId: -1 })).toBeNull()
+    expect(Animation.snapshot(1).ambience?.id).toBe(fixed.id)
+    Animation.stopAmbience(identity, fixed.id)
+    const selected = Animation.reserveAmbience(identity, epoch, { queueId: -1 })!
+    expect(selected.clip.id).toBe('ambience')
+    Animation.control(1, Animation.state(1).controlVersion, { ambienceClipId: null })
+    expect(Animation.renewAmbience(identity, epoch, selected.id, { queueId: -1 })?.rotate).toBe(true)
+    Animation.stopAmbience(identity, selected.id)
+    expect(Animation.reserveAmbience(identity, epoch, { queueId: -1 }, selected.clip.id, selected.clip.durationMs)?.clip.id).toBe('other-bed')
+  })
+
+  it.each(['disabled', 'expired', 'profile', 'unapproved'])('does not replace a fixed ambience that becomes %s', async (unavailable) => {
+    await automaticCatalog()
+    await saveCatalogRecord({ id: 'selected-bed', roomId: 1, filename: 'voice.wav', active: true, kind: 'ambience', approvedForAuto: true })
+    Animation.control(1, Animation.state(1).controlVersion, { ambienceClipId: 'selected-bed' })
+    const epoch = Animation.state(1).playerEpoch
+    const grant = Animation.reserveAmbience(identity, epoch, { queueId: -1 })!
+    if (unavailable === 'disabled') db.run('UPDATE audioResources SET state=\'disabled\' WHERE id=\'selected-bed\'')
+    else if (unavailable === 'expired') db.run('UPDATE audioResources SET metadataJSON=json_set(metadataJSON,\'$.validUntil\',?) WHERE id=\'selected-bed\'', [Date.now() - 1])
+    else if (unavailable === 'profile') db.run('UPDATE audioResources SET metadataJSON=json_set(metadataJSON,\'$.modes\',json(\'["party"]\')) WHERE id=\'selected-bed\'')
+    else db.run('UPDATE audioResources SET metadataJSON=json_set(metadataJSON,\'$.automatic\',json(\'false\')) WHERE id=\'selected-bed\'')
+    expect(Animation.renewAmbience(identity, epoch, grant.id, { queueId: -1 })).toBeNull()
+    Animation.stopAmbience(identity, grant.id)
+    expect(Animation.reserveAmbience(identity, epoch, { queueId: -1 })).toBeNull()
+    Animation.ready(identity, true, catalogClips(1).map(asset => asset.checksum), true)
+    const announcement = Animation.automatic(identity, autoInput(), { queueId: -1 })!
+    expect(announcement).toBeTruthy()
+    expect(interventionPlayback(announcement).bed).toBeUndefined()
+  })
+
+  it('grants a prepared concurrent bed without increasing the announcement duration', async () => {
+    await automaticCatalog()
+    await saveCatalogRecord({ id: 'chosen-bed', roomId: 1, filename: 'voice.wav', active: true, kind: 'ambience', approvedForAuto: true })
+    Animation.control(1, Animation.state(1).controlVersion, { ambienceClipId: 'chosen-bed' })
+    Animation.ready(identity, true, catalogClips(1).map(asset => asset.checksum), true)
+    const grant = Animation.automatic(identity, autoInput(), { queueId: -1 })!
+    const { sequence, bed } = interventionPlayback(grant)
+    expect(bed?.kind).toBe('ambience')
+    expect(bed?.id).toBe('chosen-bed')
+    expect(sequence.every(asset => asset.kind !== 'ambience')).toBe(true)
+    expect(grant.durationMs).toBe(sequence.reduce((sum, asset) => sum + asset.durationMs, 0))
+    Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')
+    Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'ASSET_STARTED', bed!.id)
+    Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'ASSET_STARTED', bed!.id)
+    expect(audioUsage(1, [bed!.id])[bed!.id].total).toBe(1)
+  })
+
+  it('does not append a bed for older players that would play it sequentially', async () => {
+    await automaticCatalog()
+    const grant = Animation.automatic(identity, autoInput(), { queueId: -1 })!
+    expect(interventionPlayback(grant).bed).toBeUndefined()
+  })
+
+  it('keeps a ready voice eligible when the optional ambience is not decoded', async () => {
+    await automaticCatalog()
+    fs.copyFileSync(path.resolve('assets/animation/thanks.wav'), path.join(directory, 'bed.wav'))
+    db.run('UPDATE audioResources SET state=\'disabled\' WHERE id=\'ambience\'')
+    await saveCatalogRecord({ id: 'unprepared-bed', roomId: 1, filename: 'bed.wav', active: true, kind: 'ambience', family: 'manual', modes: ['mixed'], approvedForAuto: true })
+    Animation.control(1, Animation.state(1).controlVersion, { ambienceClipId: 'unprepared-bed' })
+    const voices = catalogClips(1).filter(asset => asset.kind === 'voice')
+    Animation.ready(identity, true, voices.map(asset => asset.checksum), true)
+    const grant = Animation.automatic(identity, autoInput(), { queueId: -1 })!
+    expect(grant).toBeTruthy()
+    expect(interventionPlayback(grant).bed).toBeUndefined()
+    expect(interventionPlayback(grant).sequence[0].kind).toBe('voice')
+  })
+
+  it('does not treat a transition separator or bed as closing applause for the cooldown', async () => {
+    await automaticCatalog()
+    Animation.control(1, Animation.state(1).controlVersion, { events: { turn: false, celebration: false, welcome: false } })
+    db.run('UPDATE animationRoomState SET pendingEventJSON=NULL WHERE roomId=1')
+    for (let id = 1; id <= 3; id++) db.run('INSERT INTO queue(queueId,roomId,userId,source,externalId,title,artistOrChannel,status,prevQueueId) VALUES(?,1,1,\'YOUTUBE\',\'abcdefghijk\',\'Song\',\'Artist\',\'APPROVED\',?)', [id, id === 1 ? null : id - 1])
+    await saveCatalogRecord({ id: 'separator', roomId: 1, filename: 'voice.wav', active: true, kind: 'effect', effectType: 'transition', category: 'transition', family: 'manual', modes: ['mixed'], approvedForAuto: true })
+    Animation.ready(identity, true, catalogClips(1).map(asset => asset.checksum), true)
+    Queue.transition(1, 1, 'PLAYING')
+    const first = Animation.automatic(identity, autoInput({ boundary: 'ended', sourceQueueId: 1, expectedNextQueueId: 2 }), { queueId: 1 })!
+    expect(interventionPlayback(first).sequence.some(asset => asset.id === 'separator')).toBe(true)
+    Animation.event(identity, first.interventionId, first.playerEpoch!, 'STARTED')
+    Animation.event(identity, first.interventionId, first.playerEpoch!, 'ASSET_STARTED', 'separator')
+    Animation.event(identity, first.interventionId, first.playerEpoch!, 'ASSET_STARTED', 'ambience')
+    Animation.event(identity, first.interventionId, first.playerEpoch!, 'ENDED')
+    await saveCatalogRecord({ id: 'applause', roomId: 1, filename: 'voice.wav', active: true, kind: 'effect', category: 'appreciation', family: 'manual', modes: ['mixed'], approvedForAuto: true })
+    Animation.ready(identity, true, catalogClips(1).map(asset => asset.checksum), true)
+    Queue.transition(1, 2, 'PLAYING')
+    const second = Animation.automatic(identity, autoInput({ boundary: 'ended', sourceQueueId: 2, expectedNextQueueId: 3 }), { queueId: 2 })!
+    expect(interventionPlayback(second).sequence.some(asset => asset.id === 'applause')).toBe(true)
+  })
+
   it('runs repeated natural song boundaries with one clip per family and contextual effects', async () => {
     await automaticCatalog()
     db.run('UPDATE animationRoomState SET pendingEventJSON=NULL WHERE roomId=1')
@@ -539,7 +696,7 @@ describe('animation command boundary', () => {
     expect(Animation.snapshot(1).prefs.enabled).toBe(true)
   })
   it('validates volume and boolean payloads', () => {
-    for (const patch of [{ volume: -1 }, { volume: NaN }, { enabled: 'yes' }]) {
+    for (const patch of [{ volume: -1 }, { volume: NaN }, { enabled: 'yes' }, { ambienceClipId: 1 }, { ambienceClipId: '' }, { ambienceClipId: [] }]) {
       const ack = vi.fn()
       handlers[ANIMATION_CONTROL](socket(true), { payload: { ...patch, controlVersion: 1, expiresAt: Date.now() + 1000 } }, ack)
       expect(ack.mock.calls[0][0].error).toBeTruthy()

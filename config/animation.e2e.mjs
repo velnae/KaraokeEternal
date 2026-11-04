@@ -97,7 +97,7 @@ try {
     const start = AudioBufferSourceNode.prototype.start
     AudioBufferSourceNode.prototype.start = function (...args) {
       window.voiceContext = this.context
-      const video = document.querySelector('video')
+      const video = document.querySelector('video:not([data-media-role="transition-background"])')
       window.voiceStarts.push({ at: Date.now(), overlapping: !!video && !video.paused && !video.ended })
       return start.apply(this, args)
     }
