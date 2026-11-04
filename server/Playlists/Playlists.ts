@@ -52,6 +52,20 @@ export default class Playlists {
     db.run('UPDATE musicPlaylists SET name=? WHERE playlistId=?', [listName(name), playlistId])
   }
 
+  static createFromSongs (roomId: number, name: unknown, songs: ResolvedSong[]) {
+    if (!songs.length) throw new Error('No hay canciones disponibles para crear la lista. Prueba con otro enlace.')
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const playlistId = this.create(roomId, name)
+      for (const song of songs) this.addResolved(roomId, playlistId, song)
+      db.exec('COMMIT')
+      return playlistId
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
   static async add (roomId: number, playlistId: number, source: unknown, sourceId: unknown) {
     const list = this.get(roomId, playlistId)
     if (!['LOCAL', 'YOUTUBE'].includes(String(source)) || typeof sourceId !== 'string' || sourceId.length > 128) throw new Error('Seleccione una canción válida')

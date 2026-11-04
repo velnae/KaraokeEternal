@@ -1,6 +1,8 @@
 import { chromium, request, expect } from 'playwright/test'
 import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:net'
+import { createServer as createHttpServer } from 'node:http'
+import { pathToFileURL } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { io } from 'socket.io-client'
 import fs from 'node:fs'
@@ -21,6 +23,35 @@ const base = `${origin}/karaoke/`
 const api = await request.newContext()
 let server, browser, socket, db
 const errors = []
+const providerCalls = []
+const importedIds = Array.from({ length: 51 }, (_, index) => `fixture${String(index).padStart(4, '0')}`)
+const provider = createHttpServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost')
+  providerCalls.push(url.pathname)
+  res.setHeader('Content-Type', 'application/json')
+  const playlistId = url.searchParams.get('playlistId') || url.searchParams.get('id')
+  if (playlistId === 'PLprivate000001') {
+    res.writeHead(404)
+    res.end(JSON.stringify({ error: { errors: [{ reason: 'playlistNotFound' }] } }))
+    return
+  }
+  if (url.pathname.endsWith('/playlists')) {
+    res.end(JSON.stringify({ items: [{ snippet: { title: 'Música importada de YouTube '.repeat(4) }, contentDetails: { itemCount: playlistId === 'PLlarge00000001' ? 201 : playlistId === 'PLempty00000001' ? 0 : 54 } }] }))
+  } else if (url.pathname.endsWith('/playlistItems')) {
+    const all = playlistId === 'PLempty00000001' ? [] : [...importedIds, importedIds[0], 'toolong0001', 'missing0001']
+    const start = url.searchParams.has('pageToken') ? 50 : 0
+    res.end(JSON.stringify({ items: all.slice(start, start + 50).map((id, index) => ({ contentDetails: { videoId: id }, snippet: { title: `Video ${start + index + 1}`, position: start + index } })), ...(start === 0 && all.length > 50 ? { nextPageToken: 'next' } : {}) }))
+  } else if (url.pathname.endsWith('/videos')) {
+    res.end(JSON.stringify({ items: url.searchParams.get('id').split(',').filter(id => id !== 'missing0001').reverse().map(id => ({
+      id, snippet: { title: `Música ${id}`, channelTitle: 'Canal de prueba', categoryId: '10', liveBroadcastContent: 'none' },
+      contentDetails: { duration: id === 'toolong0001' ? 'PT8M' : 'PT3M' }, status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
+    })) }))
+  } else {
+    res.writeHead(400)
+    res.end('{}')
+  }
+})
+await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve))
 const pass = name => console.log(`PASS ${name}`)
 const call = async (url, body, method = body === undefined ? 'GET' : 'POST') => {
   const response = await api.fetch(`${base}api/${url}`, { method, data: body })
@@ -30,7 +61,9 @@ const call = async (url, body, method = body === undefined ? 'GET' : 'POST') => 
 const start = async () => {
   const entry = development ? ['--import', 'tsx', 'server/main.ts'] : ['build/server/main.js']
   server = spawn(process.execPath, [...entry, '--data', data, '--port', String(port), '--urlPath', '/karaoke/', '--serverLogLevel', '0'], {
-    cwd: root, stdio: ['ignore', log, log], env: { ...process.env, NODE_ENV: development ? 'development' : 'production', KES_SCAN: '', KES_ROTATE_KEY: 'false' },
+    cwd: root, stdio: ['ignore', log, log], env: { ...process.env, NODE_ENV: development ? 'development' : 'production', KES_SCAN: '', KES_ROTATE_KEY: 'false',
+      KES_YOUTUBE_API_KEY: 'test-only-youtube-key', KARAOKE_E2E_YOUTUBE_ORIGIN: `http://127.0.0.1:${provider.address().port}`,
+      NODE_OPTIONS: `--import=${pathToFileURL(path.join(root, 'config/fixtures/youtube-fetch.mjs')).href}` },
   })
   for (let attempt = 0; attempt < 240; attempt++) {
     try {
@@ -273,6 +306,86 @@ try {
   assert.equal((await call('rooms/1/playlists')).playlists.some(list => list.playlistId === 1), false)
   assert.ok(db.prepare('SELECT count(*) n FROM queue WHERE songId IN(1,2)').get().n > 0)
   pass('Deleting a saved list leaves playback history intact')
+  await player.close()
+  await admin.goto(`${base}admin/playlists`)
+  const importButton = admin.getByRole('button', { name: 'Importar desde YouTube', exact: true })
+  await importButton.focus()
+  await admin.keyboard.press('Enter')
+  const importDialog = admin.getByRole('dialog', { name: 'Importar desde YouTube', exact: true })
+  const link = importDialog.getByLabel('Enlace de la lista de YouTube', { exact: true })
+  await expect(link).toBeFocused()
+  await admin.keyboard.press('Escape')
+  await expect(importDialog).toHaveCount(0)
+  await expect(importButton).toBeFocused()
+  await importButton.click()
+  const review = async (id) => {
+    await link.fill(`https://youtube.com/playlist?list=${id}`)
+    await link.press('Enter')
+  }
+  const beforeImports = await call('rooms/1/playlists')
+  await review('PLprivate000001')
+  await expect(importDialog.getByRole('alert')).toContainText('no sea privada')
+  await review('PLlarge00000001')
+  await expect(importDialog.getByRole('alert')).toContainText('supera los 200')
+  await review('PLempty00000001')
+  await expect(importDialog.getByText('Esta lista no tiene canciones que se puedan importar. Prueba con otro enlace.')).toBeVisible()
+  await expect(importDialog.getByRole('button', { name: 'Crear lista', exact: true })).toBeDisabled()
+  await importDialog.getByRole('button', { name: 'Cambiar enlace', exact: true }).click()
+  assert.equal((await call('rooms/1/playlists')).playlists.length, beforeImports.playlists.length)
+  pass('Import supports keyboard cancellation and actionable private, oversized and empty-list states without writes')
+  await review('PLfixture00000001')
+  await expect(importDialog.getByLabel('Nombre de la lista', { exact: true })).toBeVisible()
+  await admin.route('**/api/rooms/1/playlists/import/youtube', route => route.fulfill({
+    status: 410, contentType: 'text/plain', body: 'La revisión venció. Comprueba tus listas guardadas y vuelve a revisar el enlace.',
+  }), { times: 1 })
+  await importDialog.getByRole('button', { name: 'Crear lista', exact: true }).click()
+  await expect(importDialog.getByRole('alert')).toContainText('La revisión venció')
+  await expect(link).toBeFocused()
+  assert.equal((await call('rooms/1/playlists')).playlists.length, beforeImports.playlists.length)
+  pass('Expired confirmation returns to the populated link field with recovery guidance and no list creation')
+  const requestCount = providerCalls.length
+  await review('PLfixture00000001')
+  const importName = importDialog.getByLabel('Nombre de la lista', { exact: true })
+  await expect(importName).toBeFocused()
+  assert.equal((await importName.inputValue()).length, 80)
+  await expect(importDialog.getByRole('status')).toHaveText('51 canciones listas para importar')
+  await importDialog.getByText('3 videos omitidos · Ver motivos', { exact: true }).click()
+  await expect(importDialog.getByText('Repetida en la lista', { exact: true })).toBeVisible()
+  await expect(importDialog.getByText('Duración no válida: debe ser de hasta 7 minutos', { exact: true })).toBeVisible()
+  await expect(importDialog.getByText('Video privado, eliminado o no disponible', { exact: true })).toBeVisible()
+  assert.equal(providerCalls.length - requestCount, 5)
+  await importName.fill('Repertorio importado')
+  for (const width of [390, 1440]) {
+    await admin.setViewportSize({ width, height: 1000 })
+    await admin.screenshot({ path: path.join(data, `youtube-import-${width}.png`) })
+    assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+  }
+  await admin.route('**/api/rooms/1/playlists/import/youtube', async (route) => {
+    await route.fetch()
+    await route.abort('failed')
+  }, { times: 1 })
+  await importDialog.getByRole('button', { name: 'Crear lista', exact: true }).click()
+  await expect(importDialog.getByRole('alert')).toContainText('No se recibió la confirmación')
+  await importDialog.getByRole('button', { name: 'Comprobar creación', exact: true }).click()
+  await expect(importDialog).toHaveCount(0)
+  await expect(admin.getByRole('status')).toHaveText('Lista importada. Puedes editarla o configurarla en De la casa.')
+  let importedSnapshot = await call('rooms/1/playlists')
+  assert.equal(importedSnapshot.playlists.length, beforeImports.playlists.length + 1)
+  const imported = importedSnapshot.playlists.find(list => list.name === 'Repertorio importado')
+  assert.deepEqual(imported.items.map(item => item.song.sourceId), importedIds)
+  assert.deepEqual(importedSnapshot.playback, beforeImports.playback)
+  await admin.reload()
+  await expect(admin.getByLabel('Lista para editar')).toHaveValue(String(imported.playlistId))
+  await expect(admin.getByRole('list', { name: 'Canciones de la lista' }).getByRole('listitem')).toHaveCount(51)
+  pass('Multi-page import preserves order and omissions, recovers a lost response exactly once, and survives reload')
+  await admin.getByRole('link', { name: 'Configurar en De la casa', exact: true }).click()
+  await expect(house.getByLabel('Lista predeterminada')).toHaveValue(String(imported.playlistId))
+  await house.getByRole('button', { name: 'Guardar cambios', exact: true }).click()
+  await expect(admin.getByRole('button', { name: 'De la casa (51)', exact: true })).toBeVisible()
+  importedSnapshot = await call('rooms/1/playlists')
+  assert.equal(importedSnapshot.playback.playlistId, imported.playlistId)
+  assert.deepEqual(db.prepare('SELECT externalId FROM queue WHERE status=\'APPROVED\' AND houseRunId IS NOT NULL ORDER BY queueId').all().map(row => row.externalId), importedIds)
+  pass('Imported songs enter the house queue only through explicit existing playback configuration')
   assert.deepEqual(errors, [])
   console.log(`Evidence: ${data}`)
 } catch (error) {
@@ -286,5 +399,6 @@ try {
   await stop()
   db?.close()
   await api.dispose()
+  await new Promise(resolve => provider.close(resolve))
   fs.closeSync(log)
 }

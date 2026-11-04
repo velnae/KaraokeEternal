@@ -36,6 +36,34 @@ navigating from the editor preselects a list without activating it. Editing
 links preserve the selected list. Permanent help is reduced to **Cómo funciona**;
 errors and disabled-action explanations remain visible when relevant.
 
+## Import a YouTube playlist
+
+1. In **Listas de reproducción**, choose **Importar desde YouTube**.
+2. Paste a playlist link and press **Revisar lista**. Playlist links and video
+   links containing `list=` are supported.
+3. Review the eligible-song count, change the suggested name if needed, and
+   expand **Ver canciones** or **Ver motivos** to inspect the result.
+4. Press **Crear lista**. The editor opens the saved list in YouTube order.
+   Follow **Configurar en De la casa** when you want to activate it.
+
+The import is a one-time editable copy. It keeps the first occurrence of each
+video and reports duplicates and unavailable videos. Source playlists above
+200 entries are rejected explicitly; saved lists retain the existing 50-per-room,
+200-song and 80-character-name limits. Long suggested names are shortened with
+a visible explanation.
+
+The same eligibility rules as Biblioteca apply: public, processed, embeddable
+Music-category videos of up to seven minutes, excluding live/upcoming streams,
+age restrictions and configured-region restrictions. A music-looking title
+does not override YouTube's category. Private playlists require a different,
+accessible link. Metadata acceptance cannot guarantee future playback.
+
+Reviewing does not save or queue songs. Confirmation saves the complete accepted
+list in one transaction. Repeating confirmation after a lost response recovers
+the same list through **Comprobar creación**. Reviews expire after ten minutes
+or a server restart; check existing saved lists before reviewing again if a
+previous creation response was lost. Creation does not activate house playback.
+
 ## Queue behavior
 
 | Situation | Behavior |
@@ -95,6 +123,28 @@ the same source ID twice reuses the entry. Reordering validates the complete
 item set; cross-room item/list identifiers are rejected.
 
 ## Verification
+
+### YouTube import — 2026-11-04
+
+- 100 focused source, playlist, URL and scheduler tests passed; TypeScript,
+  scoped ESLint and server/client builds passed.
+- 13 playlist E2E scenarios passed in both development and production. Import
+  coverage includes pagination, ordered batching, omission reasons, private/
+  oversized/empty lists, keyboard cancellation/focus, expired reviews, lost
+  confirmation recovery, reload persistence and explicit house activation.
+- Inspected mobile (390px) and desktop (1440px) import screenshots.
+- Real HTTPS smoke at `https://karaoke.puyu.pe/` imported 91 of the sample
+  playlist's 100 videos; nine were omitted for non-Music categories. Reload and
+  activation succeeded, and `fRIhCiUVaKs` reached actual iframe playback
+  (`currentTime > 1`, `paused=false`, `readyState=4`) in a temporary test room.
+  The temporary room and administrator were removed after the check.
+
+Evidence: development `/tmp/karaoke-playlists-e2e-skHh20`, production
+`/tmp/karaoke-playlists-e2e-Ln7nEa`; HTTPS screenshots
+`/tmp/opencode/youtube-import-https-{390,1440,player}.png`.
+Implementation details: `odd/tasks/youtube-playlist-import.md`.
+
+### Earlier saved-playlist checks
 
 The full-cycle correction passed **39 focused playlist, cleanup and scheduler
 tests** and **9 playlist E2E scenarios in each of development and production**.

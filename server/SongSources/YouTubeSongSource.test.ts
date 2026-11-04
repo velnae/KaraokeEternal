@@ -22,6 +22,77 @@ const playableVideo = (id: string, overrides: Record<string, unknown> = {}) => (
 
 afterEach(() => vi.restoreAllMocks())
 
+describe('YouTube playlist inspection', () => {
+  const playlistId = 'PLfixture00000001'
+  const entry = (videoId: string, position: number) => ({ contentDetails: { videoId }, snippet: { title: `Title ${position}`, position } })
+
+  it('paginates and batches video lookups while preserving playlist order and explaining omissions', async () => {
+    const ids = Array.from({ length: 51 }, (_, i) => `video${String(i).padStart(6, '0')}`)
+    const entries = [...ids.map(entry), entry(ids[0], 51), entry('missing0001', 52), entry('toolong0001', 53)]
+    const fetchImpl = vi.fn(async (url: URL) => {
+      if (url.pathname.endsWith('/playlists')) return jsonResponse({ items: [{ snippet: { title: 'Music &amp; Friends' }, contentDetails: { itemCount: entries.length } }] })
+      if (url.pathname.endsWith('/playlistItems')) {
+        expect(url.searchParams.get('maxResults')).toBe('50')
+        return jsonResponse(url.searchParams.has('pageToken') ? { items: entries.slice(50) } : { items: entries.slice(0, 50), nextPageToken: 'second' })
+      }
+      expect(url.pathname).toMatch(/\/videos$/)
+      const requested = url.searchParams.get('id')!.split(',')
+      expect(requested.length).toBeLessThanOrEqual(50)
+      return jsonResponse({ items: requested.filter(id => id !== 'missing0001').reverse().map(id => playableVideo(id, id === 'toolong0001' ? { contentDetails: { duration: 'PT8M' } } : {})) })
+    })
+    const result = await createYouTubeSongSource({ apiKey: 'secret', fetchImpl }).inspectPlaylist(playlistId)
+    expect(result.title).toBe('Music & Friends')
+    expect(result.songs.map(song => song.sourceId)).toEqual(ids)
+    expect(result.omissions.map(item => [item.position, item.reason])).toEqual([[52, 'DUPLICATE'], [53, 'UNAVAILABLE'], [54, 'DURATION']])
+    expect(fetchImpl).toHaveBeenCalledTimes(5)
+    expect(JSON.stringify(result)).not.toContain('secret')
+  })
+
+  it.each([
+    [{ status: { embeddable: false, privacyStatus: 'public', uploadStatus: 'processed' } }, 'EMBEDDING'],
+    [{ contentDetails: { duration: 'PT3M', contentRating: { ytRating: 'ytAgeRestricted' } } }, 'AGE'],
+    [{ contentDetails: { duration: 'PT3M', regionRestriction: { blocked: ['PE'] } } }, 'REGION'],
+    [{ snippet: { title: 'Other', channelTitle: 'Channel', categoryId: '22' } }, 'CATEGORY'],
+    [{ snippet: { title: 'Live', channelTitle: 'Channel', categoryId: '10', liveBroadcastContent: 'upcoming' } }, 'LIVE'],
+  ])('explains rejected videos using the shared eligibility rules', async (overrides, reason) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [{ snippet: { title: 'List' } }] }))
+      .mockResolvedValueOnce(jsonResponse({ items: [entry('AAAAAAAAAAA', 0)] }))
+      .mockResolvedValueOnce(jsonResponse({ items: [playableVideo('AAAAAAAAAAA', overrides as Record<string, unknown>)] }))
+    const result = await createYouTubeSongSource({ apiKey: 'secret', fetchImpl }).inspectPlaylist(playlistId)
+    expect(result.songs).toHaveLength(0)
+    expect(result.omissions[0].reason).toBe(reason)
+  })
+
+  it('bounds oversized playlists even when the reported count is absent and pagination repeats', async () => {
+    const fetchImpl = vi.fn(async (url: URL) => url.pathname.endsWith('/playlists')
+      ? jsonResponse({ items: [{ snippet: { title: 'Large list' } }] })
+      : jsonResponse({ items: Array.from({ length: 50 }, (_, i) => entry('AAAAAAAAAAA', i)), nextPageToken: 'repeated' }))
+    await expect(createYouTubeSongSource({ apiKey: 'secret', fetchImpl }).inspectPlaylist(playlistId)).rejects.toThrow('supera los 200')
+    expect(fetchImpl).toHaveBeenCalledTimes(5)
+  })
+
+  it('rejects known oversized or inaccessible playlists and surfaces a later-page failure', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ items: [{ snippet: { title: 'Large' }, contentDetails: { itemCount: 201 } }] }))
+    const source = createYouTubeSongSource({ apiKey: 'secret', fetchImpl })
+    await expect(source.inspectPlaylist(playlistId)).rejects.toThrow('supera los 200')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    fetchImpl.mockResolvedValueOnce(jsonResponse({ error: { errors: [{ reason: 'playlistNotFound' }] } }, 404))
+    await expect(source.inspectPlaylist(playlistId)).rejects.toThrow('Comprueba el enlace')
+    fetchImpl.mockResolvedValueOnce(jsonResponse({ items: [{ snippet: { title: 'Partial' } }] }))
+      .mockResolvedValueOnce(jsonResponse({ items: [entry('AAAAAAAAAAA', 0)], nextPageToken: 'next' }))
+      .mockResolvedValueOnce(jsonResponse({ error: { errors: [{ reason: 'quotaExceeded' }] } }, 403))
+    await expect(source.inspectPlaylist(playlistId)).rejects.toMatchObject({ code: 'YOUTUBE_QUOTA' })
+  })
+
+  it('returns an empty preview without video lookups for an empty playlist', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ items: [{ snippet: { title: 'Empty' } }] }))
+      .mockResolvedValueOnce(jsonResponse({ items: [] }))
+    expect(await createYouTubeSongSource({ apiKey: 'secret', fetchImpl }).inspectPlaylist(playlistId)).toEqual({ title: 'Empty', songs: [], omissions: [] })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('YouTubeSongSource', () => {
   it('coalesces concurrent searches and reuses metadata across rooms until cache expiry', async () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)

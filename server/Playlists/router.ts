@@ -1,5 +1,6 @@
 import Router from '@koa/router'
 import Playlists, { publishHouseQueue } from './Playlists.js'
+import youtubeImport from './YouTubeImport.js'
 
 const router = new Router({ prefix: '/api' })
 const body = (ctx): Record<string, unknown> => ctx.request.body || {}
@@ -19,6 +20,14 @@ router.get('/rooms/:roomId/playlists', (ctx) => {
 router.post('/rooms/:roomId/playlists', (ctx) => {
   const roomId = Number(ctx.params.roomId)
   const playlistId = Playlists.create(roomId, body(ctx).name)
+  ctx.body = { ...Playlists.snapshot(roomId), createdPlaylistId: playlistId }
+})
+router.post('/rooms/:roomId/playlists/import/youtube/preview', async (ctx) => {
+  ctx.body = await youtubeImport.preview(Number(ctx.params.roomId), ctx.user.userId, body(ctx).url)
+})
+router.post('/rooms/:roomId/playlists/import/youtube', (ctx) => {
+  const roomId = Number(ctx.params.roomId)
+  const playlistId = youtubeImport.confirm(roomId, ctx.user.userId, body(ctx).previewId, body(ctx).name)
   ctx.body = { ...Playlists.snapshot(roomId), createdPlaylistId: playlistId }
 })
 router.put('/rooms/:roomId/playlists/playback', (ctx) => {

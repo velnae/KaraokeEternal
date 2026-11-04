@@ -56,5 +56,10 @@ export function usePlaylists (poll = false) {
       setBusy(false)
     }
   }
-  return { roomId, data, busy, error, load, run }
+  const accept = (result: Result) => {
+    invalidate()
+    setData(result)
+    setError('')
+  }
+  return { roomId, data, busy, error, load, run, accept }
 }

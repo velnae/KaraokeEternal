@@ -44,6 +44,14 @@
 .save { min-height: 44px; padding: 10px 12px; border: 1px solid var(--edge); border-radius: 8px; color: var(--cyan); font-size: 13px; background: var(--stage); }
 .save:hover { border-color: var(--cyan); }
 .saveCompact { display: grid; place-items: center; width: 44px; min-height: 44px; color: var(--cyan); }
+.importIntro { margin: 0; line-height: 1.5; }
+.importSummary { margin: 0; font-size: 18px; line-height: 1.5; }
+.importSummary strong { color: var(--cyan); font-size: 28px; }
+.importDetails { border-top: 1px solid var(--edge); }
+.importDetails summary { min-height: 44px; padding-block: 12px; cursor: pointer; line-height: 1.5; }
+.importSongs { max-height: 220px; overflow: auto; margin: 0; padding-left: 28px; }
+.importSongs li { padding: 8px 12px 8px 0; overflow-wrap: anywhere; line-height: 1.5; }
+.importSongs small { display: block; color: var(--secondary); }
 @media (max-width: 680px) {
   .editor, .house { padding: 16px; }
   .songs li { grid-template-columns: 64px minmax(0, 1fr); gap: 12px; }

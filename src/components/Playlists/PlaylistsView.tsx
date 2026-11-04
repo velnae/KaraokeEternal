@@ -1,16 +1,22 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import Button from 'components/Button/Button'
 import SongArtwork from 'components/SongArtwork/SongArtwork'
 import { usePlaylists } from './usePlaylists'
 import PlaylistNameDialog from './PlaylistNameDialog'
+import ImportYouTubePlaylistDialog from './ImportYouTubePlaylistDialog'
 import styles from './Playlists.css'
 
 export default function PlaylistsView () {
-  const { roomId, data, busy, error, run, load } = usePlaylists()
+  const { roomId, data, busy, error, run, load, accept } = usePlaylists()
   const [params, setParams] = useSearchParams()
-  const [dialog, setDialog] = useState<'create' | 'rename' | null>(null)
+  const [dialog, setDialog] = useState<'create' | 'rename' | 'import' | null>(null)
   const [notice, setNotice] = useState('')
+  const importTrigger = useRef<HTMLButtonElement | null>(null)
+  const closeImport = () => {
+    setDialog(null)
+    requestAnimationFrame(() => importTrigger.current?.focus())
+  }
   const selected = data?.playlists.find(list => String(list.playlistId) === params.get('list')) || data?.playlists[0]
   const selectList = (id: number) => {
     setParams({ list: String(id) })
@@ -30,6 +36,16 @@ export default function PlaylistsView () {
         )}
         <div className={styles.actions}>
           <Button variant='primary' disabled={busy} onClick={() => setDialog('create')}>Nueva lista</Button>
+          <Button
+            variant='default'
+            disabled={busy}
+            onClick={(event) => {
+              importTrigger.current = event.currentTarget
+              setDialog('import')
+            }}
+          >
+            Importar desde YouTube
+          </Button>
           <Button className={styles.refresh} icon='REFRESH' size={20} aria-label='Actualizar listas' title='Actualizar listas' disabled={busy} onClick={() => void load()} />
         </div>
       </div>
@@ -39,7 +55,7 @@ export default function PlaylistsView () {
       {data?.playlists.length === 0 && (
         <div className={styles.empty}>
           <h2>Tu repertorio empieza aquí</h2>
-          <p>Crea una lista y agrega canciones desde Biblioteca.</p>
+          <p>Crea una lista y agrega canciones desde Biblioteca, o importa una lista de YouTube.</p>
         </div>
       )}
       {selected && (
@@ -104,7 +120,20 @@ export default function PlaylistsView () {
           </footer>
         </section>
       )}
-      {dialog && (
+      {dialog === 'import' && (
+        <ImportYouTubePlaylistDialog
+          key={roomId}
+          roomId={roomId}
+          onClose={closeImport}
+          onCreated={(result) => {
+            accept(result)
+            selectList(result.createdPlaylistId)
+            closeImport()
+            setNotice('Lista importada. Puedes editarla o configurarla en De la casa.')
+          }}
+        />
+      )}
+      {dialog && dialog !== 'import' && (
         <PlaylistNameDialog
           key={`${dialog}:${selected?.playlistId}`}
           creating={dialog === 'create'}

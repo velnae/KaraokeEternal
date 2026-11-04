@@ -5,6 +5,7 @@ import type {
   SongSourceContext,
 } from '../../shared/songSource.js'
 import { YOUTUBE_MAX_DURATION_SECONDS, youtubeVideoId, youtubeVideoRequirements } from '../../shared/youtubeSearch.js'
+import { YOUTUBE_PLAYLIST_MAX_ITEMS, type PlaylistOmissionReason, type YouTubePlaylistContents } from '../../shared/youtubePlaylists.js'
 
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3'
 const configuredMaxResults = Number.parseInt(process.env.KES_YOUTUBE_MAX_RESULTS ?? '', 10)
@@ -42,6 +43,7 @@ interface YouTubeVideo {
 
 interface YouTubeApiResponse<T> {
   items?: T[]
+  nextPageToken?: string
   error?: {
     message?: string
     errors?: Array<{ reason?: string }>
@@ -51,6 +53,15 @@ interface YouTubeApiResponse<T> {
 
 interface YouTubeSearchItem {
   id?: { videoId?: string }
+}
+
+interface YouTubePlaylistItem {
+  snippet?: { title?: string, position?: number }
+  contentDetails?: { videoId?: string }
+}
+
+export interface YouTubeSongSourceAdapter extends SongSourceAdapter {
+  inspectPlaylist(playlistId: string): Promise<YouTubePlaylistContents>
 }
 
 export class YouTubeApiError extends Error {
@@ -75,7 +86,7 @@ export const createYouTubeSongSource = ({
   fetchImpl = fetch,
   maxResults = defaultMaxResults,
   regionCode = process.env.KES_YOUTUBE_REGION?.trim().toUpperCase() || 'PE',
-}: YouTubeSongSourceOptions = {}): SongSourceAdapter => {
+}: YouTubeSongSourceOptions = {}): YouTubeSongSourceAdapter => {
   const cache = new Map<string, { expiresAt: number, results: SongSearchResult[] }>()
   const pending = new Map<string, Promise<SongSearchResult[]>>()
   const blocked = new Map<string, { until: number, error: YouTubeApiError }>()
@@ -108,6 +119,9 @@ export const createYouTubeSongSource = ({
       const dailySearch = data.error?.details?.some(detail => detail.metadata?.quota_metric === 'youtube.googleapis.com/search_list'
         && (detail.metadata.quota_unit?.includes('/d/') || detail.metadata.quota_limit?.includes('PerDay')))
       const rateLimited = response.status === 429 || ['rateLimitExceeded', 'userRateLimitExceeded'].includes(reason ?? '')
+      if (['playlists', 'playlistItems'].includes(resource) && !isQuota && !rateLimited && [403, 404].includes(response.status)) {
+        throw new YouTubeApiError('No se puede acceder a esta lista. Comprueba el enlace y que no sea privada.', 'YOUTUBE_API')
+      }
       const error = new YouTubeApiError(
         dailySearch ? 'Se agotó el límite diario de búsquedas de YouTube' : isQuota ? 'Se agotó la cuota de búsqueda de YouTube' : rateLimited ? 'YouTube está limitando las consultas. Espera un minuto.' : 'No se pudo consultar YouTube',
         dailySearch ? 'YOUTUBE_SEARCH_QUOTA' : isQuota ? 'YOUTUBE_QUOTA' : rateLimited ? 'YOUTUBE_RATE_LIMIT' : 'YOUTUBE_API',
@@ -129,19 +143,20 @@ export const createYouTubeSongSource = ({
     return response.items ?? []
   }
 
-  const normalizeVideo = (video: YouTubeVideo): ResolvedSong | null => {
-    if (!video.id || !video.snippet?.title || !video.snippet.channelTitle) return null
-
+  const omissionReason = (video: YouTubeVideo): PlaylistOmissionReason | null => {
+    if (!video.id || !video.snippet?.title || !video.snippet.channelTitle) return 'METADATA'
+    if (video.status?.privacyStatus !== 'public' || video.status.uploadStatus !== 'processed') return 'UNAVAILABLE'
+    if (video.status.embeddable !== true) return 'EMBEDDING'
+    if (video.contentDetails?.contentRating?.ytRating === 'ytAgeRestricted') return 'AGE'
     const restriction = video.contentDetails?.regionRestriction
     const isRegionAllowed = !restriction?.allowed || restriction.allowed.includes(regionCode)
     const isRegionBlocked = restriction?.blocked?.includes(regionCode) ?? false
-    const isPlayable = video.status?.embeddable === true
-      && video.status.privacyStatus === 'public'
-      && video.status.uploadStatus === 'processed'
-      && video.contentDetails?.contentRating?.ytRating !== 'ytAgeRestricted'
-      && isRegionAllowed
-      && !isRegionBlocked
-      && isEligibleMusicVideo(video)
+    if (!isRegionAllowed || isRegionBlocked) return 'REGION'
+    return musicVideoOmissionReason(video)
+  }
+
+  const normalizeVideo = (video: YouTubeVideo): ResolvedSong | null => {
+    if (!video.id || !video.snippet?.title || !video.snippet.channelTitle) return null
 
     return {
       source: 'YOUTUBE',
@@ -154,12 +169,50 @@ export const createYouTubeSongSource = ({
       artistOrChannel: decodeHtml(video.snippet.channelTitle),
       durationSeconds: parseIsoDuration(video.contentDetails?.duration),
       thumbnailUrl: selectThumbnail(video.snippet.thumbnails),
-      isPlayable,
+      isPlayable: omissionReason(video) === null,
     }
   }
 
   return {
     source: 'YOUTUBE',
+
+    async inspectPlaylist (playlistId: string): Promise<YouTubePlaylistContents> {
+      if (!/^[A-Za-z0-9_-]{10,128}$/.test(playlistId)) throw new Error('El identificador de la lista no es válido')
+      const metadata = await request<{ snippet?: { title?: string }, contentDetails?: { itemCount?: number } }>('playlists', { part: 'snippet,contentDetails', id: playlistId })
+      const playlist = metadata.items?.[0]
+      if (!playlist?.snippet?.title) throw new Error('No se puede acceder a esta lista. Comprueba el enlace y que no sea privada.')
+      const tooLarge = () => new Error(`Esta lista supera los ${YOUTUBE_PLAYLIST_MAX_ITEMS} videos. Usa una lista más corta para importarla completa.`)
+      if ((playlist.contentDetails?.itemCount ?? 0) > YOUTUBE_PLAYLIST_MAX_ITEMS) throw tooLarge()
+      const entries: YouTubePlaylistItem[] = []
+      let pageToken = ''
+      let pages = 0
+      do {
+        const page = await request<YouTubePlaylistItem>('playlistItems', { part: 'snippet,contentDetails', playlistId, maxResults: '50', ...(pageToken ? { pageToken } : {}) })
+        if (!Array.isArray(page.items)) throw new Error('YouTube devolvió una lista incompleta. Vuelve a revisarla.')
+        entries.push(...page.items)
+        pageToken = page.nextPageToken || ''
+        if (entries.length > YOUTUBE_PLAYLIST_MAX_ITEMS || (++pages >= 4 && pageToken)) throw tooLarge()
+      } while (pageToken)
+      entries.sort((a, b) => (a.snippet?.position ?? 0) - (b.snippet?.position ?? 0))
+      const ids = [...new Set(entries.flatMap(entry => /^[\w-]{11}$/.test(entry.contentDetails?.videoId ?? '') ? [entry.contentDetails!.videoId!] : []))]
+      const videos = new Map<string, YouTubeVideo>()
+      for (let offset = 0; offset < ids.length; offset += 50) {
+        for (const video of await fetchVideos(ids.slice(offset, offset + 50), 5000)) {
+          if (video.id) videos.set(video.id, video)
+        }
+      }
+      const result: YouTubePlaylistContents = { title: decodeHtml(playlist.snippet.title), songs: [], omissions: [] }
+      const seen = new Set<string>()
+      entries.forEach((entry, index) => {
+        const id = entry.contentDetails?.videoId || ''
+        const video = videos.get(id)
+        const reason = id && seen.has(id) ? 'DUPLICATE' : video ? omissionReason(video) : 'UNAVAILABLE'
+        if (id) seen.add(id)
+        if (reason) result.omissions.push({ position: index + 1, title: decodeHtml(entry.snippet?.title || `Video ${index + 1}`), reason })
+        else result.songs.push(normalizeVideo(video!)!)
+      })
+      return result
+    },
 
     async search (query: string, context: SongSourceContext): Promise<SongSearchResult[]> {
       void context
@@ -227,12 +280,14 @@ export const parseIsoDuration = (value?: string): number | null => {
   return Number(days) * 86400 + Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds)
 }
 
-const isEligibleMusicVideo = (video: YouTubeVideo): boolean => {
+const musicVideoOmissionReason = (video: YouTubeVideo): PlaylistOmissionReason | null => {
+  if (video.snippet?.categoryId !== '10') return 'CATEGORY'
+  if (['live', 'upcoming'].includes(video.snippet.liveBroadcastContent ?? '')) return 'LIVE'
   const duration = parseIsoDuration(video.contentDetails?.duration)
-  return video.snippet?.categoryId === '10'
-    && !['live', 'upcoming'].includes(video.snippet.liveBroadcastContent ?? '')
-    && duration !== null && duration > 0 && duration <= YOUTUBE_MAX_DURATION_SECONDS
+  return duration !== null && duration > 0 && duration <= YOUTUBE_MAX_DURATION_SECONDS ? null : 'DURATION'
 }
+
+const isEligibleMusicVideo = (video: YouTubeVideo): boolean => musicVideoOmissionReason(video) === null
 
 const selectThumbnail = (thumbnails?: Record<string, YouTubeThumbnail>): string | null => {
   return thumbnails?.high?.url ?? thumbnails?.medium?.url ?? thumbnails?.default?.url ?? null
