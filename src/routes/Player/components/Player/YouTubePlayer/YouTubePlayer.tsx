@@ -1,4 +1,5 @@
 import React from 'react'
+import Button from '../../../../../components/Button/Button'
 import styles from './YouTubePlayer.css'
 
 const IFRAME_API_URL = 'https://www.youtube.com/iframe_api'
@@ -31,6 +32,7 @@ interface YouTubeApi {
       onReady(event: YouTubePlayerEvent): void
       onStateChange(event: YouTubePlayerEvent): void
       onError(event: YouTubePlayerEvent): void
+      onAutoplayBlocked(event: Pick<YouTubePlayerEvent, 'target'>): void
     }
   }) => YouTubePlayerInstance
   PlayerState: {
@@ -100,6 +102,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
   isReady = false
   mountGeneration = 0
   awaitingPlayback = false
+  state = { autoplayBlocked: false }
 
   componentDidMount () {
     this.isMounted = true
@@ -121,6 +124,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
     if (!this.player || !this.isReady) return
 
     if (prevProps.mediaKey !== this.props.mediaKey || prevProps.videoId !== this.props.videoId) {
+      this.setState({ autoplayBlocked: false })
       this.props.onLoad()
       this.awaitingPlayback = this.props.isPlaying
       if (this.props.isPlaying) this.player.loadVideoById(this.props.videoId)
@@ -173,6 +177,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
         onReady: this.handleReady,
         onStateChange: this.handleStateChange,
         onError: this.handleError,
+        onAutoplayBlocked: this.handleAutoplayBlocked,
       },
     })
   }
@@ -192,6 +197,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
     if (!this.isMounted || !this.isReady || event.target !== this.player) return
     if (event.data === window.YT?.PlayerState.PLAYING) {
       this.awaitingPlayback = false
+      this.setState({ autoplayBlocked: false })
       this.props.onPlay()
       this.props.onStatus({ isPlaying: true })
       this.startStatusUpdates()
@@ -204,6 +210,22 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
     }
 
     if (event.data === window.YT?.PlayerState.ENDED) this.props.onEnd()
+  }
+
+  handleAutoplayBlocked = (event: Pick<YouTubePlayerEvent, 'target'>) => {
+    if (!this.isMounted || !this.isReady || event.target !== this.player) return
+    this.awaitingPlayback = false
+    this.stopStatusUpdates()
+    this.setState({ autoplayBlocked: true })
+    // A browser permission block is recoverable; do not fail or skip this song.
+    this.props.onStatus({ isPlaying: false })
+  }
+
+  retryPlayback = () => {
+    if (!this.isMounted || !this.isReady || !this.player) return
+    this.awaitingPlayback = true
+    // Keep playVideo synchronous with the local click/keyboard gesture.
+    this.player.playVideo()
   }
 
   handleError = (event: YouTubePlayerEvent) => {
@@ -250,9 +272,16 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
     return (
       <div
         className={styles.container}
-        ref={this.container}
         style={{ width: this.props.width, height: this.props.height }}
-      />
+      >
+        <div className={styles.surface} ref={this.container} />
+        {this.state.autoplayBlocked && (
+          <div className={styles.notice} role='status'>
+            <p>El navegador bloqueó el inicio de YouTube. Pulse Reproducir aquí para continuar con esta canción.</p>
+            <Button variant='primary' onClick={this.retryPlayback}>Reproducir aquí</Button>
+          </div>
+        )}
+      </div>
     )
   }
 }

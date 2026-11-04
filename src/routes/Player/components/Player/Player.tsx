@@ -60,7 +60,6 @@ class Player extends React.Component<PlayerProps> {
     // StrictMode immediately remounts the same instance and media element.
     // Keep its source/context association alive across that synchronous cycle.
     this.audioLifecycle++
-    this.ensureAudioContext()
     this.updateVolume()
   }
 
@@ -74,14 +73,16 @@ class Player extends React.Component<PlayerProps> {
   }
 
   componentDidUpdate (prevProps: PlayerProps) {
+    // YouTube owns its audio output. An idle local graph can still hold the
+    // device open, especially with older Windows audio drivers.
+    if (this.props.source === 'YOUTUBE' && this.audioCtx) {
+      this.releaseAudioContext()
+      this.setState({ visualizerAudioSourceNode: null })
+    }
+
     // may have been suspended by browser if no user interaction yet
     if (this.props.isPlaying && !prevProps.isPlaying) {
-      const context = this.audioCtx
-      if (context && context.state !== 'closed') {
-        void context.resume().catch((error) => {
-          if (this.audioCtx === context && context.state !== 'closed') this.props.onError(`No se pudo habilitar el audio: ${error.message}`)
-        })
-      }
+      this.resumeAudioContext()
     }
 
     // prevent applying next song's RG vals prematurely
@@ -96,6 +97,16 @@ class Player extends React.Component<PlayerProps> {
       || prevProps.isReplayGainEnabled !== this.props.isReplayGainEnabled)) {
       this.updateVolume()
     }
+  }
+
+  resumeAudioContext = () => {
+    const context = this.audioCtx
+    if (this.props.source !== 'LOCAL' || !this.props.isPlaying || !context || context.state === 'closed' || context.state === 'running') return
+    void context.resume().catch((error) => {
+      if (this.audioCtx === context && this.props.source === 'LOCAL' && this.props.isPlaying && context.state !== 'closed') {
+        this.props.onError(`No se pudo habilitar el audio: ${error.message}`)
+      }
+    })
   }
 
   handleAudioElement = (el: HTMLVideoElement | HTMLAudioElement) => {
@@ -113,6 +124,7 @@ class Player extends React.Component<PlayerProps> {
     this.audioSourceNode = source
     this.audioSourceNode.connect(this.audioGainNode)
     this.updateVolume()
+    this.resumeAudioContext()
 
     // hand back copy of original audio source
     const sourceNodeCopy = this.audioSourceNode
@@ -126,19 +138,23 @@ class Player extends React.Component<PlayerProps> {
     // DOM element is illegal even if the old context has already closed.
     queueMicrotask(() => {
       if (lifecycle !== this.audioLifecycle) return
-      const context = this.audioCtx
-      this.audioSourceNode?.disconnect()
-      this.audioGainNode?.disconnect()
-      this.audioSourceNode = null
-      this.audioGainNode = null
-      this.audioCtx = null
-      this.audioSources = new WeakMap()
-      if (context && context.state !== 'closed') {
-        void context.close().catch((error) => {
-          if (context.state !== 'closed') console.error('Could not release music audio context', error)
-        })
-      }
+      this.releaseAudioContext()
     })
+  }
+
+  releaseAudioContext = () => {
+    const context = this.audioCtx
+    this.audioSourceNode?.disconnect()
+    this.audioGainNode?.disconnect()
+    this.audioSourceNode = null
+    this.audioGainNode = null
+    this.audioCtx = null
+    this.audioSources = new WeakMap()
+    if (context && context.state !== 'closed') {
+      void context.close().catch((error) => {
+        if (context.state !== 'closed') console.error('Could not release music audio context', error)
+      })
+    }
   }
 
   handlePlay = () => {

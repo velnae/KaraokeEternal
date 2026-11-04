@@ -102,9 +102,13 @@ config.module.rules.push({
   }, {
     loader: 'css-loader',
     options: {
+      importLoaders: 1,
       modules: false,
       sourceMap: false,
     },
+  }, {
+    loader: 'postcss-loader',
+    options: { postcssOptions: { plugins: ['postcss-nesting'] } },
   }],
 })
 
@@ -118,12 +122,16 @@ config.module.rules.push({
     }, {
       loader: 'css-loader',
       options: {
+        importLoaders: 1,
         modules: {
           namedExport: false,
           exportLocalsConvention: 'as-is',
           localIdentName: __DEV__ ? '[name]__[local]--[hash:base64:5]' : '[hash:base64]',
         },
       },
+    }, {
+      loader: 'postcss-loader',
+      options: { postcssOptions: { plugins: ['postcss-nesting'] } },
     },
   ],
 })

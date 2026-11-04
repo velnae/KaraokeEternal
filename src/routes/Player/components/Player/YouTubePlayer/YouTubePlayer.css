@@ -1,9 +1,17 @@
-.container,
-.container iframe {
+.surface iframe {
   display: block;
   border: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .container {
+  display: flex;
+  flex-direction: column;
   background: #000;
 }
+
+.surface { flex: 1; min-height: 0; }
+.notice { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; color: var(--lyrics); background: var(--equipment); border-top: 1px solid var(--edge); }
+.notice p { flex: 1 1 240px; margin: 0; line-height: 1.5; }
+.notice button { flex-shrink: 0; min-height: 44px; }

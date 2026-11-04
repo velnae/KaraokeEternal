@@ -262,7 +262,8 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   })
 
   const { default: webpackDevMiddleware } = await import('webpack-dev-middleware')
-  app.use(webpackDevMiddleware.koaWrapper(compiler, { publicPath: urlPath }))
+  // Let createClientIndex apply the configured base path instead of serving raw HTML.
+  app.use(webpackDevMiddleware.koaWrapper(compiler, { publicPath: urlPath, index: false }))
 
   const { default: hotMiddleware } = await import('./lib/getHotMiddleware.js')
   app.use(hotMiddleware(compiler))

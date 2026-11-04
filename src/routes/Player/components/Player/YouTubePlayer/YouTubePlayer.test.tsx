@@ -7,11 +7,14 @@ vi.mock('react', () => ({
   default: {
     Component: class {
       props: unknown
+      state = {}
       constructor (props: unknown) { this.props = props }
+      setState (state: object) { Object.assign(this.state, state) }
     },
     createRef: () => ({ current: null as HTMLElement | null }),
   },
 }))
+vi.mock('../../../../../components/Button/Button', () => ({ default: (): null => null }))
 
 type Props = React.ComponentProps<typeof YouTubePlayer>
 
@@ -82,7 +85,7 @@ describe('YouTube player transitions', () => {
     }
     const event = (data: number) => player.handleStateChange({ data, target: iframe })
 
-    return { commands, event, iframe, onEnd, player, statuses, update }
+    return { commands, event, iframe, onEnd, onError, player, statuses, update }
   }
 
   it('keeps the next video playing despite a PAUSED event from the old video during load', () => {
@@ -188,6 +191,33 @@ describe('YouTube player transitions', () => {
     expect(commands).toEqual(['pause', 'cue:second', 'play'])
     expect(player.props.isPlaying).toBe(true)
     player.componentWillUnmount()
+  })
+
+  it('keeps an autoplay-blocked song available for a local retry without failing or skipping it', () => {
+    const { commands, event, iframe, onEnd, onError, player } = setup()
+    player.handleAutoplayBlocked({ target: iframe })
+    expect(player.props.isPlaying).toBe(false)
+    expect(player.state.autoplayBlocked).toBe(true)
+    expect(onEnd).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
+
+    player.retryPlayback()
+    expect(commands[commands.length - 1]).toBe('play')
+    event(PAUSED)
+    expect(player.awaitingPlayback).toBe(true)
+    event(PLAYING)
+    expect(player.props.isPlaying).toBe(true)
+    expect(player.state.autoplayBlocked).toBe(false)
+    player.componentWillUnmount()
+  })
+
+  it('ignores autoplay-blocked notifications from a destroyed or replaced iframe', () => {
+    const { iframe, player, statuses } = setup()
+    player.handleAutoplayBlocked({ target: { ...iframe } })
+    player.componentWillUnmount()
+    player.handleAutoplayBlocked({ target: iframe })
+    expect(player.state.autoplayBlocked).toBe(false)
+    expect(statuses).toEqual([])
   })
 
   it.each([100, 153])('passes iframe code %s separately from the display message', (code) => {

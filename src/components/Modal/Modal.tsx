@@ -20,7 +20,7 @@ const Modal = ({ buttons, className, children, visible = true, onClose, scrollab
   const isOutsideClick = useRef(false)
 
   useEffect(() => {
-    if (visible && dialogRef.current) {
+    if (visible && dialogRef.current && !dialogRef.current.open) {
       dialogRef.current.showModal()
     }
   }, [visible])
