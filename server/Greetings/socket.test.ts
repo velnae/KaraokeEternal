@@ -55,12 +55,47 @@ it('rejects revoked table membership before reading or changing messages', () =>
   expect(invoke('read', {}, member).error).toContain('terminó')
 })
 
-it('rejects post-request greeting creation and keeps the musical request intact', () => {
+it('attaches a message to an owned request once, independently of its music receipt', () => {
   db.run('DELETE FROM greetings WHERE queueId=1')
-  expect(invoke('inspect', { queueId: 1 }).error).toContain('al pedir')
-  const payload = { queueId: 1, greeting: { recipient: '', message: 'After my order' } }
-  expect(invoke('attach', payload).error).toContain('al pedir')
+  expect(invoke('read').payload.opportunities[1]).toMatchObject({ canAdd: true })
+  const payload = { queueId: 1, message: '  ¡Feliz di\u0301a!  ' }
+  const first = invoke('attach', payload)
+  expect(first.error).toBeUndefined()
+  expect(first.payload.items[0]).toMatchObject({ recipient: '', message: '¡Feliz día!', sender: 'Sender', status: 'QUEUED' })
+  expect(invoke('attach', payload).payload.items[0].greetingId).toBe(first.payload.items[0].greetingId)
+  expect(invoke('attach', { ...payload, message: 'Different message' }).error).toContain('ya tiene')
   expect(invoke('attach', { ...payload, queueId: 2 }).error).toBeTruthy()
   expect(db.all('SELECT queueId FROM queue')).toHaveLength(2)
+  expect(Greetings.items(1)).toHaveLength(1)
+  expect(invoke('read').payload.opportunities[1].canAdd).toBe(false)
+})
+
+it('allows pending approval but rejects closed windows and invalid messages', () => {
+  db.run('DELETE FROM greetings WHERE queueId=1')
+  for (const message of ['', ' ', null, '<script>', 'x'.repeat(220)]) {
+    expect(invoke('attach', { queueId: 1, message }).error).toBeTruthy()
+  }
+  db.run(`UPDATE queue SET status='PENDING_APPROVAL' WHERE queueId=1`)
+  expect(invoke('read').payload.opportunities[1].canAdd).toBe(true)
+  expect(invoke('attach', { queueId: 1, message: '¡Hola!' }).error).toBeUndefined()
+  expect(db.get<{ status: string }>('SELECT status FROM queue WHERE queueId=1')?.status).toBe('PENDING_APPROVAL')
+  db.run('DELETE FROM greetings WHERE queueId=1')
+  db.run(`UPDATE queue SET status='APPROVED' WHERE queueId=1`)
+  Greetings.reserve(1, 'player', 1, {})
+  expect(invoke('read').payload.opportunities[1]).toMatchObject({ canAdd: false, reason: expect.stringContaining('transición') })
+  expect(invoke('attach', { queueId: 1, message: 'Too late' }).error).toContain('transición')
   expect(Greetings.items(1)).toHaveLength(0)
+})
+
+it('rejects closed rooms, cancelled requests and stale membership before attaching', () => {
+  db.run('DELETE FROM greetings WHERE queueId=1')
+  const payload = { queueId: 1, message: 'Hello' }
+  const revoked = { ...actor, user: { ...actor.user, participantSessionId: 'revoked' } }
+  expect(invoke('attach', payload, revoked).error).toContain('terminó')
+  db.run(`UPDATE queue SET status='REMOVED' WHERE queueId=1`)
+  expect(invoke('attach', payload).error).toBeTruthy()
+  db.run(`UPDATE queue SET status='APPROVED' WHERE queueId=1`)
+  db.run(`UPDATE rooms SET status='closed' WHERE roomId=1`)
+  expect(invoke('attach', payload).error).toContain('cerrada')
+  expect(db.all('SELECT queueId FROM queue')).toHaveLength(2)
 })

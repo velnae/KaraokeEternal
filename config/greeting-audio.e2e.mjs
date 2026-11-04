@@ -154,13 +154,20 @@ const submit = async (index, message, intent = 'LISTEN') => {
   await guest.goto(`${base}library`)
   await guest.getByRole('radio', { name: intent === 'SING' ? 'Cantar karaoke' : 'Escuchar música', exact: true }).check()
   await guest.getByRole('searchbox', { name: 'Buscar canción o artista' }).fill(`https://youtu.be/${videoIds[index]}`)
+  await expect(guest.getByRole('button', { name: 'Buscar', exact: true })).toBeEnabled()
   await guest.getByRole('searchbox', { name: 'Buscar canción o artista' }).press('Enter')
   const card = guest.locator(`[data-source-id="${videoIds[index]}"]`)
-  await card.getByRole('checkbox', { name: /Agregar saludo/ }).check()
-  await card.getByLabel('Para (opcional)').fill('Rocío')
-  await card.getByLabel('Mensaje', { exact: true }).fill(message)
+  await expect(card.getByRole('checkbox', { name: /Agregar saludo/ })).toHaveCount(0)
   await card.getByRole('button', { name: 'Pedir canción', exact: true }).click()
-  await expect(card.getByRole('link', { name: 'En la cola', exact: true })).toBeVisible()
+  await expect(guest).toHaveURL(`${base}requests`)
+  const queueId = db.prepare('SELECT queueId FROM queue WHERE externalId=? ORDER BY queueId DESC LIMIT 1').get(videoIds[index]).queueId
+  const requested = guest.locator(`[data-queue-id="${queueId}"]`)
+  await expect(requested.getByRole('heading')).toBeFocused()
+  await requested.getByRole('button', { name: 'Agregar saludo', exact: true }).click()
+  await expect(requested.getByLabel('Para (opcional)')).toHaveCount(0)
+  await requested.getByLabel('Mensaje', { exact: true }).fill(message)
+  await requested.getByRole('button', { name: 'Guardar saludo', exact: true }).click()
+  await expect(requested.getByRole('group', { name: 'Saludo', exact: true })).toContainText(message)
   return records().at(-1)
 }
 
@@ -206,7 +213,12 @@ try {
       else socket.send(message)
     })
   })
-  for (const context of [adminContext, guestContext]) context.on('page', page => page.on('pageerror', error => errors.push(error.message)))
+  for (const context of [adminContext, guestContext]) context.on('page', (page) => {
+    page.on('pageerror', error => errors.push(error.message))
+    page.on('console', (message) => {
+      if (message.type() === 'error' && message.text().includes('Encountered two children with the same key')) errors.push(message.text())
+    })
+  })
   admin = await adminContext.newPage()
   await admin.goto(`${base}account?roomId=1`)
   await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).click()
@@ -274,7 +286,13 @@ try {
     await admin.screenshot({ path: path.join(data, `prepared-${width}.png`) })
   }
   await guest.goto(`${base}requests`)
-  await expect(guest.locator(`[data-queue-id="${first.queueId}"]`).getByText('Audio preparado', { exact: true })).toBeVisible()
+  const participantCard = guest.locator(`[data-queue-id="${first.queueId}"]`)
+  await expect(participantCard.getByRole('group', { name: 'Saludo', exact: true })).toContainText(first.message)
+  await expect(participantCard.getByText('Audio preparado', { exact: true })).toHaveCount(0)
+  await expect(participantCard.getByText('Detalle de la voz', { exact: true })).toHaveCount(0)
+  const removeAction = await participantCard.getByRole('button', { name: 'Quitar saludo', exact: true }).boundingBox()
+  const cancelAction = await participantCard.getByRole('button', { name: 'Cancelar pedido', exact: true }).boundingBox()
+  assert.ok(Math.abs(removeAction.y - cancelAction.y) < 1)
   await guest.screenshot({ path: path.join(data, 'participant-prepared-390.png') })
   const audioPath = `${base}api/greetings/${first.greetingId}/audio`
   const audio = await api.get(audioPath)

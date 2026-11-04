@@ -3,12 +3,13 @@ import Button from 'components/Button/Button'
 import { greetingLabels, greetingAudioLabels, greetingVoiceLabels, type Greeting } from 'shared/greetings'
 import styles from './Greetings.css'
 
-export default function QueueGreeting ({ greeting, paused, busy, onRemove, descriptionId }: {
+export default function QueueGreeting ({ greeting, paused, busy, onRemove, descriptionId, operator = false }: {
   greeting: Greeting
   paused?: boolean
   busy: boolean
   onRemove?: () => void
   descriptionId?: string
+  operator?: boolean
 }) {
   const pending = greeting.status === 'QUEUED' || greeting.status === 'RESERVED'
   const removed = greeting.status === 'REMOVED' || greeting.status === 'CANCELLED'
@@ -23,7 +24,7 @@ export default function QueueGreeting ({ greeting, paused, busy, onRemove, descr
               <>
                 <span className={styles.greetingLabel}>Saludo</span>
                 <p translate='no'>{`${greeting.recipient ? `Para ${greeting.recipient}: ` : ''}${greeting.message}`}</p>
-                {failed && greeting.reason
+                {operator && failed && greeting.reason
                   ? (
                       <details className={styles.outcome}>
                         <summary>{greetingLabels[greeting.status]}</summary>
@@ -31,8 +32,8 @@ export default function QueueGreeting ({ greeting, paused, busy, onRemove, descr
                       </details>
                     )
                   : !pending && <span className={styles.delivery} role='status'>{greetingLabels[greeting.status]}</span>}
-                {pending && paused && <span className={styles.notice}>Saludos pausados</span>}
-                {pending && greeting.audio && !greeting.playback && (
+                {operator && pending && paused && <span className={styles.notice}>Saludos pausados</span>}
+                {operator && pending && greeting.audio && !greeting.playback && (
                   <div className={styles.audio} data-audio-status={greeting.audio.status}>
                     <span role='status'>{greetingAudioLabels[greeting.audio.status]}</span>
                     {greeting.audio.reason && (
@@ -43,7 +44,7 @@ export default function QueueGreeting ({ greeting, paused, busy, onRemove, descr
                     )}
                   </div>
                 )}
-                {greeting.playback && (
+                {operator && greeting.playback && (
                   <div className={styles.audio} data-voice-status={greeting.playback.status}>
                     <span role='status'>{greetingVoiceLabels[greeting.playback.status]}</span>
                     {greeting.playback.reason && <p className={styles.voiceReason}>{greeting.playback.reason}</p>}
@@ -52,7 +53,7 @@ export default function QueueGreeting ({ greeting, paused, busy, onRemove, descr
               </>
             )}
       </div>
-      {canRemove && <Button className={styles.remove} disabled={busy} aria-busy={busy} aria-describedby={descriptionId} onClick={onRemove}>{greeting.status === 'DISPLAYING' ? 'Retirar saludo' : 'Quitar saludo'}</Button>}
+      {operator && canRemove && <Button className={styles.remove} disabled={busy} aria-busy={busy} aria-describedby={descriptionId} onClick={onRemove}>{greeting.status === 'DISPLAYING' ? 'Retirar saludo' : 'Quitar saludo'}</Button>}
     </div>
   )
 }

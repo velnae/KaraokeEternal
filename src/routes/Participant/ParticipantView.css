@@ -50,6 +50,7 @@
 .requestState[data-status='PENDING_APPROVAL'] { border-color: #edc47c55; background: #edc47c0d; color: var(--amber); }
 .card { padding: 18px; margin: 14px 0; border: 1px solid var(--edge); border-radius: 16px; background: var(--equipment); }
 .card[data-status='PLAYING'] { border-color: var(--cyan); box-shadow: inset 3px 0 var(--cyan); }
+.card[data-recent='true'] { border-color: var(--cyan); box-shadow: inset 3px 0 var(--cyan); }
 .queuedSong { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: start; gap: 14px; }
 .cardStatus { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .badge { display: inline-block; border-radius: 6px; padding: 4px 8px; color: var(--cyan); background: #76e0ec0d; font-size: 12px; font-weight: 600; }
@@ -58,8 +59,10 @@
 .card[data-status='FAILED'] .badge { color: #ffb6c4; background: #ffb6c40d; }
 .wait { white-space: nowrap; color: var(--secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
 .textAction { display: inline-flex; align-items: center; min-height: 44px; }
-.card > button { width: 100%; margin-top: 8px; }
-.container .cancel { display: flex; width: fit-content; margin: 12px 0 0 auto; color: var(--secondary); background: transparent; border: 1px solid var(--edge); font-weight: 500; }
+.cardActions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; margin-top: 16px; }
+.cardActions:empty { display: none; }
+.container .greetingAction { color: var(--cyan); background: transparent; border: 1px solid var(--edge); }
+.container .cancel { display: flex; flex-shrink: 0; width: fit-content; margin: 0 0 0 auto; color: var(--secondary); background: transparent; border: 1px solid var(--edge); font-weight: 500; }
 .container .cancel:disabled { opacity: .6; }
 .empty { max-width: 320px; margin: 36px auto; padding: 24px 12px; text-align: center; color: var(--secondary); }
 .empty a { display: inline-flex; align-items: center; min-height: 48px; padding: 10px 18px; margin-top: 12px; border-radius: 12px; background: var(--cyan); color: var(--stage); text-decoration: none; }
@@ -70,6 +73,7 @@
   .result { grid-template-columns: 88px minmax(0, 1fr); gap: 8px 12px; }
   .queuedSong { grid-template-columns: 64px minmax(0, 1fr); gap: 10px; }
   .card { padding: 14px; }
+  .cardActions button { padding-inline: 12px; font-size: 13px; }
 }
 
 @media (min-width: 640px) {

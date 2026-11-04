@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { Link } from 'react-router'
+import React, { useEffect, useId, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { ensureState } from 'redux-optimistic-ui'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import store from 'store/store'
@@ -23,13 +23,20 @@ import SongArtwork from 'components/SongArtwork/SongArtwork'
 import theme from 'styles/karaokeTheme.css'
 import styles from './ParticipantView.css'
 import QueueGreeting from 'components/Greetings/QueueGreeting'
+import GreetingComposer from 'components/Greetings/GreetingComposer'
 import useGreetings from 'components/Greetings/useGreetings'
-import { YOUTUBE_MAX_DURATION_SECONDS, youtubeSearchCanRetry, youtubeSearchError } from 'shared/youtubeSearch'
+import { youtubeSearchCanRetry, youtubeSearchError } from 'shared/youtubeSearch'
 import { requestIntentLabels, type RequestIntent } from 'shared/requestIntent'
 import searchStyles from 'components/SongSearch/SongSearch.css'
 
 const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | 'room' }) => {
   const dispatch = useAppDispatch()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const noticeId = useId()
+  const requestScope = useRef({ active: true })
+  const focusedLocation = useRef('')
+  const highlight = useRef({ clear: () => {} })
   const connected = useConnection()
   const user = useAppSelector(state => state.user)
   const room = useAppSelector(state => state.rooms.entities[user.roomId])
@@ -52,6 +59,52 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
     if (connected) void dispatch(fetchCurrentRoom())
   }, [connected, dispatch])
 
+  useEffect(() => {
+    const scope = { active: true }
+    const currentHighlight = highlight.current
+    requestScope.current = scope
+    return () => {
+      scope.active = false
+      currentHighlight.clear()
+    }
+  }, [page, user.roomId, user.userId, location.key])
+
+  useEffect(() => {
+    const id = location.state?.requestedQueueId
+    if (page !== 'requests' || focusedLocation.current === location.key || !Number.isSafeInteger(id)) return
+    if ((location.state?.requestedRoomId !== undefined && location.state.requestedRoomId !== user.roomId)
+      || (location.state?.requestedUserId !== undefined && location.state.requestedUserId !== user.userId)) return
+    const item = queue.entities[id]
+    if (!item || item.isOptimistic === true || item.userId !== user.userId || item.origin !== 'PARTICIPANT') return
+    const title = document.getElementById(`request-title-${id}`)
+    if (!title) return
+    const card = title.closest('article')
+    const clear = () => {
+      if (card) delete card.dataset.recent
+    }
+    const frame = requestAnimationFrame(() => {
+      focusedLocation.current = location.key
+      highlight.current.clear()
+      if (card) card.dataset.recent = 'true'
+      title.focus({ preventScroll: true })
+      card?.scrollIntoView({ block: 'center' })
+      const timer = setTimeout(clear, 3000)
+      highlight.current.clear = () => {
+        clearTimeout(timer)
+        clear()
+      }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [page, location.key, location.state, queue, user.roomId, user.userId])
+
+  const requestSong = async (sourceId: string, title: string, requestIntent?: RequestIntent) => {
+    const scope = requestScope.current
+    const receipt = await controller.request(sourceId, title, undefined, requestIntent)
+    const account = store.getState().user
+    if (!scope.active || account.userId !== user.userId || account.roomId !== user.roomId || receipt?.phase !== 'confirmed') return
+    navigate('/requests', { state: { requestedQueueId: receipt.queueId, requestedRoomId: user.roomId, requestedUserId: user.userId } })
+  }
+
   const items = Object.values(queue.entities).filter((item): item is QueueItem => item.isOptimistic !== true)
   const own = items.filter(item => item.userId === user.userId && item.origin === 'PARTICIPANT' && !isQueueHistoryHidden(item))
   const rules = normalizeQueuePrefs(room?.prefs?.queue)
@@ -59,6 +112,14 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
   const remaining = Math.max(0, rules.maxPendingPerParticipant - pending)
   const ready = connected && !queue.isLoading && !!room
   const canRequest = ready && room.status === 'open' && remaining > 0
+  let pageNotice = ''
+  if (!connected) pageNotice = 'Sin conexión · Reconectando…'
+  else if (room?.status === 'closed') pageNotice = 'Sala cerrada.'
+  else if (!ready) pageNotice = 'Actualizando…'
+  else if (page === 'search' && !canRequest) pageNotice = 'Límite de pedidos alcanzado. Revisa Mis pedidos.'
+  const visibleTable = tableMode(room?.prefs) !== 'OFF' ? user.tableLabel : null
+  const shortQuery = query.trim().length === 1
+  const searchDescription = [pageNotice ? noticeId : undefined, shortQuery ? `${noticeId}-minimum` : undefined].filter(Boolean).join(' ') || undefined
   const upcoming = ordered.result.map(id => ordered.entities[id]).filter((item): item is QueueItem =>
     item.status === 'APPROVED' || item.status === 'PLAYING')
   const current = items.find(item => item.queueId === status.queueId && !status.isAtQueueEnd && item.status === 'PLAYING')
@@ -94,9 +155,9 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
           <div className={styles.queuedSong}>
             <SongArtwork thumbnailUrl={item.thumbnailUrl} />
             <div>
-              <h2 id={`request-title-${item.queueId}`} translate='no'>{item.title}</h2>
+              <h2 id={`request-title-${item.queueId}`} tabIndex={-1} translate='no'>{item.title}</h2>
               <p translate='no'>{personal ? item.artistOrChannel : item.userDisplayName}</p>
-              {item.tableLabelSnapshot && <p>{item.tableLabelSnapshot}</p>}
+              {item.tableLabelSnapshot && (!personal || item.tableLabelSnapshot !== visibleTable) && <p>{item.tableLabelSnapshot}</p>}
             </div>
           </div>
           {personal && item.status === 'FAILED' && <Link className={styles.textAction} to='/library'>Buscar otra versión</Link>}
@@ -106,14 +167,41 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
               descriptionId={`request-title-${item.queueId}`}
               paused={greetings.snapshot?.paused}
               busy={greetings.busy}
-              onRemove={greetings.byQueue[item.queueId].status === 'QUEUED' ? () => void greetings.execute('remove', { greetingId: greetings.byQueue[item.queueId].greetingId }) : undefined}
             />
           )}
         </div>
-        {personal && isPendingRequest(item) && (
-          <Button className={styles.cancel} aria-label='Cancelar pedido' aria-describedby={`request-title-${item.queueId}`} disabled={!connected || cancelling !== null} onClick={() => { void cancel(item) }}>
-            {cancelling === item.queueId ? 'Cancelando…' : 'Cancelar pedido'}
-          </Button>
+        {personal && (
+          <div className={styles.cardActions}>
+            {!greetings.byQueue[item.queueId] && (
+              <GreetingComposer
+                key={`${user.roomId}:${user.userId}:${item.queueId}`}
+                sender={item.userDisplayName}
+                opportunity={greetings.snapshot?.opportunities?.[item.queueId]}
+                pending={isPendingRequest(item)}
+                busy={greetings.busy}
+                connected={connected}
+                descriptionId={`request-title-${item.queueId}`}
+                noticeId={pageNotice ? noticeId : undefined}
+                onSave={message => greetings.execute('attach', { queueId: item.queueId, message })}
+              />
+            )}
+            {greetings.byQueue[item.queueId]?.status === 'QUEUED' && (
+              <Button
+                className={styles.greetingAction}
+                disabled={greetings.busy || !!pageNotice}
+                aria-busy={greetings.busy}
+                aria-describedby={[`request-title-${item.queueId}`, pageNotice ? noticeId : undefined].filter(Boolean).join(' ')}
+                onClick={() => void greetings.execute('remove', { greetingId: greetings.byQueue[item.queueId].greetingId })}
+              >
+                {greetings.busy && connected ? 'Procesando…' : 'Quitar saludo'}
+              </Button>
+            )}
+            {isPendingRequest(item) && (
+              <Button className={styles.cancel} aria-label='Cancelar pedido' aria-describedby={`request-title-${item.queueId}`} disabled={!connected || cancelling !== null} onClick={() => { void cancel(item) }}>
+                {cancelling === item.queueId ? 'Cancelando…' : 'Cancelar pedido'}
+              </Button>
+            )}
+          </div>
         )}
       </article>
     )
@@ -131,9 +219,8 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
           <span translate='no'>{user.name}</span>
         </Link>
       </div>
-      {!connected && <p role='status' className={styles.notice}>Sin conexión · Reconectando…</p>}
-      {user.tableLabel && tableMode(room?.prefs) !== 'OFF' && <p className={styles.notice}>{user.tableLabel}</p>}
-      {room?.status === 'closed' && <p role='status' className={styles.notice}>Sala cerrada</p>}
+      {pageNotice && <p id={noticeId} role='status' className={styles.notice}>{pageNotice}</p>}
+      {visibleTable && <p className={styles.notice}>{visibleTable}</p>}
       {activePlayer && next?.userId === user.userId && <p role='status' className={styles.notice}>Tu turno sigue</p>}
 
       <div className={styles.pageHeading}>
@@ -148,7 +235,6 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
           </Link>
         )}
       </div>
-      {connected && !ready && <p role='status'>Actualizando…</p>}
 
       {page === 'search' && (
         <>
@@ -176,13 +262,12 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
               </div>
             </fieldset>
             <div className={styles.searchRow}>
-              <input id='youtube-query' type='search' aria-label='Buscar canción o artista' aria-describedby='youtube-search-help' value={query} onChange={event => setQuery(event.target.value)} placeholder='Canción, artista o enlace' maxLength={200} enterKeyHint='search' />
-              <Button type='submit' disabled={!connected || query.trim().length < 2}>Buscar</Button>
+              <input id='youtube-query' type='search' aria-label='Buscar canción o artista' aria-describedby={searchDescription} value={query} onChange={event => setQuery(event.target.value)} placeholder='Canción, artista o enlace' maxLength={200} enterKeyHint='search' />
+              <Button type='submit' disabled={!connected || query.trim().length < 2} aria-describedby={searchDescription}>Buscar</Button>
             </div>
-            <p id='youtube-search-help' className={styles.searchHelp}>{`Canciones de hasta ${YOUTUBE_MAX_DURATION_SECONDS / 60} minutos. Escribe al menos 2 caracteres y pulsa Buscar.`}</p>
+            {shortQuery && <p id={`${noticeId}-minimum`} className={styles.searchHelp} role='status'>Mínimo 2 caracteres.</p>}
           </form>
           <div aria-live='polite'>
-            {!matchesSubmission && query.trim().length >= 2 && <p>Pulsa Buscar para ver los resultados.</p>}
             {matchesSubmission && search.isLoading && <p>Buscando…</p>}
             {matchesSubmission && search.error && (
               <div className={styles.notice}>
@@ -191,10 +276,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
               </div>
             )}
             {matchesSubmission && search.query && !search.isLoading && !search.error && search.results.length === 0 && (
-              <div className={styles.empty}>
-                <p>{`No encontramos canciones de hasta ${YOUTUBE_MAX_DURATION_SECONDS / 60} minutos.`}</p>
-                <p>Prueba otro título, artista o un enlace de YouTube.</p>
-              </div>
+              <p className={styles.empty}>Sin resultados.</p>
             )}
           </div>
           {matchesSubmission && search.results.map((result) => {
@@ -208,8 +290,9 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
                 receipt={receipt}
                 active={active}
                 connected={connected}
-                blocker={!connected ? 'Sin conexión. Espera a reconectar para pedir la canción.' : !ready ? 'Actualizando la sala. Espera un momento.' : room.status === 'closed' ? 'Sala cerrada. Consulta al organizador.' : !canRequest ? 'Límite alcanzado. Revisa Mis pedidos antes de agregar otra canción.' : null}
-                onRequest={(greeting, intent) => { void controller.request(result.sourceId, result.title, greeting, intent) }}
+                blocker={pageNotice || null}
+                blockerDescriptionId={pageNotice ? noticeId : undefined}
+                onRequest={(intent) => { void requestSong(result.sourceId, result.title, intent) }}
               />
             )
           })}
@@ -224,7 +307,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             <article key={receipt.requestId} className={styles.card}>
               <h2 translate='no'>{receipt.title}</h2>
               {receipt.phase !== 'sending' && <p role='status'>{receipt.phase === 'error' ? receipt.message : 'Sin confirmar'}</p>}
-              <Button disabled={!connected || receipt.phase === 'sending' || (receipt.phase === 'error' && !canRequest)} onClick={() => { void controller.request(receipt.sourceId, receipt.title) }}>{receipt.phase === 'sending' ? 'Enviando…' : receipt.phase === 'error' ? 'Reintentar' : 'Comprobar pedido'}</Button>
+              <Button disabled={!connected || receipt.phase === 'sending' || (receipt.phase === 'error' && !canRequest)} onClick={() => { void requestSong(receipt.sourceId, receipt.title) }}>{receipt.phase === 'sending' ? 'Enviando…' : receipt.phase === 'error' ? 'Reintentar' : 'Comprobar pedido'}</Button>
             </article>
           ))}
           {own.length === 0 && unsettled.length === 0 && !queue.isLoading && (

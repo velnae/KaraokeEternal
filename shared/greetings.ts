@@ -7,6 +7,7 @@ export const GREETING_LIMIT = 220
 // round trips inside the existing 25-second transition, not extra playback time.
 export const GREETING_START_MS = 3000
 export interface GreetingDraft { recipient: string, message: string }
+export interface GreetingOpportunity { canAdd: boolean, reason: string | null, maxMessageLength: number }
 export type GreetingStatus = 'QUEUED' | 'RESERVED' | 'DISPLAYING' | 'DISPLAYED' | 'CANCELLED' | 'REMOVED' | 'SKIPPED' | 'INTERRUPTED'
 export type GreetingAudioStatus = 'queued' | 'generating' | 'preparing' | 'ready' | 'uncertain' | 'failed' | 'cancelled' | 'unavailable'
 export interface GreetingAudio { status: GreetingAudioStatus, reason: string | null, durationMs: number | null }
@@ -41,6 +42,7 @@ export interface Greeting extends GreetingDraft {
 }
 export interface GreetingSnapshot {
   items: Greeting[]
+  opportunities: Record<number, GreetingOpportunity>
   paused: boolean
   audioEnabled: boolean
   playback: GreetingPlaybackPrefs
@@ -61,6 +63,12 @@ export const greetingLabels: Record<GreetingStatus, string> = {
 }
 export const greetingText = (draft: GreetingDraft, sender: string) =>
   `${draft.recipient.trim() ? `Para ${draft.recipient.trim()}: ` : ''}${draft.message.trim()} — De ${sender}`
+export const greetingMessageLength = (message: string) => [...message.normalize('NFC')].length
+export const greetingMessageLimit = (sender: string) => Math.max(0, GREETING_LIMIT - [...greetingText({ recipient: '', message: '' }, sender)].length)
+export function normalizeGreetingMessage (value: unknown): string {
+  if (typeof value !== 'string') throw new Error('El mensaje del saludo no es válido.')
+  return value.normalize('NFC').trim()
+}
 export function validateGreeting (value: unknown, sender: string): GreetingDraft {
   if (!value || typeof value !== 'object') throw new Error('El saludo no es válido')
   const draft = value as GreetingDraft

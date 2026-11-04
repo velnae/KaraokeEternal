@@ -1,6 +1,6 @@
 # Greetings attached to song requests
 
-Participants can include one optional greeting with each musical request. Greetings
+Participants can add one optional greeting after confirming each musical request. Greetings
 are shown automatically before their associated song. The operator can moderate
 the queue without approving every message. Phase 4 block 3 changed the original
 turn-wide grouping to per-song delivery; optional voice playback is documented in
@@ -9,12 +9,18 @@ turn-wide grouping to per-song delivery; optional voice playback is documented i
 ## Use the feature
 
 1. Find a song by searching or pasting a YouTube link.
-2. If wanted, check **Agregar saludo**, enter a message and optional recipient.
-   Select **Pedir canción** once to send the song and greeting together.
-3. In **Mis pedidos**, the greeting appears inside its song card. You can remove
-   a queued greeting with **Quitar saludo**. Creating another greeting or adding
-   one after the request has entered the queue is not available.
-4. Open the room's player. Each greeting appears before its associated musical
+2. Select **Pedir canción**. A matching server confirmation navigates to **Mis
+   pedidos**, focuses the exact song card and briefly highlights it. An uncertain
+   request stays on Search with **Comprobar pedido**; checking reuses its receipt.
+3. Select **Agregar saludo** on the song card. Enter a single **Mensaje**, then
+   **Guardar saludo**. The Unicode character counter reserves space for the
+   automatic sender within the existing 220-character total (211 for a sender
+   named Ana). There is no separate recipient field or greeting checkbox in Search.
+4. **Cancelar** closes the editor while retaining the draft and musical request.
+   A failed save retains the message. An uncertain save locks it for **Comprobar
+   saludo** rather than submitting a different message. Confirmed greetings appear
+   inline and can be withdrawn with **Quitar saludo** while queued.
+5. Open the room's player. Each greeting appears before its associated musical
    request, then playback continues. Text delivery does not require enabling
    the animator, unlocking its audio, or installing a voice provider.
    The operator can work in the queue tab while the player remains in another tab.
@@ -46,8 +52,12 @@ separate greetings panel. Cards without greetings have no greeting placeholder.
 | Reanudar saludos | Allow greetings for upcoming turns; skipped messages are not replayed late. |
 
 The normal pending state is implicit in the musical queue. Only meaningful delivery
-outcomes are highlighted, such as **En pantalla** or **Mostrado**. Failure reasons
-are expandable in place. Removed messages show a short outcome instead of retaining
+outcomes are highlighted, such as **En pantalla** or **Mostrado**. Technical voice
+states and expandable failure reasons are reserved for the operator. Participant
+cards show the message and delivery outcome; **Quitar saludo** replaces **Agregar
+saludo** in the action row beside **Cancelar pedido**. The editor normally shows
+only its character counter below the field, with actionable errors when needed.
+Removed messages show a short outcome instead of retaining
 the withdrawn text. The room-wide pause control appears only when relevant.
 
 Messages are eligible automatically. There is no greeting approval state. The
@@ -59,21 +69,25 @@ Pending messages are visible only to their author and the room's administrators.
 
 - One greeting per accepted request; the request's durable receipt also identifies
   its greeting. The assembled text is limited to 220 Unicode code points.
-- Creation belongs exclusively to the musical request transaction. Repeating an
-  uncertain musical submission recovers the original receipt and greeting. Legacy
-  post-request `attach`/`inspect` commands are rejected, so the single-entry workflow
-  is enforced by the server as well as the interface.
-- The greeting window closes when the turn is reserved for presentation. A late
-  musical request continuing that turn cannot include a greeting; the client can retry
-  the request without the greeting. Invalid greeting submissions are atomic: no
-  partially accepted song is left behind.
+- New greetings are attached through the authenticated `attach` operation with
+  `{queueId, message}`. The server owns room/sender/table attribution and rejects
+  foreign, cancelled or already consumed requests. The message is normalized to
+  NFC; new records use an empty recipient while historical greetings remain readable.
+- The musical receipt and greeting save are independent. Failed greeting validation
+  never resubmits or cancels the song. The unique greeting-to-request relationship
+  makes identical attachment retries idempotent, including a lost acknowledgment.
+  Older combined musical submissions remain supported for durable receipt recovery.
+- The greeting window closes when that particular song's transition is reserved,
+  even before the music starts. A later pending song in the same participant turn
+  can still receive its greeting. Pending approval can accept a message; voice
+  preparation waits for approval. Provider readiness/quota never blocks the save.
 - The song scheduler supplies the turn boundaries. Greetings do not reorder music
   or create their own rotation. Consecutive turns by the same singer retain the
   configured capacity.
 - Canceling a song cancels its unshown greeting. Surviving greetings remain attached
   to their own songs. There is no arbitrary
   fifteen-minute expiration while a valid musical turn is waiting.
-- Canonical turn membership closes the request-time greeting window. Delivery is
+- Canonical turn membership continues to describe musical ordering. Delivery is
   consumed separately for each song, so its next song can present its own greeting.
   Replay, duplicate player, reconnect or server restart cannot repeat a consumed message.
 - Display is acknowledged only by the authoritative room player after React commits
@@ -95,7 +109,7 @@ Pending messages are visible only to their author and the room's administrators.
 | Subphase | Implementation |
 | --- | --- |
 | 3A | `shared/roundRobin.ts` exposes canonical turn metadata; migration `016-greetings.sql` stores greetings, consumed turn membership and pause state; request insertion and receipts preserve idempotency. |
-| 3B | `GreetingComposer` adds a compact optional message to the musical request; one submit and receipt cover both. |
+| 3B | `GreetingComposer` is a single-field inline editor in My requests. `ParticipantView` navigates only after the current confirmed submission; `useGreetings` supplies authoritative availability per song. |
 | 3C | `useGreetingPlayer` runs inside the existing `PlayerController` transition gate with existing room player authority. It renders text without using the animator audio lifecycle. |
 | 3D | `QueueGreeting` shows contextual state/actions in musical cards. `useGreetings` shares one scoped subscription per list for authors and operators. |
 
@@ -109,6 +123,16 @@ active delivery about every 400 ms; network delays can extend those intervals.
 
 ## Verification
 
+The post-request flow has 113 passing focused tests, successful typecheck/lint and
+builds, plus passing greetings and voice-playback browser suites in development
+and production. The participant flow also passed with HTTPS-served frontend assets
+and an isolated API. Mobile 390px and desktop 1440px screenshots were inspected.
+
+The broader 670-test run passed 669 tests; the existing 35-second ambience production
+test exceeded its default 5-second execution timeout. That unchanged test passed
+when run alone with `--testTimeout=15000` (about 5.3 seconds). Its media assertions
+and production time limits were not changed.
+
 ```sh
 npm run typecheck
 npm test
@@ -116,16 +140,20 @@ npm run build:server
 npm run build:client
 PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm run test:greetings:e2e
 KARAOKE_E2E_MODE=development PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm run test:greetings:e2e
+KARAOKE_E2E_MODE=development KARAOKE_E2E_HTTPS_UI=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm run test:greetings:e2e
 ```
 
 The E2E harness uses an isolated database, an actual QR admission, a local HTTP
 YouTube metadata fixture, browser submissions and real local MP4 playback. After
 submitting through the search UI, test queue items are explicitly mapped to local
-media to avoid depending on live YouTube playback. It checks two greetings at the
-first-song boundary, moderation, pause/resume, reload, duplicate player authority,
+media to avoid depending on live YouTube playback. It checks per-song greetings,
+confirmation-driven navigation, focused cards, a one-field editor, draft retention,
+lost song/greeting acknowledgments, moderation, pause/resume, reload, duplicate player authority,
 keyboard input and 390/1440px layouts, saving screenshots and logs in its printed
 temporary directory. This does not certify live YouTube or physical venue display
-legibility.
+legibility. HTTPS mode loads participant UI assets through `karaoke.puyu.pe` and
+forwards all test API/socket traffic to the isolated server; it never joins the
+shared room. Lost WebSocket acknowledgment injection is exercised by the local modes.
 
 The background regression starts playback from the queue while explicitly modeling
 a hidden player document, suspended animation frames and timers coalesced to at
@@ -186,5 +214,5 @@ their history. Keep the migration installed. Binary downgrades that omit a schem
 file run its Down migration in this application; restore a matching database
 backup when reverting binaries instead of assuming schema preservation.
 
-Phase 4 can add local TTS to this request/turn model. It must preserve automatic
-eligibility and optional moderation rather than introduce mandatory approval.
+Phase 4 supplies Gemini voice preparation while preserving automatic eligibility
+and optional moderation rather than introducing mandatory greeting approval.

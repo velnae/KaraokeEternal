@@ -2,7 +2,7 @@ import Greetings from './Greetings.js'
 import Rooms from '../Rooms/Rooms.js'
 import Animation from '../Animation/Animation.js'
 import { participation } from '../Tables/admission.js'
-import { GREETINGS } from '../../shared/greetings.js'
+import { GREETINGS, normalizeGreetingMessage } from '../../shared/greetings.js'
 import getLogger from '../lib/Log.js'
 import { prepareGreetingTransition } from './transition.js'
 import { getGreetingAudioAsset } from './audioRouter.js'
@@ -28,8 +28,8 @@ export default {
       }
       if (operation === 'read') return acknowledge({ payload: Greetings.snapshot(identity, status) })
       if (!Number.isFinite(payload?.expiresAt) || payload.expiresAt < Date.now() || payload.expiresAt > Date.now() + 10000) throw new Error('La orden venció. Actualiza e intenta nuevamente.')
-      if (operation === 'attach' || operation === 'inspect') throw new Error('Los saludos se agregan al pedir la canción.')
-      if (operation === 'remove') Greetings.remove(identity, number('greetingId'))
+      if (operation === 'attach') Greetings.attach(identity, number('queueId'), { recipient: '', message: normalizeGreetingMessage(payload.message) }, status)
+      else if (operation === 'remove') Greetings.remove(identity, number('greetingId'))
       else if (operation === 'prepareAudio') {
         if (!identity.isAdmin || typeof payload.enabled !== 'boolean') throw new Error('Solo el operador puede configurar la preparación de voz')
         Greetings.prepareAudio(roomId, payload.enabled)

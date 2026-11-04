@@ -11,6 +11,7 @@ import assert from 'node:assert/strict'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
+const httpsUi = process.env.KARAOKE_E2E_HTTPS_UI === '1'
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'karaoke-greetings-e2e-'))
 const log = fs.openSync(path.join(data, 'server.log'), 'a')
 const listen = async (server) => {
@@ -35,10 +36,11 @@ const port = await listen(reservation)
 await new Promise(resolve => reservation.close(resolve))
 const origin = `http://127.0.0.1:${port}`
 const base = `${origin}/karaoke/`
+const participantBase = httpsUi ? 'https://karaoke.puyu.pe/' : base
 const api = await request.newContext()
 const errors = []
 const sockets = []
-let server, browser, db, admin, guest, player
+let server, browser, db, admin, guest, player, guestApi
 const pass = name => console.log(`PASS ${name}`)
 const call = async (context, url, body, method = body === undefined ? 'GET' : 'POST') => {
   const response = await context.fetch(`${base}api/${url}`, { method, data: body })
@@ -49,7 +51,7 @@ const start = async () => {
   const entry = development ? ['--import', 'tsx', 'server/main.ts'] : ['build/server/main.js']
   server = spawn(process.execPath, [...entry, '--data', data, '--port', String(port), '--urlPath', '/karaoke/', '--serverLogLevel', '0'], {
     cwd: root, stdio: ['ignore', log, log], env: { ...process.env, NODE_ENV: development ? 'development' : 'production', KES_SCAN: '', KES_ROTATE_KEY: 'false',
-      KES_YOUTUBE_API_KEY: 'test-only', KARAOKE_E2E_YOUTUBE_ORIGIN: `http://127.0.0.1:${providerPort}`,
+      KES_GEMINI_API_KEY: '', KES_YOUTUBE_API_KEY: 'test-only', KARAOKE_E2E_YOUTUBE_ORIGIN: `http://127.0.0.1:${providerPort}`,
       NODE_OPTIONS: `--import=${pathToFileURL(path.join(root, 'config/fixtures/youtube-fetch.mjs')).href}` },
   })
   for (let i = 0; i < 300; i++) {
@@ -152,23 +154,110 @@ try {
   await expect(admin.getByRole('region', { name: 'Cola de saludos' })).toHaveCount(0)
   const songCard = queueId => admin.locator(`[data-queue-id="${queueId}"]`)
   const guestContext = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true })
+  if (httpsUi) {
+    // Fetch real tunnel-served UI assets while keeping all test requests and
+    // participant identities in the isolated database, never the shared room.
+    guestApi = await request.newContext()
+    const forward = async (route, socketTraffic = false) => {
+      const incoming = route.request()
+      const url = new URL(incoming.url())
+      const suffix = socketTraffic ? `socket.io/${url.search}` : `api/${url.pathname.split('/api/')[1]}${url.search}`
+      const headers = { 'accept-encoding': 'identity' }
+      for (const name of ['content-type', 'range']) if (incoming.headers()[name]) headers[name] = incoming.headers()[name]
+      try {
+        const response = await guestApi.fetch(base + suffix, { method: incoming.method(), headers, data: incoming.postDataBuffer() ?? undefined, timeout: 35000 })
+        if (socketTraffic && incoming.method() === 'GET' && !url.searchParams.has('sid') && response.status() === 200) {
+          const handshake = JSON.parse((await response.text()).slice(1))
+          handshake.upgrades = []
+          await route.fulfill({ status: 200, contentType: 'text/plain', body: '0' + JSON.stringify(handshake) })
+        } else await route.fulfill({ response })
+      } catch (error) {
+        if (guest && !guest.isClosed()) errors.push(`${url.pathname}: ${error.message.split('\n')[0]}`)
+        await route.abort().catch(() => {})
+      }
+    }
+    await guestContext.route('https://karaoke.puyu.pe/api/**', route => forward(route))
+    await guestContext.route('https://karaoke.puyu.pe/socket.io/**', route => forward(route, true))
+    await guestContext.routeWebSocket('**/socket.io/**', socket => socket.close())
+  }
+  let loseNextOrder = true
+  let rejectNextGreeting = true
+  let loseNextGreeting = false
+  let awaitingGreetingRetry = false
+  if (!httpsUi) await guestContext.routeWebSocket(/\/socket\.io\//, (socket) => {
+    const upstream = socket.connectToServer()
+    const lost = new Set()
+    socket.onMessage((message) => {
+      const packet = typeof message === 'string' && message.match(/^42(\d+)(\[.*)$/)
+      const action = packet && JSON.parse(packet[2])[1]
+      if (action?.type === 'server/QUEUE_ADD' && loseNextOrder) {
+        loseNextOrder = false
+        lost.add(packet[1])
+      }
+      if (action?.type === 'server/GREETINGS' && action.payload?.operation === 'attach') {
+        if (rejectNextGreeting) {
+          rejectNextGreeting = false
+          socket.send(`43${packet[1]}${JSON.stringify([{ error: 'No se pudo guardar el saludo. Intente nuevamente.' }])}`)
+          return
+        }
+        if (loseNextGreeting) {
+          loseNextGreeting = false
+          awaitingGreetingRetry = true
+          lost.add(packet[1])
+        } else awaitingGreetingRetry = false
+      }
+      if (action?.type === 'server/GREETINGS' && action.payload?.operation === 'read' && awaitingGreetingRetry) lost.add(packet[1])
+      upstream.send(message)
+    })
+    upstream.onMessage((message) => {
+      const packet = typeof message === 'string' && message.match(/^43(\d+)\[/)
+      if (packet && lost.delete(packet[1])) return
+      socket.send(message)
+    })
+  })
   guestContext.on('page', page => page.on('pageerror', error => errors.push(error.message)))
   guest = await guestContext.newPage()
-  await guest.goto(`${base}join#${invitation}`)
+  await guest.goto(`${participantBase}join#${invitation}`)
   await guest.getByLabel('Tu nombre').fill('Ana')
   await guest.getByRole('button', { name: 'Entrar', exact: true }).click()
   await expect(guest.getByRole('heading', { name: '¿Qué quieres pedir?' })).toBeVisible()
   for (const [index, message] of ['¡Feliz cumpleaños!', '¡Que disfruten la noche!'].entries()) {
+    if (index) await guest.goto(`${participantBase}library`)
     await guest.getByRole('searchbox', { name: 'Buscar canción o artista' }).fill(`https://youtu.be/${ids[index]}`)
+    await expect(guest.getByRole('button', { name: 'Buscar', exact: true })).toBeEnabled()
     await guest.getByRole('searchbox', { name: 'Buscar canción o artista' }).press('Enter')
     await expect(guest.locator('article[data-source-id]')).toHaveCount(1)
     const card = guest.locator(`[data-source-id="${ids[index]}"]`)
-    await card.getByRole('checkbox', { name: /Agregar saludo/ }).focus()
-    await guest.keyboard.press('Space')
-    await card.getByLabel('Para (opcional)').fill('Rocío')
-    await card.getByLabel('Mensaje', { exact: true }).fill(message)
-    await expect(card.locator('blockquote')).toHaveCount(0)
-    await expect(card.getByRole('button', { name: 'Enviar saludo', exact: true })).toHaveCount(0)
+    await expect(card.getByRole('checkbox', { name: /Agregar saludo/ })).toHaveCount(0)
+    await expect(card.getByRole('textbox', { name: 'Mensaje', exact: true })).toHaveCount(0)
+    await card.getByRole('button', { name: 'Pedir canción', exact: true }).focus()
+    await guest.keyboard.press('Enter')
+    if (index === 0 && !httpsUi) {
+      await expect(card.getByRole('button', { name: 'Comprobar pedido', exact: true })).toBeVisible({ timeout: 16000 })
+      await expect(guest).toHaveURL(`${participantBase}library`)
+      assert.equal(db.prepare('SELECT count(*) n FROM queue').get().n, 1)
+      await card.getByRole('button', { name: 'Comprobar pedido', exact: true }).click()
+    }
+    await expect(guest).toHaveURL(`${participantBase}requests`)
+    const queueId = db.prepare('SELECT queueId FROM queue WHERE externalId=?').get(ids[index]).queueId
+    const requested = guest.locator(`[data-queue-id="${queueId}"]`)
+    await expect(requested.getByRole('heading')).toBeFocused()
+    await expect(requested).toHaveAttribute('data-recent', 'true')
+    await requested.getByRole('button', { name: 'Agregar saludo', exact: true }).focus()
+    await guest.keyboard.press('Enter')
+    const input = requested.getByLabel('Mensaje', { exact: true })
+    await expect(input).toBeFocused()
+    await expect(requested.locator('textarea')).toHaveCount(1)
+    await expect(requested.getByLabel('Para (opcional)')).toHaveCount(0)
+    await input.fill('x'.repeat(300))
+    assert.equal((await input.inputValue()).length, 211)
+    await input.fill('¡Hola, ñustas! 🦙')
+    await requested.getByRole('button', { name: 'Cancelar', exact: true }).click()
+    await expect(requested.getByRole('button', { name: 'Agregar saludo', exact: true })).toBeFocused()
+    assert.equal(db.prepare('SELECT count(*) n FROM queue').get().n, index + 1)
+    await requested.getByRole('button', { name: 'Agregar saludo', exact: true }).click()
+    await expect(input).toHaveValue('¡Hola, ñustas! 🦙')
+    await input.fill(message)
     if (index === 0) {
       for (const width of [390, 1440]) {
         await guest.setViewportSize({ width, height: 1000 })
@@ -176,22 +265,35 @@ try {
         await guest.screenshot({ path: path.join(data, `composer-${width}.png`) })
       }
     }
-    await card.getByRole('button', { name: 'Pedir canción', exact: true }).focus()
+    if (index === 1 && !httpsUi) loseNextGreeting = true
+    await requested.getByRole('button', { name: 'Guardar saludo', exact: true }).focus()
     await guest.keyboard.press('Enter')
-    await expect(card.getByRole('link', { name: 'En la cola', exact: true })).toBeVisible()
-    await expect(card.getByRole('checkbox', { name: /Agregar saludo/ })).toHaveCount(0)
-    await expect(card.getByRole('button', { name: 'Agregar saludo', exact: true })).toHaveCount(0)
+    if (index === 0 && !httpsUi) {
+      await expect(requested.getByRole('alert')).toContainText('No se pudo guardar')
+      await expect(input).toHaveValue(message)
+      assert.equal(records().length, 0)
+      await requested.getByRole('button', { name: 'Guardar saludo', exact: true }).click()
+    } else if (index === 1 && !httpsUi) {
+      await expect(requested.getByRole('button', { name: 'Comprobar saludo', exact: true })).toBeVisible({ timeout: 8000 })
+      await expect(input).toBeDisabled()
+      assert.equal(records().length, 2)
+      await requested.getByRole('button', { name: 'Comprobar saludo', exact: true }).click()
+    }
+    await expect(requested.getByRole('group', { name: 'Saludo', exact: true })).toContainText(message)
+    await expect(requested.getByRole('button', { name: 'Agregar saludo', exact: true })).toHaveCount(0)
   }
   assert.equal(records().length, 2)
-  assert.ok(records().every(row => row.sender === 'Ana' && row.tableLabel.includes('4')))
-  const guestSocket = await connect(guestContext.request)
+  assert.ok(records().every(row => row.sender === 'Ana' && row.recipient === '' && row.tableLabel.includes('4')))
+  const guestSocket = await connect(guestApi ?? guestContext.request)
   const existing = db.prepare('SELECT requestId,externalId FROM queue ORDER BY queueId LIMIT 1').get()
-  const lateGreeting = await guestSocket.timeout(3000).emitWithAck('action', { type: 'server/GREETINGS', payload: { operation: 'attach', expiresAt: Date.now() + 2000, queueId: records()[0].queueId, greeting: { recipient: '', message: 'Late message' } } })
-  assert.match(lateGreeting.error, /al pedir/)
+  const duplicate = await emit(guestSocket, 'server/GREETINGS', { operation: 'attach', queueId: records()[0].queueId, message: records()[0].message })
+  assert.equal(duplicate.payload.items.length, 2)
   await emit(guestSocket, 'server/QUEUE_ADD', { requestId: existing.requestId, source: 'YOUTUBE', sourceId: existing.externalId })
   assert.equal(records().length, 2)
-  pass('URL orders offer one optional greeting at submission; keyboard, QR attribution and idempotency are preserved; late attachment is rejected')
-  await guest.goto(`${base}requests`)
+  pass(httpsUi
+    ? 'HTTPS participant flow confirms the exact card, single-field editor, attribution, draft retention and idempotency against isolated data'
+    : 'Confirmed orders navigate to their own card; single-field greetings preserve drafts, attribution, Unicode limits and idempotent lost-reply recovery')
+  await guest.goto(`${participantBase}requests`)
   await expect(guest.getByRole('region', { name: 'Mis saludos' })).toHaveCount(0)
   await expect(guest.getByRole('button', { name: 'Agregar saludo', exact: true })).toHaveCount(0)
   for (const row of records()) {
@@ -296,7 +398,7 @@ try {
   await expect(secondPlayer.getByTestId('greeting-overlay')).toHaveCount(0)
   pass('Reload and duplicate player never re-emit an interrupted turn')
   assert.deepEqual(errors, [])
-  console.log(`All greetings checks passed (${development ? 'development StrictMode' : 'production'}). Artifacts: ${data}`)
+  console.log(`All greetings checks passed (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS participant frontend / isolated API' : ''}). Artifacts: ${data}`)
 } catch (error) {
   for (const [name, page] of [['guest', guest], ['admin', admin], ['player', player]]) {
     if (page && !page.isClosed()) await page.screenshot({ path: path.join(data, `failure-${name}.png`) }).catch(() => {})
@@ -305,6 +407,7 @@ try {
 } finally {
   sockets.forEach(sock => sock.disconnect())
   await browser?.close()
+  await guestApi?.dispose()
   db?.close()
   await api.dispose()
   await stop()

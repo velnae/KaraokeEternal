@@ -15,7 +15,7 @@ afterEach(() => {
   vi.resetAllMocks()
 })
 
-it.each(['read', 'prepareAudio', 'playback'])('accepts a delayed %s confirmation without expiring the command early', async (operation) => {
+it.each(['read', 'attach', 'prepareAudio', 'playback'])('accepts a delayed %s confirmation without expiring the command early', async (operation) => {
   const now = Date.now()
   emitWithAck.mockImplementation((_event, action) => new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('operation has timed out')), vi.mocked(socket.timeout).mock.lastCall![0])

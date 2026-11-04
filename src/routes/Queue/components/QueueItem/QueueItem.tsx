@@ -352,7 +352,7 @@ const QueueItem = ({
             />
           )}
         </Buttons>
-        {greeting && <QueueGreeting greeting={greeting} descriptionId={`queue-title-${queueId}`} paused={greetingsPaused} busy={greetingBusy} onRemove={onRemoveGreeting} />}
+        {greeting && <QueueGreeting operator greeting={greeting} descriptionId={`queue-title-${queueId}`} paused={greetingsPaused} busy={greetingBusy} onRemove={onRemoveGreeting} />}
       </div>
     </div>
   )

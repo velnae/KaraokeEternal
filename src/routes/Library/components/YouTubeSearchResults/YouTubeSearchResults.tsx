@@ -58,7 +58,7 @@ export default function YouTubeSearchResults ({ code, error, isLoading, query, r
           admin
           connected={connected}
           blocker={!connected ? 'Sin conexión. Espera a reconectar para agregar la canción.' : queue.isLoading ? 'Actualizando la cola. Espera un momento.' : !user.roomId ? 'Entra a una sala desde Mi cuenta para agregar canciones.' : null}
-          onRequest={(greeting, intent) => { void controller.request(result.sourceId, result.title, greeting, intent) }}
+          onRequest={(intent) => { void controller.request(result.sourceId, result.title, undefined, intent) }}
         />
       ))}
     </section>

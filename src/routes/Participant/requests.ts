@@ -67,7 +67,7 @@ export const createRequestController = ({ storage, key, send, makeId }: {
         persist()
       } catch {
         update({ ...receipt, phase: 'error', message: 'Permite el almacenamiento del navegador para enviar tu pedido.' })
-        return
+        return receipts[sourceId]
       }
       try {
         const response = await send(sourceId, receipt.requestId, receipt.greeting, receipt.requestIntent)
@@ -83,6 +83,7 @@ export const createRequestController = ({ storage, key, send, makeId }: {
       try {
         persist()
       } catch { /* The durable sending record still retains the identifier. */ }
+      return receipts[sourceId]
     },
   }
 }

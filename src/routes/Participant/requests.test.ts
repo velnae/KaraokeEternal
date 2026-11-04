@@ -46,7 +46,7 @@ describe('mobile request confirmation', () => {
     const pending = controller.request('video', 'Song')
     expect(controller.getSnapshot().video.phase).toBe('sending')
     await controller.request('video', 'Song')
-    await pending
+    expect(await pending).toMatchObject({ phase: 'confirmed', queueId: 1 })
     expect(send).toHaveBeenCalledOnce()
     expect(controller.getSnapshot().video).toMatchObject({ phase: 'confirmed', queueId: 1 })
   })
@@ -72,8 +72,16 @@ describe('mobile request confirmation', () => {
   it('shows server errors without claiming success', async () => {
     const { controller, send } = fixture()
     send.mockResolvedValue({ type: 'error', error: 'Límite alcanzado' })
-    await controller.request('video', 'Song')
+    expect(await controller.request('video', 'Song')).toMatchObject({ phase: 'error' })
     expect(controller.getSnapshot().video).toMatchObject({ phase: 'error', message: 'Límite alcanzado' })
+  })
+
+  it('returns uncertainty instead of a navigation target after a lost acknowledgement', async () => {
+    const { controller, send } = fixture()
+    send.mockRejectedValueOnce(new Error('timeout'))
+    expect(await controller.request('video', 'Song')).toMatchObject({ phase: 'uncertain' })
+    expect(await controller.request('video', 'Song')).toMatchObject({ phase: 'confirmed', queueId: 1 })
+    expect(send.mock.calls.map(call => call[1])).toEqual(['request-0000000001', 'request-0000000001'])
   })
 
   it('keeps room snapshots out of durable receipts, including older saved entries', async () => {

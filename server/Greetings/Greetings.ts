@@ -4,7 +4,7 @@ import Rooms from '../Rooms/Rooms.js'
 import { buildRoundRobinQueue } from '../../shared/roundRobin.js'
 import { buildPlayerHistory } from '../../shared/playerHistory.js'
 import { normalizeQueuePrefs } from '../../shared/queueRules.js'
-import { greetingDuration, validateGreeting, type Greeting, type GreetingGrant, type GreetingSnapshot, type GreetingAudioStatus, type GreetingPreparation, type GreetingVoiceStatus, type GreetingPlaybackPrefs } from '../../shared/greetings.js'
+import { greetingDuration, greetingMessageLimit, validateGreeting, type Greeting, type GreetingGrant, type GreetingSnapshot, type GreetingAudioStatus, type GreetingPreparation, type GreetingVoiceStatus, type GreetingPlaybackPrefs } from '../../shared/greetings.js'
 import Animation from '../Animation/Animation.js'
 import { catalogClips } from '../Animation/catalog.js'
 import { greetingPlayback, planGreetingTransition } from './transition.js'
@@ -23,15 +23,17 @@ export default class Greetings {
   }
 
   static opportunity (identity: Identity, queueId: number, status: GreetingPlayerStatus): { greeting: Greeting | null, canAdd: boolean, reason: string | null } {
+    // Keep the caller contract for older inline submissions; eligibility now
+    // follows this song's reservation, not the canonical participant turn.
+    void status
     const song = Queue.get(identity.roomId).entities[queueId]
     if (!song || song.origin !== 'PARTICIPANT' || song.userId !== identity.userId) throw new Error('El saludo debe acompañar a tu pedido musical')
     const greeting = Greetings.items(identity.roomId).find(item => item.queueId === queueId) ?? null
     if (greeting) return { greeting, canAdd: false, reason: null }
-    if (!Rooms.get(identity.roomId).entities[identity.roomId]) return { greeting: null, canAdd: false, reason: 'La sala está cerrada.' }
+    if (Rooms.get(identity.roomId).entities[identity.roomId]?.status !== 'open') return { greeting: null, canAdd: false, reason: 'La sala está cerrada.' }
     if (!['PENDING_APPROVAL', 'APPROVED'].includes(song.status)) return { greeting: null, canAdd: false, reason: 'La ventana de saludos de este pedido ya cerró.' }
-    const turn = Greetings.order(identity.roomId, status, queueId).turns.find(turn => turn.ids.includes(queueId))
-    if (!turn?.startsNewTurn || Greetings.turnFor(queueId) || turn.ids.some(id => Greetings.turnFor(id))) {
-      return { greeting: null, canAdd: false, reason: 'La ventana de saludos de este turno ya cerró. Podrás agregar uno en tu próximo turno.' }
+    if (db.get('SELECT 1 FROM greetingTurns WHERE turnKey=? AND roomId=?', [queueId, identity.roomId])) {
+      return { greeting: null, canAdd: false, reason: 'La transición de esta canción ya comenzó. Puedes agregar un saludo a otro pedido pendiente.' }
     }
     return { greeting: null, canAdd: true, reason: null }
   }
@@ -43,7 +45,7 @@ export default class Greetings {
     if (opportunity.greeting) {
       // The unique musical request is the idempotency key, including lost acknowledgments.
       if (opportunity.greeting.recipient === draft.recipient && opportunity.greeting.message === draft.message) return opportunity.greeting.greetingId
-      throw new Error('Este pedido ya tiene un saludo. Puedes consultarlo en Mis saludos.')
+      throw new Error('Este pedido ya tiene un saludo. Puedes consultarlo en Mis pedidos.')
     }
     if (!opportunity.canAdd) throw new Error(opportunity.reason!)
     const result = db.run('INSERT INTO greetings(queueId,roomId,userId,sender,tableLabel,recipient,message,createdAt) VALUES(?,?,?,?,?,?,?,?)',
@@ -95,6 +97,12 @@ export default class Greetings {
       playback: playback.prefs,
       playbackVersion: playback.version,
       items: Greetings.items(identity.roomId).filter(item => identity.isAdmin || item.userId === identity.userId),
+      opportunities: Object.fromEntries(Object.values(order.entities)
+        .filter(item => item.origin === 'PARTICIPANT' && item.userId === identity.userId && ['PENDING_APPROVAL', 'APPROVED'].includes(item.status))
+        .map((item) => {
+          const { canAdd, reason } = Greetings.opportunity(identity, item.queueId, status)
+          return [item.queueId, { canAdd, reason, maxMessageLength: greetingMessageLimit(item.userDisplayName) }]
+        })),
       turns: order.turns.filter(turn => identity.isAdmin || order.entities[turn.ids[0]].userId === identity.userId)
         .map(turn => ({ key: turn.ids[0], queueIds: turn.ids, userId: order.entities[turn.ids[0]].userId })),
     }

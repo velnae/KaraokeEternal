@@ -50,8 +50,8 @@ export default function useGreetings (enabled = true) {
     }
   }, [enabled, roomId, userId, connected])
 
-  const execute = async (operation: 'remove' | 'pause' | 'prepareAudio' | 'playback', payload: object) => {
-    if (inFlight.current || !enabled || !connected) return
+  const execute = async (operation: 'attach' | 'remove' | 'pause' | 'prepareAudio' | 'playback', payload: object): Promise<{ ok: boolean, error?: string, uncertain?: boolean }> => {
+    if (inFlight.current || !enabled || !connected) return { ok: false, error: connected ? 'Espere a que termine la operación actual.' : 'Sin conexión. Espere a reconectar.' }
     const token = generation.current
     revision.current++
     inFlight.current = true
@@ -61,9 +61,12 @@ export default function useGreetings (enabled = true) {
       if (token === generation.current && reply.payload) {
         setValue({ roomId, userId, snapshot: reply.payload })
         setError('')
+        return { ok: true }
       }
+      return { ok: false, error: 'La sesión cambió. Revise sus pedidos.', uncertain: true }
     } catch (error) {
-      if (token === generation.current) setError((error as Error).message)
+      if (token === generation.current && operation !== 'attach') setError((error as Error).message)
+      return { ok: false, error: (error as Error).message, uncertain: (error as { uncertain?: boolean }).uncertain }
     } finally {
       if (token === generation.current) {
         inFlight.current = false

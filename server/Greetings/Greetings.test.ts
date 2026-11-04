@@ -43,7 +43,7 @@ it('closes the post-request window at reservation even before the first song sta
   const queueId = song()
   expect(Greetings.reserve(1, 'screen', queueId, {})).toBeNull()
   expect(Greetings.opportunity(identity, queueId, {}).canAdd).toBe(false)
-  expect(() => attach(queueId)).toThrow('cerró')
+  expect(() => attach(queueId)).toThrow('transición')
   expect(Greetings.items(1)).toHaveLength(0)
   expect(Queue.get(1).entities[queueId].status).toBe('APPROVED')
 })
@@ -87,12 +87,27 @@ it('retains a long-waiting greeting and moves the remaining greeting when the fi
   expect(Greetings.items(1)[0].status).toBe('CANCELLED')
 })
 
-it('closes a started turn even when another pending request slot becomes available', () => {
+it('allows a later pending song in an already-started participant turn to receive its own greeting', () => {
   const first = song()
   attach(first)
   Greetings.reserve(1, 'screen', first, {})
   const second = song()
-  expect(() => attach(second)).toThrow('cerró')
+  expect(() => attach(second)).not.toThrow()
+})
+
+it('accepts a greeting for a reserved turn member until that particular song is reserved', () => {
+  const first = song()
+  const second = song()
+  expect(Greetings.reserve(1, 'player', first, {})).toBeNull()
+  expect(Greetings.turnFor(second)).toBe(first)
+  expect(Greetings.opportunity(identity, first, {}).canAdd).toBe(false)
+  expect(Greetings.opportunity(identity, second, {}).canAdd).toBe(true)
+  attach(second)
+  Queue.transition(1, first, 'PLAYING')
+  Queue.transition(1, first, 'PLAYED')
+  const grant = Greetings.reserve(1, 'player', second, { queueId: first, historyJSON: JSON.stringify([first]) })!
+  expect(grant.items.map(item => item.queueId)).toEqual([second])
+  expect(Greetings.opportunity(identity, second, {}).canAdd).toBe(false)
 })
 
 it('admits a greeting in the next real turn of the same user', () => {
@@ -191,7 +206,7 @@ it('recognizes the continuation of a later consecutive turn by the same singer',
   }
   const fourth = song()
   expect(Greetings.order(1).turns[0]).toEqual({ ids: [fourth], startsNewTurn: false })
-  expect(() => Greetings.attach(identity, fourth, { recipient: '', message: 'Too late' }, { queueId: played[2], historyJSON: JSON.stringify(played) })).toThrow('cerró')
+  expect(() => Greetings.attach(identity, fourth, { recipient: '', message: 'For the pending song' }, { queueId: played[2], historyJSON: JSON.stringify(played) })).not.toThrow()
 })
 
 it('preserves the musical ordering of greetings after a pre-turn reorder', () => {

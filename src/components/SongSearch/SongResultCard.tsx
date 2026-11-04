@@ -9,15 +9,12 @@ import type { QueueItem } from 'shared/types'
 import type { RequestReceipt } from 'routes/Participant/requests'
 import { requestStatusLabels } from 'routes/Participant/model'
 import styles from './SongSearch.css'
-import GreetingComposer from 'components/Greetings/GreetingComposer'
-import { validateGreeting, type GreetingDraft } from 'shared/greetings'
-import { useAppSelector } from 'store/hooks'
 import { requestIntentLabels, type RequestIntent } from 'shared/requestIntent'
 
 interface RequestState {
   receipt?: RequestReceipt
   active?: QueueItem
-  onRequest: (greeting?: GreetingDraft | null, intent?: RequestIntent) => void
+  onRequest: (intent?: RequestIntent) => void
 }
 
 function RequestAction ({ receipt, active, onRequest, admin, house = false, connected, blocker, description }: RequestState & {
@@ -33,7 +30,7 @@ function RequestAction ({ receipt, active, onRequest, admin, house = false, conn
   const action = sending ? (admin ? 'Agregando…' : 'Enviando…') : uncertain ? 'Comprobar pedido' : receipt?.phase === 'error' ? 'Reintentar' : house ? 'Agregar a la casa' : admin ? 'Agregar a la cola' : 'Pedir canción'
   return confirmed
     ? (
-        <Link className={styles.confirmed} data-status={active.status} to={house ? '/queue?view=house' : admin ? '/queue' : '/requests'} aria-describedby={description}>
+        <Link className={styles.confirmed} data-status={active.status} to={house ? '/queue?view=house' : admin ? '/queue' : '/requests'} state={admin ? undefined : { requestedQueueId: active.queueId }} aria-describedby={description}>
           <Icon icon='CHECK' size={20} />
           {admin && active.status === 'PLAYING' ? 'Reproduciendo' : house ? 'En De la casa' : requestStatusLabels[active.status]}
         </Link>
@@ -46,30 +43,23 @@ function RequestAction ({ receipt, active, onRequest, admin, house = false, conn
       )
 }
 
-export default function SongResultCard ({ result, receipt, active, admin = false, house, connected, blocker, onRequest, requestIntent }: RequestState & {
+export default function SongResultCard ({ result, receipt, active, admin = false, house, connected, blocker, blockerDescriptionId, onRequest, requestIntent }: RequestState & {
   result: SongSearchResult
   requestIntent?: RequestIntent
   admin?: boolean
   house?: RequestState
   connected: boolean
   blocker: string | null
+  blockerDescriptionId?: string
 }) {
   const id = useId()
-  const sender = useAppSelector(state => state.user.name)
-  const [greeting, setGreeting] = useState<GreetingDraft | null>(receipt?.greeting ?? null)
   const [intent, setIntent] = useState<RequestIntent>(receipt?.requestIntent ?? 'LISTEN')
-  let greetingError: string | null = null
-  if (!admin && greeting) {
-    try {
-      validateGreeting(greeting, sender)
-    } catch (error) { greetingError = (error as Error).message }
-  }
   const [moreOpen, setMoreOpen] = useState(house?.receipt?.phase === 'uncertain' || house?.receipt?.phase === 'error')
   const moreButton = useRef<HTMLButtonElement>(null)
   const sending = receipt?.phase === 'sending'
   const uncertain = receipt?.phase === 'uncertain'
   const confirmed = active && !sending && !uncertain
-  const description = `${id}-title ${id}-message`
+  const description = [`${id}-title`, `${id}-message`, blockerDescriptionId].filter(Boolean).join(' ')
   return (
     <article
       className={styles.result}
@@ -105,9 +95,8 @@ export default function SongResultCard ({ result, receipt, active, admin = false
         </fieldset>
       )}
       {confirmed && active.requestIntent && <span className={styles.intentLabel}>{requestIntentLabels[active.requestIntent]}</span>}
-      {!admin && !confirmed && <GreetingComposer value={greeting} onChange={setGreeting} locked={sending || uncertain} />}
       <div className={styles.resultActions}>
-        <div className={styles.primaryAction} aria-live='polite'><RequestAction receipt={receipt} active={active} onRequest={() => onRequest(admin ? undefined : greeting, requestIntent ?? intent)} admin={admin} connected={connected} blocker={blocker ?? greetingError} description={description} /></div>
+        <div className={styles.primaryAction} aria-live='polite'><RequestAction receipt={receipt} active={active} onRequest={() => onRequest(requestIntent ?? intent)} admin={admin} connected={connected} blocker={blocker} description={description} /></div>
         {admin && <button ref={moreButton} type='button' className={styles.moreButton} aria-label={`Más opciones para ${result.title}`} title='Más opciones' aria-expanded={moreOpen} aria-controls={`${id}-options`} onClick={() => setMoreOpen(value => !value)}><Icon icon='MORE_HORIZ' size={24} /></button>}
       </div>
       {admin && moreOpen && (
@@ -117,11 +106,10 @@ export default function SongResultCard ({ result, receipt, active, admin = false
         </div>
       )}
       <div id={`${id}-message`} className={styles.message} role='status'>
-        {sending && <p>Esperando confirmación de la sala…</p>}
-        {uncertain && <p className={styles.warning}>No se recibió la confirmación. Comprueba el pedido para evitar duplicarlo.</p>}
+        {admin && sending && <p>Esperando confirmación de la sala…</p>}
+        {uncertain && <p className={styles.warning}>{admin ? 'No se recibió la confirmación. Comprueba el pedido para evitar duplicarlo.' : 'Pedido sin confirmar.'}</p>}
         {receipt?.phase === 'error' && !confirmed && <p className={styles.warning}>{receipt.message}</p>}
-        {!confirmed && !sending && blocker && <p>{blocker}</p>}
-        {!confirmed && !sending && !uncertain && greetingError && <p>{greetingError}</p>}
+        {!confirmed && !sending && blocker && !blockerDescriptionId && <p>{blocker}</p>}
         {house?.receipt?.phase === 'uncertain' && <p className={styles.warning}>Pedido de la casa sin confirmar. Usa «Comprobar pedido» en Más opciones.</p>}
         {house?.receipt?.phase === 'error' && !house.active && <p className={styles.warning}>{house.receipt.message}</p>}
       </div>
