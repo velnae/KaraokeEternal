@@ -89,20 +89,14 @@ export default function JoinView () {
                 <>
                   <h1>{destination?.tableLabel ?? (error ? 'No se pudo abrir esta mesa' : 'Escanee el QR de su mesa')}</h1>
                   {destination && <p>{destination.roomName}</p>}
-                  {user.userId && destination && (
-                    <p>
-                      {user.name}
-                      , confirme su ingreso a esta mesa.
-                    </p>
-                  )}
-                  {!destination && !error && <p>{user.tableAccessError ?? 'Use la cámara de su teléfono para abrir el QR que está en su mesa.'}</p>}
+                  {!destination && !error && user.tableAccessError && <p role='alert'>{user.tableAccessError}</p>}
                   {((destination?.hasPassword && user.userId) || (!destination && canContinue && user.userId)) && (
                     <label>
                       Contraseña de la sala
                       <input type='password' value={password} onChange={e => setPassword(e.target.value)} />
                     </label>
                   )}
-                  {destination && user.userId && <Button disabled={busy} variant='primary' onClick={() => void enter()}>Entrar a esta mesa</Button>}
+                  {destination && user.userId && <Button disabled={busy} variant='primary' onClick={() => void enter()}>{busy ? 'Entrando…' : `Entrar como ${user.name}`}</Button>}
                   {!destination && canContinue && user.userId && <Button disabled={busy} onClick={() => void enter(true)}>Continuar sin mesa</Button>}
                   {!user.userId && <Link to='/account'>Volver al ingreso</Link>}
                 </>
