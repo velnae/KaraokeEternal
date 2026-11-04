@@ -1,43 +1,20 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
 import { createHash } from 'node:crypto'
-import type { LocalTtsConfig } from '../../shared/localTts.js'
+import type { GreetingVoiceConfig } from '../../shared/greetingVoice.js'
 import { greetingText, validateGreeting, type Greeting } from '../../shared/greetings.js'
 import { AudioValidationError } from '../Animation/AudioPreparation.js'
 
 export interface GreetingVoiceProfile {
-  installationPath: string
-  configurationRevision: number
+  provider: 'gemini'
   model: string
-  engineHash: string
-  referenceHash: string
-  seed: number
+  voice: string
+  style: string
   processingRevision: number
 }
 const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex')
 
-async function boundedFile (file: string, limit: number) {
-  const stat = await fs.stat(file)
-  if (!stat.isFile() || !stat.size || stat.size > limit) throw new Error('Invalid local voice resource')
-  const bytes = await fs.readFile(file)
-  if (bytes.length > limit) throw new Error('Oversized local voice resource')
-  return bytes
-}
-
-export async function loadGreetingVoiceProfile (config: LocalTtsConfig) {
-  if (!config.installationPath) throw new AudioValidationError('Configure la voz local en Ajustes → Animador. El saludo se mostrará en pantalla.')
-  try {
-    const reference = await boundedFile(path.join(config.installationPath, 'reference', 'es_mx_f1.wav'), 5 * 1024 * 1024)
-    const scripts = await Promise.all(['model.sh', 'resident.py', 'speak.py'].map(name => boundedFile(path.join(config.installationPath, name), 1024 * 1024)))
-    const profile: GreetingVoiceProfile = {
-      installationPath: config.installationPath, configurationRevision: config.revision,
-      model: 'ResembleAI/Chatterbox-Multilingual-es-mx-latam', engineHash: hash(Buffer.concat(scripts)),
-      referenceHash: hash(reference), seed: 42, processingRevision: 1,
-    }
-    return { profile, reference }
-  } catch {
-    throw new AudioValidationError('Revise la instalación y la voz de referencia local. El saludo se mostrará en pantalla.')
-  }
+export function loadGreetingVoiceProfile (config: GreetingVoiceConfig): GreetingVoiceProfile {
+  // Credentials, enablement and quotas do not change how cached speech sounds.
+  return { provider: 'gemini', model: config.model, voice: config.voice, style: config.style, processingRevision: 1 }
 }
 
 export function greetingSpeechText (greeting: Pick<Greeting, 'recipient' | 'message' | 'sender'>) {

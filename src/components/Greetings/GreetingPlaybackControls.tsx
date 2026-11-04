@@ -5,7 +5,7 @@ import Button from 'components/Button/Button'
 import { fetchAnimationClips } from 'lib/animationApi'
 import type { AnimationClip } from 'shared/animation'
 import type { GreetingPlaybackPrefs, GreetingSnapshot } from 'shared/greetings'
-import styles from 'components/Animation/LocalTtsSettings.css'
+import styles from 'components/Animation/GreetingVoiceSettings.css'
 
 export default function GreetingPlaybackControls ({ snapshot, busy, save }: {
   snapshot: GreetingSnapshot | null

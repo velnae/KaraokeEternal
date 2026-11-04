@@ -56,3 +56,43 @@ it.each(['early', 'current'] as const)('upgrades %s migration 016 without losing
     fs.rmSync(directory, { recursive: true, force: true })
   }
 })
+
+it('retires local jobs and settings without losing greeting history or leaving a recovery barrier', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-upgrade-'))
+  const legacy = path.join(directory, 'schemas')
+  const schemas = path.join(import.meta.dirname, '../lib/schemas')
+  fs.mkdirSync(legacy)
+  for (const file of fs.readdirSync(schemas)) {
+    if (Number(file.slice(0, 3)) < 25) fs.copyFileSync(path.join(schemas, file), path.join(legacy, file))
+  }
+  const database = new DatabaseWrapper(path.join(directory, 'db.sqlite'))
+  try {
+    database.migrate({ migrationsPath: legacy })
+    database.exec(`PRAGMA foreign_keys=ON;
+      INSERT INTO rooms(roomId,name,status,data) VALUES(1,'Existing','open','{}');
+      INSERT INTO users(userId,username,password,name,roleId) VALUES(1,'existing','','Existing',3);
+      INSERT INTO queue(queueId,roomId,userId,source,externalId,status,title,artistOrChannel)
+        VALUES(1,1,1,'YOUTUBE','AAAAAAAAAAA','APPROVED','Pending','Artist'),(2,1,1,'YOUTUBE','BBBBBBBBBBB','PLAYED','Played','Artist');
+      INSERT INTO greetingAudioJobs(jobId,roomId,cacheKey,spokenText,profileJSON,status,createdAt,updatedAt)
+        VALUES('old-pending',1,'key1','Hello','{"installationPath":"/old/tts"}','uncertain',1,1),
+        ('old-ready',1,'key2','Hello again','{"installationPath":"/old/tts"}','ready',1,1);
+      INSERT INTO greetings(queueId,roomId,userId,sender,recipient,message,status,createdAt,audioJobId)
+        VALUES(1,1,1,'Ana','','Waiting','QUEUED',1,'old-pending'),(2,1,1,'Ana','','Delivered','DISPLAYED',1,'old-ready');
+      INSERT INTO prefs(key,data) VALUES('localTts','{"installationPath":"/old/tts","autoStart":true,"revision":1}');
+      INSERT INTO greetingControls(roomId,audioEnabled) VALUES(1,1);`)
+    const before = database.all('SELECT queueId,status,message FROM greetings ORDER BY greetingId')
+    database.migrate({ migrationsPath: schemas })
+    database.migrate({ migrationsPath: schemas })
+    expect(database.all('SELECT queueId,status,message FROM greetings ORDER BY greetingId')).toEqual(before)
+    expect(database.all('SELECT DISTINCT audioJobId FROM greetings')).toEqual([{ audioJobId: null }])
+    expect(database.all('SELECT DISTINCT status,cancelRequested,updatedAt FROM greetingAudioJobs')).toEqual([{ status: 'cancelled', cancelRequested: 1, updatedAt: 0 }])
+    expect(database.get('SELECT * FROM prefs WHERE key=?', ['localTts'])).toBeUndefined()
+    database.exec(`UPDATE greetingAudioJobs SET status='uncertain' WHERE jobId='old-pending';
+      UPDATE greetingAudioJobs SET status='generating' WHERE jobId='old-ready';`)
+    expect(() => database.exec(`UPDATE greetingAudioJobs SET status='generating' WHERE jobId='old-pending'`)).toThrow()
+    expect(database.all('PRAGMA foreign_key_check')).toEqual([])
+  } finally {
+    database.close()
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+})

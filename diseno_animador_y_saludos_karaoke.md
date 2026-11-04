@@ -2,7 +2,13 @@
 
 **Proyecto:** software de karaoke para una pizzería, con Il Gatto como primer escenario de uso.\
 **Versión:** 1.0 — 25 de octubre de 2026.\
-**Estado:** diseño funcional y técnico propuesto para implementación.
+**Estado:** documento histórico del diseño inicial.
+
+**Implementación vigente:** los saludos se generan con Gemini; la integración de
+voz local fue retirada. La configuración, las cuotas, la recuperación y las
+pruebas actuales se documentan en [Voz de saludos con Gemini](docs/ANIMATION-PHASE-4.md).
+Las propuestas de motores locales de este documento se conservan como contexto
+histórico, no como instrucciones de instalación u operación.
 
 El sistema incorporará un animador automático con frases expresivas reutilizables, saludos escritos por los clientes y convertidos a voz con un modelo local, mensajes coordinados en pantalla y efectos sonoros. La prioridad es acompañar la experiencia con intervenciones oportunas y variadas, conservando el protagonismo de quienes cantan y conversan.
 

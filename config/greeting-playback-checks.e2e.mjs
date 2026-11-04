@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 
-export async function runGreetingPlaybackChecks ({ api, admin, adminContext, guestContext, db, base, data, first, second, call, connect, emit, job, ready, start, stop, setSpeech, setPlayer, installation }) {
+export async function runGreetingPlaybackChecks ({ api, admin, adminContext, guestContext, db, base, data, first, second, call, connect, emit, job, ready, start, stop, setSpeech, setPlayer }) {
   const pass = name => console.log(`PASS ${name}`)
   const upload = async (id, kind, seconds, frequency) => {
     const file = path.join(data, `${id}.wav`)
@@ -46,15 +46,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   const status = item => db.prepare('SELECT status FROM queue WHERE queueId=?').get(item.queueId).status
   const waitPlayed = item => expect.poll(() => status(item), { timeout: 15000 }).toBe('PLAYED')
 
-  if (process.env.KES_TTS_TEST_INSTALLATION) {
-    const config = (await call(api, 'prefs/local-tts')).config
-    await call(api, 'prefs/local-tts', { ...config, installationPath: process.env.KES_TTS_TEST_INSTALLATION, autoStart: true }, 'PUT')
-    await expect.poll(() => job(first.greetingId)?.profileJSON.includes(process.env.KES_TTS_TEST_INSTALLATION), { timeout: 15000 }).toBe(true)
-    await expect.poll(() => job(first.greetingId)?.status, { timeout: 150000 }).toBe('ready')
-    await ready(second.greetingId)
-  }
-
-  await admin.goto(`${base}admin/settings/animator?view=local-voice`)
+  await admin.goto(`${base}admin/settings/animator?view=greeting-voice`)
   await admin.getByLabel('Presentación del saludo', { exact: true }).selectOption(introId)
   await expect.poll(() => JSON.parse(db.prepare('SELECT playbackJSON FROM greetingControls WHERE roomId=1').get().playbackJSON).introClipId).toBe(introId)
   const enable = admin.getByRole('checkbox', { name: 'Leer saludos en voz alta', exact: true })
@@ -266,11 +258,6 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   }
   pass('Play during an idle probe preserves the complete greeting without an intro over a 600 ms round-trip connection')
 
-  if (process.env.KES_TTS_TEST_INSTALLATION) {
-    const config = (await call(api, 'prefs/local-tts')).config
-    await call(api, 'prefs/local-tts', { ...config, installationPath: installation, autoStart: false }, 'PUT')
-    await expect.poll(async () => (await call(api, 'prefs/local-tts')).state, { timeout: 15000 }).toBe('ready')
-  }
   await emit(operator, 'server/PLAYER_REQ_PAUSE', {})
   setSpeech(19)
   await configure(longIntroId)

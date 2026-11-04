@@ -1,7 +1,6 @@
 import { chromium, request, expect } from 'playwright/test'
 import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
-import { createServer as createSocketServer } from 'node:net'
 import { DatabaseSync } from 'node:sqlite'
 import { pathToFileURL } from 'node:url'
 import { io } from 'socket.io-client'
@@ -16,7 +15,6 @@ const development = process.env.KARAOKE_E2E_MODE === 'development'
 const playbackMode = process.env.KARAOKE_E2E_GREETING_PLAYBACK === '1'
 const localDuration = playbackMode ? 2 : 5
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'g-audio-e2e-'))
-const installation = path.join(data, 'tts')
 const log = fs.openSync(path.join(data, 'server.log'), 'a')
 const listen = async (server) => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -32,14 +30,11 @@ const anonymous = await request.newContext()
 const foreign = await request.newContext()
 const errors = []
 const sockets = []
-const workerSockets = new Set()
 let server, browser, db, admin, guest, player, adminContext, guestContext
-let workerRunning = false
 let held = false
 let corrupt = false
 let releaseGeneration
 const requests = []
-const workerQueue = []
 const pass = name => console.log(`PASS ${name}`)
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const videoIds = ['fixture0001', 'fixture0002', 'fixture0003', 'fixture0004', 'fixture0005', 'fixture0006']
@@ -53,53 +48,31 @@ const provider = createServer((req, res) => {
 })
 const providerPort = await listen(provider)
 
-fs.mkdirSync(path.join(installation, '.tmp'), { recursive: true })
-fs.mkdirSync(path.join(installation, '.venv/bin'), { recursive: true })
-fs.mkdirSync(path.join(installation, 'reference'))
-fs.symlinkSync(process.execPath, path.join(installation, '.venv/bin/python'))
-for (const name of ['model.sh', 'resident.py', 'speak.py']) fs.writeFileSync(path.join(installation, name), '# External socket fixture\n')
-execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=24000', '-t', '0.5', path.join(installation, 'reference/es_mx_f1.wav')])
-let wave = fs.readFileSync(path.join(installation, 'reference/es_mx_f1.wav'))
-let speechDuration = 0.5
+execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=24000', '-t', '0.5', path.join(data, 'initial-voice.wav')])
+let wave = fs.readFileSync(path.join(data, 'initial-voice.wav'))
 const setSpeech = (seconds, source) => {
   const file = path.join(data, 'speech-fixture.wav')
   const input = source ? ['-i', source] : ['-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=24000', '-t', String(seconds)]
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...input, file])
   wave = fs.readFileSync(file)
-  speechDuration = seconds
 }
-const drainWorker = async () => {
-  if (workerRunning) return
-  workerRunning = true
-  try {
-    while (workerQueue.length) {
-      const { socket, payload } = workerQueue.shift()
-      let result = { status: 'ready', pid: process.pid }
-      if (payload.action === 'say') {
-        if (held) await new Promise((resolve) => {
-          releaseGeneration = resolve
-        })
-        const output = payload.args[payload.args.indexOf('--output') + 1]
-        fs.writeFileSync(output, corrupt ? 'invalid audio' : wave)
-        fs.writeFileSync(output.replace(/\.wav$/, '.json'), '{}')
-        result = { output, audio_seconds: speechDuration, sample_rate: 24000 }
-      }
-      if (!socket.destroyed) socket.end(JSON.stringify({ ok: true, result }) + '\n')
-    }
-  } finally { workerRunning = false }
-}
-const worker = createSocketServer((socket) => {
-  workerSockets.add(socket)
-  socket.on('error', () => {})
-  socket.once('close', () => workerSockets.delete(socket))
-  socket.once('data', (bytes) => {
-    const payload = JSON.parse(bytes.toString())
-    if (payload.action === 'say') requests.push(payload.args)
-    workerQueue.push({ socket, payload })
-    void drainWorker()
+const worker = createServer(async (req, res) => {
+  res.setHeader('Content-Type', 'application/json')
+  if (req.method === 'GET') {
+    res.end(JSON.stringify({ name: `models/${req.url.split('/').at(-1)}`, supportedGenerationMethods: ['generateContent'] }))
+    return
+  }
+  const chunks = []
+  for await (const chunk of req) chunks.push(chunk)
+  const payload = JSON.parse(Buffer.concat(chunks).toString())
+  requests.push(payload.contents[0].parts[0].text)
+  if (held) await new Promise((resolve) => {
+    releaseGeneration = resolve
+    res.once('close', resolve)
   })
+  if (!res.destroyed) res.end(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/wav', data: (corrupt ? Buffer.from('invalid audio') : wave).toString('base64') } }] } }] }))
 })
-await new Promise(resolve => worker.listen(path.join(installation, '.tmp/model.sock'), resolve))
+const workerPort = await listen(worker)
 const release = () => {
   held = false
   releaseGeneration?.()
@@ -114,7 +87,8 @@ const start = async () => {
     '--port', String(port), '--urlPath', '/karaoke/', '--serverLogLevel', '0'], {
     cwd: root, stdio: ['ignore', log, log], env: { ...process.env, NODE_ENV: development ? 'development' : 'production', KES_SCAN: '', KES_ROTATE_KEY: 'false',
       KES_ELEVENLABS_API_KEY: '', KES_YOUTUBE_API_KEY: 'fixture-only', KARAOKE_E2E_YOUTUBE_ORIGIN: `http://127.0.0.1:${providerPort}`,
-      NODE_OPTIONS: `--import=${pathToFileURL(path.join(root, 'config/fixtures/youtube-fetch.mjs')).href}` },
+      KES_GEMINI_API_KEY: 'fixture-only', KARAOKE_E2E_GEMINI_ORIGIN: `http://127.0.0.1:${workerPort}`,
+      NODE_OPTIONS: `--import=${pathToFileURL(path.join(root, 'config/fixtures/youtube-fetch.mjs')).href} --import=${pathToFileURL(path.join(root, 'config/fixtures/gemini-fetch.mjs')).href}` },
   })
   for (let i = 0; i < 600; i++) {
     try {
@@ -226,10 +200,12 @@ try {
   await admin.getByPlaceholder('contraseña', { exact: true }).fill('greeting-audio-test')
   await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
   await expect(admin.getByRole('navigation', { name: 'Secciones de administración' })).toBeVisible()
-  await admin.goto(`${base}admin/settings/animator?view=local-voice`)
-  await admin.getByLabel('Ruta de instalación en el servidor', { exact: true }).fill(installation)
-  await admin.getByRole('button', { name: 'Guardar y comprobar', exact: true }).click()
-  await expect(admin.getByText('Modelo listo', { exact: true })).toBeVisible()
+  await admin.goto(`${base}admin/settings/animator?view=greeting-voice`)
+  await admin.getByRole('checkbox', { name: 'Generar nuevos saludos con Gemini', exact: true }).check()
+  await admin.getByLabel('Solicitudes por minuto', { exact: true }).fill('1000')
+  await admin.getByLabel('Solicitudes por día', { exact: true }).fill('10000')
+  await admin.getByRole('button', { name: 'Guardar ajustes', exact: true }).click()
+  await expect(admin.getByText('Gemini configurado', { exact: true })).toBeVisible()
   await expect(admin.getByText('Configuración guardada.', { exact: true })).toBeVisible()
   await admin.getByRole('checkbox', { name: 'Preparar voz mientras los pedidos esperan' }).focus()
   await admin.keyboard.press('Space')
@@ -312,7 +288,7 @@ try {
   pass('Real QR orders prepare one validated private audio for two separate greetings; keyboard and responsive UI')
 
   if (playbackMode) {
-    await runGreetingPlaybackChecks({ api, admin, adminContext, guestContext, db, base, data, first, second, call, connect, emit, job, ready, start, stop, setSpeech, installation, setPlayer: (page) => {
+    await runGreetingPlaybackChecks({ api, admin, adminContext, guestContext, db, base, data, first, second, call, connect, emit, job, ready, start, stop, setSpeech, setPlayer: (page) => {
       player = page
     } })
   } else {
@@ -337,12 +313,12 @@ try {
     await sleep(1000)
     assert.equal(requests.length, beforeRestart)
     release()
-    await ready(interrupted.greetingId)
-    assert.equal(job(interrupted.greetingId).attempts, 2)
+    assert.equal(job(interrupted.greetingId).status, 'uncertain')
+    assert.equal(job(interrupted.greetingId).attempts, 1)
     assert.equal(job(first.greetingId).jobId, job(second.greetingId).jobId)
     assert.equal((await api.get(audioPath)).status(), 200)
     assert.doesNotMatch(fs.readFileSync(path.join(data, 'server.log'), 'utf8'), /database is (?:not open|closed)/i)
-    pass('SQLite preserves interrupted work and ready cache; restart waits for the old external worker before its single retry')
+    pass('SQLite preserves ready cache and an uncertain outcome; restart never repeats the cloud request')
 
     corrupt = true
     const fallback = await submit(4, 'Este saludo sigue en pantalla')
@@ -361,19 +337,6 @@ try {
     await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(fallback.queueId).status, { timeout: 12000 }).toBe('PLAYED')
     await player.close()
     pass('Failed voice preparation still delivers the visual greeting and continues real local music')
-
-    if (process.env.KES_TTS_TEST_INSTALLATION) {
-      const local = (await call(api, 'prefs/local-tts')).config
-      await call(api, 'prefs/local-tts', { ...local, installationPath: process.env.KES_TTS_TEST_INSTALLATION, autoStart: true }, 'PUT')
-      await expect.poll(async () => (await call(api, 'prefs/local-tts')).state, { timeout: 125000 }).toBe('ready')
-      const real = await submit(5, 'Que disfrutes la noche.')
-      await expect.poll(() => job(real.greetingId)?.status, { timeout: 150000 }).toBe('ready')
-      const result = await api.get(`${base}api/greetings/${real.greetingId}/audio`)
-      assert.equal(result.status(), 200)
-      fs.writeFileSync(path.join(data, 'real-greeting.mp3'), await result.body())
-      assert.equal(records().find(row => row.greetingId === real.greetingId).status, 'QUEUED')
-      console.log(`PASS Real Chatterbox greeting generated and validated: ${job(real.greetingId).durationMs} ms; no voice playback`)
-    }
   }
   assert.deepEqual(errors, [])
   console.log(`Greeting ${playbackMode ? 'playback' : 'audio'} ${development ? 'development StrictMode' : 'production'} E2E passed. Artifacts: ${data}`)
@@ -392,7 +355,7 @@ try {
   await browser?.close()
   await stop()
   db?.close()
-  for (const socket of workerSockets) socket.destroy()
+  worker.closeAllConnections()
   await new Promise(resolve => worker.close(resolve))
   await new Promise(resolve => provider.close(resolve))
   await Promise.all([api.dispose(), anonymous.dispose(), foreign.dispose()])

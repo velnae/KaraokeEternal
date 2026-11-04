@@ -1,18 +1,26 @@
 import Router from '@koa/router'
 import GreetingAudioJobs from './AudioJobs.js'
-import { getLocalTts } from './ttsRouter.js'
+import { getGreetingVoice } from './GreetingVoice.js'
 import getLogger from '../lib/Log.js'
 
 let jobs: GreetingAudioJobs | undefined
+let startup: Promise<void> | undefined
 export const getGreetingAudioAsset = (roomId: number, greetingId: number) => jobs?.asset(roomId, greetingId) ?? Promise.resolve(null)
+export async function previewGreetingAudio (signal: AbortSignal) {
+  const worker = jobs
+  if (!worker) return null
+  await startup
+  return worker.preview(signal)
+}
 export function startGreetingAudio (directory: string) {
-  const worker = new GreetingAudioJobs(directory, getLocalTts(), process.env.KES_FFMPEG_PATH || 'ffmpeg')
+  const worker = new GreetingAudioJobs(directory, getGreetingVoice(), process.env.KES_FFMPEG_PATH || 'ffmpeg')
   jobs = worker
-  const startup = worker.start().catch(() => {
+  const ready = worker.start().catch(() => {
     getLogger('greeting-audio').error('Could not initialize private greeting audio storage; visual greetings remain available.')
   })
+  startup = ready
   return async () => {
-    await startup
+    await ready
     await worker.stop()
     if (jobs === worker) jobs = undefined
   }

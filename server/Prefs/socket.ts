@@ -14,10 +14,10 @@ const ACTION_HANDLERS = {
     }
 
     // These settings have validated HTTP update routes and dedicated lifecycle handling.
-    if (payload.key === 'branding' || payload.key === 'localTts') {
+    if (payload.key === 'branding' || payload.key === 'greetingVoice') {
       return acknowledge({
         type: PREFS_SET + _ERROR,
-        error: payload.key === 'localTts' ? 'Use los ajustes de voz local para guardar los cambios.' : 'Use los ajustes de marca del cliente para guardar los cambios.',
+        error: payload.key === 'greetingVoice' ? 'Use los ajustes de voz de saludos para guardar los cambios.' : 'Use los ajustes de marca del cliente para guardar los cambios.',
       })
     }
     Prefs.set(payload.key, payload.data)

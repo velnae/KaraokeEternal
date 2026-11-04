@@ -31,7 +31,7 @@ import { startHousePlaylists } from './Playlists/Playlists.js'
 import Animation from './Animation/Animation.js'
 import { loadCatalog } from './Animation/catalog.js'
 import { startProduction } from './Animation/Production.js'
-import localTtsRouter, { startLocalTts } from './Greetings/ttsRouter.js'
+import greetingVoiceRouter from './Greetings/voiceRouter.js'
 import greetingAudioRouter, { startGreetingAudio } from './Greetings/audioRouter.js'
 import pushQueuesAndLibrary from './lib/pushQueuesAndLibrary.js'
 import { Server as SocketIO } from 'socket.io'
@@ -78,7 +78,6 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     // attach socket.io handlers
     const stopAnimation = Animation.initialize(io)
     const stopProduction = await startProduction(path.join(env.KES_PATH_DATA, 'animation'), roomId => Animation.publish(roomId))
-    const stopLocalTts = startLocalTts()
     const stopGreetingAudio = startGreetingAudio(path.join(env.KES_PATH_DATA, 'greetings'))
     const stopTransitionVideos = await startTransitionVideos(path.join(env.KES_PATH_DATA, 'transition-video'))
     socketActions(io, jwtKey)
@@ -112,7 +111,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     shutdownHandlers.push(async () => {
       stopAnimation()
       stopHousePlaylists()
-      await Promise.allSettled([stopGreetingAudio(), stopLocalTts(), stopTransitionVideos()])
+      await Promise.allSettled([stopGreetingAudio(), stopTransitionVideos()])
       await stopProduction()
       return new Promise((resolve) => {
       // also calls http server's close method, which ultimately handles the callback
@@ -220,7 +219,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(libraryRouter.routes())
   baseRouter.use(mediaRouter.routes())
   baseRouter.use(prefsRouter.routes())
-  baseRouter.use(localTtsRouter.routes())
+  baseRouter.use(greetingVoiceRouter.routes())
   baseRouter.use(greetingAudioRouter.routes())
   baseRouter.use(roomsRouter.routes())
   baseRouter.use(userRouter.routes())

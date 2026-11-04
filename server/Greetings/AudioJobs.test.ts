@@ -2,14 +2,13 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { createServer, type Socket } from 'node:net'
 import { parseBuffer } from 'music-metadata'
 import { open, close, db } from '../lib/Database.js'
 import Queue from '../Queue/Queue.js'
 import Greetings from './Greetings.js'
-import LocalTts from './LocalTts.js'
+import GreetingVoice from './GreetingVoice.js'
+import { GreetingVoiceError, type GreetingVoiceProvider } from './GeminiGreetingTts.js'
 import GreetingAudioJobs, { type GreetingAudioJob } from './AudioJobs.js'
-import type { LocalTtsConfig } from '../../shared/localTts.js'
 
 function wave (seconds = 0.4, silent = false) {
   const samples = Math.floor(24000 * seconds)
@@ -30,115 +29,74 @@ function wave (seconds = 0.4, silent = false) {
   return bytes
 }
 
-async function fixture (directory: string) {
-  await fs.mkdir(path.join(directory, '.tmp'), { recursive: true })
-  await fs.mkdir(path.join(directory, '.venv/bin'), { recursive: true })
-  await fs.mkdir(path.join(directory, 'reference'))
-  await fs.symlink(process.execPath, path.join(directory, '.venv/bin/python'))
-  for (const file of ['model.sh', 'resident.py', 'speak.py']) await fs.writeFile(path.join(directory, file), '# Test fixture\n')
-  await fs.writeFile(path.join(directory, 'reference/es_mx_f1.wav'), wave())
-  const sockets = new Set<Socket>()
-  const waiting: Array<{ socket: Socket, action: string, args?: string[] }> = []
-  const state = { hold: false, mode: 'ok', received: [] as string[][], completed: 0 }
-  let release: (() => void) | undefined
-  let running: Promise<void> | null = null
-  let stopped = false
-  const drain = async () => {
-    while (waiting.length && !stopped) {
-      const item = waiting.shift()!
-      try {
-        let result: object
-        if (item.action === 'say') {
-          const args = item.args!
-          const output = args[args.indexOf('--output') + 1]
-          const mode = state.mode
-          if (state.hold) await new Promise<void>((resolve) => {
-            release = resolve
-          })
-          if (stopped) return
-          if (mode === 'reject') throw new Error('Fixture rejection')
-          const bytes = mode === 'bad' ? Buffer.from('not audio') : wave(mode === 'long' ? 21 : 0.4, mode === 'silent')
-          await fs.writeFile(output, bytes)
-          await fs.writeFile(output.replace(/\.wav$/, '.json'), '{}')
-          result = { output, audio_seconds: mode === 'long' ? 21 : 0.4, sample_rate: 24000 }
-          state.completed++
-          if (mode === 'lost') {
-            item.socket.destroy()
-            continue
-          }
-        } else result = { status: 'ready', pid: process.pid }
-        if (!item.socket.destroyed) item.socket.end(JSON.stringify({ ok: true, result }) + '\n')
-      } catch {
-        if (!item.socket.destroyed) item.socket.end('{"ok":false,"error":"Fixture failure"}\n')
-      }
-    }
-  }
-  const server = createServer((socket) => {
-    sockets.add(socket)
-    socket.on('error', () => {})
-    socket.once('close', () => sockets.delete(socket))
-    socket.once('data', (data) => {
-      const request = JSON.parse(data.toString())
-      if (request.action === 'say') state.received.push(request.args)
-      waiting.push({ socket, ...request })
-      if (!running) running = drain().finally(() => {
-        running = null
+function fixture () {
+  const state = { hold: false, mode: 'ok', received: [] as string[] }
+  const waiting = new Set<() => void>()
+  const provider: GreetingVoiceProvider = {
+    configured: true,
+    check: async () => {},
+    generate: async (text, _profile, signal) => {
+      state.received.push(text)
+      const mode = state.mode
+      if (state.hold) await new Promise<void>((resolve, reject) => {
+        const done = () => {
+          waiting.delete(done)
+          signal.removeEventListener('abort', abort)
+          resolve()
+        }
+        const abort = () => {
+          waiting.delete(done)
+          signal.removeEventListener('abort', abort)
+          reject(new GreetingVoiceError('Cancelled request', 'uncertain'))
+        }
+        waiting.add(done)
+        signal.addEventListener('abort', abort, { once: true })
       })
-    })
-  })
-  await new Promise<void>(resolve => server.listen(path.join(directory, '.tmp/model.sock'), resolve))
+      if (mode === 'lost') throw new GreetingVoiceError('Lost reply', 'uncertain')
+      if (mode === 'reject') throw new GreetingVoiceError('Rejected', 'invalid')
+      if (mode === 'rate') throw new GreetingVoiceError('Rate limited', 'rate', Date.now() + 60)
+      if (mode === 'quota') throw new GreetingVoiceError('Daily quota', 'quota')
+      return mode === 'bad' ? Buffer.from('not audio') : wave(mode === 'long' ? 21 : 0.4, mode === 'silent')
+    },
+  }
   return {
-    state,
+    state, provider,
     release: () => {
       state.hold = false
-      release?.()
-    },
-    close: async () => {
-      stopped = true
-      release?.()
-      await running
-      for (const socket of sockets) socket.destroy()
-      await new Promise<void>(resolve => server.close(() => resolve()))
+      for (const done of waiting) done()
     },
   }
 }
 
 let directory: string
-let installation: string
 let data: string
-let model: Awaited<ReturnType<typeof fixture>>
-let tts: LocalTts
+let model: ReturnType<typeof fixture>
+let tts: GreetingVoice
 let jobs: GreetingAudioJobs
-let config: LocalTtsConfig
 const options = { intervalMs: 20, maxPending: 10, retentionMs: 30 * 86400000, retryMs: 20 }
 const allJobs = () => db.all<GreetingAudioJob>('SELECT * FROM greetingAudioJobs ORDER BY createdAt,rowid')
 const jobFor = (greetingId: number) => db.get<GreetingAudioJob>('SELECT j.* FROM greetingAudioJobs j JOIN greetings g ON g.audioJobId=j.jobId WHERE g.greetingId=?', [greetingId])
 const waitReady = (greetingId: number) => expect.poll(() => jobFor(greetingId)?.status, { timeout: 6000 }).toBe('ready')
 
-async function startJobs (generationTimeoutMs = 3000, maxPending = 10) {
-  tts = new LocalTts(config, (next) => {
-    config = next
-  }, { waitingMs: 20, timeoutMs: 3000, startupMs: 1000, retryMs: 20 }, generationTimeoutMs)
-  tts.check()
-  await expect.poll(() => tts.snapshot().state).toBe('ready')
+async function startJobs (maxPending = 10) {
+  tts = new GreetingVoice(model.provider)
+  if (!tts.config().revision) tts.configure({ ...tts.config(), enabled: true, requestsPerMinute: 1000, requestsPerDay: 10000 })
   jobs = new GreetingAudioJobs(data, tts, 'ffmpeg', { ...options, maxPending })
   await jobs.start()
 }
 
 beforeEach(async () => {
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'g-audio-'))
-  installation = path.join(directory, 'tts')
   data = path.join(directory, 'audio')
-  model = await fixture(installation)
-  config = { installationPath: installation, autoStart: false, revision: 1 }
+  model = fixture()
   open({ file: path.join(directory, 'db.sqlite'), ro: false })
   db.exec(`INSERT INTO rooms(roomId,name,status,data) VALUES(1,'Main','open','{}'),(2,'Other','open','{}');
     INSERT INTO users(userId,username,password,name,roleId) VALUES(1,'ana','','Ana',1),(2,'juan','','Juan',3);`)
   Greetings.prepareAudio(1, true)
 })
 afterEach(async () => {
-  await Promise.all([jobs?.stop(), tts?.close()])
-  await model.close()
+  await jobs?.stop()
+  model.release()
   close()
   await fs.rm(directory, { recursive: true, force: true })
 })
@@ -206,7 +164,7 @@ it('sends one generation at a time and retains a shared job when one consumer ca
   expect(await jobs.audio(1, first.greetingId)).toBeNull()
 })
 
-it('discards a cancelled generation after completion before sending the next request', async () => {
+it('aborts a cancelled generation and discards its late result', async () => {
   model.state.hold = true
   const first = greeting()
   const next = greeting('Siguiente saludo')
@@ -215,8 +173,7 @@ it('discards a cancelled generation after completion before sending the next req
   const original = jobFor(first.greetingId)!
   Greetings.remove({ roomId: 1, userId: 1 }, first.greetingId)
   await jobs.tick()
-  expect(allJobs().find(job => job.jobId === original.jobId)).toMatchObject({ status: 'generating', cancelRequested: 1 })
-  expect(model.state.received).toHaveLength(1)
+  expect(allJobs().find(job => job.jobId === original.jobId)).toMatchObject({ cancelRequested: 1 })
   model.release()
   await waitReady(next.greetingId)
   expect(allJobs().find(job => job.jobId === original.jobId)?.status).toBe('cancelled')
@@ -238,7 +195,7 @@ it('keeps visual reservation available while generation is pending and discards 
   expect(Greetings.items(1)[0].status).toBe('DISPLAYING')
 })
 
-it('retains the in-flight barrier when its room is deleted and then continues with another room', async () => {
+it('cancels an in-flight generation when its room is deleted and continues with another room', async () => {
   model.state.hold = true
   const first = greeting()
   Greetings.prepareAudio(2, true)
@@ -248,8 +205,7 @@ it('retains the in-flight barrier when its room is deleted and then continues wi
   const original = jobFor(first.greetingId)!
   db.exec('DELETE FROM queue WHERE roomId=1; DELETE FROM rooms WHERE roomId=1')
   await jobs.tick()
-  expect(allJobs().find(job => job.jobId === original.jobId)).toMatchObject({ roomId: null, status: 'generating', cancelRequested: 1 })
-  expect(model.state.received).toHaveLength(1)
+  expect(allJobs().find(job => job.jobId === original.jobId)).toMatchObject({ roomId: null, cancelRequested: 1 })
   model.release()
   await waitReady(second.greetingId)
   expect(allJobs().find(job => job.jobId === original.jobId)?.status).toBe('cancelled')
@@ -267,44 +223,40 @@ it.each(['bad', 'silent', 'long', 'reject'])('rejects %s output and preserves vi
   expect(Greetings.reserve(1, 'player', first.queueId, {})?.items).toHaveLength(1)
 })
 
-it('holds an uncertain generation as a barrier and retries it at most once after the worker is free', async () => {
-  model.state.hold = true
+it('keeps an uncertain result terminal without blocking other greetings', async () => {
+  model.state.mode = 'lost'
   const first = greeting()
-  const next = greeting('Segundo')
-  await startJobs(80)
+  await startJobs()
   await expect.poll(() => jobFor(first.greetingId)?.status).toBe('uncertain')
-  const originalAttempt = jobFor(first.greetingId)!.attemptId
   expect(model.state.received).toHaveLength(1)
-  expect(jobFor(next.greetingId)?.status).toBe('queued')
-  model.release()
-  await waitReady(first.greetingId)
+  model.state.mode = 'ok'
+  const next = greeting('Segundo')
   await waitReady(next.greetingId)
-  expect(jobFor(first.greetingId)?.attempts).toBe(2)
-  expect(model.state.received).toHaveLength(3)
-  await expect(fs.stat(path.join(data, 'staging', `${originalAttempt}.wav`))).rejects.toThrow()
+  expect(jobFor(first.greetingId)).toMatchObject({ status: 'uncertain', attempts: 1 })
+  expect(model.state.received).toHaveLength(2)
 })
 
-it('fences an interrupted external worker across database reopen before retrying', async () => {
+it('does not automatically resend a request interrupted by server restart', async () => {
   model.state.hold = true
   const first = greeting()
   await startJobs()
   await expect.poll(() => model.state.received.length).toBe(1)
-  await Promise.all([jobs.stop(), tts.close()])
+  await jobs.stop()
   expect(jobFor(first.greetingId)?.status).toBe('uncertain')
   close()
   open({ file: path.join(directory, 'db.sqlite'), ro: false })
-  tts = new LocalTts(config, () => {}, { waitingMs: 20, timeoutMs: 3000, startupMs: 1000, retryMs: 20 }, 3000)
-  jobs = new GreetingAudioJobs(data, tts, 'ffmpeg', options)
-  await jobs.start()
+  await startJobs()
   expect(model.state.received).toHaveLength(1)
   model.release()
-  await waitReady(first.greetingId)
+  const next = greeting('Siguiente solicitud')
+  await waitReady(next.greetingId)
   expect(model.state.received).toHaveLength(2)
-  expect(jobFor(first.greetingId)?.attempts).toBe(2)
+  expect(jobFor(first.greetingId)).toMatchObject({ status: 'uncertain', attempts: 1 })
+  expect(tts.snapshot().usage.day).toBe(2)
 })
 
-it('exhausts exactly one retry when the worker repeatedly loses the generation acknowledgment', async () => {
-  model.state.mode = 'lost'
+it('bounds retries for explicit transient rate-limit rejections', async () => {
+  model.state.mode = 'rate'
   const first = greeting()
   await startJobs()
   await expect.poll(() => jobFor(first.greetingId)?.status, { timeout: 6000 }).toBe('failed')
@@ -336,13 +288,12 @@ it('discards an older configuration and prepares the pending greeting with the n
   await startJobs()
   await expect.poll(() => model.state.received.length).toBe(1)
   const original = jobFor(first.greetingId)!
-  await tts.configure({ ...config })
+  tts.configure({ ...tts.config(), voice: 'Kore' })
   await jobs.tick()
-  expect(tts.snapshot().pending).toBe(true)
   model.release()
   await waitReady(first.greetingId)
   expect(jobFor(first.greetingId)?.jobId).not.toBe(original.jobId)
-  expect(JSON.parse(jobFor(first.greetingId)!.profileJSON).configurationRevision).toBe(2)
+  expect(JSON.parse(jobFor(first.greetingId)!.profileJSON).voice).toBe('Kore')
   expect(allJobs().find(job => job.jobId === original.jobId)?.status).toBe('cancelled')
 })
 
@@ -350,7 +301,7 @@ it('bounds the preparation queue and leaves excess greetings available visually'
   model.state.hold = true
   const first = greeting()
   const second = greeting('No perder este mensaje')
-  await startJobs(3000, 1)
+  await startJobs(1)
   await expect.poll(() => model.state.received.length).toBe(1)
   expect(allJobs()).toHaveLength(1)
   expect(Greetings.items(1).find(item => item.greetingId === second.greetingId)?.audio).toMatchObject({ status: 'unavailable', reason: expect.stringContaining('ocupada') })
@@ -395,9 +346,18 @@ it('sends only plain greeting text with fixed options, while tagged text keeps v
   await startJobs()
   await waitReady(first.greetingId)
   expect(model.state.received).toHaveLength(1)
-  const args = model.state.received[0]
-  expect(args.slice(-2)).toEqual(['--', 'Para Rocío: --seed 999 Un saludo para todos — De Ana'])
-  expect(args[args.indexOf('--seed') + 1]).toBe('42')
-  expect(args[args.indexOf('--reference') + 1]).toContain(path.join(data, 'staging'))
+  expect(model.state.received[0]).toBe('Para Rocío: --seed 999 Un saludo para todos — De Ana')
   expect(Greetings.items(1).find(item => item.greetingId === tagged.greetingId)).toMatchObject({ status: 'QUEUED', audio: { status: 'unavailable' } })
+})
+
+it('exhausted daily quota preserves visual delivery without repeated provider calls', async () => {
+  model.state.mode = 'quota'
+  const first = greeting()
+  await startJobs()
+  await expect.poll(() => jobFor(first.greetingId)?.status).toBe('failed')
+  const second = greeting('Segunda sala sin cuota', 2)
+  Greetings.prepareAudio(2, true)
+  await expect.poll(() => jobFor(second.greetingId)?.status).toBe('failed')
+  expect(model.state.received).toHaveLength(1)
+  expect(Greetings.reserve(1, 'player', first.queueId, {})?.items).toHaveLength(1)
 })
