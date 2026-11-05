@@ -1,4 +1,5 @@
 import { chromium, request, expect } from 'playwright/test'
+import { installYouTubePreviewMock, confirmSongPreview } from './fixtures/youtube-preview.mjs'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
@@ -207,6 +208,7 @@ try {
   pass('Admin layouts, empty/error states and local-source recovery remain usable')
 
   const guestContext = await browser.newContext({ viewport: { width: 390, height: 1000 }, isMobile: true, hasTouch: true })
+  await installYouTubePreviewMock(guestContext)
   const guest = await guestContext.newPage()
   guest.on('pageerror', error => errors.push(error.message))
   await guest.goto(`${base}account?roomId=1`)
@@ -233,20 +235,29 @@ try {
   await expect.poll(() => queries.at(-1)).toBe('Mi canción karaoke')
   await expect(guest.locator('article[data-source-id]')).toHaveCount(3)
   const guestFirst = guest.locator(`[data-source-id="${ids[0]}"]`)
-  await guestFirst.getByRole('button', { name: 'Pedir canción', exact: true }).click()
-  await expect(guestFirst.getByRole('button', { name: 'Enviando…', exact: true })).toBeVisible()
+  await guestFirst.getByRole('button', { name: 'Pedir', exact: true }).click()
+  await confirmSongPreview(guest)
+  await expect(guest.getByRole('dialog').getByRole('button', { name: 'Enviando…', exact: true })).toBeVisible()
+  await expect(guest).toHaveURL(`${base}requests`)
+  await guest.goto(`${base}library`)
+  await guest.getByRole('radio', { name: 'Cantar karaoke', exact: true }).check()
+  await submitSearch(guestSearch, 'Mi canción')
   await expect(guestFirst.getByRole('link', { name: 'Por aprobar', exact: true })).toBeVisible()
   assert.equal(db.prepare('SELECT count(*) n FROM queue WHERE status=\'PENDING_APPROVAL\'').get().n, 1)
   assert.equal(db.prepare('SELECT requestIntent FROM queue WHERE status=\'PENDING_APPROVAL\'').get().requestIntent, 'SING')
   await guest.screenshot({ path: path.join(data, 'participant-confirmed-390.png') })
   await guest.getByRole('radio', { name: 'Escuchar música', exact: true }).check()
   await submitSearch(guestSearch, 'Mi canción')
-  await guest.locator(`[data-source-id="${ids[1]}"]`).getByRole('button', { name: 'Pedir canción', exact: true }).click()
+  await guest.locator(`[data-source-id="${ids[1]}"]`).getByRole('button', { name: 'Pedir', exact: true }).click()
+  await confirmSongPreview(guest)
+  await expect(guest).toHaveURL(`${base}requests`)
+  await guest.goto(`${base}library`)
+  await submitSearch(guestSearch, 'Mi canción')
   await expect(guest.locator(`[data-source-id="${ids[1]}"]`).getByRole('link', { name: 'Por aprobar', exact: true })).toBeVisible()
   assert.equal(db.prepare('SELECT requestIntent FROM queue WHERE status=\'PENDING_APPROVAL\' AND externalId=?').get(ids[1]).requestIntent, 'LISTEN')
   const guestThird = guest.locator(`[data-source-id="${ids[2]}"]`)
-  await expect(guestThird.getByRole('button', { name: 'Pedir canción', exact: true })).toBeDisabled()
-  await expect(guestThird.getByText('Límite alcanzado. Revisa Mis pedidos antes de agregar otra canción.', { exact: true })).toBeVisible()
+  await expect(guestThird.getByRole('button', { name: 'Pedir', exact: true })).toBeDisabled()
+  await expect(guest.getByText('Límite de pedidos alcanzado. Revisa Mis pedidos.', { exact: true })).toBeVisible()
   for (const width of [320, 768, 1440]) {
     await guest.setViewportSize({ width, height: 1000 })
     assert.ok(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `guest overflow ${width}`)
@@ -337,13 +348,15 @@ try {
   await guest.getByRole('radio', { name: 'Cantar karaoke', exact: true }).check()
   await submitSearch(guestSearch, 'https://youtu.be/toolong0001')
   await expect(guest.getByText('Elige un video de la categoría Música, de hasta 7 minutos y sin emisiones en directo.', { exact: true })).toBeVisible()
-  await expect(guest.getByRole('button', { name: 'Pedir canción', exact: true })).toHaveCount(0)
+  await expect(guest.getByRole('button', { name: 'Pedir', exact: true })).toHaveCount(0)
   await expect(guest.getByRole('button', { name: 'Reintentar', exact: true })).toHaveCount(0)
   pass('A pasted link exceeding seven minutes has an actionable error and cannot be requested')
   await submitSearch(guestSearch, `https://youtu.be/${ids[2]}`)
   await expect(guest.locator('article[data-source-id]')).toHaveCount(1)
-  await guest.locator(`[data-source-id="${ids[2]}"]`).getByRole('button', { name: 'Pedir canción', exact: true }).click()
-  await expect(guest.locator(`[data-source-id="${ids[2]}"]`).getByRole('link', { name: 'Por aprobar', exact: true })).toBeVisible()
+  await guest.locator(`[data-source-id="${ids[2]}"]`).getByRole('button', { name: 'Pedir', exact: true }).click()
+  await confirmSongPreview(guest)
+  await expect(guest).toHaveURL(`${base}requests`)
+  await expect(guest.getByRole('heading', { name: titles[2], exact: true })).toBeVisible()
   await guest.screenshot({ path: path.join(data, 'link-mobile-390.png') })
   await admin.getByRole('radio', { name: 'Karaoke', exact: true }).check()
   await submitSearch(search, `https://www.youtube.com/watch?v=${ids[2]}`)
@@ -356,6 +369,7 @@ try {
     const httpsBase = new URL(process.env.KARAOKE_E2E_HTTPS_URL)
     assert.equal(httpsBase.protocol, 'https:')
     const httpsContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+    await installYouTubePreviewMock(httpsContext)
     let submittedSearches = 0
     // Load the real HTTPS frontend, but keep all API writes and search traffic on
     // the isolated server. Polling-only transport avoids any shared WebSocket.
@@ -393,8 +407,9 @@ try {
       assert.ok(await httpsGuest.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `HTTPS overflow ${width}`)
       await httpsGuest.screenshot({ path: path.join(data, `https-participant-${width}.png`), fullPage: true })
     }
-    await httpsGuest.locator(`[data-source-id="${ids[0]}"]`).getByRole('button', { name: 'Pedir canción', exact: true }).click()
-    await expect(httpsGuest.locator(`[data-source-id="${ids[0]}"]`).getByRole('link', { name: 'Por aprobar', exact: true })).toBeVisible()
+    await httpsGuest.locator(`[data-source-id="${ids[0]}"]`).getByRole('button', { name: 'Pedir', exact: true }).click()
+    await confirmSongPreview(httpsGuest)
+    await expect(httpsGuest).toHaveURL(new URL('requests', httpsBase).href)
     assert.equal(db.prepare('SELECT requestIntent FROM queue ORDER BY queueId DESC LIMIT 1').get().requestIntent, 'SING')
     await httpsContext.unrouteAll({ behavior: 'ignoreErrors' })
     await httpsContext.close()

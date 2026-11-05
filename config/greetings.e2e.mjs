@@ -1,4 +1,5 @@
 import { chromium, request, expect } from 'playwright/test'
+import { installYouTubePreviewMock, confirmSongPreview } from './fixtures/youtube-preview.mjs'
 import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
@@ -154,6 +155,7 @@ try {
   await expect(admin.getByRole('region', { name: 'Cola de saludos' })).toHaveCount(0)
   const songCard = queueId => admin.locator(`[data-queue-id="${queueId}"]`)
   const guestContext = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true })
+  await installYouTubePreviewMock(guestContext)
   if (httpsUi) {
     // Fetch real tunnel-served UI assets while keeping all test requests and
     // participant identities in the isolated database, never the shared room.
@@ -230,13 +232,14 @@ try {
     const card = guest.locator(`[data-source-id="${ids[index]}"]`)
     await expect(card.getByRole('checkbox', { name: /Agregar saludo/ })).toHaveCount(0)
     await expect(card.getByRole('textbox', { name: 'Mensaje', exact: true })).toHaveCount(0)
-    await card.getByRole('button', { name: 'Pedir canción', exact: true }).focus()
+    await card.getByRole('button', { name: 'Pedir', exact: true }).focus()
     await guest.keyboard.press('Enter')
+    await confirmSongPreview(guest)
     if (index === 0 && !httpsUi) {
-      await expect(card.getByRole('button', { name: 'Comprobar pedido', exact: true })).toBeVisible({ timeout: 16000 })
+      await expect(guest.getByRole('dialog').getByText('Pedido sin confirmar. Pulsa Confirmar para comprobarlo.')).toBeVisible({ timeout: 16000 })
       await expect(guest).toHaveURL(`${participantBase}library`)
       assert.equal(db.prepare('SELECT count(*) n FROM queue').get().n, 1)
-      await card.getByRole('button', { name: 'Comprobar pedido', exact: true }).click()
+      await confirmSongPreview(guest)
     }
     await expect(guest).toHaveURL(`${participantBase}requests`)
     const queueId = db.prepare('SELECT queueId FROM queue WHERE externalId=?').get(ids[index]).queueId

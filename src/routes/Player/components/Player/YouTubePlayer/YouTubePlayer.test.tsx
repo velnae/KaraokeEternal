@@ -88,6 +88,23 @@ describe('YouTube player transitions', () => {
     return { commands, event, iframe, onEnd, onError, player, statuses, update }
   }
 
+  it.each([undefined, 0] as const)('uses controls=%s without changing the venue default', (controls) => {
+    const { player, iframe } = setup()
+    Object.defineProperty(player, 'props', { value: { ...player.props, controls } })
+    player.player = null
+    Object.defineProperty(player.container, 'current', { value: { replaceChildren: vi.fn() } })
+    vi.stubGlobal('document', { createElement: () => ({}) })
+    Object.defineProperty(window, 'location', { value: { origin: 'https://karaoke.example' } })
+    const construct = vi.fn(function () {
+      return iframe
+    })
+    player.createPlayer({ Player: construct, PlayerState: { PLAYING, PAUSED, ENDED } })
+    expect(construct).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      playerVars: expect.objectContaining({ controls: controls ?? 1 }),
+    }))
+    player.componentWillUnmount()
+  })
+
   it('keeps the next video playing despite a PAUSED event from the old video during load', () => {
     const { commands, event, player, statuses, update } = setup()
 
@@ -100,6 +117,43 @@ describe('YouTube player transitions', () => {
     event(PLAYING)
     expect(player.props.isPlaying).toBe(true)
     player.componentWillUnmount()
+  })
+
+  it('can retry API loading after a failed script without reloading the page', async () => {
+    vi.resetModules()
+    const { default: RetryPlayer } = await import('./YouTubePlayer')
+    const { player: template, onError } = setup()
+    vi.stubGlobal('window', {})
+    const scripts: Array<{ onerror?: () => void, remove: ReturnType<typeof vi.fn> }> = []
+    let attached: object | null = null
+    vi.stubGlobal('document', {
+      querySelector: () => attached,
+      createElement: () => {
+        const script = { remove: vi.fn(() => {
+          attached = null
+        }) }
+        scripts.push(script)
+        return script
+      },
+      head: { appendChild: (script: object) => {
+        attached = script
+      } },
+    })
+    const first = new RetryPlayer(template.props)
+    first.componentDidMount()
+    scripts[0].onerror!()
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.any(String), { category: 'api-load' }))
+    first.componentWillUnmount()
+    expect(scripts[0].remove).toHaveBeenCalledOnce()
+
+    const retry = new RetryPlayer(template.props)
+    retry.createPlayer = vi.fn()
+    retry.componentDidMount()
+    expect(scripts).toHaveLength(2)
+    window.YT = { Player: vi.fn(), PlayerState: { PLAYING, PAUSED, ENDED } }
+    window.onYouTubeIframeAPIReady!()
+    await vi.waitFor(() => expect(retry.createPlayer).toHaveBeenCalledOnce())
+    retry.componentWillUnmount()
   })
 
   it('creates only one iframe when StrictMode remounts before API loading resolves', async () => {
@@ -234,7 +288,7 @@ describe('YouTube player transitions', () => {
     vi.stubGlobal('window', { YT: undefined })
     vi.stubGlobal('document', {
       querySelector: (): null => null,
-      createElement: () => ({}),
+      createElement: () => ({ remove: vi.fn() }),
       head: { appendChild: (script: { onerror(): void }) => script.onerror() },
     })
 

@@ -1,4 +1,5 @@
 import { chromium, request, expect } from 'playwright/test'
+import { installYouTubePreviewMock, confirmSongPreview } from './fixtures/youtube-preview.mjs'
 import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
@@ -132,7 +133,8 @@ const submit = async (index, message, intent = 'LISTEN') => {
   await guest.getByRole('searchbox', { name: 'Buscar canción o artista' }).press('Enter')
   const card = guest.locator(`[data-source-id="${videoIds[index]}"]`)
   await expect(card.getByRole('checkbox', { name: /Agregar saludo/ })).toHaveCount(0)
-  await card.getByRole('button', { name: 'Pedir canción', exact: true }).click()
+  await card.getByRole('button', { name: 'Pedir', exact: true }).click()
+  await confirmSongPreview(guest)
   await expect(guest).toHaveURL(`${base}requests`)
   const queueId = db.prepare('SELECT queueId FROM queue WHERE externalId=? ORDER BY queueId DESC LIMIT 1').get(videoIds[index]).queueId
   const requested = guest.locator(`[data-queue-id="${queueId}"]`)
@@ -163,6 +165,7 @@ try {
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, headless: true })
   adminContext = await browser.newContext({ viewport: { width: 1440, height: 1100 } })
   guestContext = await browser.newContext({ viewport: { width: 390, height: 1000 }, isMobile: true, hasTouch: true })
+  await installYouTubePreviewMock(guestContext)
   let preparationDelay = 'reply'
   let delayedPreparations = 0
   await adminContext.routeWebSocket(/\/socket\.io\//, (socket) => {

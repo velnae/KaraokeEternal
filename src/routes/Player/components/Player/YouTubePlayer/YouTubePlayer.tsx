@@ -71,6 +71,7 @@ const loadYouTubeIframeApi = (): Promise<YouTubeApi> => {
     script.async = true
     script.onerror = () => {
       apiPromise = null
+      script.remove()
       reject(new Error('No se pudo cargar el reproductor de YouTube'))
     }
     document.head.appendChild(script)
@@ -80,6 +81,7 @@ const loadYouTubeIframeApi = (): Promise<YouTubeApi> => {
 }
 
 interface YouTubePlayerProps {
+  controls?: 0 | 1
   height: number
   isPlaying: boolean
   mediaKey: number
@@ -166,7 +168,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
       videoId: this.props.videoId,
       playerVars: {
         autoplay: 0,
-        controls: 1,
+        controls: this.props.controls ?? 1,
         disablekb: 0,
         enablejsapi: 1,
         origin: window.location.origin,
@@ -275,7 +277,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
         style={{ width: this.props.width, height: this.props.height }}
       >
         <div className={styles.surface} ref={this.container} />
-        {this.state.autoplayBlocked && (
+        {this.state.autoplayBlocked && this.props.controls !== 0 && (
           <div className={styles.notice} role='status'>
             <p>El navegador bloqueó el inicio de YouTube. Pulse Reproducir aquí para continuar con esta canción.</p>
             <Button variant='primary' onClick={this.retryPlayback}>Reproducir aquí</Button>
