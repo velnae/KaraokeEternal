@@ -6,9 +6,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
+import { checkRemoteFullscreen } from './remote-fullscreen-checks.e2e.mjs'
 
-// Set PLAYWRIGHT_CHROMIUM_EXECUTABLE to an actual Chromium 109 binary to test
-// its JS/CSS/media engine. Changing a modern browser's user agent is not enough.
+// Use an installed modern Chromium engine. Chrome 128+ is the supported target;
+// changing the user agent does not test a different JS/CSS/media engine.
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
 const httpsUi = process.env.KARAOKE_E2E_HTTPS_UI === '1'
@@ -97,7 +98,12 @@ try {
   }
   await context.route('**/compatibility-video.webm', route => route.fulfill({ path: path.join(data, 'video.webm'), contentType: 'video/webm' }))
   await context.addInitScript(() => {
-    window.compatibility = { contexts: [], failAudio: true, blockOnce: true, video: null, clockTicks: 0, playerVars: null }
+    window.compatibility = { contexts: [], failAudio: true, blockOnce: true, video: null, clockTicks: 0, playerVars: null, fullscreenRequests: [] }
+    const requestFullscreen = Element.prototype.requestFullscreen
+    Element.prototype.requestFullscreen = function (...args) {
+      window.compatibility.fullscreenRequests.push({ id: this.id, active: navigator.userActivation.isActive })
+      return requestFullscreen.apply(this, args)
+    }
     const setInterval = window.setInterval
     window.setInterval = (handler, delay, ...args) => setInterval(typeof handler === 'function' && delay === 250
       ? (...values) => {
@@ -215,7 +221,11 @@ try {
   await expect.poll(() => page.evaluate(() => window.compatibility.video.paused)).toBe(true)
   await toolbar.getByRole('button', { name: 'Reproducir', exact: true }).click()
   await expect.poll(() => page.evaluate(() => window.compatibility.video.paused)).toBe(false)
+  await checkRemoteFullscreen({ player: page, uiBase, data, db })
   await page.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
+  await expect(page.getByRole('link', { name: 'Abrir reproductor', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Pantalla completa del reproductor (beta)', exact: true })).toBeDisabled()
+  await expect(page.getByText('Abre el reproductor para continuar.', { exact: true })).toBeVisible()
   await page.goto(`${uiBase}admin/settings/animator?view=greeting-voice`)
   await expect(page.getByRole('heading', { name: 'Voz de saludos', exact: true })).toBeVisible()
   await expect(page.getByText('Falta la clave de Gemini', { exact: true })).toBeVisible()

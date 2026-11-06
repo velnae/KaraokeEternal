@@ -1,5 +1,5 @@
 export default {
-  targets: ['defaults', 'chrome 109'],
+  targets: { chrome: '128' },
   plugins: [
     [
       'babel-plugin-react-compiler',

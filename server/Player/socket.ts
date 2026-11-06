@@ -3,6 +3,7 @@ import Queue from '../Queue/Queue.js'
 import Animation from '../Animation/Animation.js'
 import Playlists from '../Playlists/Playlists.js'
 import getLogger from '../lib/Log.js'
+import { FULLSCREEN_REQUEST_MS, fullscreenResult, type FullscreenResult } from '../../shared/playerFullscreen.js'
 
 import {
   PLAYER_CMD_NEXT,
@@ -11,12 +12,14 @@ import {
   PLAYER_CMD_PLAY,
   PLAYER_CMD_REPLAY,
   PLAYER_CMD_VOLUME,
+  PLAYER_CMD_FULLSCREEN,
   PLAYER_REQ_NEXT,
   PLAYER_REQ_OPTIONS,
   PLAYER_REQ_PAUSE,
   PLAYER_REQ_PLAY,
   PLAYER_REQ_REPLAY,
   PLAYER_REQ_VOLUME,
+  PLAYER_REQ_FULLSCREEN,
   PLAYER_EMIT_STATUS,
   PLAYER_EMIT_LEAVE,
   PLAYER_EMIT_FAILURE,
@@ -93,6 +96,32 @@ const announcePlayerLeave = (sock) => {
 // Action Handlers
 // ------------------------------------
 const ACTION_HANDLERS = {
+  [PLAYER_REQ_FULLSCREEN]: async (sock, { payload }, acknowledge) => {
+    if (!adminOnly(sock, PLAYER_REQ_FULLSCREEN, acknowledge)) return
+    const roomId = sock.user.roomId
+    const reply = (result: FullscreenResult) => acknowledge?.({ type: PLAYER_REQ_FULLSCREEN + '_RESULT', payload: result })
+    const now = Date.now()
+    if (!Number.isSafeInteger(roomId) || roomId < 1 || !Number.isFinite(payload?.expiresAt)
+      || payload.expiresAt <= now || payload.expiresAt > now + FULLSCREEN_REQUEST_MS * 2) {
+      return reply({ status: 'changed' })
+    }
+    const player = [...sock.server.of('/').sockets.values()].find(candidate => candidate.connected !== false
+      && candidate.user?.isAdmin && candidate.user.roomId === roomId && Rooms.isAuthoritativePlayer(candidate))
+    if (!player) return reply({ status: 'no-player' })
+    const expiresAt = Math.min(payload.expiresAt, now + FULLSCREEN_REQUEST_MS)
+    try {
+      // This is a window operation, not a musical command: address only the
+      // authoritative player and do not cancel announcements or broadcast Play.
+      const response = await player.timeout(Math.max(1, expiresAt - Date.now())).emitWithAck('action', {
+        type: PLAYER_CMD_FULLSCREEN,
+        payload: { roomId, playerSocketId: player.id, expiresAt },
+      })
+      if (sock.connected === false || !sock.user?.isAdmin || sock.user.roomId !== roomId
+        || player.connected === false || player.user?.roomId !== roomId || !player.user?.isAdmin
+        || !Rooms.isAuthoritativePlayer(player) || Date.now() > expiresAt) return reply({ status: 'changed' })
+      return reply(fullscreenResult(response) ?? { status: 'rejected' })
+    } catch { return reply({ status: 'timeout' }) }
+  },
   [PLAYER_EMIT_FAILURE]: (sock, { payload }, acknowledge) => {
     if (!authoritativeOnly(sock, PLAYER_EMIT_FAILURE, acknowledge)) return
 

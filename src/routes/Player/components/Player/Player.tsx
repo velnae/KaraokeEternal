@@ -65,7 +65,7 @@ class Player extends React.PureComponent<PlayerProps> {
 
   ensureAudioContext = () => {
     if (!this.audioCtx || this.audioCtx.state === 'closed') {
-      this.audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      this.audioCtx = new window.AudioContext()
       this.audioGainNode = this.audioCtx.createGain()
       this.audioGainNode.connect(this.audioCtx.destination)
       this.audioSources = new WeakMap()

@@ -7,6 +7,7 @@ import playerVisualizerReducer from '../modules/playerVisualizer'
 import PlayerController from '../components/PlayerController/PlayerController'
 import { fetchCurrentRoom } from 'store/modules/rooms'
 import styles from './PlayerView.css'
+import useRemoteFullscreen from '../useRemoteFullscreen'
 
 const PlayerView = () => {
   const { innerWidth, innerHeight, headerHeight } = useAppSelector(state => state.ui)
@@ -21,6 +22,8 @@ const PlayerView = () => {
     combinedReducer.inject({ reducerPath: 'playerVisualizer', reducer: playerVisualizerReducer })
     dispatch(sliceInjectNoOp()) // update store with new slices
   }
+
+  useRemoteFullscreen()
 
   // once per mount
   useEffect(() => {
