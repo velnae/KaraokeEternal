@@ -169,6 +169,7 @@ export interface AnimationSnapshot extends AnimationRoomState {
   greetingVoiceEnabled?: boolean
 }
 export interface AnimationReply {
+  background?: TransitionVideoBackground | null
   eligible?: boolean
   type: string
   error?: string

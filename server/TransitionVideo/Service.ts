@@ -6,7 +6,7 @@ import { db } from '../lib/Database.js'
 import getLogger from '../lib/Log.js'
 import { prepareTransitionVideo, VideoPreparationError, type VideoTools } from './Preparation.js'
 import { completeTransitionVideo, createTransitionVideo, failTransitionVideo, getLatestTransitionVideo,
-  getTransitionVideo, getTransitionVideoAttempt, getTransitionVideoSettings, transitionVideoDTO, type StoredTransitionVideo } from './Store.js'
+  getTransitionVideo, getTransitionVideoAttempt, getTransitionVideoSettings, listTransitionVideos, transitionVideoDTO, type StoredTransitionVideo } from './Store.js'
 
 const run = promisify(execFile)
 const log = getLogger('transition-video')
@@ -41,7 +41,8 @@ export class TransitionVideoService {
     await fs.mkdir(this.staging)
     await this.cleanup()
     // Remove partially published/orphaned generated files after a crash.
-    const kept = new Set(db.all<StoredTransitionVideo>('SELECT * FROM transitionVideos WHERE retiredAt IS NULL AND state=\'ready\'')
+    const kept = new Set(db.all<StoredTransitionVideo>(`SELECT * FROM transitionVideos WHERE state='ready' AND (retiredAt IS NULL
+      OR EXISTS(SELECT 1 FROM transitionVideoLeases WHERE videoId=transitionVideos.id AND untilAt>?))`, [Date.now()])
       .flatMap(row => [row.filename, row.posterFilename]))
     for (const name of await fs.readdir(this.directory)) {
       if (/^[a-f0-9-]{36}\.(mp4|jpg)$/.test(name) && !kept.has(name)) await fs.rm(path.join(this.directory, name), { force: true })
@@ -63,7 +64,7 @@ export class TransitionVideoService {
     const settings = getTransitionVideoSettings(roomId)
     const selected = settings.videoId ? getTransitionVideo(roomId, settings.videoId) : undefined
     const latest = getLatestTransitionVideo(roomId)
-    return { settings, selected: selected ? transitionVideoDTO(selected) : null,
+    return { settings, videos: listTransitionVideos(roomId).map(transitionVideoDTO), selected: selected ? transitionVideoDTO(selected) : null,
       candidate: latest && latest.id !== selected?.id ? transitionVideoDTO(latest) : null, capability: this.capability() }
   }
 
@@ -133,7 +134,8 @@ export class TransitionVideoService {
 
   // Acquire before any async file open. Retirement cannot race an active range.
   acquire (roomId: number, id: string) {
-    const row = getTransitionVideo(roomId, id)
+    const row = getTransitionVideo(roomId, id) ?? db.get<StoredTransitionVideo>(`SELECT * FROM transitionVideos WHERE roomId=? AND id=?
+      AND EXISTS(SELECT 1 FROM transitionVideoLeases WHERE videoId=transitionVideos.id AND untilAt>?)`, [roomId, id, Date.now()])
     if (!row || row.state !== 'ready') throw new VideoServiceError(404, 'El video no está disponible.')
     this.readers.set(id, (this.readers.get(id) ?? 0) + 1)
     let released = false
@@ -152,12 +154,9 @@ export class TransitionVideoService {
       db.run('DELETE FROM transitionVideoLeases WHERE untilAt<=?', [Date.now()])
       for (const row of db.all<StoredTransitionVideo>('SELECT * FROM transitionVideos')) {
         if (this.readers.has(row.id) || row.state === 'preparing') continue
-        const retired = row.retiredAt || db.run(`UPDATE transitionVideos SET retiredAt=? WHERE id=? AND retiredAt IS NULL
-          AND id!=COALESCE((SELECT json_extract(data,'$.prefs.transitionVideo.videoId') FROM rooms WHERE roomId=?),'')
-          AND id!=(SELECT id FROM transitionVideos WHERE roomId=? ORDER BY createdAt DESC,rowid DESC LIMIT 1)
-          AND NOT EXISTS(SELECT 1 FROM transitionVideoLeases WHERE videoId=transitionVideos.id AND untilAt>?)`,
-        [Date.now(), row.id, row.roomId, row.roomId, Date.now()]).changes
-        if (retired) await Promise.all(['mp4', 'jpg'].map(ext => fs.rm(path.join(this.directory, `${row.id}.${ext}`), { force: true })))
+        if (row.retiredAt && !db.get('SELECT 1 FROM transitionVideoLeases WHERE videoId=? AND untilAt>?', [row.id, Date.now()])) {
+          await Promise.all(['mp4', 'jpg'].map(ext => fs.rm(path.join(this.directory, `${row.id}.${ext}`), { force: true })))
+        }
       }
       clearTimeout(this.cleanupTimer)
       this.cleanupTimer = undefined

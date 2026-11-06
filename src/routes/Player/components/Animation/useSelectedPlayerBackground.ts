@@ -4,12 +4,12 @@ import type { TransitionVideo, TransitionVideoBackground, TransitionVideoPrefs }
 
 export default function useSelectedPlayerBackground (roomId: number | null, prefs: TransitionVideoPrefs | undefined, enabled: boolean): TransitionVideoBackground | null {
   const [resource, setResource] = useState<TransitionVideo | null>(null)
-  const videoId = prefs?.videoId
+  const videoId = prefs?.mode === 'all' ? null : prefs?.videoId
   useEffect(() => {
     if (!enabled || !videoId || roomId === null) return
     const controller = new AbortController()
     void getTransitionVideoResource(videoId, controller.signal).then((video): void => {
-      if (!controller.signal.aborted && video.roomId === roomId && video.state === 'ready') setResource(video)
+      if (!controller.signal.aborted && video.roomId === roomId && video.state === 'ready' && video.active !== false) setResource(video)
       return undefined
     }).catch(() => { /* Visual failure must never hold the music queue. */ })
     return () => controller.abort()

@@ -352,7 +352,7 @@ try {
   await player.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
   if (abandoned) await expect.poll(() => abandoned.evaluate(video => video.paused && !video.hasAttribute('src'))).toBe(true)
   await checkAmbienceHandoff({ player, uiBase, emit, db, bed, voice: volumeVoice, httpsUi })
-  await checkTransitionPresentation({ player, uiBase, emit, db, voice: volumeVoice, data })
+  if (process.env.KARAOKE_E2E_TRANSITION_ONLY !== '1') await checkTransitionPresentation({ player, uiBase, emit, db, voice: volumeVoice, data })
   assert.deepEqual(errors, [])
   console.log(`PASS video + concurrent ambience + sequential voice/effects, natural boundaries, frozen settings, music handoff, video failure and pause/exit cleanup (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS frontend with isolated API/socket' : ''}). Artifacts: ${data}`)
 } catch (error) {

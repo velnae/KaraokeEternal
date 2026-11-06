@@ -9,7 +9,9 @@ import {
   type TransitionVideoPrefs,
 } from '../../shared/transitionVideo.js'
 
-export interface StoredTransitionVideo extends Omit<TransitionVideo, 'videoUrl' | 'posterUrl'> {
+export interface StoredTransitionVideo extends Omit<TransitionVideo, 'videoUrl' | 'posterUrl' | 'active'> {
+  active: number
+  selectionOrder: number
   filename: string | null
   posterFilename: string | null
   retiredAt: number | null
@@ -35,6 +37,7 @@ export class TransitionVideoConflictError extends Error {
 export function transitionVideoDTO (row: StoredTransitionVideo): TransitionVideo {
   const base = `api/animation/background/videos/${encodeURIComponent(row.id)}`
   return {
+    active: row.active === 1,
     id: row.id, roomId: row.roomId, requestId: row.requestId, title: row.title,
     state: row.retiredAt ? 'failed' : row.state,
     reason: row.retiredAt ? 'Este video fue descartado. Use una nueva solicitud para subirlo otra vez.' : row.reason,
@@ -56,6 +59,20 @@ export const getTransitionVideoAttempt = (roomId: number, requestId: string) => 
 
 export const getLatestTransitionVideo = (roomId: number) => db.get<StoredTransitionVideo>(
   'SELECT * FROM transitionVideos WHERE roomId=? AND retiredAt IS NULL ORDER BY createdAt DESC,rowid DESC LIMIT 1', [roomId])
+
+export const listTransitionVideos = (roomId: number) => db.all<StoredTransitionVideo>(
+  'SELECT * FROM transitionVideos WHERE roomId=? AND retiredAt IS NULL ORDER BY createdAt DESC,rowid DESC', [roomId])
+
+export function changeTransitionVideo (roomId: number, id: string, active: boolean | 'delete') {
+  const row = getTransitionVideo(roomId, id)
+  if (!row) throw new ValidationError('No se encontró el video de esta sala.')
+  const prefs = getTransitionVideoSettings(roomId)
+  if (prefs.mode !== 'all' && prefs.videoId === id && active !== true) throw new ValidationError('Quite la selección fija y guarde el fondo antes de desactivar o eliminar este video.')
+  if (row.state === 'preparing') throw new ValidationError('Espere a que termine la preparación del video.')
+  if (active === true && row.state !== 'ready') throw new ValidationError('Solo puede activar videos disponibles.')
+  db.run('UPDATE transitionVideos SET active=?,retiredAt=?,updatedAt=? WHERE roomId=? AND id=?',
+    [active === true ? 1 : 0, active === 'delete' ? Date.now() : null, Date.now(), roomId, id])
+}
 
 export function getTransitionVideoSettings (roomId: number): TransitionVideoPrefs {
   const row = db.get<{ data: string }>('SELECT data FROM rooms WHERE roomId=?', [roomId])
@@ -101,7 +118,7 @@ export function saveTransitionVideoSettings (roomId: number, value: unknown): Tr
   const error = getTransitionVideoPrefsValidationError(value)
   if (error) throw new ValidationError(error)
   const prefs = value as TransitionVideoPrefs
-  const next: TransitionVideoPrefs = { videoId: prefs.videoId, dimOpacity: prefs.dimOpacity, revision: prefs.revision + 1 }
+  const next: TransitionVideoPrefs = { ...normalizeTransitionVideoPrefs(prefs), videoId: prefs.mode === 'all' ? null : prefs.videoId, revision: prefs.revision + 1 }
   // Selection ownership/readiness and the expected revision are checked in the
   // same write. Only this preference changes; other room data remains current.
   const saved = db.get<{ data: string }>(`UPDATE rooms SET data=json_set(data,'$.prefs',
@@ -109,8 +126,12 @@ export function saveTransitionVideoSettings (roomId: number, value: unknown): Tr
       '$.transitionVideo',json(?)))
     WHERE roomId=? AND COALESCE(json_extract(data,'$.prefs.transitionVideo.revision'),0)=?
       AND (? IS NULL OR EXISTS(SELECT 1 FROM transitionVideos WHERE id=? AND roomId=rooms.roomId AND state='ready' AND retiredAt IS NULL))
-    RETURNING data`, [JSON.stringify(next), roomId, prefs.revision, prefs.videoId, prefs.videoId])
-  if (saved) return next
+    RETURNING data`, [JSON.stringify(next), roomId, prefs.revision, next.videoId, next.videoId])
+  if (saved) {
+    // Explicitly saving a fixed choice also activates it; uploads alone never do.
+    if (next.videoId) db.run('UPDATE transitionVideos SET active=1 WHERE id=? AND roomId=?', [next.videoId, roomId])
+    return next
+  }
   const current = getTransitionVideoSettings(roomId)
   if (current.revision !== prefs.revision) throw new TransitionVideoConflictError()
   throw new ValidationError('Seleccione un video disponible de esta sala.')

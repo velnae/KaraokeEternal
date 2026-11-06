@@ -16,7 +16,7 @@ const samples = {
 const stateLabels = { preparing: 'Preparando video', ready: 'Video disponible', failed: 'No se pudo preparar el video' }
 
 export default function TransitionVideoSettings ({ roomId }: { roomId: number }) {
-  const { state, dispatch, upload, save, reload, refresh, cancelUpload } = useTransitionVideoSettings(roomId)
+  const { state, dispatch, upload, save, change, reload, refresh, cancelUpload } = useTransitionVideoSettings(roomId)
   const { overview, draft, resource, operation } = state
   const [sample, setSample] = useState<keyof typeof samples>('karaoke')
   const [playRequest, setPlayRequest] = useState<string | null>(null)
@@ -44,24 +44,25 @@ export default function TransitionVideoSettings ({ roomId }: { roomId: number })
 
   const busy = operation !== 'idle'
   const editingLocked = busy || !!state.pendingSave
-  const choices = [overview?.selected, overview?.candidate, resource].filter((video, index, all): video is TransitionVideo => !!video && all.findIndex(candidate => candidate?.id === video.id) === index)
-  const listed = [overview?.selected, overview?.candidate].some(video => video?.id === draft?.videoId)
-  const available = !draft?.videoId || (resource?.id === draft.videoId && resource.state !== 'failed')
-  const ready = resource?.state === 'ready' && !!resource.videoUrl && available
+  const choices = [...(overview?.videos ?? [overview?.selected, overview?.candidate]), resource].filter((video, index, all): video is TransitionVideo => !!video && all.findIndex(candidate => candidate?.id === video.id) === index)
+  const listed = (overview?.videos ?? [overview?.selected, overview?.candidate]).some(video => video?.id === resource?.id)
+  const allActive = draft?.mode === 'all'
+  const available = allActive || !draft?.videoId || (resource?.id === draft.videoId && resource.state !== 'failed')
+  const ready = resource?.state === 'ready' && !!resource.videoUrl
   const resourceKey = resource ? `${resource.id}:${resource.checksum}` : null
   const playing = ready && resourceKey === playRequest
   const dirty = !!draft && !!overview && !sameVideoAppearance(draft, overview.settings)
   function saveReason () {
     if (!draft) return 'Cargando la configuración del fondo…'
-    if (operation !== 'idle') return { uploading: 'Espere a que termine la carga.', recovering: 'Comprobando si el servidor recibió el video…', saving: 'Guardando el fondo…', reloading: 'Recargando la configuración…' }[operation]
+    if (operation !== 'idle') return { uploading: 'Espere a que termine la carga.', recovering: 'Comprobando si el servidor recibió el video…', saving: 'Guardando el fondo…', reloading: 'Recargando la configuración…', updating: 'Actualizando el catálogo…' }[operation]
     if (state.connectionError) return 'Recupere la conexión para guardar. Los cambios locales se conservan.'
     if (state.conflict) return 'Recargue la configuración para resolver el cambio de versión.'
     if (!available) return 'Este video no está disponible. Seleccione otro video o quite la selección.'
-    if (draft.videoId && !ready) return 'Para guardar, espere a que el video esté disponible o elija otro archivo.'
+    if (!allActive && draft.videoId && !ready) return 'Para guardar, espere a que el video esté disponible o elija otro archivo.'
     if (state.pendingSave) return 'El guardado está sin confirmar. Compruebe el estado o reintente el mismo guardado.'
     return dirty ? 'Hay cambios locales. Guarde para conservar la selección y el oscurecimiento.' : 'La configuración coincide con el fondo guardado.'
   }
-  const canSave = !!draft && !busy && !state.connectionError && !state.conflict && available && (!draft.videoId || ready) && (dirty || !!state.pendingSave)
+  const canSave = !!draft && !busy && !state.connectionError && !state.conflict && available && (allActive || !draft.videoId || ready) && (dirty || !!state.pendingSave)
   function uploadReason () {
     if (!overview) return 'Cargando la disponibilidad del servidor…'
     if (state.connectionError) return 'Recupere la conexión para subir un archivo.'
@@ -95,8 +96,25 @@ export default function TransitionVideoSettings ({ roomId }: { roomId: number })
     <section className={styles.panel} aria-label='Fondo de transición'>
       <header className={styles.heading}>
         <h2>Fondo de transición</h2>
-        <p>Pruebe el video con distintos textos antes de guardar el fondo de esta sala.</p>
+        <p>Conserve sus videos y elija un fondo fijo o alterne todos los activos en esta sala.</p>
       </header>
+      <label className={styles.field}>
+        Modo de fondos
+        <select
+          value={allActive ? 'all' : draft?.videoId ? 'single' : 'none'}
+          disabled={!draft || editingLocked}
+          onChange={event => dispatch({ type: 'mode', mode: event.target.value as 'single' | 'all' | 'none' })}
+        >
+          <option value='none'>Sin video</option>
+          <option value='single'>Un video fijo</option>
+          <option value='all'>Todos los activos</option>
+        </select>
+      </label>
+      <p className={styles.help}>
+        {allActive
+          ? `${choices.filter(video => video.active && video.state === 'ready').length} videos activos. Se alternan una vez por transición; si no hay disponibles se usa el fondo de respaldo.`
+          : 'Elija un video y guarde para usarlo como fondo fijo. Guardar también activa el video elegido.'}
+      </p>
       <div className={styles.previewLabel}>
         <strong>Vista previa local</strong>
         <span>No se transmite al reproductor</span>
@@ -170,7 +188,7 @@ export default function TransitionVideoSettings ({ roomId }: { roomId: number })
             }}
           />
           <Button className={audioStyles.secondary} disabled={!canUpload} aria-describedby={uploadHelpId} onClick={() => file.current?.click()}>
-            {overview?.selected || overview?.candidate ? 'Reemplazar video' : 'Subir video'}
+            Agregar video
           </Button>
           {operation === 'uploading' && <Button className={audioStyles.secondary} onClick={cancelUpload}>Cancelar carga</Button>}
           {state.retryUpload && !busy && <Button className={audioStyles.secondary} onClick={() => void upload()}>Reintentar carga</Button>}
@@ -179,14 +197,51 @@ export default function TransitionVideoSettings ({ roomId }: { roomId: number })
       {operation === 'uploading' && <progress className={styles.progress} aria-label='Progreso de carga' max={100} value={state.progress ?? undefined} />}
       <p id={uploadHelpId} className={styles.help}>{uploadReason()}</p>
       <p className={styles.help}>El video se guarda sin sonido. Las voces y el ambiente se añaden por separado.</p>
+      <p className={styles.help}>Los videos nuevos quedan inactivos hasta que los active o los guarde como fondo fijo.</p>
       {resource?.state === 'failed' && <p className={styles.notice} role='alert'>{`${resource.reason} Elija otro archivo o seleccione el fondo guardado.`}</p>}
+
+      <ul className={styles.catalog} aria-label='Videos de transición'>
+        {(overview?.videos ?? []).map((video) => {
+          const fixed = overview?.settings.mode !== 'all' && overview?.settings.videoId === video.id
+          return (
+            <li key={video.id} className={styles.catalogItem}>
+              {video.posterUrl && <img src={new URL(video.posterUrl, document.baseURI).href} alt='' loading='lazy' />}
+              <div className={styles.fileInfo}>
+                <strong>{video.title}</strong>
+                <span>{video.state === 'ready' ? video.active ? 'Activo' : 'Inactivo' : stateLabels[video.state]}</span>
+                {video.durationMs && <small>{`${(video.durationMs / 1000).toFixed(1)} s · ${((video.size ?? 0) / 1024 / 1024).toFixed(1)} MiB`}</small>}
+                {fixed && <small>Fondo fijo. Quite la selección y guarde antes de desactivarlo o eliminarlo.</small>}
+                {video.reason && <small>{video.reason}</small>}
+              </div>
+              <div className={styles.actions}>
+                <Button className={audioStyles.secondary} disabled={editingLocked} onClick={() => select(video)}>Vista previa</Button>
+                <Button
+                  className={audioStyles.secondary}
+                  disabled={editingLocked || video.state !== 'ready' || fixed}
+                  onClick={() => void change(video.id, !video.active)}
+                >
+                  {video.active ? 'Desactivar' : 'Activar'}
+                </Button>
+                <Button
+                  className={audioStyles.secondary}
+                  disabled={editingLocked || video.state === 'preparing' || fixed}
+                  onClick={() => { if (window.confirm(`¿Eliminar «${video.title}» del catálogo?`)) void change(video.id, 'delete') }}
+                >
+                  Eliminar
+                </Button>
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+      {overview && !overview.videos?.length && <p className={styles.help}>Todavía no hay videos. Use Agregar video para guardar el primero.</p>}
 
       <div className={styles.fields}>
         <label className={styles.field}>
           Video para la vista previa
-          <select value={draft?.videoId ?? ''} disabled={!draft || editingLocked} onChange={event => select(choices.find(video => video.id === event.target.value) ?? null)}>
+          <select value={resource?.id ?? ''} disabled={!draft || editingLocked} onChange={event => select(choices.find(video => video.id === event.target.value) ?? null)}>
             <option value=''>Sin fondo de video</option>
-            {choices.map(video => <option key={video.id} value={video.id}>{`${video.title}${video.state === 'failed' ? ' — no disponible' : overview?.selected?.id === video.id ? ' — guardado' : ' — nuevo'}`}</option>)}
+            {choices.map(video => <option key={video.id} value={video.id}>{`${video.title}${video.state === 'failed' ? ' — no disponible' : overview?.selected?.id === video.id ? ' — fijo' : video.active ? ' — activo' : ' — inactivo'}`}</option>)}
           </select>
         </label>
         <label className={styles.field}>

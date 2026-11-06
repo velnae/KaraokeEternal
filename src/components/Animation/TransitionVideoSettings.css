@@ -33,7 +33,15 @@
 .notice p { margin: 0 0 12px; }
 .footer { border-top: 1px solid var(--edge); padding-top: 20px; }
 .saved { color: var(--cyan); line-height: 1.5; font-size: 14px; }
+.catalog { list-style: none; padding: 0; margin: 24px 0; }
+.catalogItem { display: flex; align-items: center; gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--edge); }
+.catalogItem > img { width: 120px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; }
+.catalogItem > .fileInfo { flex: 1; }
+.catalogItem .actions { justify-content: flex-end; }
 @media (max-width: 600px) {
+  .catalogItem { flex-wrap: wrap; }
+  .catalogItem > img { width: 88px; }
+  .catalogItem .actions { width: 100%; }
   .heading h2 { font-size: 20px; }
   .sample h3 { margin-block: 8px; }
   .previewControls { align-items: stretch; }

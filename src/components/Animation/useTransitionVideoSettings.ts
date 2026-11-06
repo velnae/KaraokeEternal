@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { getTransitionVideoOverview, getTransitionVideoResource, recoverTransitionVideoUpload, saveTransitionVideo, transitionVideoError, uploadTransitionVideo } from 'lib/transitionVideoApi'
+import { changeTransitionVideo, getTransitionVideoOverview, getTransitionVideoResource, recoverTransitionVideoUpload, saveTransitionVideo, transitionVideoError, uploadTransitionVideo } from 'lib/transitionVideoApi'
 import { TRANSITION_VIDEO_LIMITS } from 'shared/transitionVideo'
 import { initialVideoSettings, transitionVideoReducer, type VideoSettingsOperation } from './transitionVideoState'
 
@@ -26,8 +26,8 @@ export function useTransitionVideoSettings (roomId: number) {
       try {
         const overview = await getTransitionVideoOverview(controller.signal)
         if (!controller.signal.aborted) dispatch({ type: 'receive', overview })
-        const id = state.draft?.videoId
-        if (id && ![overview.selected, overview.candidate].some(video => video?.id === id)) {
+        const id = state.resource?.id ?? state.draft?.videoId
+        if (id && !(overview.videos ?? [overview.selected, overview.candidate]).some(video => video?.id === id)) {
           // An older preview may still be pinned by an active stream. Verify it
           // instead of discarding the draft or assuming absence means retirement.
           try {
@@ -49,7 +49,7 @@ export function useTransitionVideoSettings (roomId: number) {
       controller.abort()
       clearTimeout(timer)
     }
-  }, [roomId, state.operation, refreshVersion, state.draft?.videoId])
+  }, [roomId, state.operation, refreshVersion, state.draft?.videoId, state.resource?.id])
 
   const begin = (kind: VideoSettingsOperation) => {
     operation.current?.abort()
@@ -132,5 +132,19 @@ export function useTransitionVideoSettings (roomId: number) {
       } catch { /* Polling keeps the draft and reconciles when connectivity returns. */ }
     }
   }
-  return { state, dispatch, upload, save, reload, refresh, cancelUpload: () => operation.current?.abort() }
+  const change = async (id: string, active: boolean | 'delete') => {
+    const controller = begin('updating')
+    try {
+      const overview = await changeTransitionVideo(id, active, controller.signal)
+      if (current(controller)) {
+        dispatch({ type: 'receive', overview })
+        if (active === 'delete' && state.resource?.id === id) dispatch({ type: 'select', resource: null })
+      }
+    } catch (error) {
+      if (current(controller)) dispatch({ type: 'error', message: transitionVideoError(error) })
+    } finally {
+      if (current(controller)) dispatch({ type: 'operation', operation: 'idle' })
+    }
+  }
+  return { state, dispatch, upload, save, change, reload, refresh, cancelUpload: () => operation.current?.abort() }
 }

@@ -1,6 +1,8 @@
 export type TransitionVideoState = 'preparing' | 'ready' | 'failed'
+export const TRANSITION_VIDEO_SCENE = 'server/TRANSITION_VIDEO_SCENE'
 
 export interface TransitionVideoPrefs {
+  mode?: 'single' | 'all'
   videoId: string | null
   dimOpacity: number
   revision: number
@@ -22,6 +24,7 @@ export const TRANSITION_VIDEO_LIMITS = Object.freeze({
 })
 
 export interface TransitionVideo {
+  active?: boolean
   id: string
   roomId: number
   requestId: string
@@ -42,6 +45,7 @@ export interface TransitionVideo {
 }
 
 export interface TransitionVideoOverview {
+  videos?: TransitionVideo[]
   settings: TransitionVideoPrefs
   selected: TransitionVideo | null
   candidate: TransitionVideo | null
@@ -61,7 +65,8 @@ const isRevision = (value: unknown): value is number => typeof value === 'number
 
 export function getTransitionVideoPrefsValidationError (value: unknown): string | null {
   if (!isRecord(value)) return 'La configuración del fondo debe ser un objeto.'
-  if (Object.keys(value).some(key => !['videoId', 'dimOpacity', 'revision'].includes(key))) return 'La configuración del fondo contiene campos no válidos.'
+  if (Object.keys(value).some(key => !['mode', 'videoId', 'dimOpacity', 'revision'].includes(key))) return 'La configuración del fondo contiene campos no válidos.'
+  if (value.mode !== undefined && !['single', 'all'].includes(value.mode as string)) return 'Seleccione un modo de fondo válido.'
   if (!isVideoId(value.videoId)) return 'Seleccione un video válido o quite la selección.'
   if (!isOpacity(value.dimOpacity)) return 'El oscurecimiento debe estar entre 0 y 0.85.'
   if (!isRevision(value.revision) || value.revision === Number.MAX_SAFE_INTEGER) return 'La revisión del fondo no es válida. Recargue la configuración.'
@@ -71,6 +76,7 @@ export function getTransitionVideoPrefsValidationError (value: unknown): string 
 export function normalizeTransitionVideoPrefs (value?: unknown): TransitionVideoPrefs {
   const prefs = isRecord(value) ? value : {}
   return {
+    ...(prefs.mode === 'all' ? { mode: 'all' as const } : {}),
     videoId: isVideoId(prefs.videoId) ? prefs.videoId : TRANSITION_VIDEO_PREF_DEFAULTS.videoId,
     dimOpacity: isOpacity(prefs.dimOpacity) ? prefs.dimOpacity : TRANSITION_VIDEO_PREF_DEFAULTS.dimOpacity,
     revision: isRevision(prefs.revision) ? prefs.revision : TRANSITION_VIDEO_PREF_DEFAULTS.revision,

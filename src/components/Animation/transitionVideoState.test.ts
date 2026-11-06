@@ -13,6 +13,22 @@ const overview = (revision = 0): TransitionVideoOverview => ({
 })
 const loaded = () => reduce(initialVideoSettings, { type: 'receive', overview: overview() })
 
+it('keeps all-active mode while previewing, uploading and polling catalog videos', () => {
+  let state = reduce(loaded(), { type: 'mode', mode: 'all' })
+  state = reduce(state, { type: 'select', resource: video('other') })
+  expect(state.draft).toMatchObject({ mode: 'all', videoId: null })
+  expect(state.resource?.id).toBe('other')
+  state = reduce(state, { type: 'uploadDone', resource: { ...video('upload'), active: false } })
+  expect(state.draft).toMatchObject({ mode: 'all', videoId: null })
+  state = reduce(state, { type: 'receive', overview: { ...overview(), videos: [video('saved'), video('other'), { ...video('upload'), active: true }] } })
+  expect(state.resource?.active).toBe(true)
+  const submitted = state.draft!
+  state = reduce(state, { type: 'saveStart', settings: submitted })
+  state = reduce(state, { type: 'saveResult', overview: { ...overview(1), settings: { ...submitted, revision: 1 }, videos: [video('upload')] } })
+  expect(state.notice).toBe('Fondo guardado.')
+  expect(state.resource?.id).toBe('upload')
+})
+
 it('updates preparation without moving the slider or discarding the pending selection', () => {
   let state = loaded()
   state = reduce(state, { type: 'opacity', value: 0.78 })

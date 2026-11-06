@@ -181,8 +181,8 @@ it('accepts promptly, deduplicates during preparation and rejects a second job i
   expect((await upload('second')).status).toBe(409)
   expect(db.get<{ count: number }>('SELECT count(*) count FROM transitionVideos')!.count).toBe(2)
   await service.cleanup()
-  expect(getTransitionVideo(1, previous)).toBeUndefined()
-  await expect(fs.stat(path.join(service.directory, `${previous}.mp4`))).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(getTransitionVideo(1, previous)?.state).toBe('ready')
+  await expect(fs.stat(path.join(service.directory, `${previous}.mp4`))).resolves.toBeDefined()
   await service.stop()
   expect(getTransitionVideo(1, row.id)?.state).toBe('failed')
   expect(await fs.readdir(service.staging)).toEqual([])
@@ -206,13 +206,15 @@ it('keeps the previous background usable after malformed replacement input', asy
   expect((await save(bad.id, 1)).status).toBe(422)
 })
 
-it('retains selected/latest assets and pins streamed files until release, keeping deduplication receipts', async () => {
+it('retains the full catalog and defers explicit deletion until readers finish', async () => {
   const selected = await ready('selected')
   await save(selected)
   const previous = await ready('previous')
   const reading = service.acquire(1, previous)
   const latest = await ready('latest')
+  expect((await (await api('/')).json()).videos).toHaveLength(3)
   expect(getTransitionVideo(1, previous)?.state).toBe('ready')
+  expect((await api(`/videos/${previous}`, { method: 'DELETE' })).status).toBe(200)
   await expect(fs.stat(path.join(service.directory, `${previous}.mp4`))).resolves.toBeDefined()
   reading.release()
   await service.cleanup()
@@ -224,6 +226,20 @@ it('retains selected/latest assets and pins streamed files until release, keepin
   expect(duplicate).toMatchObject({ id: previous, state: 'failed', videoUrl: null })
   expect(getTransitionVideoAttempt(1, 'previous')?.retiredAt).toBeTruthy()
 }, 15_000)
+
+it('activates only prepared own-room videos and preserves inactive files', async () => {
+  const id = await ready('activation')
+  expect((await (await api(`/videos/${id}`)).json()).active).toBe(false)
+  const options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: true }) }
+  expect((await api(`/videos/${id}`, options, 'anonymous')).status).toBe(403)
+  expect((await api(`/videos/${id}`, options, 'foreign')).status).toBe(422)
+  expect((await api(`/videos/${id}`, options)).status).toBe(200)
+  expect((await (await api(`/videos/${id}`)).json()).active).toBe(true)
+  expect((await api(`/videos/${id}`, { ...options, body: JSON.stringify({ active: false }) })).status).toBe(200)
+  await restart()
+  expect((await (await api('/')).json()).videos).toHaveLength(1)
+  expect((await api(`/videos/${id}/video`)).status).toBe(200)
+})
 
 it('recovers incomplete work and orphaned files after restart without losing selected media', async () => {
   const selected = await ready('selected')

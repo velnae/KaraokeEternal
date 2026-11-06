@@ -7,6 +7,7 @@ import { ValidationError } from '../lib/Errors.js'
 import {
   completeTransitionVideo, createTransitionVideo, failTransitionVideo, getTransitionVideo,
   getTransitionVideoSettings, saveTransitionVideoSettings, transitionVideoDTO, TransitionVideoConflictError,
+  changeTransitionVideo, listTransitionVideos,
 } from './Store.js'
 
 let directory: string
@@ -66,7 +67,7 @@ it('persists selection and media metadata across a database close/reopen', () =>
   close()
   open({ file: database, ro: false })
   expect(getTransitionVideoSettings(1)).toEqual({ ...saved, revision: 1 })
-  expect(getTransitionVideo(1, video.id)).toEqual(video)
+  expect(getTransitionVideo(1, video.id)).toEqual({ ...video, active: 1 })
   expect(JSON.parse(db.get<{ data: string }>('SELECT data FROM rooms WHERE roomId=1')!.data))
     .toMatchObject({ extra: 'keep', prefs: { roles: { 4: { allowNew: true } }, animation: { enabled: true } } })
 })
@@ -129,7 +130,7 @@ it('leaves the selected resource intact after a replacement candidate fails', ()
   const replacement = createTransitionVideo(1, { requestId: 'replacement', title: 'Replacement' })
   failTransitionVideo(1, replacement.id, 'La preparación se interrumpió. Vuelva a subir el archivo.')
   expect(getTransitionVideoSettings(1)).toEqual(selected)
-  expect(getTransitionVideo(1, original.id)).toEqual(original)
+  expect(getTransitionVideo(1, original.id)).toEqual({ ...original, active: 1 })
   expect(() => completeTransitionVideo(1, replacement.id, media)).toThrow('ya no está en preparación')
   expect(() => completeTransitionVideo(1, original.id, { ...media, checksum: 'b'.repeat(64) })).toThrow('ya no está en preparación')
   expect(() => failTransitionVideo(1, original.id, 'Failed')).toThrow('ya no está en preparación')
@@ -177,4 +178,37 @@ it('enforces room ownership and ready-state completeness in the schema', () => {
   expect(() => db.run('UPDATE transitionVideos SET roomId=999 WHERE id=?', [video.id])).toThrow()
   db.run('DELETE FROM rooms WHERE roomId=1')
   expect(getTransitionVideo(1, video.id)).toBeUndefined()
+})
+
+it('keeps a room-scoped catalog with explicit activation and deletion', () => {
+  const first = createReady(1, 'first')
+  const second = createReady(1, 'second')
+  const third = createReady(1, 'third')
+  expect(listTransitionVideos(1)).toHaveLength(3)
+  expect(transitionVideoDTO(first).active).toBe(false)
+  expect(() => changeTransitionVideo(2, first.id, true)).toThrow('esta sala')
+  changeTransitionVideo(1, first.id, true)
+  changeTransitionVideo(1, second.id, true)
+  changeTransitionVideo(1, first.id, false)
+  expect(getTransitionVideo(1, first.id)?.active).toBe(0)
+  const saved = saveTransitionVideoSettings(1, { mode: 'all', videoId: null, dimOpacity: 0.55, revision: 0 })
+  expect(saved.mode).toBe('all')
+  changeTransitionVideo(1, third.id, 'delete')
+  expect(listTransitionVideos(1)).toHaveLength(2)
+  expect(() => changeTransitionVideo(1, third.id, true)).toThrow()
+  saveTransitionVideoSettings(1, { ...saved, mode: 'single', videoId: second.id })
+  expect(() => changeTransitionVideo(1, second.id, false)).toThrow('selección fija')
+  expect(() => changeTransitionVideo(1, second.id, 'delete')).toThrow('selección fija')
+})
+
+it('migrates the existing fixed choice as active without activating other uploads', () => {
+  const first = createReady(1, 'first')
+  const second = createReady(1, 'second')
+  saveTransitionVideoSettings(1, { videoId: first.id, dimOpacity: 0.6, revision: 0 })
+  rollbackFixtureTo(28)
+  close()
+  open({ file: database, ro: false })
+  expect(getTransitionVideo(1, first.id)?.active).toBe(1)
+  expect(getTransitionVideo(1, second.id)?.active).toBe(0)
+  expect(getTransitionVideoSettings(1)).toEqual({ videoId: first.id, dimOpacity: 0.6, revision: 1 })
 })

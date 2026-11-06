@@ -27,7 +27,7 @@ export async function runTransitionVideoUiChecks ({ page, uiBase, source, data, 
   await expect(ambience.getByRole('heading', { name: 'Sonido de pausa', exact: true })).toBeVisible()
   if (httpsUi) {
     await expect(ambienceVolume).toBeDisabled()
-    await expect(ambience.getByRole('status')).toContainText('Conectando con la sala')
+    await expect(ambience.getByRole('status').filter({ hasText: 'Conectando con la sala' })).toBeVisible()
   } else {
     await expect(ambienceVolume).toBeEnabled()
     const version = readAmbience().controlVersion
@@ -67,6 +67,7 @@ export async function runTransitionVideoUiChecks ({ page, uiBase, source, data, 
     const result = await response.json()
     if (holdPreparation && result.candidate) {
       result.candidate = { ...result.candidate, state: 'preparing', videoUrl: null, posterUrl: null }
+      result.videos = result.videos.map(video => video.id === result.candidate.id ? result.candidate : video)
       result.capability.busy = true
     }
     await route.fulfill({ response, json: result })
@@ -86,7 +87,7 @@ export async function runTransitionVideoUiChecks ({ page, uiBase, source, data, 
     await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
     await cdp.detach()
   }
-  await expect(panel.getByText('Preparando video', { exact: true })).toBeVisible()
+  await expect(panel.getByRole('status').filter({ hasText: /^Preparando video$/ })).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Guardar fondo', exact: true })).toBeDisabled()
   await opacity.focus()
   await page.keyboard.press('End')
@@ -132,7 +133,8 @@ export async function runTransitionVideoUiChecks ({ page, uiBase, source, data, 
   // older asset may still be pinned. Only its status endpoint can confirm loss.
   await page.route(settingsUrl, async (route) => {
     const response = await fetchRoute(route)
-    await route.fulfill({ response, json: { ...await response.json(), candidate: null } })
+    const result = await response.json()
+    await route.fulfill({ response, json: { ...result, candidate: null, videos: result.videos.filter(video => video.id !== uploadedId) } })
   })
   const resourceUrl = new RegExp(`/api/animation/background/videos/${uploadedId}$`)
   await page.waitForResponse(response => resourceUrl.test(response.url()))
@@ -200,7 +202,7 @@ export async function runTransitionVideoUiChecks ({ page, uiBase, source, data, 
   await panel.getByRole('button', { name: 'Reproducir vista previa', exact: true }).click()
   await expect(panel.getByText(/No se pudo reproducir el video/)).toBeVisible()
   await expect(panel.getByRole('heading', { name: 'Tu momento de brillar' })).toBeVisible()
-  await expect.poll(() => panel.locator('img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true)
+  await expect.poll(() => panel.locator('img').first().evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true)
   await page.unroute(mediaUrl)
   await panel.getByRole('button', { name: 'Reproducir vista previa', exact: true }).click()
   await expect.poll(() => video.evaluate(element => !element.paused && element.currentTime > 0)).toBe(true)
@@ -251,7 +253,7 @@ export async function runTransitionVideoUiChecks ({ page, uiBase, source, data, 
   await page.getByRole('button', { name: 'Cerrar sesión', exact: true }).click()
   await page.waitForURL(/\/account\?/)
   await signIn(page, uiBase, 2)
-  await expect(panel.getByRole('button', { name: 'Subir video', exact: true })).toBeEnabled()
+  await expect(panel.getByRole('button', { name: 'Agregar video', exact: true })).toBeEnabled()
   await expect(select).toHaveValue('')
   await expect(opacity).toHaveValue('55')
   await expect(panel.getByRole('button', { name: 'Reproducir vista previa', exact: true })).toBeDisabled()

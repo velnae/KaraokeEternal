@@ -19,7 +19,8 @@ import Button from 'components/Button/Button'
 import animationStyles from 'components/Animation/Animation.css'
 import getRoomPrefs from '../../selectors/getRoomPrefs'
 import type { QueueItem } from 'shared/types'
-import type { TransitionVideoBackground } from 'shared/transitionVideo'
+import { TRANSITION_VIDEO_SCENE, type TransitionVideoBackground } from 'shared/transitionVideo'
+import { animationRequest } from 'lib/animationApi'
 import { TRANSITION_INTRO_MS } from 'shared/animation'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
 import styles from './PlayerController.css'
@@ -81,6 +82,7 @@ const PlayerController = (props: PlayerControllerProps) => {
   const finishTransition = useCallback(async (fadeMs = 80) => {
     const scene = transitionRef.current
     await animationRef.current.stopTransition(fadeMs)
+    if (scene && socket.connected) void animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: true }, 1000).catch(() => {})
     if (transitionRef.current === scene) updateTransition(null)
   }, [updateTransition])
   const handlePlay = useCallback(() => {
@@ -94,6 +96,8 @@ const PlayerController = (props: PlayerControllerProps) => {
 
   useEffect(() => {
     const cancel = () => {
+      const scene = transitionRef.current
+      if (scene && socket.connected) void animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: true }, 1000).catch(() => {})
       updateTransition(null)
       void animationRef.current.stopTransition(30)
     }
@@ -177,12 +181,19 @@ const PlayerController = (props: PlayerControllerProps) => {
       // A pause can arrive while the previous ambience is being released.
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       if (announce && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
-        && (backgroundRef.current || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)) {
-        const scene: TransitionScene = { id: crypto.randomUUID(), background: backgroundRef.current, phase: 'intro' }
+        && (backgroundRef.current || store.getState().rooms.entities[store.getState().user.roomId]?.prefs?.transitionVideo?.mode === 'all'
+          || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)) {
+        const scene: TransitionScene = { id: crypto.randomUUID(), background: null, phase: 'intro' }
         updateTransition(scene)
+        // A scene owns one choice across intro, speech and loading. Preview and
+        // audio-permit renewals must not consume another position in the rotation.
+        const visual = await animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: false }, 1000).catch((): null => null)
+        if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
+        scene.background = visual?.background ?? null
+        updateTransition({ ...scene })
         const grant = await animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null)
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
-        if (grant?.background) {
+        if (!visual && grant?.background) {
           scene.background = grant.background
           updateTransition({ ...scene })
         }

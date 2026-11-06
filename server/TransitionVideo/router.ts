@@ -4,7 +4,7 @@ import type { Middleware } from 'koa'
 import Rooms, { STATUSES } from '../Rooms/Rooms.js'
 import { ValidationError } from '../lib/Errors.js'
 import { ROOM_PREFS_PUSH } from '../../shared/actionTypes.js'
-import { getTransitionVideo, getTransitionVideoSettings, saveTransitionVideoSettings, transitionVideoDTO } from './Store.js'
+import { changeTransitionVideo, getTransitionVideo, getTransitionVideoSettings, saveTransitionVideoSettings, transitionVideoDTO } from './Store.js'
 import { getTransitionVideoService, type TransitionVideoService } from './Service.js'
 import { streamTransitionVideo } from './stream.js'
 import { uploadTransitionVideo } from './upload.js'
@@ -43,6 +43,17 @@ export function createTransitionVideoRouter (getService: () => TransitionVideoSe
     const row = getTransitionVideo(ctx.user.roomId, ctx.params.id)
     if (!row) ctx.throw(404, 'No se encontró el video.')
     ctx.body = transitionVideoDTO(row)
+  })
+  router.patch('/videos/:id', authorize, koaBody({ multipart: false, jsonLimit: '1kb', urlencoded: false, text: false }), (ctx) => {
+    const body = ctx.request.body as { active?: unknown }
+    if (typeof body?.active !== 'boolean') ctx.throw(422, 'Indique si el video está activo.')
+    changeTransitionVideo(ctx.user.roomId, ctx.params.id, body.active as boolean)
+    ctx.body = getService().overview(ctx.user.roomId)
+  })
+  router.delete('/videos/:id', authorize, async (ctx) => {
+    changeTransitionVideo(ctx.user.roomId, ctx.params.id, 'delete')
+    await getService().cleanup()
+    ctx.body = getService().overview(ctx.user.roomId)
   })
   router.get('/videos/:id/video', authorize, async (ctx) => {
     await streamTransitionVideo(ctx, getService(), false)

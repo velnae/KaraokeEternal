@@ -24,6 +24,10 @@ export const getTransitionVideoResource = (id: string, signal: AbortSignal) => b
   signal => api.get<TransitionVideo>(`videos/${encodeURIComponent(id)}`, { signal }), signal)
 export const saveTransitionVideo = (settings: TransitionVideoPrefs, signal: AbortSignal) => boundedRequest(
   signal => api.put<TransitionVideoOverview>('', { body: settings, signal }), signal)
+export const changeTransitionVideo = (id: string, active: boolean | 'delete', signal: AbortSignal) => boundedRequest(
+  signal => active === 'delete'
+    ? api.delete<TransitionVideoOverview>(`videos/${encodeURIComponent(id)}`, { signal })
+    : api.request<TransitionVideoOverview>('PATCH', `videos/${encodeURIComponent(id)}`, { body: { active }, signal }), signal)
 export const recoverTransitionVideoUpload = (requestId: string, signal: AbortSignal) => boundedRequest(
   signal => api.post<TransitionVideo>('upload', { headers: { 'X-Upload-Request-Id': requestId }, signal }), signal)
 

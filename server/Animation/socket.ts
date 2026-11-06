@@ -3,14 +3,16 @@ import { catalogAsset, catalogClips } from './catalog.js'
 import Rooms from '../Rooms/Rooms.js'
 import Queue from '../Queue/Queue.js'
 import { QUEUE_PUSH } from '../../shared/actionTypes.js'
+import { TRANSITION_VIDEO_SCENE } from '../../shared/transitionVideo.js'
+import { transitionVideoScene } from '../TransitionVideo/Playback.js'
 import {
   ANIMATION_REQUEST, ANIMATION_CANCEL, ANIMATION_CONTROL, ANIMATION_RESERVE,
   ANIMATION_READY, ANIMATION_EVENT, ANIMATION_SYNC, ANIMATION_STATE,
   ANIMATION_AUTO, ANIMATION_SESSION, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, VOICE_FAMILIES,
 } from '../../shared/animation.js'
 
-const actions = [ANIMATION_REQUEST, ANIMATION_CANCEL, ANIMATION_CONTROL, ANIMATION_RESERVE, ANIMATION_READY, ANIMATION_EVENT, ANIMATION_SYNC, ANIMATION_AUTO, ANIMATION_SESSION, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED]
-const playerActions = [ANIMATION_RESERVE, ANIMATION_READY, ANIMATION_EVENT, ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED]
+const actions = [ANIMATION_REQUEST, ANIMATION_CANCEL, ANIMATION_CONTROL, ANIMATION_RESERVE, ANIMATION_READY, ANIMATION_EVENT, ANIMATION_SYNC, ANIMATION_AUTO, ANIMATION_SESSION, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, TRANSITION_VIDEO_SCENE]
+const playerActions = [ANIMATION_RESERVE, ANIMATION_READY, ANIMATION_EVENT, ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, TRANSITION_VIDEO_SCENE]
 const isId = (value: unknown): value is string => typeof value === 'string' && /^[\w-]{1,100}$/.test(value)
 
 export default Object.fromEntries(actions.map(type => [type, (sock, action, acknowledge) => {
@@ -24,8 +26,12 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
     const identity = { roomId, userId: sock.user.userId, socketId: sock.id }
     let grant
     let ambience
+    let background
     let eligible: boolean | undefined
-    if (type === ANIMATION_REQUEST) {
+    if (type === TRANSITION_VIDEO_SCENE) {
+      if (!isId(input.sceneId) || typeof input.finished !== 'boolean') throw new Error('Escena de video no válida.')
+      background = transitionVideoScene(roomId, input.sceneId, input.finished)
+    } else if (type === ANIMATION_REQUEST) {
       if (!isId(input.requestId) || !isId(input.clipId)) throw new Error('Solicitud no válida')
       const asset = catalogAsset(input.clipId, roomId)
       if (!asset || (asset.clip.roomId !== undefined && asset.clip.roomId !== roomId)) throw new Error('El clip no está disponible')
@@ -86,7 +92,7 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       Animation.ambienceStarted(identity, input.id, input.runId)
     }
     Animation.sweep()
-    acknowledge?.({ type: ANIMATION_STATE, payload: Animation.snapshot(roomId), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
+    acknowledge?.({ type: ANIMATION_STATE, payload: Animation.snapshot(roomId), ...(background !== undefined ? { background } : {}), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
   } catch (error) {
     acknowledge?.({ type: ANIMATION_STATE, error: (error as Error).message })
   }

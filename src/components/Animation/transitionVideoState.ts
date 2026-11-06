@@ -1,6 +1,6 @@
 import type { TransitionVideo, TransitionVideoOverview, TransitionVideoPrefs } from 'shared/transitionVideo'
 
-export type VideoSettingsOperation = 'idle' | 'uploading' | 'recovering' | 'saving' | 'reloading'
+export type VideoSettingsOperation = 'idle' | 'uploading' | 'recovering' | 'saving' | 'reloading' | 'updating'
 export interface VideoSettingsState {
   overview: TransitionVideoOverview | null
   draft: TransitionVideoPrefs | null
@@ -27,6 +27,7 @@ type Action = { type: 'receive', overview: TransitionVideoOverview, reset?: bool
   | { type: 'progress', value: number | null }
   | { type: 'select', resource: TransitionVideo | null }
   | { type: 'opacity', value: number }
+  | { type: 'mode', mode: 'single' | 'all' | 'none' }
   | { type: 'uploadDone', resource: TransitionVideo }
   | { type: 'uploadFailed', message: string, retry: boolean }
   | { type: 'saveStart', settings: TransitionVideoPrefs }
@@ -35,8 +36,8 @@ type Action = { type: 'receive', overview: TransitionVideoOverview, reset?: bool
   | { type: 'saveRejected', message: string }
   | { type: 'error', message: string }
 
-const resourceFor = (overview: TransitionVideoOverview, id: string | null) => [overview.selected, overview.candidate].find(video => video && video.id === id) ?? null
-export const sameVideoAppearance = (a: TransitionVideoPrefs, b: TransitionVideoPrefs) => a.videoId === b.videoId && a.dimOpacity === b.dimOpacity
+const resourceFor = (overview: TransitionVideoOverview, id: string | null) => (overview.videos ?? [overview.selected, overview.candidate]).find(video => video && video.id === id) ?? null
+export const sameVideoAppearance = (a: TransitionVideoPrefs, b: TransitionVideoPrefs) => (a.mode ?? 'single') === (b.mode ?? 'single') && a.videoId === b.videoId && a.dimOpacity === b.dimOpacity
 export const confirmsVideoSave = (current: TransitionVideoPrefs, submitted: TransitionVideoPrefs) => current.revision > submitted.revision && sameVideoAppearance(current, submitted)
 
 function savedResult (state: VideoSettingsState, overview: TransitionVideoOverview): VideoSettingsState {
@@ -44,7 +45,7 @@ function savedResult (state: VideoSettingsState, overview: TransitionVideoOvervi
     return { ...state, overview, operation: 'idle', pendingSave: null, conflict: true,
       error: 'La configuración cambió. Recargue el fondo antes de guardar.', notice: '' }
   }
-  return { ...state, overview, draft: overview.settings, resource: resourceFor(overview, overview.settings.videoId),
+  return { ...state, overview, draft: overview.settings, resource: resourceFor(overview, overview.settings.mode === 'all' ? state.resource?.id ?? null : overview.settings.videoId),
     operation: 'idle', pendingSave: null, conflict: false, error: '', connectionError: '', notice: 'Fondo guardado.' }
 }
 
@@ -57,7 +58,7 @@ export function transitionVideoReducer (state: VideoSettingsState, action: Actio
       if (!state.draft || action.reset) return { ...initialVideoSettings, overview, draft: overview.settings,
         resource: resourceFor(overview, overview.settings.videoId), notice: action.reset ? 'Configuración recargada.' : '' }
       if (state.pendingSave && state.operation !== 'saving' && overview.settings.revision > state.pendingSave.revision) return savedResult(state, overview)
-      const resource = resourceFor(overview, state.draft.videoId) ?? state.resource
+      const resource = resourceFor(overview, state.draft.mode === 'all' ? state.resource?.id ?? null : state.draft.videoId) ?? state.resource
       return { ...state, overview, connectionError: '',
         resource, notice: state.resource?.state === 'preparing' && resource?.state !== 'preparing'
           ? resource?.state === 'ready' ? 'Video listo. Revise la vista previa y guarde el fondo.' : ''
@@ -65,17 +66,25 @@ export function transitionVideoReducer (state: VideoSettingsState, action: Actio
         conflict: state.conflict || (!state.pendingSave && overview.settings.revision !== state.draft.revision) }
     }
     case 'connection': return { ...state, connectionError: action.message }
-    case 'resource': return state.draft?.videoId === action.resource.id ? { ...state, resource: action.resource } : state
-    case 'unavailable': return state.draft?.videoId === action.id && state.resource
+    case 'resource': return state.resource?.id === action.resource.id || state.draft?.videoId === action.resource.id ? { ...state, resource: action.resource } : state
+    case 'unavailable': return state.resource?.id === action.id && state.resource
       ? { ...state, resource: { ...state.resource, state: 'failed', reason: 'Este video ya no está disponible. Seleccione otro video o quite la selección.', videoUrl: null, posterUrl: null } }
       : state
-    case 'operation': return { ...state, operation: action.operation, error: '', notice: '', progress: action.operation === 'uploading' ? 0 : state.progress }
+    case 'operation': return { ...state, operation: action.operation, error: action.operation === 'idle' ? state.error : '', notice: '', progress: action.operation === 'uploading' ? 0 : state.progress }
     case 'progress': return { ...state, progress: action.value }
-    case 'select': return state.draft ? { ...state, draft: { ...state.draft, videoId: action.resource?.id ?? null }, resource: action.resource, notice: '', error: '' } : state
+    case 'select': return state.draft ? { ...state, draft: { ...state.draft, videoId: state.draft.mode === 'all' ? null : action.resource?.id ?? null }, resource: action.resource, notice: '', error: '' } : state
+    case 'mode': return state.draft
+      ? { ...state, draft: { ...state.draft, mode: action.mode === 'all' ? 'all' : 'single',
+          videoId: action.mode === 'single' ? state.resource?.id ?? state.overview?.videos?.find(video => video.state === 'ready')?.id ?? null : null },
+        resource: action.mode === 'none' ? null : state.resource, notice: '', error: '' }
+      : state
     case 'opacity': return state.draft ? { ...state, draft: { ...state.draft, dimOpacity: action.value }, notice: '', error: '' } : state
     case 'uploadDone': return { ...state, operation: 'idle', retryUpload: false, error: '', connectionError: '',
-      draft: state.draft ? { ...state.draft, videoId: action.resource.id } : null, resource: action.resource,
-      overview: state.overview ? { ...state.overview, candidate: action.resource } : null,
+      draft: state.draft ? { ...state.draft, videoId: state.draft.mode === 'all' ? null : action.resource.id } : null, resource: action.resource,
+      overview: state.overview
+        ? { ...state.overview, candidate: action.resource,
+            ...(state.overview.videos ? { videos: [action.resource, ...state.overview.videos.filter(video => video.id !== action.resource.id)] } : {}) }
+        : null,
       notice: action.resource.state === 'preparing' ? 'Video recibido. Preparando la vista previa…' : 'Carga recuperada. Revise el video antes de guardar.' }
     case 'uploadFailed': return { ...state, operation: 'idle', retryUpload: action.retry, error: action.message, notice: '' }
     case 'saveStart': return { ...state, operation: 'saving', pendingSave: action.settings, error: '', notice: '' }
