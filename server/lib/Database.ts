@@ -126,12 +126,11 @@ export class DatabaseWrapper {
       }
     }
 
-    const lastMigrationId = dbMigrations.length
-      ? dbMigrations[dbMigrations.length - 1].id
-      : 0
+    // Parallel features can introduce a missing version below the latest applied ID.
+    const appliedIds = new Set(dbMigrations.map(migration => migration.id))
 
     for (const migration of migrations) {
-      if (migration.id > lastMigrationId) {
+      if (!appliedIds.has(migration.id)) {
         log.info('Running migration %s: %s', migration.id, migration.name)
         this.exec('BEGIN')
         try {
