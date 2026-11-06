@@ -63,7 +63,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   db.prepare(`UPDATE queue SET source='LOCAL',songId=1,externalId=NULL WHERE queueId IN (?,?)`).run(first.queueId, second.queueId)
 
   await adminContext.addInitScript(() => {
-    window.audioTrace = { events: [], decoded: [], next: 0 }
+    window.audioTrace = { events: [], decoded: [], contexts: [], next: 0 }
     const musicGains = new WeakMap()
     const mediaSource = AudioContext.prototype.createMediaElementSource
     AudioContext.prototype.createMediaElementSource = function (element) {
@@ -77,6 +77,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
     }
     const create = AudioContext.prototype.createBufferSource
     AudioContext.prototype.createBufferSource = function (...args) {
+      if (!window.audioTrace.contexts.includes(this)) window.audioTrace.contexts.push(this)
       const node = create.apply(this, args)
       const id = ++window.audioTrace.next
       const start = node.start.bind(node)
@@ -326,6 +327,32 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   }
   assert.ok(trace.some(event => event.type === 'start' && event.duration > 30))
   fs.writeFileSync(path.join(data, 'playback-trace.json'), JSON.stringify(trace, null, 2))
-  await player.close()
   pass('Native audio-source trace confirms partial ambient playback, bounded stops and no voices/background at musical starts')
+
+  await emit(operator, 'server/PLAYER_REQ_PAUSE', {})
+  await configure(null)
+  setSpeech(8)
+  const remotelyClosed = await add('Esta lectura se detiene al cerrar el reproductor desde administración.')
+  // Keep a browser-created tab with navigation history so native close is
+  // refused and we can inspect the actual stopped voice/ambience sources.
+  await player.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
+  await player.goto(`${base}player`)
+  await decoded(remotelyClosed)
+  await play()
+  await expect.poll(() => delivery(remotelyClosed)?.voiceStatus).toBe('PLAYING')
+  await admin.goto(`${base}queue`)
+  await admin.getByRole('button', { name: 'Cerrar reproductor', exact: true }).click()
+  await admin.getByRole('dialog', { name: 'Cerrar reproductor', exact: true }).getByRole('button', { name: 'Cerrar y detener', exact: true }).click()
+  await expect(player.getByRole('heading', { name: 'Reproductor cerrado desde administración', exact: true })).toBeVisible()
+  await expect(admin.getByText('Sin reproductor', { exact: true })).toBeVisible()
+  await expect.poll(() => player.evaluate(() => {
+    // A closed audio clock may never dispatch scheduled `ended` events. Native
+    // context state is the definitive proof that voice/ambience cannot continue.
+    return window.audioTrace.contexts.length > 0 && window.audioTrace.contexts.every(context => context.state === 'closed')
+  })).toBe(true)
+  assert.equal(status(remotelyClosed), 'APPROVED')
+  assert.equal(db.prepare('SELECT status FROM greetings WHERE greetingId=?').get(remotelyClosed.greetingId).status, 'INTERRUPTED')
+  assert.equal(delivery(remotelyClosed).finished, 1)
+  pass('Remote close stops an active greeting and its ambience, releases ownership and preserves the pending song')
+  await player.close()
 }

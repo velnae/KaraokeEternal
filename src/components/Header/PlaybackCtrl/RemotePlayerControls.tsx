@@ -4,15 +4,17 @@ import Modal from 'components/Modal/Modal'
 import { useAppSelector } from 'store/hooks'
 import socket from 'lib/socket'
 import { animationTime } from 'lib/animationApi'
-import { PLAYER_REQ_FULLSCREEN } from 'shared/actionTypes'
-import { FULLSCREEN_REQUEST_MS, fullscreenMessages, fullscreenResult, type FullscreenResult } from 'shared/playerFullscreen'
-import styles from './RemoteFullscreen.css'
+import { PLAYER_REQ_CLOSE, PLAYER_REQ_FULLSCREEN } from 'shared/actionTypes'
+import { PLAYER_WINDOW_REQUEST_MS, playerWindowMessages, playerWindowResult, type PlayerWindowResult } from 'shared/playerWindow'
+import styles from './RemotePlayerControls.css'
+import toolbarStyles from './PlaybackCtrl.css'
 
-export default function RemoteFullscreen ({ available }: { available: boolean }) {
+export default function RemotePlayerControls ({ available }: { available: boolean }) {
   const roomId = useAppSelector(state => state.user.roomId)
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<FullscreenResult | null>(null)
+  const [result, setResult] = useState<PlayerWindowResult | null>(null)
   const [help, setHelp] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
   const generation = useRef(0)
   const feedbackId = useId()
   useEffect(() => {
@@ -20,12 +22,13 @@ export default function RemoteFullscreen ({ available }: { available: boolean })
     requests.current++
     setBusy(false)
     setResult(null)
+    setConfirmClose(false)
     return () => {
       requests.current++
     }
   }, [roomId])
 
-  const request = async () => {
+  const request = async (close = false) => {
     if (busy || !available) return
     if (!socket.connected) {
       setResult({ status: 'disconnected' })
@@ -35,11 +38,11 @@ export default function RemoteFullscreen ({ available }: { available: boolean })
     setBusy(true)
     setResult(null)
     try {
-      const reply = await socket.timeout(FULLSCREEN_REQUEST_MS + 2000).emitWithAck('action', {
-        type: PLAYER_REQ_FULLSCREEN,
-        payload: { expiresAt: animationTime() + FULLSCREEN_REQUEST_MS },
+      const reply = await socket.timeout(PLAYER_WINDOW_REQUEST_MS + 2000).emitWithAck('action', {
+        type: close ? PLAYER_REQ_CLOSE : PLAYER_REQ_FULLSCREEN,
+        payload: { expiresAt: animationTime() + PLAYER_WINDOW_REQUEST_MS },
       })
-      if (generation.current === version) setResult(reply?.error ? { status: 'forbidden' } : fullscreenResult(reply?.payload) ?? { status: 'rejected' })
+      if (generation.current === version) setResult(reply?.error ? { status: 'forbidden' } : playerWindowResult(reply?.payload) ?? { status: 'rejected' })
     } catch {
       if (generation.current === version) setResult({ status: socket.connected ? 'timeout' : 'disconnected' })
     } finally {
@@ -53,19 +56,39 @@ export default function RemoteFullscreen ({ available }: { available: boolean })
   return (
     <div className={styles.control} aria-busy={busy}>
       <div className={styles.actions}>
-        <Button className={styles.request} icon='FULLSCREEN' disabled={!available || busy} onClick={() => void request()} aria-label='Pantalla completa del reproductor (beta)' aria-describedby={!available || busy || result ? feedbackId : undefined}>
-          {busy ? 'Solicitando…' : 'Pantalla completa'}
-          <span className={styles.beta}>Beta</span>
-        </Button>
+        <Button className={toolbarStyles.btn} icon='FULLSCREEN' disabled={!available || busy} onClick={() => void request()} aria-label='Pantalla completa del reproductor' title='Pantalla completa del reproductor' aria-describedby={!available || busy || result ? feedbackId : undefined} />
+        <Button className={toolbarStyles.btn} icon='CLEAR' disabled={!available || busy} onClick={() => setConfirmClose(true)} aria-label='Cerrar reproductor' title='Cerrar reproductor' aria-describedby={!available || busy || result ? feedbackId : undefined} />
         <Button className={styles.help} onClick={() => setHelp(true)} aria-label='Ver pasos para fullscreen remoto'>Ver pasos</Button>
       </div>
       {(!available || busy || result) && (
         <p id={feedbackId} className={styles.feedback} role='status' data-result={result?.status}>
-          {!available ? 'Abre el reproductor para continuar.' : busy ? 'Esperando confirmación del reproductor…' : result && fullscreenMessages[result.status]}
+          {!available ? 'Abre el reproductor para continuar.' : busy ? 'Esperando confirmación del reproductor…' : result && playerWindowMessages[result.status]}
         </p>
       )}
+      {confirmClose && (
+        <Modal
+          title='Cerrar reproductor'
+          onClose={() => setConfirmClose(false)}
+          buttons={(
+            <>
+              <Button onClick={() => setConfirmClose(false)}>Cancelar</Button>
+              <Button
+                variant='danger'
+                onClick={() => {
+                  setConfirmClose(false)
+                  void request(true)
+                }}
+              >
+                Cerrar y detener
+              </Button>
+            </>
+          )}
+        >
+          <p>Se detendrán la música y las voces. La cola se conservará y la canción actual quedará pendiente.</p>
+        </Modal>
+      )}
       {help && (
-        <Modal title='Pantalla completa remota (beta)' onClose={() => setHelp(false)} scrollable className={styles.instructions}>
+        <Modal title='Pantalla completa remota' onClose={() => setHelp(false)} scrollable className={styles.instructions}>
           <p>Configura el permiso en el equipo y navegador del reproductor, no en el servidor. Usa Chrome 128 o posterior.</p>
           <ol>
             <li>

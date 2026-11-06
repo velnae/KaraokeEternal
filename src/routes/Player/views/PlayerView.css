@@ -5,3 +5,6 @@
   justify-content: center;
   background: var(--stage);
 }
+
+.closed { display: flex; flex-direction: column; justify-content: center; padding: 48px 24px; text-align: center; color: var(--secondary); }
+.closed h1 { color: var(--lyrics); font-size: 24px; }

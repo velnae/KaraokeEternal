@@ -98,7 +98,12 @@ try {
   }
   await context.route('**/compatibility-video.webm', route => route.fulfill({ path: path.join(data, 'video.webm'), contentType: 'video/webm' }))
   await context.addInitScript(() => {
-    window.compatibility = { contexts: [], failAudio: true, blockOnce: true, video: null, clockTicks: 0, playerVars: null, fullscreenRequests: [] }
+    window.compatibility = { contexts: [], failAudio: true, blockOnce: true, video: null, clockTicks: 0, playerVars: null, fullscreenRequests: [], closeCalls: 0 }
+    const closeWindow = window.close
+    window.close = function () {
+      window.compatibility.closeCalls++
+      closeWindow.call(window)
+    }
     const requestFullscreen = Element.prototype.requestFullscreen
     Element.prototype.requestFullscreen = function (...args) {
       window.compatibility.fullscreenRequests.push({ id: this.id, active: navigator.userActivation.isActive })
@@ -222,9 +227,9 @@ try {
   await toolbar.getByRole('button', { name: 'Reproducir', exact: true }).click()
   await expect.poll(() => page.evaluate(() => window.compatibility.video.paused)).toBe(false)
   await checkRemoteFullscreen({ player: page, uiBase, data, db })
-  await page.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
+  await page.goto(`${uiBase}queue`)
   await expect(page.getByRole('link', { name: 'Abrir reproductor', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Pantalla completa del reproductor (beta)', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Pantalla completa del reproductor', exact: true })).toBeDisabled()
   await expect(page.getByText('Abre el reproductor para continuar.', { exact: true })).toBeVisible()
   await page.goto(`${uiBase}admin/settings/animator?view=greeting-voice`)
   await expect(page.getByRole('heading', { name: 'Voz de saludos', exact: true })).toBeVisible()

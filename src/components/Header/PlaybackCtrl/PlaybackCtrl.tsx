@@ -14,7 +14,7 @@ import { PlaybackOptions } from 'shared/types'
 import AnimationQuickControls from 'components/Animation/AnimationQuickControls'
 import { isPlayerFullscreenShortcut, PLAYER_FULLSCREEN_SHORTCUT, requestPlayerFullscreen } from 'lib/playerFullscreen'
 import { showErrorMessage } from 'store/modules/ui'
-import RemoteFullscreen from './RemoteFullscreen'
+import RemotePlayerControls from './RemotePlayerControls'
 
 const PlaybackCtrl = () => {
   const [isDisplayCtrlVisible, setDisplayCtrlVisible] = useState(false)
@@ -52,7 +52,7 @@ const PlaybackCtrl = () => {
   }
 
   if (!status.isPlayerPresent) {
-    return (isAdmin && isInRoom) ? <NoPlayer remoteFullscreen={!isPlayer} /> : null
+    return (isAdmin && isInRoom) ? <NoPlayer remoteControls={!isPlayer} /> : null
   }
 
   return (
@@ -90,7 +90,7 @@ const PlaybackCtrl = () => {
 
       <div className={styles.viewActions}>
         {isPlayer && <AnimationQuickControls />}
-        {!isPlayer && isAdmin && <RemoteFullscreen available={status.isPlayerPresent} />}
+        {!isPlayer && isAdmin && <RemotePlayerControls available={status.isPlayerPresent} />}
         <Button
           className={clsx(styles.btn, styles.displayCtrl)}
           icon='TUNE'

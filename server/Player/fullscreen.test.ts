@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import ACTION_HANDLERS from './socket.js'
 import Animation from '../Animation/Animation.js'
 import { PLAYER_CMD_FULLSCREEN, PLAYER_REQ_FULLSCREEN } from '../../shared/actionTypes.js'
-import { FULLSCREEN_REQUEST_MS } from '../../shared/playerFullscreen.js'
+import { PLAYER_WINDOW_REQUEST_MS } from '../../shared/playerWindow.js'
 
 vi.mock('../Animation/Animation.js', () => ({ default: { cancel: vi.fn() } }))
 const handle = ACTION_HANDLERS[PLAYER_REQ_FULLSCREEN]
-const action = () => ({ payload: { expiresAt: Date.now() + FULLSCREEN_REQUEST_MS, roomId: 99 } })
+const action = () => ({ payload: { expiresAt: Date.now() + PLAYER_WINDOW_REQUEST_MS, roomId: 99 } })
 
 function setup () {
   const emitWithAck = vi.fn().mockResolvedValue({ status: 'entered', origin: 'https://karaoke.puyu.pe' })

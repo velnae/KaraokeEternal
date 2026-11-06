@@ -1,5 +1,5 @@
 import screenfull from 'screenfull'
-import type { FullscreenResult } from '../../shared/playerFullscreen'
+import type { PlayerWindowResult } from '../../shared/playerWindow'
 
 export const PLAYER_FULLSCREEN_ID = 'player-fs-container'
 export const PLAYER_FULLSCREEN_SHORTCUT = 'Ctrl+Alt+K'
@@ -19,9 +19,9 @@ export async function requestPlayerFullscreen () {
   await screenfull.request(element)
 }
 
-export async function requestAutomaticPlayerFullscreen (isCurrent: () => boolean): Promise<FullscreenResult> {
+export async function requestAutomaticPlayerFullscreen (isCurrent: () => boolean): Promise<PlayerWindowResult> {
   const origin = window.location.origin
-  const result = (status: FullscreenResult['status']): FullscreenResult => ({ status, origin })
+  const result = (status: PlayerWindowResult['status']): PlayerWindowResult => ({ status, origin })
   if (!isCurrent()) return result('changed')
   const element = document.getElementById(PLAYER_FULLSCREEN_ID)
   if (!element) return result('changed')

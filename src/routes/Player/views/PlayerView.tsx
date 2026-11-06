@@ -7,7 +7,7 @@ import playerVisualizerReducer from '../modules/playerVisualizer'
 import PlayerController from '../components/PlayerController/PlayerController'
 import { fetchCurrentRoom } from 'store/modules/rooms'
 import styles from './PlayerView.css'
-import useRemoteFullscreen from '../useRemoteFullscreen'
+import useRemotePlayerControls from '../useRemotePlayerControls'
 
 const PlayerView = () => {
   const { innerWidth, innerHeight, headerHeight } = useAppSelector(state => state.ui)
@@ -23,7 +23,7 @@ const PlayerView = () => {
     dispatch(sliceInjectNoOp()) // update store with new slices
   }
 
-  useRemoteFullscreen()
+  const closed = useRemotePlayerControls()
 
   // once per mount
   useEffect(() => {
@@ -46,6 +46,13 @@ const PlayerView = () => {
       document.title = previousTitle
     }
   }, [])
+
+  if (closed) return (
+    <section className={styles.closed} style={{ minHeight: viewportHeight }} role='status'>
+      <h1>Reproductor cerrado desde administración</h1>
+      <p>Puedes cerrar esta ventana. La cola se conserva.</p>
+    </section>
+  )
 
   return (
     <div style={{ overflow: 'hidden' }}>

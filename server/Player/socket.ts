@@ -3,7 +3,7 @@ import Queue from '../Queue/Queue.js'
 import Animation from '../Animation/Animation.js'
 import Playlists from '../Playlists/Playlists.js'
 import getLogger from '../lib/Log.js'
-import { FULLSCREEN_REQUEST_MS, fullscreenResult, type FullscreenResult } from '../../shared/playerFullscreen.js'
+import { PLAYER_WINDOW_REQUEST_MS, playerWindowResult, type PlayerWindowCommand, type PlayerWindowResult } from '../../shared/playerWindow.js'
 
 import {
   PLAYER_CMD_NEXT,
@@ -13,6 +13,7 @@ import {
   PLAYER_CMD_REPLAY,
   PLAYER_CMD_VOLUME,
   PLAYER_CMD_FULLSCREEN,
+  PLAYER_CMD_CLOSE,
   PLAYER_REQ_NEXT,
   PLAYER_REQ_OPTIONS,
   PLAYER_REQ_PAUSE,
@@ -20,6 +21,7 @@ import {
   PLAYER_REQ_REPLAY,
   PLAYER_REQ_VOLUME,
   PLAYER_REQ_FULLSCREEN,
+  PLAYER_REQ_CLOSE,
   PLAYER_EMIT_STATUS,
   PLAYER_EMIT_LEAVE,
   PLAYER_EMIT_FAILURE,
@@ -92,36 +94,77 @@ const announcePlayerLeave = (sock) => {
   })
 }
 
+// An accepted close is not a completed close. Observe the existing LEAVE or
+// disconnect lifecycle on this exact socket, including when its ACK is lost.
+function closePlayerWindow (player, command: PlayerWindowCommand): Promise<PlayerWindowResult> {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (result: PlayerWindowResult) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      player.off('action', onAction)
+      player.off('disconnect', onLeave)
+      resolve(result)
+    }
+    const onLeave = () => {
+      if (!Rooms.isAuthoritativePlayer(player)) finish({ status: 'closed' })
+    }
+    const onAction = (action: { type: string }) => {
+      if (action.type === PLAYER_EMIT_LEAVE) queueMicrotask(onLeave)
+    }
+    const remaining = Math.max(1, command.expiresAt - Date.now())
+    const timer = setTimeout(() => finish({ status: 'timeout' }), remaining)
+    player.on('action', onAction)
+    player.on('disconnect', onLeave)
+    void player.timeout(remaining).emitWithAck('action', { type: PLAYER_CMD_CLOSE, payload: command }).then((response) => {
+      if (response?.status === 'closing') return
+      const result = playerWindowResult(response)
+      return finish(result && !['closed', 'entered'].includes(result.status) ? result : { status: 'rejected' })
+    }).catch(() => finish({ status: 'timeout' }))
+  })
+}
+
+async function sendWindowCommand (sock, { payload }, acknowledge, close = false) {
+  const requestType = close ? PLAYER_REQ_CLOSE : PLAYER_REQ_FULLSCREEN
+  if (!adminOnly(sock, requestType, acknowledge)) return
+  const roomId = sock.user.roomId
+  const reply = (result: PlayerWindowResult) => acknowledge?.({ type: requestType + '_RESULT', payload: result })
+  const now = Date.now()
+  if (!Number.isSafeInteger(roomId) || roomId < 1 || !Number.isFinite(payload?.expiresAt)
+    || payload.expiresAt <= now || payload.expiresAt > now + PLAYER_WINDOW_REQUEST_MS * 2) {
+    return reply({ status: 'changed' })
+  }
+  const player = [...sock.server.of('/').sockets.values()].find(candidate => candidate.connected !== false
+    && candidate.user?.isAdmin && candidate.user.roomId === roomId && Rooms.isAuthoritativePlayer(candidate))
+  if (!player) return reply({ status: 'no-player' })
+  const expiresAt = Math.min(payload.expiresAt, now + PLAYER_WINDOW_REQUEST_MS)
+  const command = { roomId, playerSocketId: player.id, expiresAt }
+  try {
+    // The player closes through its normal unmount. Never broadcast a musical
+    // command or release its authority before it has actually stopped.
+    const response = close
+      ? await closePlayerWindow(player, command)
+      : await player.timeout(Math.max(1, expiresAt - Date.now())).emitWithAck('action', {
+          type: PLAYER_CMD_FULLSCREEN,
+          payload: command,
+        })
+    if (sock.connected === false || !sock.user?.isAdmin || sock.user.roomId !== roomId
+      || player.user?.roomId !== roomId || !player.user?.isAdmin
+      || (Date.now() > expiresAt && response?.status !== 'timeout')
+      || (close && response?.status === 'closed' && Rooms.isAuthoritativePlayer(player))
+      || (!close && (player.connected === false || !Rooms.isAuthoritativePlayer(player)))) return reply({ status: 'changed' })
+    const result = playerWindowResult(response)
+    return reply(result && (close || result.status !== 'closed') ? result : { status: 'rejected' })
+  } catch { return reply({ status: 'timeout' }) }
+}
+
 // ------------------------------------
 // Action Handlers
 // ------------------------------------
 const ACTION_HANDLERS = {
-  [PLAYER_REQ_FULLSCREEN]: async (sock, { payload }, acknowledge) => {
-    if (!adminOnly(sock, PLAYER_REQ_FULLSCREEN, acknowledge)) return
-    const roomId = sock.user.roomId
-    const reply = (result: FullscreenResult) => acknowledge?.({ type: PLAYER_REQ_FULLSCREEN + '_RESULT', payload: result })
-    const now = Date.now()
-    if (!Number.isSafeInteger(roomId) || roomId < 1 || !Number.isFinite(payload?.expiresAt)
-      || payload.expiresAt <= now || payload.expiresAt > now + FULLSCREEN_REQUEST_MS * 2) {
-      return reply({ status: 'changed' })
-    }
-    const player = [...sock.server.of('/').sockets.values()].find(candidate => candidate.connected !== false
-      && candidate.user?.isAdmin && candidate.user.roomId === roomId && Rooms.isAuthoritativePlayer(candidate))
-    if (!player) return reply({ status: 'no-player' })
-    const expiresAt = Math.min(payload.expiresAt, now + FULLSCREEN_REQUEST_MS)
-    try {
-      // This is a window operation, not a musical command: address only the
-      // authoritative player and do not cancel announcements or broadcast Play.
-      const response = await player.timeout(Math.max(1, expiresAt - Date.now())).emitWithAck('action', {
-        type: PLAYER_CMD_FULLSCREEN,
-        payload: { roomId, playerSocketId: player.id, expiresAt },
-      })
-      if (sock.connected === false || !sock.user?.isAdmin || sock.user.roomId !== roomId
-        || player.connected === false || player.user?.roomId !== roomId || !player.user?.isAdmin
-        || !Rooms.isAuthoritativePlayer(player) || Date.now() > expiresAt) return reply({ status: 'changed' })
-      return reply(fullscreenResult(response) ?? { status: 'rejected' })
-    } catch { return reply({ status: 'timeout' }) }
-  },
+  [PLAYER_REQ_FULLSCREEN]: (sock, action, acknowledge) => sendWindowCommand(sock, action, acknowledge),
+  [PLAYER_REQ_CLOSE]: (sock, action, acknowledge) => sendWindowCommand(sock, action, acknowledge, true),
   [PLAYER_EMIT_FAILURE]: (sock, { payload }, acknowledge) => {
     if (!authoritativeOnly(sock, PLAYER_EMIT_FAILURE, acknowledge)) return
 

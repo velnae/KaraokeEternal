@@ -2,6 +2,7 @@ import { expect } from 'playwright/test'
 import { setTimeout as delay } from 'node:timers/promises'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { checkRemoteClose } from './remote-close-checks.e2e.mjs'
 
 export async function checkRemoteFullscreen ({ player, uiBase, data, db }) {
   const context = player.context()
@@ -25,7 +26,7 @@ export async function checkRemoteFullscreen ({ player, uiBase, data, db }) {
     const adminCdp = await context.newCDPSession(admin)
     const { windowId: adminWindow } = await adminCdp.send('Browser.getWindowForTarget')
     assert.notEqual(adminWindow, playerWindow, 'Admin and player must be different browser windows')
-    const button = admin.getByRole('button', { name: 'Pantalla completa del reproductor (beta)', exact: true })
+    const button = admin.getByRole('button', { name: 'Pantalla completa del reproductor', exact: true })
     await expect(button).toBeEnabled()
     await browserCdp.send('Browser.setPermission', {
       permission: { name: 'fullscreen', allowWithoutGesture: true }, setting: 'denied', origin, browserContextId: targetInfo.browserContextId,
@@ -45,7 +46,7 @@ export async function checkRemoteFullscreen ({ player, uiBase, data, db }) {
 
     await admin.getByRole('button', { name: 'Ver pasos para fullscreen remoto' }).focus()
     await admin.keyboard.press('Enter')
-    const help = admin.getByRole('dialog', { name: 'Pantalla completa remota (beta)', exact: true })
+    const help = admin.getByRole('dialog', { name: 'Pantalla completa remota', exact: true })
     await expect(help).toBeVisible()
     await expect(help.getByText(origin, { exact: true })).toBeVisible()
     await help.getByText('Windows · Google Chrome', { exact: true }).click()
@@ -76,8 +77,8 @@ export async function checkRemoteFullscreen ({ player, uiBase, data, db }) {
     await button.click()
     await expect(admin.getByText('El reproductor confirmó la pantalla completa.', { exact: true })).toBeVisible()
     assert.equal(await read('window.compatibility.fullscreenRequests.length'), before.requests + 1, 'An already-fullscreen player is idempotent')
-    await read('document.exitFullscreen()')
     console.log('PASS remote fullscreen: separate admin/player windows, denied/granted permission, no player gesture, unchanged media, keyboard help and responsive UI')
+    await checkRemoteClose({ admin, player, data, db })
   } finally {
     await admin?.close()
     await browserCdp.send('Browser.resetPermissions', { browserContextId: targetInfo.browserContextId })

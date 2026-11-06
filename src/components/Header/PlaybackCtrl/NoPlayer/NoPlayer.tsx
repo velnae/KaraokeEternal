@@ -3,9 +3,9 @@ import { Link } from 'react-router'
 import { useAppSelector } from 'store/hooks'
 import Icon from 'components/Icon/Icon'
 import styles from './NoPlayer.css'
-import RemoteFullscreen from '../RemoteFullscreen'
+import RemotePlayerControls from '../RemotePlayerControls'
 
-const NoPlayer = ({ remoteFullscreen = true }: { remoteFullscreen?: boolean }) => {
+const NoPlayer = ({ remoteControls = true }: { remoteControls?: boolean }) => {
   const roomName = useAppSelector(state => state.rooms.entities[state.user.roomId]?.name)
   return (
     <div className={styles.container}>
@@ -18,7 +18,7 @@ const NoPlayer = ({ remoteFullscreen = true }: { remoteFullscreen?: boolean }) =
           <Icon icon='TELEVISION_PLAY' size={22} />
           Abrir reproductor
         </Link>
-        {remoteFullscreen && <RemoteFullscreen available={false} />}
+        {remoteControls && <RemotePlayerControls available={false} />}
       </div>
     </div>
   )

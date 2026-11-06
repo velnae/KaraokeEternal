@@ -1,9 +1,5 @@
 .control { min-width: 0; max-width: 340px; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.request { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 9px 12px; border: 1px solid var(--edge); border-radius: 11px; color: var(--cyan); background: var(--equipment); font-size: 13px; }
-.request:disabled { opacity: .55; cursor: not-allowed; }
-.request svg { width: 20px; height: 20px; }
-.beta { padding: 2px 5px; border-radius: 4px; background: rgb(237 196 124 / 12%); color: var(--amber); font-size: 11px; }
 .help { min-height: 44px; padding: 8px; color: var(--secondary); background: transparent; font-size: 12px; text-decoration: underline; }
 .feedback { margin: 6px 0 0; max-width: 42ch; font-size: 12px; line-height: 1.4; color: var(--amber); overflow-wrap: anywhere; }
 .feedback[data-result='entered'] { color: var(--cyan); }
