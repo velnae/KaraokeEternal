@@ -52,7 +52,8 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
   const matchesSubmission = submitted?.query === query.trim() && submitted.intent === intent
   const [cancelling, setCancelling] = useState<number | null>(null)
   const [cancelMessage, setCancelMessage] = useState('')
-  const { controller, receipts } = useSongRequests()
+  const replacementId = Number(new URLSearchParams(location.search).get('replace')) || undefined
+  const { controller, receipts } = useSongRequests('PARTICIPANT', replacementId)
   const greetings = useGreetings(page === 'requests')
   const unsettled = Object.values(receipts).filter(receipt => receipt.phase !== 'confirmed')
 
@@ -108,15 +109,18 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
 
   const items = Object.values(queue.entities).filter((item): item is QueueItem => item.isOptimistic !== true)
   const own = items.filter(item => item.userId === user.userId && item.origin === 'PARTICIPANT' && !isQueueHistoryHidden(item))
+  const replacedIds = new Set(items.map(item => item.replacesQueueId))
+  const replacement = own.find(item => item.queueId === replacementId && item.status === 'FAILED' && !replacedIds.has(item.queueId))
   const rules = normalizeQueuePrefs(room?.prefs?.queue)
   const pending = own.filter(isPendingRequest).length
   const remaining = Math.max(0, rules.maxPendingPerParticipant - pending)
   const ready = connected && !queue.isLoading && !!room
-  const canRequest = ready && room.status === 'open' && remaining > 0
+  const canRequest = ready && room.status === 'open' && remaining > 0 && (!replacementId || !!replacement)
   let pageNotice = ''
   if (!connected) pageNotice = 'Sin conexión · Reconectando…'
   else if (room?.status === 'closed') pageNotice = 'Sala cerrada.'
   else if (!ready) pageNotice = 'Actualizando…'
+  else if (page === 'search' && replacementId && !replacement) pageNotice = 'Este pedido ya no se puede reemplazar. Revisa Mis pedidos.'
   else if (page === 'search' && !canRequest) pageNotice = 'Límite de pedidos alcanzado. Revisa Mis pedidos.'
   const visibleTable = tableMode(room?.prefs) !== 'OFF' ? user.tableLabel : null
   const shortQuery = query.trim().length === 1
@@ -125,6 +129,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
     item.status === 'APPROVED' || item.status === 'PLAYING')
   const current = items.find(item => item.queueId === status.queueId && !status.isAtQueueEnd && item.status === 'PLAYING')
   const next = upcoming.find(item => item.queueId !== current?.queueId)
+  const nextParticipant = upcoming.find(item => item.queueId !== current?.queueId && item.origin === 'PARTICIPANT')
   const activePlayer = connected && status.isPlayerPresent
 
   const cancel = async (item: QueueItem) => {
@@ -142,6 +147,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
 
   const renderItem = (item: QueueItem, personal: boolean) => {
     const index = upcoming.findIndex(entry => entry.queueId === item.queueId)
+    const turnsAhead = ordered.turns.findIndex(turn => turn.ids.includes(item.queueId))
     const wait = activePlayer && status.isPlaying && current && index >= 0 && item.status === 'APPROVED'
       ? estimatedWait(upcoming.slice(0, index), status.queueId, status.position)
       : null
@@ -152,6 +158,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             <span className={styles.badge}>{requestStatusLabels[item.status]}</span>
             {item.requestIntent && item.requestIntent !== 'UNKNOWN' && <span className={styles.badge}>{requestIntentLabels[item.requestIntent]}</span>}
             {wait !== null && <span className={styles.wait} aria-label={`Espera estimada: ${wait < 1 ? 'menos de 1 minuto' : `${wait} minutos`}`}>{wait < 1 ? '< 1 min' : `≈ ${wait} min`}</span>}
+            {item.status === 'APPROVED' && turnsAhead >= 0 && <span className={styles.badge}>{turnsAhead === 0 ? 'Próximo turno de cliente' : `${turnsAhead} ${turnsAhead === 1 ? 'turno' : 'turnos'} por delante`}</span>}
           </div>
           <div className={styles.queuedSong}>
             <SongArtwork thumbnailUrl={item.thumbnailUrl} />
@@ -161,7 +168,14 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
               {item.tableLabelSnapshot && (!personal || item.tableLabelSnapshot !== visibleTable) && <p>{item.tableLabelSnapshot}</p>}
             </div>
           </div>
-          {personal && item.status === 'FAILED' && <Link className={styles.textAction} to='/library'>Buscar otra versión</Link>}
+          {personal && item.status === 'FAILED' && (replacedIds.has(item.queueId)
+            ? <p>Ya elegiste un reemplazo para este pedido.</p>
+            : (
+                <>
+                  <p>La canción falló. Puedes elegir otra versión conservando la antigüedad de tu pedido.</p>
+                  <Link className={styles.textAction} to={`/library?replace=${item.queueId}`}>Buscar otra versión</Link>
+                </>
+              ))}
           {personal && greetings.byQueue[item.queueId] && (
             <QueueGreeting
               greeting={greetings.byQueue[item.queueId]}
@@ -222,7 +236,13 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
       </div>
       {pageNotice && <p id={noticeId} role='status' className={styles.notice}>{pageNotice}</p>}
       {visibleTable && <p className={styles.notice}>{visibleTable}</p>}
-      {activePlayer && next?.userId === user.userId && <p role='status' className={styles.notice}>Tu turno sigue</p>}
+      {activePlayer && nextParticipant?.userId === user.userId && <p role='status' className={styles.notice}>{next?.origin === 'HOUSE' ? 'Tu turno sigue después de la música de la casa' : 'Tu turno sigue'}</p>}
+      {page === 'search' && replacement && (
+        <p className={styles.notice}>
+          {`Elige el reemplazo de «${replacement.title}». Conservaremos la antigüedad de tu pedido. `}
+          <Link to='/library'>Cancelar reemplazo</Link>
+        </p>
+      )}
 
       <div className={styles.pageHeading}>
         <h1>{page === 'search' ? '¿Qué quieres pedir?' : page === 'requests' ? 'Mis pedidos' : 'En la sala'}</h1>
@@ -317,6 +337,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
 
       {page === 'requests' && (
         <>
+          <p className={styles.searchHelp}>Una canción por persona en cada turno. La espera es aproximada e incluye la música programada.</p>
           {cancelMessage && <p role='status'>{cancelMessage}</p>}
           {connected && greetings.error && <p role='alert' className={styles.notice}>{greetings.error}</p>}
           {unsettled.map(receipt => (
@@ -332,7 +353,9 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
               <Link to='/library'>Buscar una canción</Link>
             </div>
           )}
-          {own.sort((a, b) => requestPriority(b) - requestPriority(a) || b.queueId - a.queueId).map(item => renderItem(item, true))}
+          {own.sort((a, b) => requestPriority(b) - requestPriority(a)
+            || (a.status === 'APPROVED' && b.status === 'APPROVED' ? ordered.result.indexOf(a.queueId) - ordered.result.indexOf(b.queueId) : 0)
+            || b.queueId - a.queueId).map(item => renderItem(item, true))}
         </>
       )}
       {page === 'room' && (

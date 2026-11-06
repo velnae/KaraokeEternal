@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { QueueItem } from '../../../../shared/types.js'
 import type { QueuePrefs } from '../../../../shared/queueRules.js'
 import { buildRoundRobinQueue } from './roundRobin'
+import { houseInterleaving } from '../../../../shared/roundRobin'
+
+beforeEach(() => vi.useFakeTimers({ now: 1000 }))
+afterEach(() => vi.useRealTimers())
 
 const item = (
   queueId: number,
@@ -73,9 +77,9 @@ describe('configurable participant ordering', () => {
       .toEqual([1, 3, 2, 4])
   })
 
-  it('plays multiple songs per FAIR turn up to the configured limit', () => {
+  it('keeps one song per FAIR turn even with legacy multi-song preferences', () => {
     expect(buildRoundRobinQueue([1, 2, 3, 4], entities, [], -1, null, prefs('FAIR', 2)).result)
-      .toEqual([1, 2, 3, 4])
+      .toEqual([1, 3, 2, 4])
   })
 
   it('orders FIFO by creation time and queue id regardless of linked-list order', () => {
@@ -89,7 +93,7 @@ describe('configurable participant ordering', () => {
       .toEqual([3, 2, 1])
   })
 
-  it('gives a late participant the next unlocked FAIR turn', () => {
+  it('keeps an older waiting request ahead of a late participant', () => {
     const lateEntities = {
       1: item(1, 10, 'PLAYED'),
       2: item(2, 10),
@@ -97,7 +101,7 @@ describe('configurable participant ordering', () => {
     }
 
     expect(buildRoundRobinQueue([1, 2, 3], lateEntities, [1], -1, null, prefs('FAIR', 1)).result)
-      .toEqual([1, 3, 2])
+      .toEqual([1, 2, 3])
   })
 
   it('preserves the locked next participant when a late participant arrives', () => {
@@ -124,7 +128,7 @@ describe('configurable participant ordering', () => {
 
     expect(fair.slice(0, 2)).toEqual([1, 3])
     expect(fifo.slice(0, 2)).toEqual([1, 3])
-    expect(fair).toEqual([1, 3, 5, 2, 4])
+    expect(fair).toEqual([1, 3, 2, 5, 4])
     expect(fifo).toEqual([1, 3, 2, 4, 5])
   })
 })
@@ -142,10 +146,10 @@ describe('house and operator ordering', () => {
   })
 
   it.each([
-    { available: 2, expected: [1, 3, 4, 2] },
+    { available: 2, expected: [1, 3, 2] },
     { available: 1, expected: [1, 3, 2] },
-    { available: 3, expected: [1, 3, 4, 2] },
-  ])('interleaves up to two house items when $available are available', ({ available, expected }) => {
+    { available: 3, expected: [1, 3, 2] },
+  ])('interleaves at most one house item when $available are available', ({ available, expected }) => {
     const entities: Record<number, QueueItem> = {
       1: item(1, 10),
       2: item(2, 20),
@@ -186,8 +190,8 @@ describe('house and operator ordering', () => {
 
     const ordered = buildRoundRobinQueue([1, 2, 3, 4, 5], entities, [1, 2], -1, null, prefs('FAIR', 1, 1)).result
 
-    expect(ordered).toEqual([1, 2, 4, 5, 3])
-    expect(ordered.filter(queueId => entities[queueId].origin === 'PARTICIPANT')).toEqual([1, 4, 3])
+    expect(ordered).toEqual([1, 2, 3, 5, 4])
+    expect(ordered.filter(queueId => entities[queueId].origin === 'PARTICIPANT')).toEqual([1, 3, 4])
   })
 
   it('preserves operator positions without adding them to participant turns', () => {
@@ -202,5 +206,60 @@ describe('house and operator ordering', () => {
       .toEqual([1, 2, 3, 4])
     expect(buildRoundRobinQueue([4, 1, 2, 3], entities, [], -1, null, prefs()).result)
       .toEqual([4, 1, 2, 3])
+  })
+})
+
+describe('customer waiting guarantees', () => {
+  it('serves an old Juan request despite a stream of first-time participants', () => {
+    const entities = { 1: item(1, 10, 'PLAYED'), 2: item(2, 10) } as Record<number, QueueItem>
+    const result = [1, 2]
+    for (let id = 3; id < 23; id++) {
+      entities[id] = item(id, id * 10)
+      result.push(id)
+      expect(buildRoundRobinQueue(result, entities, [1], -1, null, prefs()).turns[0].ids).toEqual([2])
+    }
+  })
+
+  it('returns a served participant to the tail and reconstructs the same order after reconnect', () => {
+    const entities = { 1: item(1, 10, 'PLAYED'), 2: item(2, 10), 3: item(3, 20), 4: item(4, 30) }
+    entities[1].dateUpdated = 10
+    expect(buildRoundRobinQueue([1, 2, 3, 4], entities, [1], -1, null, prefs(), 11).turns.map(turn => turn.ids))
+      .toEqual([[3], [4], [2]])
+  })
+
+  it('does not count a failed attempt as a served turn', () => {
+    const entities = { 1: item(1, 10, 'FAILED'), 2: item(2, 10), 3: item(3, 20) }
+    entities[1].dateUpdated = 100
+    expect(buildRoundRobinQueue([1, 2, 3], entities, [1], -1, null, prefs(), 101).turns[0].ids).toEqual([2])
+  })
+
+  it('puts a completed turn behind a customer who arrived in the same timestamp second', () => {
+    const entities = { 1: item(1, 10, 'PLAYED'), 2: item(2, 10), 3: item(3, 20, 'APPROVED', 'PARTICIPANT', 100) }
+    entities[1].dateUpdated = 100
+    expect(buildRoundRobinQueue([1, 2, 3], entities, [1], 1, null, prefs(), 100).turns.map(turn => turn.ids)).toEqual([[3], [2]])
+  })
+
+  it.each([
+    { count: 2, wait: 599, limit: 1, reason: null },
+    { count: 3, wait: 599, limit: 0, reason: 'backlog' },
+    { count: 1, wait: 600, limit: 0, reason: 'wait' },
+  ])('applies the house policy for $count requests waiting $wait seconds', ({ count, wait, limit, reason }) => {
+    const pending = Array.from({ length: count }, (_, index) => item(index + 1, index + 1, 'APPROVED', 'PARTICIPANT', 1000))
+    expect(houseInterleaving(pending, 1000 + wait, 2)).toEqual({ limit, reason, pendingCount: count })
+  })
+
+  it('excludes pending approval and current playback from demand and preserves the house pool', () => {
+    const entities = { 1: item(1, 10, 'PLAYING'), 2: item(2, 20), 3: item(3, 30, 'PENDING_APPROVAL'), 4: item(4, 99, 'APPROVED', 'HOUSE') }
+    const queue = buildRoundRobinQueue([1, 2, 3, 4], entities, [], 1, 20, prefs('FAIR', 1, 2), 5)
+    expect(queue.housePolicy.pendingCount).toBe(1)
+    expect(queue.result).toEqual([1, 4, 2])
+    expect(entities[4].status).toBe('APPROVED')
+  })
+
+  it('resumes house interleaving as demand shrinks and suppresses it again when projected waiting exceeds ten minutes', () => {
+    const entities = { 1: item(1, 10, 'PLAYED'), 2: item(2, 20), 3: item(3, 30), 4: item(4, 40), 5: item(5, 99, 'APPROVED', 'HOUSE'), 6: item(6, 99, 'APPROVED', 'HOUSE') }
+    const queue = buildRoundRobinQueue([1, 2, 3, 4, 5, 6], entities, [1], 1, null, prefs('FAIR', 1, 2), 100)
+    expect(queue.result).toEqual([1, 2, 5, 3, 4])
+    expect(queue.housePolicy.reason).toBe('backlog')
   })
 })

@@ -32,6 +32,7 @@ class Queue {
     playlistItemId,
     houseRunId,
     requestIntent: intent,
+    replacesQueueId,
   }: {
     roomId: number
     song: ResolvedSong
@@ -43,10 +44,14 @@ class Queue {
     playlistItemId?: number
     houseRunId?: string
     requestIntent?: RequestIntent
+    replacesQueueId?: number
   }): number {
     const validationError = getResolvedSongValidationError(song)
     if (validationError) throw new Error(validationError)
     if (!song.isPlayable) throw new Error('La canción no se puede reproducir')
+
+    const replacement = replacesQueueId === undefined ? undefined : this.getReplacement(roomId, userId, replacesQueueId)
+    if (replacement && origin !== 'PARTICIPANT') throw new Error('El reemplazo debe ser un pedido de participante')
 
     const fields = new Map()
     const now = Math.floor(Date.now() / 1000)
@@ -73,7 +78,7 @@ class Queue {
     fields.set('artistOrChannel', song.artistOrChannel)
     fields.set('durationSeconds', song.durationSeconds)
     fields.set('thumbnailUrl', song.thumbnailUrl)
-    fields.set('dateCreated', now)
+    fields.set('dateCreated', replacement?.dateCreated ?? now)
     fields.set('dateUpdated', now)
     fields.set('requestId', requestId ?? null)
     fields.set('tableId', tableContext?.tableId ?? null)
@@ -81,6 +86,12 @@ class Queue {
     fields.set('tableLabelSnapshot', tableContext?.tableLabel ?? null)
     fields.set('playlistItemId', playlistItemId ?? null)
     fields.set('houseRunId', houseRunId ?? null)
+    fields.set('replacesQueueId', replacesQueueId ?? null)
+    if (replacement) {
+      fields.set('tableId', replacement.tableId)
+      fields.set('participantSessionId', replacement.participantSessionId)
+      fields.set('tableLabelSnapshot', replacement.tableLabelSnapshot)
+    }
 
     const query = sql`
       INSERT INTO queue ${sql.tuple(Array.from(fields.keys()).map(sql.column))}
@@ -96,11 +107,22 @@ class Queue {
 
   static getRequest (roomId: number, userId: number, requestId: string) {
     const query = sql`
-      SELECT queueId, status, source, externalId, songId, origin, requestIntent,
+      SELECT queueId, status, source, externalId, songId, origin, requestIntent, replacesQueueId,
         (SELECT greetingId FROM greetings g WHERE g.queueId=queue.queueId) AS greetingId
       FROM queue WHERE roomId = ${roomId} AND userId = ${userId} AND requestId = ${requestId}
     `
-    return db.get<Pick<QueueItem, 'queueId' | 'status' | 'source' | 'externalId' | 'songId' | 'origin' | 'requestIntent'> & { greetingId?: number }>(String(query), query.parameters)
+    return db.get<Pick<QueueItem, 'queueId' | 'status' | 'source' | 'externalId' | 'songId' | 'origin' | 'requestIntent' | 'replacesQueueId'> & { greetingId?: number }>(String(query), query.parameters)
+  }
+
+  static getReplacement (roomId: number, userId: number, queueId: number) {
+    const item = db.get<{ dateCreated: number, tableId: number | null, participantSessionId: string | null, tableLabelSnapshot: string | null }>(
+      `SELECT dateCreated,tableId,participantSessionId,tableLabelSnapshot FROM queue
+       WHERE roomId=? AND userId=? AND queueId=? AND origin='PARTICIPANT' AND status='FAILED' AND historyClearedAt IS NULL`,
+      [roomId, userId, queueId],
+    )
+    if (!item) throw new Error('Solo puedes reemplazar un pedido fallido vigente')
+    if (db.get('SELECT 1 FROM queue WHERE replacesQueueId=?', [queueId])) throw new Error('Este pedido ya tiene un reemplazo. Revisa la cola.')
+    return item
   }
 
   /**
@@ -117,7 +139,7 @@ class Queue {
       SELECT queueId, songId, userId, prevQueueId,
         queue.origin, queue.source, queue.status, queue.externalId, queue.requestIntent,
         queue.title, queue.artistOrChannel, queue.durationSeconds, queue.thumbnailUrl,
-        queue.dateCreated, queue.dateUpdated, queue.historyClearedAt,
+        queue.dateCreated, queue.dateUpdated, queue.historyClearedAt, queue.replacesQueueId,
         queue.tableId, queue.tableLabelSnapshot,
         media.mediaId, media.relPath, media.rgTrackGain, media.rgTrackPeak,
         users.name AS userDisplayName, users.dateUpdated AS userDateUpdated,

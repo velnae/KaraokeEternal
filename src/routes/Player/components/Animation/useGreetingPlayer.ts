@@ -8,14 +8,14 @@ import { ANIMATION_EVENT, ambienceBedVolume } from 'shared/animation'
 import { animationRequest, animationTime } from 'lib/animationApi'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, PLAYER_EMIT_STATUS } from 'shared/actionTypes'
 import { playerStatusCancel } from '../../modules/player'
-import getRoundRobinQueue from 'routes/Queue/selectors/getRoundRobinQueue'
+import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
 import GreetingCommitGate from './GreetingCommitGate'
 import type AnnouncementAudio from './AnnouncementAudio'
 
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, Math.max(0, ms)))
 function upcoming () {
   const state = store.getState()
-  const ordered = getRoundRobinQueue({ ...state, status: { ...state.status, queueId: state.player.queueId, historyJSON: state.player.historyJSON, nextUserId: state.player.nextUserId } })
+  const ordered = getPlaybackQueue(state)
   return ordered.result.slice(ordered.result.indexOf(state.player.queueId) + 1).find(id => ordered.entities[id].status === 'APPROVED')
 }
 

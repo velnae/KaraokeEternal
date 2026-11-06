@@ -16,6 +16,7 @@ export interface Song {
 }
 
 export interface QueueItem {
+  replacesQueueId?: number | null
   historyClearedAt?: number | null
   tableId?: number | null
   tableLabelSnapshot?: string | null

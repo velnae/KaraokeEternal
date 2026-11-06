@@ -95,11 +95,11 @@ it('allows a later pending song in an already-started participant turn to receiv
   expect(() => attach(second)).not.toThrow()
 })
 
-it('accepts a greeting for a reserved turn member until that particular song is reserved', () => {
+it('keeps the next single-song turn open for greetings until it is reserved', () => {
   const first = song()
   const second = song()
   expect(Greetings.reserve(1, 'player', first, {})).toBeNull()
-  expect(Greetings.turnFor(second)).toBe(first)
+  expect(Greetings.turnFor(second)).toBeUndefined()
   expect(Greetings.opportunity(identity, first, {}).canAdd).toBe(false)
   expect(Greetings.opportunity(identity, second, {}).canAdd).toBe(true)
   attach(second)
@@ -196,7 +196,7 @@ it('uses the existing FIFO turn semantics and rejects unowned or invalid text', 
   expect(() => Greetings.attach({ roomId: 1, userId: 2 }, foreign, { recipient: '', message: '<script>hi</script>' }, {})).toThrow('texto simple')
 })
 
-it('recognizes the continuation of a later consecutive turn by the same singer', () => {
+it('starts a new single-song turn even when only one singer remains', () => {
   const played: number[] = []
   for (let i = 0; i < 3; i++) {
     const id = song()
@@ -205,7 +205,7 @@ it('recognizes the continuation of a later consecutive turn by the same singer',
     played.push(id)
   }
   const fourth = song()
-  expect(Greetings.order(1).turns[0]).toEqual({ ids: [fourth], startsNewTurn: false })
+  expect(Greetings.order(1).turns[0]).toEqual({ ids: [fourth], startsNewTurn: true })
   expect(() => Greetings.attach(identity, fourth, { recipient: '', message: 'For the pending song' }, { queueId: played[2], historyJSON: JSON.stringify(played) })).not.toThrow()
 })
 
@@ -231,6 +231,6 @@ it('uses the player history merge order after reconnect rather than a different 
   const nextFirst = song()
   const nextSecond = song(2)
   const order = Greetings.order(1, { queueId: second, historyJSON: `[${second}]` })
-  expect(order.result).toEqual([first, second, nextSecond, nextFirst])
-  expect(order.turns[0]).toEqual({ ids: [nextSecond], startsNewTurn: false })
+  expect(order.result).toEqual([first, second, nextFirst, nextSecond])
+  expect(order.turns[0]).toEqual({ ids: [nextFirst], startsNewTurn: true })
 })

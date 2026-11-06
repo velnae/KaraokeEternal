@@ -6,6 +6,15 @@ export interface ParticipantTurn {
   startsNewTurn: boolean
 }
 
+export const HOUSE_BACKLOG_LIMIT = 3
+export const HOUSE_WAIT_LIMIT_SECONDS = 10 * 60
+
+export const houseInterleaving = (pending: QueueItem[], nowSeconds: number, configuredLimit: number) => {
+  const oldestWait = pending.length ? Math.max(0, nowSeconds - Math.min(...pending.map(item => item.dateCreated))) : 0
+  const reason = pending.length >= HOUSE_BACKLOG_LIMIT ? 'backlog' : oldestWait >= HOUSE_WAIT_LIMIT_SECONDS ? 'wait' : null
+  return { limit: reason ? 0 : Math.min(1, configuredLimit), reason, pendingCount: pending.length }
+}
+
 const isPersistedItem = (
   item: QueueItem | OptimisticQueueItem | undefined,
 ): item is QueueItem => item !== undefined && item.isOptimistic !== true
@@ -17,6 +26,7 @@ export const buildRoundRobinQueue = (
   curId: number,
   nextUserId: number | null,
   prefs: Pick<QueuePrefs, 'houseTracksBeforeParticipant' | 'maxSongsPerParticipantRound' | 'rotationMode'>,
+  nowSeconds = Math.floor(Date.now() / 1000),
 ) => {
   // History/current are an immutable playback prefix and may contain every origin.
   const fixedHistory = history.filter(queueId => result.includes(queueId))
@@ -34,21 +44,15 @@ export const buildRoundRobinQueue = (
     ? undefined
     : participantIds.find(queueId => (entities[queueId] as QueueItem).userId === nextUserId)
   const unlockedParticipantIds = participantIds.filter(queueId => queueId !== lockedId)
-  const participantHistory = fixedHistory
-    .filter((queueId) => {
-      const item = entities[queueId]
-      return isPersistedItem(item) && item.origin === 'PARTICIPANT'
-    })
-    .map(queueId => (entities[queueId] as QueueItem).userId)
-
   const turns = prefs.rotationMode === 'FIFO'
     ? buildFifoTurns(unlockedParticipantIds, entities, lockedId)
     : buildFairTurns(
         unlockedParticipantIds,
         entities,
-        participantHistory,
+        fixedHistory,
         lockedId,
-        prefs.maxSongsPerParticipantRound,
+        curId,
+        nowSeconds,
       )
 
   const participantOrder = turns.flatMap(turn => turn.ids)
@@ -66,12 +70,14 @@ export const buildRoundRobinQueue = (
     housePool,
     turnStarts,
     prefs.houseTracksBeforeParticipant,
+    nowSeconds,
   )
 
   return {
     result: fixedHistory.concat(scheduled),
     entities: entities as Record<number, QueueItem>,
     turns,
+    housePolicy: houseInterleaving(participantIds.map(id => entities[id] as QueueItem), nowSeconds, prefs.houseTracksBeforeParticipant),
   }
 }
 
@@ -93,67 +99,57 @@ const buildFifoTurns = (
 const buildFairTurns = (
   participantIds: number[],
   entities: Record<number, QueueItem | OptimisticQueueItem>,
-  participantHistory: number[],
+  history: number[],
   lockedId: number | undefined,
-  turnLimit: number,
+  curId: number,
+  nowSeconds: number,
 ): ParticipantTurn[] => {
   const byUser = new Map<number, number[]>()
   const turns: ParticipantTurn[] = []
-  const resultByUser = [...participantHistory]
-
-  participantIds.forEach((queueId) => {
+  const lastTurn = new Map<number, number>()
+  for (const id of history) {
+    const item = entities[id]
+    // A failed song has not served the customer's turn.
+    if (!isPersistedItem(item) || item.origin !== 'PARTICIPANT' || item.status === 'FAILED') continue
+    const servedAt = id === curId || item.status !== 'PLAYED' ? nowSeconds : item.dateUpdated
+    lastTurn.set(item.userId, Math.max(lastTurn.get(item.userId) ?? 0, servedAt))
+  }
+  const chronological = (left: number, right: number) => {
+    const a = entities[left] as QueueItem
+    const b = entities[right] as QueueItem
+    return a.dateCreated - b.dateCreated || a.queueId - b.queueId
+  }
+  const ids = lockedId === undefined ? participantIds : [...participantIds, lockedId]
+  ids.forEach((queueId) => {
     const userId = (entities[queueId] as QueueItem).userId
     byUser.set(userId, [...(byUser.get(userId) ?? []), queueId])
   })
-
-  const appendTurn = (
-    userId: number,
-    limit: number,
-    startsNewTurn: boolean,
-    initialIds: number[] = [],
-  ) => {
-    const userItems = byUser.get(userId) ?? []
-    const ids = [...initialIds, ...userItems.splice(0, Math.max(0, limit - initialIds.length))]
-
-    if (userItems.length) byUser.set(userId, userItems)
-    else byUser.delete(userId)
-
-    resultByUser.push(...ids.map(() => userId))
-    if (ids.length) turns.push({ ids, startsNewTurn })
-  }
-
-  const trailingUserId = resultByUser[resultByUser.length - 1]
-  let trailingCount = 0
-  for (let i = resultByUser.length - 1; i >= 0 && resultByUser[i] === trailingUserId; i--) trailingCount++
-  // Consecutive turns by the only participant still have their own capacity.
-  if (trailingCount > turnLimit) trailingCount = ((trailingCount - 1) % turnLimit) + 1
-
+  const waiting = [...byUser.keys()].sort((a, b) => {
+    const firstA = byUser.get(a)![0]
+    const firstB = byUser.get(b)![0]
+    const oldestA = Math.min(...byUser.get(a)!.map(id => (entities[id] as QueueItem).dateCreated))
+    const oldestB = Math.min(...byUser.get(b)!.map(id => (entities[id] as QueueItem).dateCreated))
+    const servedA = lastTurn.get(a) ?? -1
+    const servedB = lastTurn.get(b) ?? -1
+    const sinceA = Math.max(oldestA, servedA)
+    const sinceB = Math.max(oldestB, servedB)
+    // Persisted timestamps have second precision. A completed turn joins behind
+    // requests already waiting in that second, not ahead of them by old queueId.
+    return sinceA - sinceB || Number(servedA >= oldestA) - Number(servedB >= oldestB) || chronological(firstA, firstB)
+  })
   if (lockedId !== undefined) {
-    const lockedUserId = (entities[lockedId] as QueueItem).userId
-    const continuesTurn = lockedUserId === trailingUserId && trailingCount < turnLimit
-    const limit = continuesTurn ? turnLimit - trailingCount : turnLimit
-    appendTurn(lockedUserId, limit, !continuesTurn, [lockedId])
-  } else if (typeof trailingUserId === 'number' && byUser.has(trailingUserId)) {
-    const remainingInTurn = turnLimit - trailingCount
-    if (remainingInTurn > 0) appendTurn(trailingUserId, remainingInTurn, false)
+    const userId = (entities[lockedId] as QueueItem).userId
+    waiting.splice(waiting.indexOf(userId), 1)
+    waiting.unshift(userId)
+    const songs = byUser.get(userId)!
+    songs.splice(songs.indexOf(lockedId), 1)
+    songs.unshift(lockedId)
   }
-
-  while (byUser.size) {
-    let longestWait = -1
-    let selectedUserId: number | undefined
-
-    for (const userId of byUser.keys()) {
-      const idx = resultByUser.lastIndexOf(userId)
-      const distance = idx === -1 ? Infinity : resultByUser.length - idx
-
-      if (distance > longestWait) {
-        longestWait = distance
-        selectedUserId = userId
-      }
-    }
-
-    if (selectedUserId === undefined) break
-    appendTurn(selectedUserId, turnLimit, true)
+  while (waiting.length) {
+    const userId = waiting.shift()!
+    const songs = byUser.get(userId)!
+    turns.push({ ids: [songs.shift()!], startsNewTurn: true })
+    if (songs.length) waiting.push(userId)
   }
 
   return turns
@@ -201,11 +197,14 @@ const interleaveHouseItems = (
   housePool: number[],
   turnStarts: Set<number>,
   limit: number,
+  nowSeconds: number,
 ): number[] => {
   const scheduled: number[] = []
   let houseIndex = 0
   let hasParticipant = false
   let housesSinceParticipant = 0
+  let projectedTime = nowSeconds
+  let pending = upcoming.map(id => entities[id] as QueueItem).filter(item => item.origin === 'PARTICIPANT')
 
   for (let i = fixedHistory.length - 1; i >= 0; i--) {
     const item = entities[fixedHistory[i]]
@@ -222,18 +221,21 @@ const interleaveHouseItems = (
 
     if (item.origin === 'PARTICIPANT' && turnStarts.has(queueId) && hasParticipant) {
       const amount = Math.min(
-        Math.max(0, limit - housesSinceParticipant),
+        Math.max(0, houseInterleaving(pending, projectedTime, limit).limit - housesSinceParticipant),
         housePool.length - houseIndex,
       )
       scheduled.push(...housePool.slice(houseIndex, houseIndex + amount))
+      projectedTime += housePool.slice(houseIndex, houseIndex + amount).reduce((sum, id) => sum + ((entities[id] as QueueItem).durationSeconds ?? 180), 0)
       houseIndex += amount
     }
 
     scheduled.push(queueId)
+    projectedTime += item.durationSeconds ?? 180
 
     if (item.origin === 'PARTICIPANT') {
       hasParticipant = true
       housesSinceParticipant = 0
+      pending = pending.filter(candidate => candidate.queueId !== queueId)
     }
   })
 

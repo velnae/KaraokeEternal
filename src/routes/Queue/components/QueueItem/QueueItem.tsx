@@ -17,10 +17,15 @@ import styles from './QueueItem.css'
 import QueueGreeting from 'components/Greetings/QueueGreeting'
 import type { Greeting } from 'shared/greetings'
 import { requestIntentLabels, type RequestIntent } from 'shared/requestIntent'
+import socket from 'lib/socket'
+import store from 'store/store'
+import { QUEUE_ADD } from 'shared/actionTypes'
+import { queuePush } from '../../modules/queue'
 
 const LONG_PRESS_THRESHOLD_MS = 700
 
 interface QueueItemProps {
+  canRecover?: boolean
   greeting?: Greeting
   greetingsPaused?: boolean
   greetingBusy?: boolean
@@ -61,6 +66,7 @@ interface QueueItemProps {
 }
 
 const QueueItem = ({
+  canRecover = false,
   greeting,
   greetingsPaused,
   greetingBusy = false,
@@ -101,6 +107,30 @@ const QueueItem = ({
   const [isExpanded, setExpanded] = useState(false)
   const longPressActiveRef = useRef(false)
   const dispatch = useAppDispatch()
+  const [recovering, setRecovering] = useState(false)
+  const recoveryId = useRef<string | null>(null)
+  const handleRecoverClick = async () => {
+    if (recovering) return
+    if (!socket.connected) {
+      dispatch(showErrorMessage('Sin conexión. Reconecta y vuelve a intentarlo.'))
+      return
+    }
+    recoveryId.current ??= crypto.randomUUID()
+    const account = store.getState().user
+    setRecovering(true)
+    try {
+      const response = await socket.timeout(12000).emitWithAck('action', { type: QUEUE_ADD, payload: {
+        source, sourceId: source === 'YOUTUBE' ? externalId : String(songId), origin: 'PARTICIPANT', requestIntent,
+        requestId: recoveryId.current, replacesQueueId: queueId,
+      } })
+      if (response.error) dispatch(showErrorMessage(response.error))
+      else if (store.getState().user.roomId === account.roomId && store.getState().user.userId === account.userId) dispatch(queuePush(response.payload.queue))
+    } catch {
+      dispatch(showErrorMessage('Reintento sin confirmar. Vuelve a pulsar para comprobarlo sin duplicar el pedido.'))
+    } finally {
+      setRecovering(false)
+    }
+  }
 
   const handleErrorInfoClick = () => dispatch(showErrorMessage(errorMessage))
   const isLocal = source === 'LOCAL' && typeof songId === 'number'
@@ -210,6 +240,7 @@ const QueueItem = ({
             )}
           </div>
           <div className={styles.badges}>
+            {recovering && <span role='status'>Reintentando pedido…</span>}
             <div className={clsx(styles.status, (status === 'REJECTED' || status === 'FAILED') && styles.rejected)}>
               {statusLabel[status]}
               {requestIntent !== 'UNKNOWN' && ` · ${requestIntentLabels[requestIntent]}`}
@@ -222,6 +253,7 @@ const QueueItem = ({
         </div>
 
         <Buttons btnWidth={56} isExpanded={isExpanded} className={styles.btnContainer}>
+          {canRecover && <Button icon='REPLAY' aria-label='Reintentar conservando la antigüedad' title='Reintentar conservando la antigüedad' disabled={recovering} onClick={() => { void handleRecoverClick() }} />}
           {(isInfoable || isMovable || isPlayed || isReplayable || isRemovable || isSkippable) && (
             <Button
               icon={isExpanded ? 'CHEVRON_UP' : 'MORE_HORIZ'}

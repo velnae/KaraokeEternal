@@ -83,21 +83,15 @@ const QueuePrefs = ({ onChange, prefs = {} }: QueuePrefsProps) => {
           onChange={value => handleSetQueuePrefs({ maxPendingPerParticipant: value })}
         />
 
-        <NumberField
-          id='queue-max-songs-round'
-          label='Canciones por turno de participante'
-          description='Se aplica a los turnos equitativos. El orden de llegada sigue el orden de las solicitudes.'
-          {...QUEUE_PREF_LIMITS.maxSongsPerParticipantRound}
-          value={queue.maxSongsPerParticipantRound}
-          onChange={value => handleSetQueuePrefs({ maxSongsPerParticipantRound: value })}
-        />
+        <p>Los turnos equitativos atienden una canción por persona. Los pedidos nuevos se incorporan detrás de quienes esperan.</p>
 
         <NumberField
           id='queue-house-tracks'
-          label='Canciones de la casa entre turnos de participantes'
-          description='Use 0 para no intercalar canciones. La música de la casa puede continuar cuando no hay pedidos.'
-          {...QUEUE_PREF_LIMITS.houseTracksBeforeParticipant}
-          value={queue.houseTracksBeforeParticipant}
+          label='Máximo de canciones de la casa entre turnos'
+          description='Se intercalan solo con 1–2 pedidos y menos de 10 minutos de espera. Con más demanda se atiende a los clientes. Sin pedidos, continúa la lista de la casa. Use 0 para no intercalar.'
+          min={0}
+          max={1}
+          value={Math.min(1, queue.houseTracksBeforeParticipant)}
           onChange={value => handleSetQueuePrefs({ houseTracksBeforeParticipant: value })}
         />
 

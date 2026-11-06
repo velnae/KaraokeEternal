@@ -55,6 +55,15 @@ const ACTION_HANDLERS = {
     const sourceId = String(payload.sourceId ?? songId ?? '')
     const roomId = sock.user.roomId
     const requestId = payload.requestId
+    const replacesQueueId = payload.replacesQueueId
+    if (replacesQueueId !== undefined && (!Number.isSafeInteger(replacesQueueId) || replacesQueueId <= 0 || !requestId || origin !== 'PARTICIPANT')) {
+      return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'Seleccione un pedido fallido válido para reemplazar' })
+    }
+    const original = replacesQueueId === undefined ? undefined : Queue.get(roomId).entities[replacesQueueId]
+    if (replacesQueueId !== undefined && (!original || (!sock.user.isAdmin && original.userId !== sock.user.userId))) {
+      return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'No puedes reemplazar este pedido' })
+    }
+    const requestUserId = original?.userId ?? sock.user.userId
 
     if (requestId !== undefined && (typeof requestId !== 'string' || !/^[a-zA-Z0-9-]{16,64}$/.test(requestId))) {
       return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'El identificador del pedido no es válido' })
@@ -62,9 +71,10 @@ const ACTION_HANDLERS = {
 
     const acknowledgeExisting = () => {
       if (!requestId) return false
-      const receipt = Queue.getRequest(roomId, sock.user.userId, requestId)
+      const receipt = Queue.getRequest(roomId, requestUserId, requestId)
       if (!receipt) return false
       const matches = receipt.source === source && receipt.origin === origin
+        && (receipt.replacesQueueId ?? null) === (replacesQueueId ?? null)
         && (source === 'YOUTUBE' ? receipt.externalId : String(receipt.songId)) === sourceId
       acknowledge(matches
         ? { type: QUEUE_ADD + '_SUCCESS', payload: { requestId, queueId: receipt.queueId, status: receipt.status, queue: Queue.get(roomId), greetingId: receipt.greetingId, requestIntent: receipt.requestIntent } }
@@ -94,6 +104,14 @@ const ACTION_HANDLERS = {
     }
 
     if (acknowledgeExisting()) return
+
+    if (replacesQueueId !== undefined) {
+      try {
+        Queue.getReplacement(roomId, requestUserId, replacesQueueId)
+      } catch (error) {
+        return acknowledge({ type: QUEUE_ADD + '_ERROR', error: (error as Error).message })
+      }
+    }
 
     const generation = Queue.cleanupGeneration(roomId)
 
@@ -153,10 +171,11 @@ const ACTION_HANDLERS = {
         ...(tableContext.tableId ? { tableContext } : {}),
         roomId,
         song,
-        userId: sock.user.userId,
+        userId: requestUserId,
         origin,
         ...(payload.requestIntent !== undefined ? { requestIntent: requestIntent(payload.requestIntent) } : {}),
         ...(requestId ? { requestId } : {}),
+        ...(replacesQueueId !== undefined ? { replacesQueueId } : {}),
         status: origin === 'PARTICIPANT' && !sock.user.isAdmin && queuePrefs.approvalMode === 'MANUAL'
           ? 'PENDING_APPROVAL'
           : 'APPROVED',

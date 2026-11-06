@@ -10,7 +10,7 @@ import Animation from '../Animation/Animation.js'
 import { catalogClips } from '../Animation/catalog.js'
 import { greetingPlayback, planGreetingTransition } from './transition.js'
 
-export interface GreetingPlayerStatus { queueId?: number, historyJSON?: string, nextUserId?: number | null, isAtQueueEnd?: boolean }
+export interface GreetingPlayerStatus { queueId?: number, historyJSON?: string, nextUserId?: number | null, isAtQueueEnd?: boolean, queueDecisionAt?: number }
 interface Identity { roomId: number, userId: number, isAdmin?: boolean }
 interface Delivery { ownerSocketId: string, untilAt: number, finished: number, displayMs: number | null, interventionId: string | null, voiceStatus: GreetingVoiceStatus | null }
 
@@ -20,7 +20,7 @@ export default class Greetings {
     if (includePendingId && queue.entities[includePendingId]?.status === 'PENDING_APPROVAL') queue.entities[includePendingId].status = 'APPROVED'
     const history = buildPlayerHistory(status.historyJSON ?? '[]', queue.result, queue.entities)
     return buildRoundRobinQueue(queue.result, queue.entities, history, status.queueId ?? -1, status.nextUserId ?? null,
-      normalizeQueuePrefs(Rooms.get(roomId).entities[roomId]?.prefs?.queue))
+      normalizeQueuePrefs(Rooms.get(roomId).entities[roomId]?.prefs?.queue), status.queueDecisionAt || undefined)
   }
 
   static opportunity (identity: Identity, queueId: number, status: GreetingPlayerStatus): { greeting: Greeting | null, canAdd: boolean, reason: string | null } {

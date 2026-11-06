@@ -22,7 +22,7 @@ function ordered (...items: Array<QueueItem | OptimisticQueueItem>) {
   return { result: items.map(item => item.queueId), entities: Object.fromEntries(items.map(item => [item.queueId, item])) }
 }
 
-const position = (queueId: number) => ({ queueId, historyJSON: '[]', nextUserId: null as number | null })
+const position = (queueId: number) => ({ queueId, historyJSON: '[]', nextUserId: null as number | null, queueDecisionAt: 1 })
 const preferences = { rotationMode: 'FAIR', maxSongsPerParticipantRound: 1, houseTracksBeforeParticipant: 0 }
 
 describe('transition queue context', () => {

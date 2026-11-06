@@ -71,6 +71,7 @@ const QueueList = () => {
   })
   const pendingLabel = `Por aprobar (${pendingIds.length})`
   const houseLabel = `De la casa (${houseIds.length})`
+  const replacedIds = new Set(Object.values(rawQueue.entities).filter(item => item.isOptimistic !== true).map(item => item.replacesQueueId))
 
   // actions
   const dispatch = useAppDispatch()
@@ -121,6 +122,7 @@ const QueueList = () => {
         isCurrent={isCurrent}
         key={qId}
         isAdmin={user.isAdmin}
+        canRecover={user.isAdmin && item.origin === 'PARTICIPANT' && item.status === 'FAILED' && !replacedIds.has(qId)}
         isErrored={isCurrent && isErrored}
         isInfoable={user.isAdmin && item.source === 'LOCAL' && typeof item.songId === 'number'}
         isMovable={isUpcoming && user.isAdmin}
@@ -193,6 +195,11 @@ const QueueList = () => {
         </div>
       )}
       {greetings.error && <p role='alert'>{greetings.error}</p>}
+      {user.isAdmin && houseIds.length > 0 && queue.housePolicy.reason && (
+        <p className={styles.empty} role='status'>
+          {`Música de la casa en espera: ${queue.housePolicy.reason === 'backlog' ? 'hay 3 o más pedidos de clientes pendientes.' : 'un pedido lleva 10 minutos o más esperando.'} La lista conserva su orden.`}
+        </p>
+      )}
       {user.isAdmin && filter === 'house' && <HousePlaylistControl key={user.roomId} />}
       {user.isAdmin && filter === 'queue' && result.length === 0 && (
         <div className={styles.empty}>

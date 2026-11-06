@@ -148,4 +148,66 @@ describe('durable participant request receipts', () => {
     expect(ack.mock.calls[0][0].error).toBeTruthy()
     expect(Queue.get(1).entities[queueId].status).toBe('PLAYING')
   })
+
+  const failedRequest = () => {
+    const queueId = Queue.add({ roomId: 1, userId: 1, song, requestIntent: 'SING' })
+    Queue.transition(1, queueId, 'FAILED')
+    db.run('UPDATE queue SET dateCreated=100,tableLabelSnapshot=? WHERE queueId=?', ['Mesa 01', queueId])
+    return queueId
+  }
+
+  it('replaces a failed request once with its original waiting time and attribution, including lost acknowledgments', async () => {
+    const original = failedRequest()
+    const action = { payload: { ...request('replacement-00001').payload, replacesQueueId: original, requestIntent: 'SING' } }
+    const ack = vi.fn()
+    await handlers[QUEUE_ADD](socket, action, ack)
+    await handlers[QUEUE_ADD](socket, action, ack)
+    const replacementId = ack.mock.calls[0][0].payload.queueId
+    expect(ack.mock.calls[1][0].payload.queueId).toBe(replacementId)
+    expect(Queue.get(1).entities[replacementId]).toMatchObject({
+      dateCreated: 100, replacesQueueId: original, userId: 1, tableLabelSnapshot: 'Mesa 01', status: 'PENDING_APPROVAL', requestIntent: 'SING',
+    })
+    expect(Queue.get(1).entities[original].status).toBe('FAILED')
+    expect(Queue.countPending(1, 1)).toBe(1)
+    const retry = vi.fn()
+    await handlers[QUEUE_ADD](socket, { payload: { ...action.payload, requestId: 'replacement-00002' } }, retry)
+    expect(retry.mock.calls[0][0].error).toContain('ya tiene un reemplazo')
+  })
+
+  it('refuses another participant, another room, non-failed and cleared requests', async () => {
+    const original = failedRequest()
+    const action = { payload: { ...request('replacement-00001').payload, replacesQueueId: original } }
+    for (const user of [{ ...socket.user, userId: 2 }, { ...socket.user, roomId: 2 }]) {
+      const ack = vi.fn()
+      await handlers[QUEUE_ADD]({ ...socket, user }, action, ack)
+      expect(ack.mock.calls[0][0].error).toContain('No puedes')
+    }
+    for (const update of ['status=\'PLAYED\'', 'status=\'FAILED\',historyClearedAt=1']) {
+      db.exec(`UPDATE queue SET ${update} WHERE queueId=${original}`)
+      const ack = vi.fn()
+      await handlers[QUEUE_ADD](socket, action, ack)
+      expect(ack.mock.calls[0][0].error).toContain('fallido vigente')
+    }
+    expect(Queue.get(1).result).toHaveLength(1)
+  })
+
+  it('allows an operator to recover a client request without changing its owner', async () => {
+    const original = failedRequest()
+    const adminSocket = { ...socket, user: { ...socket.user, userId: 2, isAdmin: true } }
+    const action = { payload: { ...request('replacement-admin').payload, replacesQueueId: original } }
+    const ack = vi.fn()
+    await handlers[QUEUE_ADD](adminSocket, action, ack)
+    await handlers[QUEUE_ADD](adminSocket, action, ack)
+    expect(ack.mock.calls[0][0].payload.queueId).toBe(ack.mock.calls[1][0].payload.queueId)
+    expect(Queue.get(1).entities[ack.mock.calls[0][0].payload.queueId]).toMatchObject({ userId: 1, dateCreated: 100 })
+  })
+
+  it('keeps replacement uniqueness when two different recoveries resolve concurrently', async () => {
+    const original = failedRequest()
+    db.run('UPDATE rooms SET data=? WHERE roomId=1', [JSON.stringify({ prefs: { queue: { maxPendingPerParticipant: 2 } } })])
+    const results = await Promise.allSettled(['replacement-00001', 'replacement-00002'].map(requestId =>
+      handlers[QUEUE_ADD](socket, { payload: { ...request(requestId).payload, replacesQueueId: original } }, vi.fn())))
+    expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
+    expect(db.get<{ count: number }>('SELECT count(*) count FROM queue WHERE replacesQueueId=?', [original])?.count).toBe(1)
+  })
 })

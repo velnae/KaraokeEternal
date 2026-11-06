@@ -4,8 +4,8 @@ import { useAppDispatch, useAppSelector } from 'store/hooks'
 import Player from '../Player/Player'
 import PlayerTextOverlay from '../PlayerTextOverlay/PlayerTextOverlay'
 import PlayerQR from '../PlayerQR/PlayerQR'
-import getRoundRobinQueue from 'routes/Queue/selectors/getRoundRobinQueue'
-import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, playerUpdate, type PlayerState } from '../../modules/player'
+import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
+import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, type PlayerState } from '../../modules/player'
 import store from 'store/store'
 import socket from 'lib/socket'
 import useAnimationPlayer from '../Animation/useAnimationPlayer'
@@ -38,7 +38,7 @@ interface PlayerControllerProps {
 type TransitionScene = { id: string, background: TransitionVideoBackground | null, phase: 'intro' | 'voice' | 'loading' }
 
 const PlayerController = (props: PlayerControllerProps) => {
-  const queue = useAppSelector(getRoundRobinQueue)
+  const queue = useAppSelector(getPlaybackQueue)
   const rawQueue = useAppSelector(state => ensureState(state.queue))
   const player = useAppSelector(state => state.player)
   const playerVisualizer = useAppSelector(state => state.playerVisualizer)
@@ -164,10 +164,10 @@ const PlayerController = (props: PlayerControllerProps) => {
     const before = store.getState().player
     const sourceId = before.queueId
     const historyJSON = appendCompletedToHistory(before.historyJSON, includeCurrentInHistory && sourceId >= 0 ? sourceId : undefined)
-    dispatch(playerUpdate({ historyJSON, _isBetweenTracks: true }))
+    dispatch(playerStatus({ historyJSON, _isBetweenTracks: true, queueDecisionAt: Math.floor(Date.now() / 1000) }))
     const selection = () => {
       const state = store.getState()
-      const ordered = getRoundRobinQueue({ ...state, status: { ...state.status, queueId: state.player.queueId, historyJSON: state.player.historyJSON, nextUserId: state.player.nextUserId } })
+      const ordered = getPlaybackQueue(state)
       const index = ordered.result.indexOf(state.player.queueId)
       return ordered.result.slice(index + 1).map(id => ordered.entities[id]).find(item => item.status === 'APPROVED')
     }
@@ -197,14 +197,16 @@ const PlayerController = (props: PlayerControllerProps) => {
         ? await greetingsRef.current.attempt(upcoming.queueId)
         : false
       if (!greeted && announce && controlVersion === animationRef.current.controlVersion()) {
-        await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, selection()?.queueId ?? null)
+        await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null)
       }
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       const current = store.getState().player
       if (!socket.connected || current._authority !== 'GRANTED' || current._isReplayingQueueId !== null || animationRef.current.isBlocked()) return
       // Read the current intent, never restore the pre-announcement pause state.
       if (!current.isPlaying && !current._isPlayingNext) return
-      const next = selection()
+      // Keep the song whose transition just ran, unless it was cancelled.
+      const reserved = upcoming && ensureState(store.getState().queue).entities[upcoming.queueId]
+      const next = reserved?.isOptimistic !== true && reserved?.status === 'APPROVED' ? reserved : selection()
       if (!next) {
         await finishTransition()
         dispatch(playerStatus({ historyJSON: current.historyJSON, isAtQueueEnd: true, isErrored: false, mediaType: null, _isPlayingNext: false, _isBetweenTracks: false }))
@@ -215,7 +217,9 @@ const PlayerController = (props: PlayerControllerProps) => {
       dispatch(playerStatus({
         errorMessage: '', historyJSON: current.historyJSON, isAtQueueEnd: false, isErrored: false,
         isPlaying: true, isVideoKeyingEnabled: next.isVideoKeyingEnabled, mediaType: next.mediaType,
-        position: 0, queueId: next.queueId, nextUserId: null, _isPlayingNext: false, _isBetweenTracks: false, _isReplayPlayback: false,
+        position: 0, queueId: next.queueId,
+        nextUserId: next.origin === 'PARTICIPANT' ? null : current.nextUserId,
+        _isPlayingNext: false, _isBetweenTracks: false, _isReplayPlayback: false,
       }))
     } finally {
       advancing.current = false
@@ -255,7 +259,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     const currentIndex = queue.result.indexOf(queueItem?.queueId)
     const upcomingParticipantId = queue.result
       .slice(currentIndex + 1)
-      .find(queueId => queue.entities[queueId].origin === 'PARTICIPANT')
+      .find(queueId => queue.entities[queueId].origin === 'PARTICIPANT' && queue.entities[queueId].status === 'APPROVED')
     const upcomingUserId = upcomingParticipantId === undefined
       ? null
       : queue.entities[upcomingParticipantId].userId

@@ -62,6 +62,7 @@ export interface StatusState {
   mediaType: MediaType | null
   mp4Alpha: number
   nextUserId: number | null
+  queueDecisionAt?: number
   position: number
   queueId: number
   visualizer: PlayerVisualizerState | Record<string, never>
@@ -82,6 +83,7 @@ const initialState: StatusState = {
   mediaType: null,
   mp4Alpha: 1,
   nextUserId: null,
+  queueDecisionAt: 0,
   position: 0,
   queueId: -1,
   visualizer: {},

@@ -4,7 +4,7 @@ import { youtubeQuery } from '../../../shared/youtubeSearch'
 export const requestStatusLabels = {
   PENDING_APPROVAL: 'Por aprobar',
   APPROVED: 'En la cola',
-  PLAYING: 'Cantando ahora',
+  PLAYING: 'En reproducción',
   PLAYED: 'Finalizada',
   REJECTED: 'No aprobada',
   FAILED: 'No se pudo reproducir',

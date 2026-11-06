@@ -6,7 +6,7 @@ import { QUEUE_ADD } from 'shared/actionTypes'
 import { queuePush } from 'routes/Queue/modules/queue'
 import { createRequestController } from 'routes/Participant/requests'
 
-export function useSongRequests (origin: 'PARTICIPANT' | 'HOUSE' = 'PARTICIPANT') {
+export function useSongRequests (origin: 'PARTICIPANT' | 'HOUSE' = 'PARTICIPANT', replacesQueueId?: number) {
   const { roomId, userId } = useAppSelector(state => state.user)
   const dispatch = useAppDispatch()
   const controller = useMemo(() => createRequestController({
@@ -14,12 +14,12 @@ export function useSongRequests (origin: 'PARTICIPANT' | 'HOUSE' = 'PARTICIPANT'
       getItem: key => window.sessionStorage.getItem(key),
       setItem: (key, value) => window.sessionStorage.setItem(key, value),
     },
-    key: `karaoke-requests:${roomId}:${userId}${origin === 'HOUSE' ? ':house' : ''}`,
+    key: `karaoke-requests:${roomId}:${userId}${origin === 'HOUSE' ? ':house' : ''}${replacesQueueId ? `:replace:${replacesQueueId}` : ''}`,
     makeId: () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join(''),
     send: async (sourceId, requestId, greeting, requestIntent) => {
       if (!socket.connected) throw new Error('offline')
       const response = await socket.timeout(12000).emitWithAck('action', {
-        type: QUEUE_ADD, payload: { source: 'YOUTUBE', sourceId, origin, requestId, requestIntent, ...(greeting ? { greeting } : {}) },
+        type: QUEUE_ADD, payload: { source: 'YOUTUBE', sourceId, origin, requestId, requestIntent, ...(replacesQueueId ? { replacesQueueId } : {}), ...(greeting ? { greeting } : {}) },
       })
       const account = store.getState().user
       if (account.userId === userId && account.roomId === roomId && response.payload?.queue) {
@@ -27,7 +27,7 @@ export function useSongRequests (origin: 'PARTICIPANT' | 'HOUSE' = 'PARTICIPANT'
       }
       return response
     },
-  }), [roomId, userId, origin, dispatch])
+  }), [roomId, userId, origin, replacesQueueId, dispatch])
   const receipts = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
   return { controller, receipts }
 }

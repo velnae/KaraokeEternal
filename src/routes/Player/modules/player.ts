@@ -120,6 +120,7 @@ export interface PlayerState {
   mediaType: string | null
   mp4Alpha: number
   nextUserId: number | null
+  queueDecisionAt?: number
   position: number
   queueId: number
   rgTrackGain: number | null
@@ -148,6 +149,7 @@ const initialState: PlayerState = {
   mediaType: null,
   mp4Alpha: 0.5,
   nextUserId: null,
+  queueDecisionAt: 0,
   position: 0,
   queueId: -1,
   rgTrackGain: null,
