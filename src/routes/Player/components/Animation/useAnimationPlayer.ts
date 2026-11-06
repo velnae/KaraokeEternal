@@ -74,7 +74,7 @@ export default function useAnimationPlayer () {
     const owner = audioOwnerKey()
     if (!mounted.current || !owner || preparedOwner.current !== owner || !voiceRequested(store.getState().animation.snapshot)) return
     const ready = audio.current.ready
-    const readyClips = ready ? [...audio.current.buffers.keys()].sort() : []
+    const readyClips = ready ? audio.current.readyChecksums : []
     try {
       await readiness.publish(JSON.stringify([owner, ready, readyClips]), async () => {
         await animationRequest(ANIMATION_READY, { audioUnlocked: ready, readyClips, transitionBed: true })

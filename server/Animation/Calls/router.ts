@@ -3,18 +3,23 @@ import { getGreetingVoice } from '../../Greetings/GreetingVoice.js'
 import Tables from '../../Tables/Tables.js'
 import { job, jobDTO, tableVoice } from './Store.js'
 import CallJobs, { CallError } from './Jobs.js'
+import CallAutomation, { getCallAutomation } from './Automation.js'
+import Animation from '../Animation.js'
 
 let worker: CallJobs | undefined
 export async function startCallJobs (directory: string) {
   const instance = new CallJobs(directory, getGreetingVoice(), process.env.KES_FFMPEG_PATH || 'ffmpeg')
   await instance.start()
   worker = instance
+  const automatic = new CallAutomation(instance, getGreetingVoice())
+  automatic.start()
   return async () => {
+    automatic.stop()
     await instance.stop()
     if (worker === instance) worker = undefined
   }
 }
-export function createCallRouter (getWorker = () => worker) {
+export function createCallRouter (getWorker = () => worker, getAutomation = getCallAutomation) {
   const router = new Router({ prefix: '/api/rooms/:roomId' })
   const callPaths = /^\/(karaoke-calls(?:\/|$)|tables\/[^/]+\/voice(?:\/|$))/
   router.use(async (ctx, next) => {
@@ -32,7 +37,47 @@ export function createCallRouter (getWorker = () => worker) {
   })
   const body = (ctx): Record<string, unknown> => ctx.request.body || {}
   router.get('/karaoke-calls', (ctx) => {
-    ctx.body = getWorker()!.snapshot(Number(ctx.params.roomId))
+    const roomId = Number(ctx.params.roomId)
+    ctx.body = { ...getWorker()!.snapshot(roomId), automation: getAutomation()?.snapshot(roomId) }
+  })
+  const automatic = () => {
+    const service = getAutomation()
+    if (!service) throw new CallError('El servicio automático todavía no está disponible.', 503)
+    return service
+  }
+  const changed = (roomId: number) => {
+    if (Animation.active(roomId)?.callJSON) Animation.cancel(roomId, 'Cambió la configuración de llamados.')
+    Animation.publish(roomId)
+  }
+  router.put('/karaoke-calls/automation', (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    ctx.body = automatic().configure(roomId, body(ctx))
+    changed(roomId)
+  })
+  router.post('/karaoke-calls/setup', (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    ctx.body = automatic().setup(roomId, body(ctx))
+    changed(roomId)
+    ctx.status = 202
+  })
+  const queueId = (ctx) => {
+    const id = Number(ctx.params.queueId)
+    if (!Number.isSafeInteger(id) || id < 1) throw new CallError('Pedido no válido.')
+    return id
+  }
+  router.get('/karaoke-calls/requests/:queueId', (ctx) => {
+    ctx.body = automatic().snapshot(Number(ctx.params.roomId), queueId(ctx)).requests[0]
+    if (!ctx.body) ctx.throw(404)
+  })
+  router.post('/karaoke-calls/requests/:queueId/retry', (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    automatic().retry(roomId, queueId(ctx), body(ctx).inputKey)
+    ctx.body = automatic().snapshot(roomId)
+    ctx.status = 202
+  })
+  router.get('/karaoke-calls/requests/:queueId/audio/:id', async (ctx) => {
+    ctx.body = await automatic().audio(Number(ctx.params.roomId), queueId(ctx), ctx.params.id)
+    ctx.type = 'audio/mpeg'
   })
   router.post('/karaoke-calls/intros', (ctx) => {
     ctx.body = getWorker()!.submit(Number(ctx.params.roomId), 'intro', body(ctx))

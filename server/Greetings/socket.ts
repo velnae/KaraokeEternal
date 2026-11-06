@@ -10,6 +10,7 @@ import { db } from '../lib/Database.js'
 import { interventionAssets, type Intervention } from '../../shared/animation.js'
 import type { GreetingAsset } from '../../shared/greetings.js'
 import { catalogClips } from '../Animation/catalog.js'
+import { getCallAutomation } from '../Animation/Calls/Automation.js'
 
 const log = getLogger('greetings')
 
@@ -45,6 +46,7 @@ export default {
           if (sock.connected === false || sock.user?.roomId !== roomId || !sock.user?.isAdmin || !Rooms.isAuthoritativePlayer(sock) || payload.expiresAt < Date.now()) throw new Error('El permiso de reproducción venció')
         }
         if (operation === 'prepare') {
+          getCallAutomation()?.prioritize(roomId, number('queueId'))
           const preparation = await prepareGreetingTransition(roomId, number('queueId'))
           revalidate()
           return acknowledge({ preparation })

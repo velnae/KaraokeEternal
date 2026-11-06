@@ -35,6 +35,7 @@
     "test:animation:phase2": "node config/animation-phase2.e2e.mjs",
     "test:animation:rehearsal": "node config/animation-rehearsal.e2e.mjs",
     "test:animation:calls": "node config/karaoke-call-pilot.e2e.mjs",
+    "test:animation:calls:playback": "node config/karaoke-calls-playback.e2e.mjs",
     "test:greetings:e2e": "node config/greetings.e2e.mjs",
     "test:greetings:audio": "node config/greeting-audio.e2e.mjs",
     "test:greetings:playback": "node config/greeting-playback.e2e.mjs",

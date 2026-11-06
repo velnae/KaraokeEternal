@@ -166,6 +166,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     advancing.current = true
     const controlVersion = animationRef.current.controlVersion()
     const before = store.getState().player
+    const transitionStartedAt = performance.now()
     const sourceId = before.queueId
     const historyJSON = appendCompletedToHistory(before.historyJSON, includeCurrentInHistory && sourceId >= 0 ? sourceId : undefined)
     dispatch(playerStatus({ historyJSON, _isBetweenTracks: true, queueDecisionAt: Math.floor(Date.now() / 1000) }))
@@ -177,10 +178,11 @@ const PlayerController = (props: PlayerControllerProps) => {
     }
     try {
       const upcoming = selection()
+      const callRequested = animationRef.current.snapshot?.karaokeCallsEnabled && upcoming?.origin !== 'HOUSE' && upcoming?.requestIntent === 'SING'
       if (upcoming || boundary !== 'idle') await animationRef.current.stopAmbience()
       // A pause can arrive while the previous ambience is being released.
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
-      if (announce && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
+      if ((announce || callRequested) && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
         && (backgroundRef.current || store.getState().rooms.entities[store.getState().user.roomId]?.prefs?.transitionVideo?.mode === 'all'
           || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)) {
         const scene: TransitionScene = { id: crypto.randomUUID(), background: null, phase: 'intro' }
@@ -205,7 +207,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         updateTransition({ ...scene, phase: 'voice' })
       }
       const greeted = upcoming && controlVersion === animationRef.current.controlVersion()
-        ? await greetingsRef.current.attempt(upcoming.queueId)
+        ? await greetingsRef.current.attempt(upcoming.queueId, callRequested ? Math.max(0, 25000 - (performance.now() - transitionStartedAt)) : undefined)
         : false
       if (!greeted && announce && controlVersion === animationRef.current.controlVersion()) {
         await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null)
@@ -421,7 +423,7 @@ const PlayerController = (props: PlayerControllerProps) => {
                 <PlayerTransitionPresentation
                   {...presentedTracks}
                   venueName={prefs.branding.name}
-                  announcementActive={!!(animation.text || animation.scene)}
+                  announcementActive={!!(animation.text || animation.scene || greetings.scene?.transition?.call)}
                   greetingIntro={!!greetings.intro}
                   greeting={greetings.active}
                   onGreetingMounted={greetings.confirmMounted}

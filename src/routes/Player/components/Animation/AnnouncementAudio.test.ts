@@ -6,6 +6,27 @@ import type { GreetingAsset } from '../../../../../shared/greetings.js'
 
 afterEach(() => vi.unstubAllGlobals())
 
+it('retains the call and its fallbacks alongside greetings under catalog memory pressure', async () => {
+  const audio = new AnnouncementAudio()
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration: 10, length: 441000, numberOfChannels: 2 }) } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/karaoke/' })
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(url.split('/').pop())))
+  const calls = Array.from({ length: 3 }, (_, index) => ({ id: `call-${index}`, role: 'call', url: `api/calls/call-${index}`,
+    checksum: createHash('sha256').update(`call-${index}`).digest('hex'), durationMs: 10000, kind: 'voice' } as GreetingAsset))
+  const greeting = { id: 'greeting', role: 'greeting', url: 'api/greeting', checksum: createHash('sha256').update('greeting').digest('hex'), durationMs: 10000, kind: 'voice' } as GreetingAsset
+  const catalog = Array.from({ length: 24 }, (_, index) => ({ id: `catalog-${index}`, durationMs: 10000,
+    checksum: createHash('sha256').update(`catalog-${index}`).digest('hex'), kind: 'voice' } as AnimationClip))
+  await audio.prepare(catalog)
+  await audio.prepareGreetingAssets([...calls, greeting])
+  await audio.prepare(catalog)
+  expect(audio.decodedBytes).toBeLessThanOrEqual(audio.maxDecodedBytes)
+  expect([...calls, greeting].every(asset => audio.buffers.has(asset.checksum))).toBe(true)
+  expect(audio.readyChecksums.slice(0, 3)).toEqual(calls.map(asset => asset.checksum))
+  await audio.prepareGreetingAssets([])
+  expect(calls.some(asset => audio.buffers.has(asset.checksum))).toBe(false)
+  audio.close()
+})
+
 it('preloads a private twenty-second greeting independently of catalog refresh', async () => {
   const audio = new AnnouncementAudio()
   audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration: 20, length: 480000, numberOfChannels: 1 }) } as unknown as AudioContext

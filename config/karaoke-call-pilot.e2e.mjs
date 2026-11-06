@@ -7,10 +7,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
+import { checkAutomaticCalls } from './karaoke-call-playback-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
 const httpsUi = process.env.KARAOKE_E2E_HTTPS_UI === '1'
+const automaticCalls = process.env.KARAOKE_E2E_AUTOMATIC_CALLS === '1'
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'karaoke-call-pilot-'))
 const log = fs.openSync(path.join(data, 'server.log'), 'a')
 const listen = async (instance) => {
@@ -31,6 +33,7 @@ execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i
 const wave = fs.readFileSync(source)
 let held = false
 let release
+let failText = ''
 const provider = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json')
   if (req.method === 'GET') {
@@ -39,7 +42,13 @@ const provider = createServer(async (req, res) => {
   }
   const chunks = []
   for await (const chunk of req) chunks.push(chunk)
-  providerRequests.push(JSON.parse(Buffer.concat(chunks).toString()))
+  const body = JSON.parse(Buffer.concat(chunks).toString())
+  providerRequests.push(body)
+  if (failText && body.contents[0].parts[0].text.includes(failText)) {
+    res.statusCode = 500
+    res.end(JSON.stringify({ error: { message: 'Fixture uncertainty' } }))
+    return
+  }
   if (held) await new Promise((resolve) => {
     release = resolve
     res.once('close', resolve)
@@ -218,6 +227,12 @@ try {
   assert.equal(db.prepare('SELECT count(*) n FROM animationInterventions').get().n, 0)
   assert.equal(db.prepare('SELECT count(*) n FROM audioUsage').get().n, 0)
   assert.equal(db.prepare('SELECT count(*) n FROM greetings').get().n, 0)
+  if (automaticCalls) await checkAutomaticCalls({ page, context, browser, api, base, uiBase, data, db, call, snapshot,
+    restart: async () => {
+      await stop()
+      await start()
+      await call('login', { username: 'admin', password: 'call-pilot-test', roomId: 1 })
+    }, fail: (text) => { failText = text } })
   const beforeRestart = providerRequests.length
   await page.close()
   await stop()

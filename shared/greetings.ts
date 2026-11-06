@@ -1,6 +1,7 @@
 import type { AnimationClip, Intervention } from './animation.js'
 import type { RequestIntent } from './requestIntent.js'
 import type { TransitionVideoBackground } from './transitionVideo.js'
+import type { CallContext, CallPreparation } from './karaokeCalls.js'
 import { guestNameError } from './guestName.js'
 import { hasInvisibleCharacters, hasOffensiveText } from './textModeration.js'
 
@@ -20,10 +21,10 @@ export type GreetingVoiceStatus = 'SCREEN' | 'SCHEDULED' | 'PLAYING' | 'PLAYED' 
 export const greetingVoiceLabels: Record<GreetingVoiceStatus, string> = {
   SCREEN: 'Solo pantalla', SCHEDULED: 'Lectura programada', PLAYING: 'Leyendo saludo', PLAYED: 'Voz reproducida', FAILED: 'Voz no completada', INTERRUPTED: 'Voz interrumpida',
 }
-export interface GreetingAsset extends AnimationClip { role: 'greeting' | 'intro' | 'bed', url: string }
+export interface GreetingAsset extends AnimationClip { role: 'greeting' | 'intro' | 'bed' | 'call', url: string }
 export interface GreetingPerformer { name: string, tableLabel: string | null, requestIntent: RequestIntent, title: string }
-export interface GreetingPreparation { queueId: number, greetingId: number, assets: GreetingAsset[], playbackVersion: number, performer: GreetingPerformer }
-export interface GreetingTransition { assets: GreetingAsset[], durationMs: number, voiceMs: number, displayMs: number }
+export interface GreetingPreparation { queueId: number, greetingId: number | null, assets: GreetingAsset[], playbackVersion: number, performer: GreetingPerformer, call?: CallPreparation }
+export interface GreetingTransition { assets: GreetingAsset[], durationMs: number, voiceMs: number, displayMs: number, call?: CallContext }
 export const greetingAudioLabels: Record<GreetingAudioStatus, string> = {
   queued: 'Voz en espera', generating: 'Generando voz', preparing: 'Preparando audio', ready: 'Audio preparado',
   uncertain: 'Solo pantalla', failed: 'Solo pantalla', cancelled: 'Solo pantalla', unavailable: 'Solo pantalla',
@@ -53,6 +54,7 @@ export interface GreetingSnapshot {
   turns: { key: number, queueIds: number[], userId: number }[]
 }
 export interface GreetingGrant {
+  callMode?: boolean
   background?: TransitionVideoBackground | null
   turnKey: number
   items: Greeting[]

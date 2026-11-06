@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { db } from '../../lib/Database.js'
 import Tables from '../../Tables/Tables.js'
 import type { GreetingVoiceProfile } from '../../Greetings/voiceProfile.js'
-import { defaultTableCallText, type CallJob, type CallOperation, type CallPart, type CallStatus, type TableCallVoice } from '../../../shared/karaokeCalls.js'
+import { defaultTableCallText, type CallControls, type CallJob, type CallJobPurpose, type CallOperation, type CallPart, type CallStatus, type TableCallVoice } from '../../../shared/karaokeCalls.js'
 
 export const key = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export interface PartRow extends CallPart {
@@ -28,6 +28,8 @@ export interface JobInput {
   continuation?: string
 }
 export interface JobRow {
+  purpose: CallJobPurpose
+  priority: number
   id: string
   roomId: number
   requestId: string
@@ -46,6 +48,28 @@ export interface JobRow {
   updatedAt: number
 }
 export interface Binding { tableId: number, roomId: number, spokenText: string, codeSnapshot: string, revision: number, partId: string | null }
+export interface RequestRow {
+  queueId: number
+  roomId: number
+  inputKey: string
+  introId: string | null
+  jobId: string | null
+  resultId: string | null
+  status: 'waiting' | 'preparing' | 'ready' | 'fallback' | 'cancelled'
+  reason: string | null
+  attempt: number
+  startedAt: number | null
+  updatedAt: number
+}
+export const callControls = (roomId: number): CallControls => {
+  const row = db.get<{ revision: number, preparing: number, enabled: number, introIdsJSON: string }>('SELECT * FROM karaokeCallControls WHERE roomId=?', [roomId])
+  return row ? { revision: row.revision, preparing: !!row.preparing, enabled: !!row.enabled, introIds: JSON.parse(row.introIdsJSON) } : { revision: 0, preparing: false, enabled: false, introIds: [] }
+}
+export const requestCall = (roomId: number, queueId: number) => db.get<RequestRow>('SELECT * FROM karaokeCallRequests WHERE roomId=? AND queueId=?', [roomId, queueId])
+export const callSessionAllows = (roomId: number) => {
+  const session = db.get<{ status: string }>('SELECT status FROM animationSessions WHERE roomId=? ORDER BY openedAt DESC,rowid DESC LIMIT 1', [roomId])
+  return !session || session.status === 'OPEN'
+}
 export const part = (roomId: number, id: string) => db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND id=? AND retired=0', [roomId, id])
 export const job = (roomId: number, id: string) => db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND id=?', [roomId, id])
 export const binding = (roomId: number, tableId: number) => db.get<Binding>('SELECT * FROM tableCallVoices WHERE roomId=? AND tableId=?', [roomId, tableId])

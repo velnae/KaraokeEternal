@@ -26,8 +26,18 @@
 .error, .warning { color: var(--amber); line-height: 1.5; overflow-wrap: anywhere; }
 .notice { color: var(--cyan); line-height: 1.5; }
 .panel a { color: var(--cyan); }
+.automatic { margin-block: 24px; padding: 20px; background: var(--equipment); border-left: 3px solid var(--cyan); }
+.automatic p { line-height: 1.6; }
+.automaticHeading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.automaticHeading h3 { margin: 0; font-size: 22px; }
+.switch { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
+.switch input { width: 20px; height: 20px; accent-color: var(--cyan); }
+.readiness { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-block: 18px; }
+.readiness span { color: var(--secondary); }
+.requestDetails { margin-top: 18px; border-top: 1px solid var(--edge); }
+.requestDetails summary { padding-block: 16px; cursor: pointer; }
 @media (max-width: 680px) {
   .grid { grid-template-columns: 1fr; gap: 0; }
   .actions > button { flex: 1 1 auto; }
-  .profile, .preview { padding: 14px; }
+  .profile, .preview, .automatic { padding: 14px; }
 }

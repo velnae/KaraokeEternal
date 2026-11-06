@@ -13,6 +13,10 @@ import { categoryEffects, heardAt, profileIntervals, selectAnnouncement, support
 import { backfillAudioUsage, leastUsedAudio, recordAudioUsage } from './usage.js'
 import { GREETING_START_MS } from '../../shared/greetings.js'
 import { captureTransitionBackground, leasedTransitionBackground } from '../TransitionVideo/Playback.js'
+import { callsEnabled, prepareCall, validCall } from './Calls/Playback.js'
+import { callControls } from './Calls/Store.js'
+import { getCallAutomation } from './Calls/Automation.js'
+import type { CallContext } from '../../shared/karaokeCalls.js'
 
 type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[], transitionBed: boolean }
 export interface AnimationIdentity { roomId: number, userId: number, socketId: string }
@@ -78,7 +82,8 @@ export default class Animation {
     return { ...state, microphoneOccupied: 0, prefs: animationPrefs(Animation.room(roomId).prefs.animation), active: Animation.active(roomId),
       history: Animation.history(roomId), playerPresent: !!owner, audioUnlocked: owner?.unlocked ?? false,
       readyClips: owner?.readyClips ?? [], serverTime: Date.now(), session: currentSession(roomId), ambience: Animation.ambience(roomId),
-      catalogVersion: catalogVersion(), voiceBudgetRemainingMs: voiceBudget(Animation.selectionHistory(roomId), Date.now()), greetingVoiceEnabled: Animation.greetingEnabled(roomId) }
+      catalogVersion: catalogVersion(), voiceBudgetRemainingMs: voiceBudget(Animation.selectionHistory(roomId), Date.now()), greetingVoiceEnabled: Animation.greetingEnabled(roomId),
+      karaokeCallsEnabled: callsEnabled(roomId), karaokeCallsRevision: callControls(roomId).revision }
   }
 
   static greetingEnabled (roomId: number) {
@@ -95,23 +100,25 @@ export default class Animation {
   }
 
   /** Greetings share the same exclusive intervention, epoch and persisted room fence. */
-  static reserveGreeting (identity: AnimationIdentity, queueId: number, assets: AnimationClip[], durationMs: number, voiceMs: number, text: string): Intervention | null {
+  static reserveGreeting (identity: AnimationIdentity, queueId: number, assets: AnimationClip[], durationMs: number, voiceMs: number, text: string, call?: CallContext): Intervention | null {
     const owner = owners.get(identity.roomId)
     const snapshot = Animation.snapshot(identity.roomId)
     const now = Date.now()
-    if (!owner || owner.socketId !== identity.socketId || !owner.unlocked || !Animation.greetingEnabled(identity.roomId)
+    if (!owner || owner.socketId !== identity.socketId || !owner.unlocked || (call ? !validCall(identity.roomId, call) : !Animation.greetingEnabled(identity.roomId))
       || snapshot.active || snapshot.blockedUntil > now || (snapshot.ambience && !Animation.transitionAmbience(identity, queueId)) || snapshot.prefs.volume <= 0
       || Animation.room(identity.roomId).status !== 'open' || voiceMs > (snapshot.voiceBudgetRemainingMs ?? 0)) return null
     if (!assets.length || durationMs <= 0 || durationMs > 25000 - GREETING_START_MS || voiceMs <= 0 || voiceMs > durationMs) throw new Error('La transición supera el tiempo disponible.')
     const id = randomUUID()
     const startBefore = now + GREETING_START_MS
-    const until = now + 25000
+    const until = now + (call ? durationMs + GREETING_START_MS : 25000)
+    const requestKey = call ? `call-${queueId}-${id}` : `greeting-${queueId}`
     const room = Animation.room(identity.roomId)
     db.run(`INSERT INTO animationInterventions(interventionId,roomId,requestId,requestedByUserId,clipId,clipChecksum,displayText,durationMs,voiceDurationMs,status,
       playerEpoch,ownerSocketId,contextKey,transitionId,requestedAt,expiresAt,startBefore,leaseUntil,origin,sourceEventKey,family,sequenceJSON)
       VALUES(?,?,?,?,?,?,?,?,?,'RESERVED',?,?,?,?,?,?,?,?,'GREETING',?,'greeting',?)`,
-    [id, identity.roomId, `greeting-${queueId}`, identity.userId, assets[0].id, assets[0].checksum, text, durationMs, voiceMs,
-      owner.epoch, identity.socketId, animationContext(Queue.get(identity.roomId), room.prefs.queue), id, now, until, startBefore, until, `greeting-${queueId}`, JSON.stringify(assets)])
+    [id, identity.roomId, requestKey, identity.userId, assets[0].id, assets[0].checksum, text, durationMs, voiceMs,
+      owner.epoch, identity.socketId, animationContext(Queue.get(identity.roomId), room.prefs.queue), id, now, until, startBefore, until, requestKey, JSON.stringify(assets)])
+    if (call) db.run('UPDATE animationInterventions SET callJSON=? WHERE interventionId=?', [JSON.stringify(call), id])
     db.run('UPDATE animationRoomState SET blockedUntil=?,pendingEventJSON=NULL WHERE roomId=?', [until, identity.roomId])
     captureTransitionBackground(identity.roomId, `animation:${id}`, until)
     return Animation.active(identity.roomId)
@@ -147,6 +154,9 @@ export default class Animation {
     const now = Date.now()
     const rows = db.all<Intervention>(`SELECT * FROM animationInterventions WHERE status IN ${activeStatuses}`)
     for (const row of rows) {
+      if (row.callJSON && !row.stopRequestedAt && !validCall(row.roomId, JSON.parse(row.callJSON), !!row.startedAt)) {
+        Animation.cancel(row.roomId, 'Cambió el pedido o la configuración del llamado.', row.interventionId)
+      }
       if (row.status === 'PENDING' ? row.expiresAt <= now : (row.leaseUntil ?? 0) <= now) {
         db.run('UPDATE animationInterventions SET status = ?, finishedAt = ?, reason = ? WHERE interventionId = ?',
           [row.status === 'PENDING' ? 'EXPIRED' : 'UNCERTAIN', now,
@@ -253,7 +263,7 @@ export default class Animation {
       db.exec('RELEASE animation_control')
       throw error
     }
-    if ((!prefs.enabled && Animation.active(roomId)?.origin !== 'GREETING') || prefs.volume === 0) {
+    if ((!prefs.enabled && (Animation.active(roomId)?.origin !== 'GREETING' || Animation.active(roomId)?.callJSON)) || prefs.volume === 0) {
       Animation.cancel(roomId, 'Animador bloqueado por el operador')
     }
     const active = Animation.active(roomId)
@@ -343,6 +353,7 @@ export default class Animation {
     const session = currentSession(roomId)
     const owner = owners.get(roomId)
     if (!session || !prefs.enabled || !prefs.automation || Animation.active(roomId) || input.replay) return null
+    if (input.expectedNextQueueId !== null && prepareCall(roomId, input.expectedNextQueueId)) return null
     if (owner?.socketId !== identity.socketId || owner.epoch !== input.playerEpoch) throw new Error('Reproductor sin autoridad')
     const now = Date.now()
     const state = Animation.state(roomId)
@@ -529,7 +540,12 @@ export default class Animation {
       if (row.stopRequestedAt || now > row.startBefore! || owners.get(identity.roomId)?.epoch !== epoch) throw new Error('El permiso de inicio venció')
       const room = Animation.room(identity.roomId)
       const state = Animation.snapshot(identity.roomId)
-      const greeting = row.origin === 'GREETING'
+      const call: CallContext | undefined = row.callJSON ? JSON.parse(row.callJSON) : undefined
+      if (call && !validCall(identity.roomId, call)) {
+        Animation.cancel(identity.roomId, 'El llamado cambió antes del inicio')
+        throw new Error('El llamado ya no corresponde al pedido.')
+      }
+      const greeting = row.origin === 'GREETING' && (!call || interventionAssets(row).some(asset => (asset as AnimationClip & { role?: string }).role === 'greeting'))
       const control = greeting ? db.get<{ playbackVersion: number }>('SELECT playbackVersion FROM greetingControls WHERE roomId=?', [identity.roomId]) : null
       const delivery = greeting ? db.get<{ playbackVersion: number }>('SELECT playbackVersion FROM greetingTurns WHERE interventionId=?', [id]) : null
       if (room.status !== 'open' || (greeting ? !Animation.greetingEnabled(identity.roomId) || control?.playbackVersion !== delivery?.playbackVersion : !state.prefs.enabled) || state.prefs.volume <= 0
@@ -539,6 +555,7 @@ export default class Animation {
       }
       db.run('UPDATE animationInterventions SET status = \'PLAYING\', startedAt = ? WHERE interventionId = ?', [now, id])
       recordAudioUsage(row.roomId, `intervention:${id}`, interventionAssets(row)[0].id, 'intervention', now, row.sessionId)
+      if (call) getCallAutomation()?.started(identity.roomId, call)
     } else {
       const status = event === 'ENDED' && row.startedAt && !row.stopRequestedAt
         ? 'PLAYED'

@@ -1,7 +1,8 @@
 # Hybrid karaoke calls — private batch 2 pilot
 
-**Status: private pilot 2A–2D implemented and technically verified. Real-voice
-listening and user acoustic acceptance remain pending.**
+**Status: private pilot 2A–2D implemented, technically verified and accepted by the
+user on 2026-11-06. Automatic request preparation and public playback are delivered
+separately by batch 3; these pilot operations remain private.**
 
 Deliver a private, usable pilot of three-part calls: reusable introduction,
 table-bound recording and a Gemini-generated performer/song continuation. The
@@ -15,6 +16,11 @@ checks use an isolated Gemini fixture producing real WAV bytes; they prove the
 integration and playback, not the pronunciation or naturalness of a real model.
 No paid synthesis or public-room announcement was triggered during verification.
 
+The user subsequently confirmed that verification was complete and everything
+worked correctly, closing batch 2 acceptance. This records the user's report; it
+does not add new automated-test results. The next scope is the
+[batch 3 implementation plan](AUTOMATIC-KARAOKE-CALLS-PLAN.md).
+
 ### Operator quick path
 
 1. Open **Ajustes → Animador → Llamados**. Review the shared Gemini profile, enter
@@ -26,8 +32,8 @@ No paid synthesis or public-room announcement was triggered during verification.
 4. Repeat with **Referencia: frase completa con Gemini**. Compare results through
    **Escuchar** in **Preparaciones recientes**. Closing the listener or leaving
    the page stops local playback.
-5. Approve the actual voice and joins before expanding the bank or activating live
-   transitions. The rest of the six-batch rollout remains separate.
+5. With the private pilot accepted, use the batch 3 plan for bank expansion and
+   automatic live transitions. Existing private previews remain available.
 
 Implemented files include migration `026-karaoke-call-pilot.sql`, the private
 `server/Animation/Calls` module, `shared/karaokeCalls.ts`, the Llamados panel and
@@ -287,15 +293,12 @@ Internal generated files may be retained without becoming publicly eligible.
 
 ## Relationship to later batches
 
-- **Batch 3:** expand accepted table voices to 01–14 and establish live static
-  table-call fallback and greeting coexistence as already planned.
-- **Batch 4:** reuse this pilot's generation/composition service for real approved
-  singing requests. Resolve actual performer identity, clean song titles and
-  preparation timing there. Preserve request table snapshots: never substitute a
-  newly renamed table's audio for an older request silently.
-- **Batch 5:** authorize, preload and play the ready composite through the existing
-  coordinator. Never start a partial call while waiting for Gemini. Listening and
-  house music retain general animator audio; karaoke replaces it with one call.
+- **Batch 3:** the [delivery and implementation plan](AUTOMATIC-KARAOKE-CALLS-PLAN.md)
+  records the implemented bank setup, automatic preparation, fallback and public
+  delivery for approved singing requests, including greeting coexistence.
+- **Batches 4–5:** their essential request-preparation/playback integration is now
+  delivered within batch 3. Reassess remaining refinements after its acceptance,
+  rather than implementing those integrations twice.
 - **Batch 6:** venue acceptance using the actual screen, speakers and operator flow.
 
 The shared two-second video/ambience lead-in, independent ambience level and batch 1

@@ -9,6 +9,7 @@ import { captureTransitionBackground } from '../TransitionVideo/Playback.js'
 import Animation from '../Animation/Animation.js'
 import { catalogClips } from '../Animation/catalog.js'
 import { greetingPlayback, planGreetingTransition } from './transition.js'
+import { planCallTransition, prepareCall } from '../Animation/Calls/Playback.js'
 import { isGreetingAllowed } from '../../shared/greetings.js'
 import { publicGuestName } from '../../shared/guestName.js'
 
@@ -179,23 +180,30 @@ export default class Greetings {
     const current = order.entities[status.queueId ?? -1]
     if (current && !status.isAtQueueEnd && !['PLAYED', 'FAILED'].includes(current.status)) throw new Error('La canción todavía ocupa la sala')
     const turn = order.turns.find(turn => turn.ids.includes(next!))
-    if (!turn) return null
+    const call = prepareCall(roomId, next!)
+    if (!turn && !call) return null
     if (db.get('SELECT 1 FROM greetingTurns WHERE turnKey=?', [next])) return null
     const turnKey = next!
     const selected = Greetings.items(roomId).find(item => item.queueId === next && item.status === 'QUEUED')
     const reason = Greetings.paused(roomId) ? 'Publicación pausada' : blocker
     const control = greetingPlayback(roomId)
     const compatible = selected && prepared?.queueId === next && prepared.greetingId === selected.greetingId && prepared.playbackVersion === control.version
-    const candidate = !reason && selected && compatible && control.enabled
-      ? planGreetingTransition(selected, prepared, ready, Animation.snapshot(roomId).voiceBudgetRemainingMs ?? 0, remainingMs)
+    const callCandidate = !blocker && prepared?.call
+      ? planCallTransition(roomId, reason ? null : selected ?? null,
+          { ...prepared, assets: prepared.assets.filter(asset => asset.role !== 'greeting' || (compatible && control.enabled && !reason)) },
+          ready, Animation.snapshot(roomId).voiceBudgetRemainingMs ?? 0, remainingMs)
       : null
+    const candidate = callCandidate ?? (!reason && selected && compatible && control.enabled
+      ? planGreetingTransition(selected, prepared, ready, Animation.snapshot(roomId).voiceBudgetRemainingMs ?? 0, remainingMs)
+      : null)
     let transition: GreetingGrant['transition']
     let displayMs = selected ? greetingDuration(selected) : 0
     let until = Date.now() + displayMs + 2000
     db.exec('SAVEPOINT greeting_turn')
     try {
       if (candidate) {
-        const intervention = Animation.reserveGreeting({ roomId, socketId, userId }, turnKey, candidate.assets, candidate.durationMs, candidate.voiceMs, selected!.message)
+        const text = candidate.call ? candidate.assets.find(asset => asset.role === 'call')!.displayText : selected!.message
+        const intervention = Animation.reserveGreeting({ roomId, socketId, userId }, turnKey, candidate.assets, candidate.durationMs, candidate.voiceMs, text, candidate.call)
         if (intervention) {
           transition = { ...candidate, intervention }
           displayMs = candidate.displayMs
@@ -204,15 +212,18 @@ export default class Greetings {
       }
       const voiceReason = !prepared?.assets.some(asset => asset.role === 'greeting')
         ? 'La voz todavía no estaba preparada. El saludo se mostró en pantalla.'
-        : !candidate
-            ? 'El audio no estaba listo en el reproductor o se alcanzó el límite de voz. El saludo se mostró en pantalla.'
-            : 'El canal de voz no pudo reservarse. Revise el volumen de voz y la conexión del reproductor.'
+        : callCandidate && !callCandidate.assets.some(asset => asset.role === 'greeting')
+          ? 'El llamado tiene prioridad; el saludo se muestra en pantalla dentro del tiempo disponible.'
+          : !candidate
+              ? 'El audio no estaba listo en el reproductor o se alcanzó el límite de voz. El saludo se mostró en pantalla.'
+              : 'El canal de voz no pudo reservarse. Revise el volumen de voz y la conexión del reproductor.'
       db.run(`INSERT INTO greetingTurns(turnKey,roomId,ownerSocketId,untilAt,finished,displayMs,interventionId,playbackVersion,voiceStatus,voiceReason)
-        VALUES(?,?,?,?,?,?,?,?,?,?)`, [turnKey, roomId, socketId, until, reason || !selected ? 1 : 0, displayMs, transition?.intervention.interventionId ?? null,
-        control.version, selected && !reason && control.prefs.enabled ? transition ? 'SCHEDULED' : 'SCREEN' : null,
-        selected && !reason && control.prefs.enabled && !transition ? voiceReason : null])
-      const membership = turn.ids.map(id => Greetings.turnFor(id)).find(Boolean) ?? turnKey
-      for (const [position, id] of turn.ids.entries()) db.run('INSERT OR IGNORE INTO greetingTurnItems(queueId,turnKey,position) VALUES(?,?,?)', [id, membership, position])
+        VALUES(?,?,?,?,?,?,?,?,?,?)`, [turnKey, roomId, socketId, until, transition || (selected && !reason) ? 0 : 1, displayMs, transition?.intervention.interventionId ?? null,
+        control.version, selected && !reason && control.prefs.enabled ? transition?.assets.some(asset => asset.role === 'greeting') ? 'SCHEDULED' : 'SCREEN' : null,
+        selected && !reason && control.prefs.enabled && !transition?.assets.some(asset => asset.role === 'greeting') ? voiceReason : null])
+      const ids = turn?.ids ?? [turnKey]
+      const membership = ids.map(id => Greetings.turnFor(id)).find(Boolean) ?? turnKey
+      for (const [position, id] of ids.entries()) db.run('INSERT OR IGNORE INTO greetingTurnItems(queueId,turnKey,position) VALUES(?,?,?)', [id, membership, position])
       if (selected) db.run('UPDATE greetings SET turnKey=?,status=?,reason=? WHERE greetingId=?', [turnKey, reason ? 'SKIPPED' : 'RESERVED', reason ?? null, selected.greetingId])
       db.exec('RELEASE greeting_turn')
     } catch (error) {
@@ -220,8 +231,8 @@ export default class Greetings {
       throw error
     }
     const song = order.entities[next!]
-    if (reason || !selected) return null
-    return { turnKey, until, displayMs, items: [{ ...selected, turnKey, status: 'RESERVED' }], transition,
+    if (blocker || (!call && (reason || !selected))) return null
+    return { turnKey, until, displayMs, items: selected && !reason ? [{ ...selected, turnKey, status: 'RESERVED' }] : [], transition, callMode: !!call,
       background: transition?.intervention.background ?? captureTransitionBackground(roomId, `greeting:${roomId}:${turnKey}`, until),
       performer: { name: song.userDisplayName, tableLabel: song.tableLabelSnapshot ?? null, requestIntent: song.requestIntent ?? 'UNKNOWN', title: song.title } }
   }
@@ -268,5 +279,13 @@ export default class Greetings {
     db.run(`UPDATE greetings SET status=CASE WHEN status='DISPLAYING' THEN 'INTERRUPTED' ELSE 'SKIPPED' END,
       reason='La entrega del turno terminó' WHERE turnKey=? AND status IN ('RESERVED','DISPLAYING')`, [turnKey])
     db.run(`UPDATE greetingTurns SET finished=1,voiceStatus=CASE WHEN voiceStatus IN ('SCHEDULED','PLAYING') THEN 'INTERRUPTED' ELSE voiceStatus END WHERE turnKey=?`, [turnKey])
+    const cancelled = db.get(`SELECT 1 FROM greetingTurns t JOIN animationInterventions i USING(interventionId) JOIN queue q ON q.queueId=t.turnKey
+      WHERE t.roomId=? AND t.turnKey=? AND i.callJSON IS NOT NULL AND i.startedAt IS NULL AND i.status='CANCELLED' AND q.status='APPROVED'
+      AND NOT EXISTS(SELECT 1 FROM greetings g WHERE g.turnKey=t.turnKey AND g.startedAt IS NOT NULL)`, [roomId, turnKey])
+    if (cancelled) {
+      db.run(`UPDATE greetings SET status='QUEUED',turnKey=NULL,reason=NULL WHERE roomId=? AND turnKey=? AND startedAt IS NULL AND status='SKIPPED'`, [roomId, turnKey])
+      db.run('DELETE FROM greetingTurnItems WHERE turnKey=?', [turnKey])
+      db.run('DELETE FROM greetingTurns WHERE turnKey=? AND roomId=?', [turnKey, roomId])
+    }
   }
 }

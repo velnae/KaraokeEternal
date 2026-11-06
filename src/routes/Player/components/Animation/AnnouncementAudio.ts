@@ -16,6 +16,7 @@ export default class AnnouncementAudio {
   private playingChecksum: string | null = null
   private catalogKeys = new Set<string>()
   private greetingKeys = new Set<string>()
+  private callKeys = new Set<string>()
   private bedChecksum: string | null = null
   private bedStop: ((fadeMs: number) => void) | null = null
   private bedFinish: (() => void) | null = null
@@ -25,6 +26,10 @@ export default class AnnouncementAudio {
 
   get decodedBytes () { return [...this.buffers.values()].reduce((total, buffer) => total + buffer.length * buffer.numberOfChannels * 4, 0) }
   get hasBed () { return !!this.bedStop }
+  get readyChecksums () {
+    return [...new Set([this.playingChecksum, this.bedChecksum, ...this.callKeys, ...this.greetingKeys, ...this.buffers.keys()])]
+      .filter((hash): hash is string => !!hash && this.buffers.has(hash)).slice(0, 30)
+  }
 
   private ensureContext () {
     if (!this.context || this.context.state === 'closed') this.context = new AudioContext()
@@ -77,7 +82,7 @@ export default class AnnouncementAudio {
       const desired = new Set(clips.slice(0, 24).map(clip => clip.checksum))
       this.catalogKeys = desired
       for (const hash of this.buffers.keys()) {
-        if (!desired.has(hash) && !this.greetingKeys.has(hash) && hash !== this.playingChecksum && hash !== this.bedChecksum) this.buffers.delete(hash)
+        if (!desired.has(hash) && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && hash !== this.playingChecksum && hash !== this.bedChecksum) this.buffers.delete(hash)
       }
       const retained = new Set<string>()
       for (const clip of clips.slice(0, 24)) {
@@ -97,7 +102,7 @@ export default class AnnouncementAudio {
         if (size > this.maxDecodedBytes) throw new Error('El audio supera la memoria disponible para este canal.')
         for (const hash of this.buffers.keys()) {
           if (this.decodedBytes + size <= this.maxDecodedBytes) break
-          if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.greetingKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
+          if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
         }
         if (this.decodedBytes + size > this.maxDecodedBytes) continue
         this.buffers.set(clip.checksum, buffer)
@@ -129,14 +134,17 @@ export default class AnnouncementAudio {
     const current = () => this.context === context && this.generation === generation && context.state !== 'closed'
     const prepare = async () => {
       if (!current()) return []
-      const desired = new Set(assets.slice(0, 3).map(asset => asset.checksum))
-      for (const hash of this.greetingKeys) {
+      const calls = assets.filter(asset => asset.role === 'call').slice(0, 3)
+      const greetings = assets.filter(asset => asset.role !== 'call').slice(0, 3)
+      const desired = new Set([...calls, ...greetings].map(asset => asset.checksum))
+      for (const hash of [...this.greetingKeys, ...this.callKeys]) {
         if (!desired.has(hash) && !this.catalogKeys.has(hash) && hash !== this.playingChecksum && hash !== this.bedChecksum) this.buffers.delete(hash)
       }
-      this.greetingKeys = desired
+      this.callKeys = new Set(calls.map(asset => asset.checksum))
+      this.greetingKeys = new Set(greetings.map(asset => asset.checksum))
       const retained = new Set<string>()
-      const ordered = [...assets].sort((a, b) => Number(b.role === 'greeting') - Number(a.role === 'greeting'))
-      for (const asset of ordered.slice(0, 3)) {
+      const ordered = [...calls, ...greetings.sort((a, b) => Number(b.role === 'greeting') - Number(a.role === 'greeting'))]
+      for (const asset of ordered) {
         try {
           if (!current()) break
           if (!this.buffers.has(asset.checksum)) {
@@ -150,7 +158,7 @@ export default class AnnouncementAudio {
             const size = buffer.length * buffer.numberOfChannels * 4
             for (const hash of this.buffers.keys()) {
               if (this.decodedBytes + size <= this.maxDecodedBytes) break
-              if (hash !== this.playingChecksum && hash !== this.bedChecksum && !retained.has(hash)) this.buffers.delete(hash)
+              if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.callKeys.has(hash) && !this.greetingKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
             }
             if (this.decodedBytes + size > this.maxDecodedBytes) continue
             this.buffers.set(asset.checksum, buffer)
@@ -344,6 +352,7 @@ export default class AnnouncementAudio {
     this.buffers.clear()
     this.catalogKeys.clear()
     this.greetingKeys.clear()
+    this.callKeys.clear()
     if (context && context.state !== 'closed') {
       context.onstatechange = null
       void context.close().catch((error) => {

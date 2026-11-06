@@ -39,6 +39,7 @@ export async function preparedPart (directory: string, bytes: Buffer, ffmpeg: st
 }
 
 export async function compose (directory: string, masters: Buffer[], ffmpeg: string, signal: AbortSignal) {
+  if (masters.length < 2 || masters.length > 3) throw new AudioValidationError('El llamado necesita dos o tres piezas.')
   const attempt = await fs.mkdtemp(path.join(directory, '.compose-'))
   try {
     const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y']
@@ -49,7 +50,10 @@ export async function compose (directory: string, masters: Buffer[], ffmpeg: str
     }
     const file = path.join(attempt, 'complete.wav')
     // Silence remains intentional at grammatical boundaries; spoken samples never overlap.
-    args.push('-filter_complex', '[0:a]apad=pad_dur=0.10[a];[1:a]apad=pad_dur=0.06[b];[a][b][2:a]concat=n=3:v=0:a=1[out]',
+    const filter = masters.length === 3
+      ? '[0:a]apad=pad_dur=0.10[a];[1:a]apad=pad_dur=0.06[b];[a][b][2:a]concat=n=3:v=0:a=1[out]'
+      : '[0:a]apad=pad_dur=0.10[a];[a][1:a]concat=n=2:v=0:a=1[out]'
+    args.push('-filter_complex', filter,
       '-map', '[out]', '-ar', '24000', '-ac', '1', '-c:a', 'pcm_s16le', file)
     await run(ffmpeg, args, { signal, timeout: 45000, maxBuffer: 16384 })
     return await preparedPart(directory, await fs.readFile(file), ffmpeg, signal)

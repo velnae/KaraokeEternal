@@ -93,6 +93,7 @@ export function eligibleAmbience (clips: AnimationClip[], prefs: Pick<AnimationP
 
 export type InterventionStatus = 'PENDING' | 'RESERVED' | 'PLAYING' | 'PLAYED' | 'CANCELLED' | 'EXPIRED' | 'FAILED' | 'INTERRUPTED' | 'UNCERTAIN'
 export interface Intervention {
+  callJSON?: string | null
   background?: TransitionVideoBackground | null
   interventionId: string
   roomId: number
@@ -155,6 +156,8 @@ export interface AmbienceGrant {
   offsetMs: number
 }
 export interface AnimationSnapshot extends AnimationRoomState {
+  karaokeCallsEnabled?: boolean
+  karaokeCallsRevision?: number
   prefs: AnimationPrefs
   active: Intervention | null
   history: Intervention[]

@@ -5,9 +5,10 @@ import { callContinuation, callStatusLabels, type CallPart } from 'shared/karaok
 import useCallPilot from './useCallPilot'
 import PrivateCallAudio from './PrivateCallAudio'
 import styles from './KaraokeCallPilot.css'
+import AutomaticCallControls from './AutomaticCallControls'
 
 export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
-  const { snapshot, error, busy, notice, submit, cancel, unavailable } = useCallPilot(roomId)
+  const { snapshot, error, busy, notice, submit, cancel, configure, unavailable } = useCallPilot(roomId)
   const id = useId()
   const [introTitle, setIntroTitle] = useState('Vamos con el karaoke')
   const [introText, setIntroText] = useState('¡Vamos con el karaoke!')
@@ -35,8 +36,9 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
     <section className={styles.panel} aria-label='Llamados de karaoke'>
       <header className={styles.heading}>
         <h2>Llamados de karaoke</h2>
-        <p>Prepare y compare la voz en privado. Estas pruebas no se anuncian en la sala.</p>
+        <p>Configure los llamados automáticos y pruebe las voces en privado.</p>
       </header>
+      {snapshot && <AutomaticCallControls snapshot={snapshot} busy={busy} configure={configure} submit={submit} listen={setListening} />}
       <div className={styles.profile}>
         <strong>{snapshot ? `Voz de Gemini: ${snapshot.voice.config.voice}` : 'Cargando perfil…'}</strong>
         {snapshot && <p>{snapshot.voice.config.model}</p>}
@@ -144,7 +146,7 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
         <ul className={styles.list}>
           {snapshot?.jobs.map(item => (
             <li className={styles.item} key={item.id}>
-              <strong>{`${({ intro: 'Introducción', table: 'Voz de mesa', hybrid: 'Llamado híbrido', reference: 'Frase completa' })[item.operation]} · ${callStatusLabels[item.status]}`}</strong>
+              <strong>{`${({ intro: 'Introducción', table: 'Voz de mesa', hybrid: 'Llamado híbrido', reference: 'Frase completa', fallback: 'Llamado básico' })[item.operation]} · ${callStatusLabels[item.status]}`}</strong>
               <p translate='no'>{item.text}</p>
               {item.outdated && <p className={styles.warning}>Desactualizado: cambiaron los datos o el perfil. Prepare una nueva versión.</p>}
               {item.error && <p className={styles.error}>{item.error}</p>}

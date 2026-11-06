@@ -1,7 +1,9 @@
 import type { GreetingVoiceSnapshot } from './greetingVoice.js'
+import type { AnimationClip } from './animation.js'
 
 export type CallPurpose = 'intro' | 'table' | 'continuation' | 'reference'
-export type CallOperation = 'intro' | 'table' | 'hybrid' | 'reference'
+export type CallOperation = 'intro' | 'table' | 'hybrid' | 'reference' | 'fallback'
+export type CallJobPurpose = 'preview' | 'setup' | 'automatic'
 export type CallStatus = 'queued' | 'generating' | 'preparing' | 'ready' | 'failed' | 'uncertain' | 'cancelled'
 export interface CallPart {
   id: string
@@ -35,6 +37,7 @@ export interface TableCallVoice {
   outdated: boolean
 }
 export interface CallSnapshot {
+  automation?: CallAutomationSnapshot
   intros: CallPart[]
   jobs: CallJob[]
   tables: TableCallVoice[]
@@ -45,6 +48,45 @@ export interface CallSnapshot {
 export const callStatusLabels: Record<CallStatus, string> = {
   queued: 'En espera', generating: 'Generando voz', preparing: 'Preparando audio', ready: 'Disponible',
   failed: 'Error', uncertain: 'Sin confirmación', cancelled: 'Cancelado',
+}
+export interface CallControls {
+  revision: number
+  preparing: boolean
+  enabled: boolean
+  introIds: string[]
+}
+export interface CallRequestState {
+  queueId: number
+  inputKey: string
+  title: string
+  performer: string
+  tableLabel: string | null
+  status: 'waiting' | 'preparing' | 'ready' | 'fallback' | 'cancelled'
+  reason: string | null
+  result: CallPart | null
+  startedAt: number | null
+}
+export interface CallAutomationSnapshot {
+  controls: CallControls
+  tablesReady: number
+  tablesTotal: number
+  fallbackReady: boolean
+  message: string | null
+  requests: CallRequestState[]
+}
+export interface CallContext {
+  queueId: number
+  inputKey: string
+  revision: number
+  partId: string
+}
+export interface CallAsset extends AnimationClip { role: 'call', url: string, partId: string }
+export interface CallPreparation {
+  queueId: number
+  inputKey: string
+  revision: number
+  assets: CallAsset[]
+  reason: string | null
 }
 export const callTextLimit = 220
 export function callText (value: unknown, max = callTextLimit): string {

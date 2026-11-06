@@ -5,6 +5,7 @@ import { leastUsedAudio } from '../Animation/usage.js'
 import { animationPrefs, eligibleAmbience } from '../../shared/animation.js'
 import { defaultGreetingPlayback, GREETING_START_MS, type Greeting, type GreetingPlaybackPrefs, type GreetingPreparation, type GreetingAsset, type GreetingTransition } from '../../shared/greetings.js'
 import { getGreetingAudioAsset } from './audioRouter.js'
+import { prepareCall } from '../Animation/Calls/Playback.js'
 import { isGreetingAllowed } from '../../shared/greetings.js'
 
 export function greetingPlayback (roomId: number) {
@@ -17,23 +18,25 @@ export async function prepareGreetingTransition (roomId: number, queueId: number
   const stored = db.get<Greeting>('SELECT * FROM greetings WHERE roomId=? AND queueId=? AND status=\'QUEUED\'', [roomId, queueId])
   const item = stored && isGreetingAllowed(stored) ? stored : undefined
   const song = Queue.get(roomId).entities[queueId]
-  if (!item || !song || song.status !== 'APPROVED') return null
+  if (!song || song.status !== 'APPROVED') return null
+  const call = prepareCall(roomId, queueId)
+  if (!item && !call) return null
   const control = greetingPlayback(roomId)
-  const assets: GreetingAsset[] = []
-  if (control.enabled) {
+  const assets: GreetingAsset[] = [...(call?.assets ?? [])]
+  if (control.enabled && item) {
     const voice = await getGreetingAudioAsset(roomId, item.greetingId)
     if (voice) {
       assets.push(voice)
       const room = db.get<{ data: string }>('SELECT data FROM rooms WHERE roomId=?', [roomId])
       const prefs = animationPrefs(room ? JSON.parse(room.data).prefs?.animation : undefined)
       const clips = catalogClips(roomId).filter(clip => clip.approvedForAuto && (!clip.validUntil || clip.validUntil > Date.now()))
-      const intro = clips.find(clip => clip.id === control.prefs.introClipId && (clip.kind ?? 'voice') === 'voice')
+      const intro = !call && clips.find(clip => clip.id === control.prefs.introClipId && (clip.kind ?? 'voice') === 'voice')
       if (intro) assets.push({ ...intro, role: 'intro', url: `api/animation/assets/${encodeURIComponent(intro.id)}` })
       const bed = control.prefs.ambienceEnabled && leastUsedAudio(roomId, eligibleAmbience(clips, prefs))
       if (bed) assets.push({ ...bed, role: 'bed', url: `api/animation/assets/${encodeURIComponent(bed.id)}` })
     }
   }
-  return { queueId, greetingId: item.greetingId, assets, playbackVersion: control.version,
+  return { queueId, greetingId: item?.greetingId ?? null, assets, playbackVersion: control.version, ...(call ? { call } : {}),
     performer: { name: song.userDisplayName, tableLabel: song.tableLabelSnapshot ?? null, requestIntent: song.requestIntent ?? 'UNKNOWN', title: song.title } }
 }
 

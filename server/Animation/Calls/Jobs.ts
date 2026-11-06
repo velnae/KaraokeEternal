@@ -7,7 +7,7 @@ import type GreetingVoice from '../../Greetings/GreetingVoice.js'
 import { GreetingVoiceError } from '../../Greetings/GeminiGreetingTts.js'
 import { callSpeechProfile, type GreetingVoiceProfile } from '../../Greetings/voiceProfile.js'
 import { AudioValidationError } from '../AudioPreparation.js'
-import { callContinuation, callText, type CallOperation, type CallPurpose, type CallSnapshot } from '../../../shared/karaokeCalls.js'
+import { callContinuation, callText, type CallJobPurpose, type CallOperation, type CallPurpose, type CallSnapshot } from '../../../shared/karaokeCalls.js'
 import { binding, intros, job, jobDTO, jobOutdated, key, part, partDTO, tableVoice, type JobInput, type JobRow, type PartRow } from './Store.js'
 import { checksum, compose, compositionRevision, preparedPart } from './Composition.js'
 
@@ -24,6 +24,7 @@ export default class CallJobs {
   private runningId: string | null = null
   private stopped = false
   private startupError: string | null = null
+  validateAutomatic?: (row: JobRow) => boolean
   constructor (private directory: string, private tts: Voice, private ffmpeg = 'ffmpeg') {}
 
   async start () {
@@ -55,11 +56,11 @@ export default class CallJobs {
     Tables.room(roomId)
     const profile = this.tts.profile()
     return { intros: intros(roomId).map(partDTO), profileKey: key(profile), voice: this.tts.snapshot(), error: this.startupError,
-      jobs: db.all<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? ORDER BY rowid DESC LIMIT 20', [roomId]).map(row => jobDTO(row, profile)),
+      jobs: db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='preview' ORDER BY rowid DESC LIMIT 20`, [roomId]).map(row => jobDTO(row, profile)),
       tables: Tables.list(roomId).filter(table => table.status === 'active').map(table => tableVoice(roomId, table.tableId, profile)) }
   }
 
-  submit (roomId: number, operation: CallOperation, value: unknown, tableId?: number) {
+  submit (roomId: number, operation: CallOperation, value: unknown, tableId?: number, purpose: CallJobPurpose = 'preview', priority = 0) {
     Tables.room(roomId)
     if (this.stopped || this.startupError) throw new CallError(this.startupError ?? 'El servidor se está cerrando.', 503)
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CallError('Datos de preparación no válidos.')
@@ -69,10 +70,11 @@ export default class CallJobs {
       revision: body.revision, introId: body.introId, table: body.tableId, performer: body.performer, song: body.song, regenerate: body.regenerate === true })
     const receipt = db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND requestId=?', [roomId, body.requestId])
     if (receipt) {
-      if (receipt.requestJSON !== requestJSON) throw new CallError('El identificador pertenece a otra preparación.', 409)
+      if (receipt.requestJSON !== requestJSON || receipt.purpose !== purpose) throw new CallError('El identificador pertenece a otra preparación.', 409)
       return jobDTO(receipt, this.tts.profile())
     }
-    if (db.get<{ n: number }>(`SELECT count(*) n FROM karaokeCallJobs WHERE status IN ${active}`)!.n >= 10) throw new CallError('Hay diez preparaciones pendientes. Espere o cancele una.', 409)
+    // Leave one slot for an explicit private operation even when automation is paused.
+    if (db.get<{ n: number }>(`SELECT count(*) n FROM karaokeCallJobs WHERE status IN ${active}`)!.n >= (purpose === 'preview' ? 10 : 9)) throw new CallError('La cola de preparación está ocupada. Espere o cancele una.', 409)
     const profile = this.tts.profile()
     const input: JobInput = { title: '', text: '', variantId: randomUUID(), regenerate: body.regenerate === true }
     if (operation === 'intro') {
@@ -93,6 +95,16 @@ export default class CallJobs {
       if (!Number.isSafeInteger(body.revision) || body.revision !== (saved?.revision ?? 0)) throw new CallError('La voz de la mesa cambió. Actualice antes de generar.', 409)
       Object.assign(input, { title: `Voz de mesa ${table.code}`, text: callText(body.text, 100), tableId: table.tableId,
         code: table.code, revision: (saved?.revision ?? 0) + 1, variantId: `table-${table.tableId}` })
+    } else if (operation === 'fallback') {
+      const intro = intros(roomId).find(item => item.id === body.introId && item.profileKey === key(profile))
+      if (!intro) throw new CallError('Prepare una introducción con la voz actual.')
+      const table = body.tableId === undefined ? undefined : Tables.get(roomId, Number(body.tableId))
+      const voice = table && tableVoice(roomId, table.tableId, profile)
+      if (table && (table.status !== 'active' || !voice?.part || voice.outdated)) throw new CallError('Prepare la voz de la mesa.')
+      const continuation = table ? 'recibamos a nuestro próximo cantante. ¡Un aplauso!' : '¡Es momento de cantar!'
+      Object.assign(input, { title: table ? `Llamado básico · Mesa ${table.code}` : 'Llamado básico de karaoke', introId: intro.id,
+        ...(table ? { tableId: table.tableId, code: table.code, revision: voice!.revision, tablePartId: voice!.part!.id } : {}),
+        continuation, text: callText([intro.text, voice?.part?.text, continuation].filter(Boolean).join(' ')) })
     } else {
       if (!Number.isSafeInteger(body.tableId) || typeof body.introId !== 'string') throw new CallError('Seleccione introducción y mesa.')
       const table = Tables.get(roomId, body.tableId as number)
@@ -111,14 +123,15 @@ export default class CallJobs {
       if (operation === 'table') db.run(`INSERT INTO tableCallVoices(tableId,roomId,spokenText,codeSnapshot,revision) VALUES(?,?,?,?,?)
         ON CONFLICT(tableId) DO UPDATE SET spokenText=excluded.spokenText,codeSnapshot=excluded.codeSnapshot,revision=excluded.revision`,
       [input.tableId, roomId, input.text, input.code, input.revision])
-      db.run(`INSERT INTO karaokeCallJobs(id,roomId,requestId,operation,requestJSON,inputJSON,profileJSON,text,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-        [id, roomId, body.requestId, operation, requestJSON, JSON.stringify(input), JSON.stringify(profile), input.text, now, now])
+      db.run(`INSERT INTO karaokeCallJobs(id,roomId,requestId,operation,requestJSON,inputJSON,profileJSON,text,createdAt,updatedAt,purpose,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, roomId, body.requestId, operation, requestJSON, JSON.stringify(input), JSON.stringify(profile), input.text, now, now, purpose, priority])
       db.exec('RELEASE call_submit')
     } catch (error) {
       db.exec('ROLLBACK TO call_submit; RELEASE call_submit')
       throw error
     }
-    void this.tick()
+    // Automatic bindings must be committed before their worker can validate them.
+    if (purpose === 'preview') void this.tick()
     return jobDTO(job(roomId, id)!, profile)
   }
 
@@ -133,6 +146,7 @@ export default class CallJobs {
   private assertCurrent (row: JobRow) {
     const current = job(row.roomId, row.id)
     if (this.stopped || current?.status === 'cancelled') throw new CallError('Preparación cancelada.')
+    if (row.purpose !== 'preview' && this.validateAutomatic && !this.validateAutomatic(row)) throw new CallError('La preparación automática ya no corresponde al pedido o a la sala.')
     if (jobOutdated(row, this.tts.profile())) throw new CallError('Los datos o el perfil cambiaron. Prepare una nueva versión.')
     if (row.operation === 'intro') {
       const input: JobInput = JSON.parse(row.inputJSON)
@@ -144,7 +158,9 @@ export default class CallJobs {
   tick (): Promise<void> {
     if (this.running) return this.running
     if (this.stopped || this.startupError) return Promise.resolve()
-    const row = db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE status=\'queued\' AND retryAt<=? ORDER BY rowid LIMIT 1', [Date.now()])
+    const row = db.get<JobRow>(`SELECT * FROM karaokeCallJobs j WHERE status='queued' AND retryAt<=? AND
+      (purpose='preview' OR (?=1 AND EXISTS(SELECT 1 FROM karaokeCallControls c JOIN rooms r USING(roomId) WHERE c.roomId=j.roomId AND c.preparing=1 AND r.status='open')))
+      ORDER BY priority DESC,rowid LIMIT 1`, [Date.now(), this.tts.snapshot().config.enabled ? 1 : 0])
     if (!row) return Promise.resolve()
     this.runningId = row.id
     this.controller = new AbortController()
@@ -187,7 +203,7 @@ export default class CallJobs {
     const started = Date.now()
     let bytes: Buffer
     try {
-      bytes = await this.tts.generate(text, profile, this.controller!.signal, true, purpose)
+      bytes = await this.tts.generate(text, profile, this.controller!.signal, row.purpose === 'preview', purpose)
     } finally {
       db.run('UPDATE karaokeCallJobs SET providerMs=providerMs+? WHERE id=?', [Date.now() - started, row.id])
     }
@@ -206,14 +222,14 @@ export default class CallJobs {
       this.assertCurrent(row)
       const input: JobInput = JSON.parse(row.inputJSON)
       let result: PartRow
-      if (row.operation === 'hybrid') {
+      if (row.operation === 'hybrid' || row.operation === 'fallback') {
         const intro = part(row.roomId, input.introId!)
         const table = part(row.roomId, input.tablePartId!)
-        if (!intro || !table) throw new CallError('Una pieza ya no está disponible.')
+        if (!intro || (input.tablePartId && !table)) throw new CallError('Una pieza ya no está disponible.')
         const continuation = await this.generatePart(row, 'continuation', input.continuation!)
         this.assertCurrent(row)
-        const pieces = [intro, table, continuation]
-        const cacheKey = key([pieces.map(piece => piece.masterChecksum), compositionRevision])
+        const pieces = [intro, ...(table ? [table] : []), continuation]
+        const cacheKey = key([pieces.map(piece => [piece.masterChecksum, piece.text, piece.profileKey]), compositionRevision])
         const cached = db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND kind=\'composition\' AND cacheKey=? AND retired=0 ORDER BY rowid DESC LIMIT 1', [row.roomId, cacheKey])
         if (cached) {
           await this.bytes(row.roomId, cached.id)
@@ -242,7 +258,7 @@ export default class CallJobs {
       }
     } catch (error) {
       if (job(row.roomId, row.id)?.status !== 'cancelled') {
-        if (!this.stopped && error instanceof GreetingVoiceError && ['busy', 'rate'].includes(error.kind) && !error.attempted) {
+        if (!this.stopped && error instanceof GreetingVoiceError && ['busy', 'rate', 'quota', 'disabled'].includes(error.kind) && !error.attempted && (row.purpose !== 'preview' || error.kind !== 'disabled')) {
           db.run('UPDATE karaokeCallJobs SET status=\'queued\',retryAt=?,error=?,updatedAt=? WHERE id=?', [Math.max(Date.now() + 1000, error.retryAt), error.message, Date.now(), row.id])
         } else {
           const uncertain = this.stopped || (error instanceof GreetingVoiceError && error.kind === 'uncertain')
@@ -271,12 +287,26 @@ export default class CallJobs {
     for (const { roomId } of db.all<{ roomId: number }>('SELECT DISTINCT roomId FROM karaokeCallParts')) {
       for (const item of intros(roomId)) keep.add(item.id)
       for (const row of db.all<{ partId: string }>('SELECT partId FROM tableCallVoices WHERE roomId=? AND partId IS NOT NULL', [roomId])) keep.add(row.partId)
-      const recent = db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND operation IN ('hybrid','reference') AND status='ready' ORDER BY rowid DESC LIMIT 10`, [roomId])
+      const recent = db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='preview' AND operation IN ('hybrid','reference') AND status='ready' ORDER BY rowid DESC LIMIT 10`, [roomId])
       for (const row of [...recent, ...db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND status IN ${active}`, [roomId])]) {
         if (row.resultId) keep.add(row.resultId)
         const input: JobInput = JSON.parse(row.inputJSON)
         if (input.introId) keep.add(input.introId)
         if (input.tablePartId) keep.add(input.tablePartId)
+      }
+      for (const row of db.all<{ resultId: string | null, introId: string | null }>(`SELECT r.resultId,r.introId FROM karaokeCallRequests r JOIN queue q USING(queueId)
+        WHERE r.roomId=? AND q.status IN ('APPROVED','PLAYING') UNION ALL SELECT resultId,NULL FROM karaokeCallFallbacks WHERE roomId=?`, [roomId, roomId])) {
+        if (row.resultId) keep.add(row.resultId)
+        if (row.introId) keep.add(row.introId)
+      }
+      // Keep completed work until reconciliation publishes its request binding.
+      for (const row of db.all<{ resultId: string | null }>(`SELECT j.resultId FROM karaokeCallJobs j WHERE j.roomId=? AND j.status='ready' AND
+        (EXISTS(SELECT 1 FROM karaokeCallRequests r JOIN queue q USING(queueId) WHERE r.jobId=j.id AND q.status IN ('APPROVED','PLAYING'))
+        OR EXISTS(SELECT 1 FROM karaokeCallFallbacks f WHERE f.jobId=j.id))`, [roomId])) if (row.resultId) keep.add(row.resultId)
+      for (const row of db.all<{ callJSON: string }>('SELECT callJSON FROM animationInterventions WHERE roomId=? AND callJSON IS NOT NULL AND leaseUntil>?', [roomId, Date.now()])) {
+        try {
+          keep.add(JSON.parse(row.callJSON).partId)
+        } catch { /* Invalid metadata cannot retain arbitrary files. */ }
       }
     }
     const rows = db.all<PartRow>('SELECT * FROM karaokeCallParts WHERE retired=0')

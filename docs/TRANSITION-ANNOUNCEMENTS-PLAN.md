@@ -1,8 +1,10 @@
 # Contextual transitions — incremental delivery plan
 
-**Status: batch 1 and the private batch 2 pilot are implemented and technically
-verified; user acceptance, including real-voice listening, remains pending.
-Batches 3–6 remain planned.**
+**Status: batch 1 is implemented and technically verified; its visual acceptance
+remains as recorded below. The private batch 2 pilot was accepted by the user on
+2026-11-06. Batch 3 is implemented and technically verified; acceptance of its
+automatic workflow in the venue remains pending. The essential preparation/playback
+integration originally assigned to batches 4–5 is included in batch 3.**
 
 Build on the existing transition video, pause ambience and player coordination.
 Each batch delivers a usable increment. Resolve its listed choices when starting
@@ -34,9 +36,9 @@ composed call, not independently to each fragment.
 | --- | --- | --- |
 | 1 | Incoming/following-track presentation | Correct, readable information; existing audio still works. |
 | 2 | Hybrid audio pilot with local preview | Natural-sounding saved cue/table + Gemini continuation. |
-| 3 | Live table calls for all 14 tables | The correct table is called only for a singing request. |
-| 4 | Personalized preparation and private preview | A request can produce a ready, reusable personalized call. |
-| 5 | Personalized calls in live transitions | Correct automatic delivery, with reliable static fallback. |
+| 3 | Implemented: automatic hybrid calls from real requests | Preparation, public delivery and fallback verified; venue acceptance pending. |
+| 4 | Preparation refinements, to rescope after batch 3 acceptance | Address remaining preparation requirements without rebuilding the pilot. |
+| 5 | Playback refinements, to rescope after batch 3 acceptance | Address remaining playback requirements without duplicating batch 3. |
 | 6 | Venue rehearsal and accepted delivery | The complete experience works on the venue's actual setup. |
 
 ### Batch 1 — Show the incoming and following tracks
@@ -122,7 +124,8 @@ table-specific spoken calls were introduced; these remain batches 2–5.
 **Status: private hybrid pilot implemented and technically verified.** See the
 [batch 2 implementation plan](HYBRID-KARAOKE-PILOT-PLAN.md) for the project-aligned
 data model, shared Gemini integration, table manager, private API and increments 2A–2D.
-Its delivery section records the actual checks and remaining acoustic acceptance.
+Its delivery section records the technical checks and the user's subsequent
+acceptance on 2026-11-06.
 
 **Deliver:** reusable introduction variants, audio bound to pilot tables 01/03/14
 in the existing table manager, and a Gemini-generated performer/song continuation.
@@ -143,38 +146,85 @@ standalone public announcements.
 Reuse the existing Gemini generation gate and audio preparation, with internal
 storage separate from the public catalog. Ready catalog resources can become
 eligible, so ordinary catalog publication is not an isolation mechanism. Private
-pilot inputs do not yet trigger preparation or playback for real queue requests;
-batches 4–5 integrate that lifecycle using the accepted service.
+pilot inputs do not trigger preparation or playback for real queue requests.
+Batch 3 connects that lifecycle through its separate automatic controls; private
+preview does not activate the room's public playback.
 
 **Delivered:** Llamados administration, persisted introductions, table voice editor,
 hybrid composition, complete-phrase references and private listening. The automated
 three-table A/B scenarios passed in production and development/HTTPS with simulated
-Gemini responses. Real model pronunciation/joins still require the user's listening
-approval; no paid or public-room audio was generated as a test side effect.
+Gemini responses. The user subsequently confirmed verification and acceptance of
+batch 2 on 2026-11-06. No paid or public-room audio was generated as a test side
+effect; that acceptance is a user report, not additional automated-test evidence.
 
-### Batch 3 — Deliver live table calls with generic continuations
+### Batch 3 — Automatic hybrid calls from real requests
 
-**Deliver:** extend the accepted sound pattern to tables 01–14 and integrate it
-with singing transitions. A complete prepared table call replaces the general
-announcement; listening and house tracks retain general animator behavior.
-No personalized synthesis is required yet.
+**Status: implemented and technically verified; venue acceptance pending.** Batch 2 already implements saved
+introductions, table-bound voice, Gemini continuation, composition, reuse and
+private listening. Reuse that service instead of building a temporary generic-only
+path. This batch absorbs the minimum automatic preparation and public
+delivery originally assigned to batches 4–5.
 
-**Resolve at start:** final continuation variants, table identity/renaming and
-missing-table fallback; call priority relative to greetings/manual announcements;
-and operational calls versus existing repetition/voice-budget rules. Preserve
-room disable/pause controls and agree on how omissions are communicated.
+**Implementation:** [Automatic karaoke calls — batch 3](AUTOMATIC-KARAOKE-CALLS-PLAN.md)
+records the delivery, operator quick path, verification commands, persistence,
+automatic preparation, player/greeting coordination and increments 3A–3D.
 
-**Accept when:** the immediate singing request receives its own table call, never
-the table shown in `Después`. Missing table audio uses a neutral fallback, never
-another table. A greeting can coexist under the agreed order without a duplicate
-presentation or video/ambience restart. Each valid transition is claimed once.
+**Deliver:** one room-level setup followed by unattended request-to-call operation:
 
-**Verify:** table selection, all three track types, greeting coexistence, changed
-queue, cancelled request, skip/pause and duplicate-event regressions; development,
-production and HTTPS playback. The rollback boundary is table-call routing;
-batch 1's screen and the existing general animator remain usable.
+1. Select the accepted voice and usable introductions once. Provide a single setup
+   action to prepare missing table voices for active tables 01–14 and ready fallback
+   calls through the existing worker. Expose incomplete setup without requiring a
+   separate generation click for each table or musical request.
+2. When a non-house `SING` request becomes approved, read its table, display name
+   and song from the request. Prepare its call in the background, prioritizing the
+   actual upcoming requests and respecting the shared Gemini limits. Do not require
+   a greeting, an open administration page or manual entry in the pilot form.
+3. Automatically choose a compatible introduction, retain that choice for this
+   request version and reuse its table recording. Generate only the missing
+   continuation, then compose the final file. Reordering alone must not regenerate
+   unchanged speech; changed identities, text or voice dependencies invalidate it.
+4. Preload and reserve the call for the actual immediate request through the existing
+   player authority. After the two-second video/ambience lead-in, play it once and
+   continue to the song. Karaoke replaces the general announcement; listening and
+   house music preserve general animator behavior and the current presentation.
+5. If preparation is late or fails, use the prepared basic table call, then a
+   neutral karaoke fallback if the table recording is unavailable. If no voice is
+   playable, keep the visual identification and continue music. Do not wait for the
+   provider at the playback boundary or announce a different table. Show the
+   operator a concise status; transient retries follow the existing bounded policy,
+   and uncertain provider outcomes are not blindly resubmitted.
+
+**Required integration:** bind preparation to a stable room/request/table identity,
+not a parsed display label. Keep public-call authorization and usage distinct from
+private preview. Protect assets referenced by queued/active requests from the
+pilot's ten-result preview retention. Do not add composed calls to the general
+catalog or introduce another scheduler. Cancellation, restart and changed inputs
+must not allow stale work to speak later.
+
+**Resolve at start:** initially use the request's display name or introduce a
+separate performer field only if required; agree on title shortening, missing
+metadata and intro rotation. Set greeting/call order and combined time budget so
+the karaoke call is not displaced by the current greeting-first branch. Preserve
+greeting delivery, manual controls and independent ambience; agree on how call
+priority interacts with the existing voice budget and repeat rules.
+
+**Accept when:** after setup, successive requests prepare and announce themselves
+without operator action. The spoken table/person/song matches the incoming card,
+never `Después`; all 14 table bindings, queue changes, duplicate events, greetings
+and fallback paths work without double presentation or stalled music.
+
+**Verify:** extend Calls preparation tests and player/coordinator regressions;
+exercise delayed/failed generation, cancellation, queue edits, restart and retained
+assets in development, production and HTTPS. Include actual listening acceptance.
+Disabling automatic call routing leaves batch 1's screen, the private pilot and
+general animator usable. Technical pilot tests do not replace real-voice approval.
 
 ### Batch 4 — Prepare personalized calls and preview them
+
+**Replanning note:** the original scope below is retained for traceability. The
+essential preparation and playback integration is delivered by batch 3; assess
+remaining refinements after venue acceptance instead of implementing it twice.
+The same applies to batch 5.
 
 **Deliver:** connect the accepted pilot service to real musical requests and
 prepare their personalized continuation and complete cue/table composition while

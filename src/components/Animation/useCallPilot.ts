@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import HttpApi from 'lib/HttpApi'
-import type { CallJob, CallSnapshot } from 'shared/karaokeCalls'
+import type { CallControls, CallJob, CallSnapshot } from 'shared/karaokeCalls'
 
 const api = new HttpApi()
 export default function useCallPilot (roomId: number) {
@@ -65,10 +65,29 @@ export default function useCallPilot (roomId: number) {
       await refresh()
     } catch (err) { if (alive.current) setError((err as Error).message) }
   }
+  const configure = async (controls: CallControls) => {
+    if (working.current) return false
+    working.current = true
+    setBusy(true)
+    setError('')
+    try {
+      await api.put(`rooms/${roomId}/karaoke-calls/automation`, { body: controls })
+      if (alive.current) setNotice(controls.enabled ? 'Los llamados se prepararán y anunciarán automáticamente.' : 'Configuración de llamados guardada.')
+      await refresh()
+      return true
+    } catch (err) {
+      if (alive.current) setError((err as Error).message)
+      await refresh()
+      return false
+    } finally {
+      working.current = false
+      if (alive.current) setBusy(false)
+    }
+  }
   let unavailable = ''
   if (!snapshot) unavailable = 'Cargando el perfil de voz…'
   else if (snapshot.error) unavailable = snapshot.error
   else if (!snapshot.voice.configured) unavailable = 'Configure Gemini en Voz de saludos antes de generar.'
   else if (['limited', 'error', 'checking', 'generating'].includes(snapshot.voice.state)) unavailable = snapshot.voice.message
-  return { snapshot, error, busy, notice, submit, cancel, refresh, unavailable }
+  return { snapshot, error, busy, notice, submit, cancel, configure, refresh, unavailable }
 }
