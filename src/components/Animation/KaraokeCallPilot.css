@@ -1,0 +1,33 @@
+.panel { max-width: 1040px; margin-block: 24px; color: var(--lyrics); }
+.heading h2 { margin: 0 0 8px; font-size: 26px; }
+.heading p, .hint { color: var(--secondary); line-height: 1.6; }
+.profile { margin-block: 20px; padding: 16px 20px; background: var(--equipment); border-left: 3px solid var(--cyan); }
+.profile p { margin: 6px 0; overflow-wrap: anywhere; }
+.section { margin-block: 24px; padding-top: 20px; border-top: 1px solid var(--edge); }
+.section h3 { margin: 0 0 12px; font-size: 20px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.field { display: grid; gap: 8px; margin-block: 12px; font-size: 14px; }
+.field input, .field textarea, .field select { width: 100%; min-width: 0; }
+.field input, .field textarea { background: var(--stage); color: var(--lyrics); border: 1px solid var(--edge); border-radius: 6px; padding: 12px; font: inherit; line-height: 1.5; box-sizing: border-box; }
+.field textarea { resize: vertical; }
+.field input, .field select { min-height: 44px; }
+.panel :focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.panel button { min-height: 44px; padding-inline: 14px; }
+.panel button:disabled { opacity: .55; }
+.list { padding: 0; list-style: none; }
+.item { padding: 16px 0; border-bottom: 1px solid var(--edge); overflow-wrap: anywhere; }
+.item p { line-height: 1.5; margin: 8px 0; }
+.item small { color: var(--secondary); }
+.transcript { padding: 16px; background: var(--equipment); border-radius: 8px; line-height: 1.6; overflow-wrap: anywhere; }
+.preview { margin-block: 20px; padding: 18px; background: var(--equipment); border: 1px solid var(--cyan); border-radius: 10px; }
+.preview audio { display: block; width: 100%; margin-block: 14px; }
+.preview p { overflow-wrap: anywhere; line-height: 1.6; }
+.error, .warning { color: var(--amber); line-height: 1.5; overflow-wrap: anywhere; }
+.notice { color: var(--cyan); line-height: 1.5; }
+.panel a { color: var(--cyan); }
+@media (max-width: 680px) {
+  .grid { grid-template-columns: 1fr; gap: 0; }
+  .actions > button { flex: 1 1 auto; }
+  .profile, .preview { padding: 14px; }
+}

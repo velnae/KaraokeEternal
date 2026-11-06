@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { GreetingVoiceConfig } from '../../shared/greetingVoice.js'
 import { greetingText, validateGreeting, type Greeting } from '../../shared/greetings.js'
 import { AudioValidationError } from '../Animation/AudioPreparation.js'
+import type { CallPurpose } from '../../shared/karaokeCalls.js'
 
 export interface GreetingVoiceProfile {
   provider: 'gemini'
@@ -9,6 +10,17 @@ export interface GreetingVoiceProfile {
   voice: string
   style: string
   processingRevision: number
+}
+const callDirections: Record<CallPurpose, string> = {
+  intro: 'This is a short karaoke introduction. Sound welcoming, with moderate energy and a natural sentence ending.',
+  table: 'This is the opening clause of a longer announcement. Use a continuing intonation after the table number, with a brief comma pause, not a final sentence cadence.',
+  continuation: 'Continue a karaoke introduction after the table has been named. Welcome the performer warmly and pronounce the song title clearly. Keep the delivery concise and natural.',
+  reference: 'Read this complete karaoke introduction naturally, with a brief pause after the opening sentence and a warm welcome for the performer.',
+}
+export function callSpeechProfile (profile: GreetingVoiceProfile, purpose?: CallPurpose): GreetingVoiceProfile {
+  if (purpose === undefined) return profile
+  if (!Object.hasOwn(callDirections, purpose)) throw new Error('Propósito de voz no válido.')
+  return { ...profile, style: `${profile.style} ${callDirections[purpose]}` }
 }
 const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex')
 

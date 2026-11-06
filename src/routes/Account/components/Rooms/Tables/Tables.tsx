@@ -7,6 +7,7 @@ import Button from 'components/Button/Button'
 import Panel from 'components/Panel/Panel'
 import Modal from 'components/Modal/Modal'
 import TablePrint from './TablePrint'
+import TableVoice from './TableVoice'
 import type { Room } from 'shared/types'
 import { tableMode, type RoomTable, type TableMode } from 'shared/tableAccess'
 import styles from './Tables.css'
@@ -29,6 +30,7 @@ export default function Tables ({ room, onClose }: { room: Room, onClose: () => 
   const [{ mode, savedMode }, setAccess] = useState({ mode: tableMode(room.prefs), savedMode: tableMode(room.prefs) })
   const [editorOpen, setEditorOpen] = useState(false)
   const [editing, setEditing] = useState<RoomTable | null>(null)
+  const [voiceTable, setVoiceTable] = useState<RoomTable | null>(null)
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [query, setQuery] = useState('')
@@ -227,6 +229,7 @@ export default function Tables ({ room, onClose }: { room: Room, onClose: () => 
                   <div className={styles.rowActions}>
                     {table.status === 'active' && <Button className={styles.qrButton} disabled={busy} onClick={() => void run(async () => setQR(await credential(table)))}>Ver QR</Button>}
                     <Button className={styles.secondary} disabled={busy} onClick={() => openEditor(table)}>Editar</Button>
+                    {table.status === 'active' && <Button className={styles.secondary} disabled={busy} onClick={() => setVoiceTable(table)}>Voz de la mesa</Button>}
                   </div>
                 )}
                 {table.status !== 'archived' && (
@@ -252,6 +255,11 @@ export default function Tables ({ room, onClose }: { room: Room, onClose: () => 
           </ul>
         </div>
 
+        {voiceTable && (
+          <Modal title={`Voz de mesa ${voiceTable.code}`} onClose={() => setVoiceTable(null)}>
+            <TableVoice key={voiceTable.tableId} roomId={room.roomId} tableId={voiceTable.tableId} />
+          </Modal>
+        )}
         {editorOpen && (
           <Modal className={styles.editorDialog} title={editing ? `Editar ${label(editing)}` : 'Nueva mesa'} onClose={closeEditor}>
             <form

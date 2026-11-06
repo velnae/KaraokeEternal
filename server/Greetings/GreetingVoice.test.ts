@@ -99,3 +99,14 @@ it('allows an explicit private preview before enabling automatic generation', as
   expect(voice.snapshot().usage.day).toBe(1)
   expect(voice.config().enabled).toBe(false)
 })
+
+it('applies call directions only after validating the shared base profile', async () => {
+  const profile = voice.profile()
+  await voice.generate('Desde la mesa siete,', profile, signal(), true, 'table')
+  expect(vi.mocked(provider.generate).mock.calls[0][0]).toBe('Desde la mesa siete,')
+  expect(vi.mocked(provider.generate).mock.calls[0][1].style).toContain('continuing intonation')
+  await expect(voice.generate('Hola', { ...profile, style: 'override' }, signal(), true, 'intro')).rejects.toMatchObject({ attempted: false })
+  expect(voice.snapshot().usage.day).toBe(1)
+  await voice.generate('Saludo', profile, signal())
+  expect(vi.mocked(provider.generate).mock.calls[1][1]).toEqual(profile)
+})

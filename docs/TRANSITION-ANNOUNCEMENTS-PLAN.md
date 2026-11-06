@@ -1,7 +1,8 @@
 # Contextual transitions — incremental delivery plan
 
-**Status: batch 1 implemented and verified; user acceptance pending.
-Batches 2–6 remain planned.**
+**Status: batch 1 and the private batch 2 pilot are implemented and technically
+verified; user acceptance, including real-voice listening, remains pending.
+Batches 3–6 remain planned.**
 
 Build on the existing transition video, pause ambience and player coordination.
 Each batch delivers a usable increment. Resolve its listed choices when starting
@@ -32,7 +33,7 @@ composed call, not independently to each fragment.
 | Batch | Usable increment | Acceptance outcome |
 | --- | --- | --- |
 | 1 | Incoming/following-track presentation | Correct, readable information; existing audio still works. |
-| 2 | Modular audio pilot with local preview | Natural-sounding cue + table + continuation. |
+| 2 | Hybrid audio pilot with local preview | Natural-sounding saved cue/table + Gemini continuation. |
 | 3 | Live table calls for all 14 tables | The correct table is called only for a singing request. |
 | 4 | Personalized preparation and private preview | A request can produce a ready, reusable personalized call. |
 | 5 | Personalized calls in live transitions | Correct automatic delivery, with reliable static fallback. |
@@ -116,27 +117,40 @@ Evidence directories from this delivery:
 **Acceptance:** pending the user's visual review. No new voice generation or
 table-specific spoken calls were introduced; these remain batches 2–5.
 
-### Batch 2 — Prove the modular voice sounds natural
+### Batch 2 — Hybrid audio pilot
 
-**Deliver:** a local preview that composes one karaoke cue, the pilot tables
-01/03/14 and two generic continuations into six complete calls. The pilot has six
-source pieces; each preview plays one composed file, independently of public usage.
+**Status: private hybrid pilot implemented and technically verified.** See the
+[batch 2 implementation plan](HYBRID-KARAOKE-PILOT-PLAN.md) for the project-aligned
+data model, shared Gemini integration, table manager, private API and increments 2A–2D.
+Its delivery section records the actual checks and remaining acoustic acceptance.
+
+**Deliver:** reusable introduction variants, audio bound to pilot tables 01/03/14
+in the existing table manager, and a Gemini-generated performer/song continuation.
+The server composes one finished file for private listening. Compare three hybrid
+calls against the same three complete-phrase references before expanding the bank.
 
 **Resolve at start:** exact scripts, voice/model, pronunciation, recording in
-context, join points, pauses and source format. Keep a consistent voice across
-fragments; the current animator voice is the starting recommendation. Approve the
-scripts and generation scope before submitting any provider work.
+context, join points, pauses and source format. Use a common Gemini base profile
+for all pieces, with explicit role-specific delivery instructions. Approve the
+scripts and generation scope before submitting provider work.
 
-**Accept when:** the six calls sound continuous, identify each table clearly and
+**Accept when:** hybrid calls sound continuous, identify each table clearly and
 fit the measured voice-duration limit without cutting words or accelerating speech.
 Preview closure stops playback. Source fragments cannot accidentally become
 standalone public announcements.
 
 **Verify:** composition/duration tests and actual listening to the rendered pilot.
-Use the authenticated generation worker and existing audio preparation; introduce
-an explicit internal-source purpose before using the catalog pipeline for fragments.
-Ready catalog resources are currently automatically eligible, so ordinary catalog
-publication is not an isolation mechanism. Reuse existing preview UI where practical.
+Reuse the existing Gemini generation gate and audio preparation, with internal
+storage separate from the public catalog. Ready catalog resources can become
+eligible, so ordinary catalog publication is not an isolation mechanism. Private
+pilot inputs do not yet trigger preparation or playback for real queue requests;
+batches 4–5 integrate that lifecycle using the accepted service.
+
+**Delivered:** Llamados administration, persisted introductions, table voice editor,
+hybrid composition, complete-phrase references and private listening. The automated
+three-table A/B scenarios passed in production and development/HTTPS with simulated
+Gemini responses. Real model pronunciation/joins still require the user's listening
+approval; no paid or public-room audio was generated as a test side effect.
 
 ### Batch 3 — Deliver live table calls with generic continuations
 
@@ -162,10 +176,11 @@ batch 1's screen and the existing general animator remain usable.
 
 ### Batch 4 — Prepare personalized calls and preview them
 
-**Deliver:** for a musical request, prepare and privately preview the personalized
-continuation and its complete cue/table composition. Show simple preparing, ready
-and failed states with a useful next action. Public playback still uses batch 3's
-static calls while this preparation increment is evaluated.
+**Deliver:** connect the accepted pilot service to real musical requests and
+prepare their personalized continuation and complete cue/table composition while
+they wait in the queue. Show simple preparing, ready and failed states with private
+listening and a useful next action. Public playback still uses batch 3's static
+calls while this automatic-preparation increment is evaluated.
 
 **Resolve at start, rather than choosing now:**
 
@@ -173,8 +188,8 @@ static calls while this preparation increment is evaluated.
   group name; define the minimal input/editing UI if needed.
 - What to say: table, performer, clean song title and optional artist; decide how
   long titles or missing data are shortened in the script while remaining visible.
-- Which provider/voice to use for the variable continuation, matching the fixed
-  fragments; whether listening requests need any personalized variant. The agreed
+- How to reuse the pilot's accepted Gemini profile and handle deliberate profile
+  changes; whether listening requests need any personalized variant. The agreed
   initial use is karaoke, with general announcements for listening/house music.
 - When preparation starts, which pending requests to prepare, provider limits,
   retry rules and cache retention. Estimate generation scope before execution.

@@ -8,6 +8,7 @@ import CatalogProductionPanel from 'components/Animation/CatalogProductionPanel'
 import AnimationQuickControls from 'components/Animation/AnimationQuickControls'
 import OperationControls from 'components/Animation/OperationControls'
 import GreetingVoiceSettings from 'components/Animation/GreetingVoiceSettings'
+import KaraokeCallPilot from 'components/Animation/KaraokeCallPilot'
 import TransitionVideoSettings from 'components/Animation/TransitionVideoSettings'
 import { animationRequest } from 'lib/animationApi'
 import { ANIMATION_CONTROL } from 'shared/animation'
@@ -60,7 +61,7 @@ function ProviderSettings () {
 
 export default function AnimatorSettings () {
   const [params, setParams] = useSearchParams()
-  const view = params.get('view') === 'background' ? 'background' : params.get('view') === 'greeting-voice' ? 'greeting-voice' : params.get('view') === 'audio' ? 'audio' : 'control'
+  const view = params.get('view') === 'calls' ? 'calls' : params.get('view') === 'background' ? 'background' : params.get('view') === 'greeting-voice' ? 'greeting-voice' : params.get('view') === 'audio' ? 'audio' : 'control'
   const liveView = view === 'control' || view === 'audio'
   const settings = params.get('panel') === 'settings' || params.get('view') === 'connection'
   const roomId = useAppSelector(state => state.user.roomId)
@@ -112,11 +113,13 @@ export default function AnimatorSettings () {
       <nav className={styles.tabs} aria-label='Ajustes del animador'>
         <Link to='?view=control' aria-current={view === 'control' ? 'page' : undefined}>Control</Link>
         <Link to='?view=audio' aria-current={view === 'audio' ? 'page' : undefined}>Audios</Link>
+        <Link to='?view=calls' aria-current={view === 'calls' ? 'page' : undefined}>Llamados</Link>
         <Link to='?view=greeting-voice' aria-current={view === 'greeting-voice' ? 'page' : undefined}>Voz de saludos</Link>
         <Link to='?view=background' aria-current={view === 'background' ? 'page' : undefined}>Fondo</Link>
       </nav>
       <div hidden={view !== 'control'}><AnimationPanel /></div>
       <CatalogProductionPanel key={roomId} visible={view === 'audio'} />
+      {view === 'calls' && typeof roomId === 'number' && <KaraokeCallPilot key={`calls-${roomId}`} roomId={roomId} />}
       {view === 'greeting-voice' && <GreetingVoiceSettings key={`greeting-voice-${roomId}`} />}
       {view === 'background' && (typeof roomId === 'number' ? <TransitionVideoSettings key={`background-${roomId}`} roomId={roomId} /> : <p role='status'>Ingrese a una sala para configurar su fondo.</p>)}
       {view === 'background' && typeof roomId === 'number' && <OperationControls key={`ambience-${roomId}`} ambienceOnly />}

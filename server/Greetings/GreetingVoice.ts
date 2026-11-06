@@ -3,7 +3,7 @@ import { db } from '../lib/Database.js'
 import Prefs from '../Prefs/Prefs.js'
 import { defaultGreetingVoiceConfig, greetingVoiceModels, type GreetingVoiceConfig, type GreetingVoiceSnapshot } from '../../shared/greetingVoice.js'
 import GeminiGreetingTts, { GreetingVoiceError, type GreetingVoiceProvider } from './GeminiGreetingTts.js'
-import { greetingAudioKey, loadGreetingVoiceProfile, type GreetingVoiceProfile } from './voiceProfile.js'
+import { callSpeechProfile, greetingAudioKey, loadGreetingVoiceProfile, type GreetingVoiceProfile } from './voiceProfile.js'
 
 export class GreetingVoiceSettingsError extends Error {
   constructor (message: string, readonly status = 422) { super(message) }
@@ -97,7 +97,7 @@ export default class GreetingVoice {
     return this.snapshot()
   }
 
-  async generate (text: string, profile: GreetingVoiceProfile, signal: AbortSignal, preview = false) {
+  async generate (text: string, profile: GreetingVoiceProfile, signal: AbortSignal, preview = false, purpose?: import('../../shared/karaokeCalls.js').CallPurpose) {
     signal.throwIfAborted()
     const state = this.snapshot()
     const now = this.now()
@@ -107,13 +107,14 @@ export default class GreetingVoice {
     if (this.working) throw new GreetingVoiceError('Hay otra generación en curso.', 'busy', now + 500, false)
     if (state.usage.nextAt > now) throw new GreetingVoiceError(state.message, state.usage.nextAt >= state.usage.resetsAt ? 'quota' : 'rate', state.usage.nextAt, false)
     if (greetingAudioKey(0, text, profile) !== greetingAudioKey(0, text, this.profile())) throw new GreetingVoiceError('El perfil de voz cambió.', 'disabled', 0, false)
+    const effectiveProfile = callSpeechProfile(profile, purpose)
     this.working = true
     try {
       // Reserve before sending. Interrupted/failed requests conservatively consume
       // this installation's budget; these counters are not Google's quota balance.
       db.run('INSERT INTO greetingVoiceRequests(requestId,requestedAt,day) VALUES(?,?,?)', [randomUUID(), now, voiceQuotaDay(now)])
       db.run('DELETE FROM greetingVoiceRequests WHERE requestedAt<?', [now - 32 * 86400000])
-      return await this.provider.generate(text, profile, signal)
+      return await this.provider.generate(text, effectiveProfile, signal)
     } catch (error) {
       if (error instanceof GreetingVoiceError && ['auth', 'quota', 'rate'].includes(error.kind)) {
         const until = error.kind === 'quota' ? voiceQuotaReset(this.now()) : error.retryAt

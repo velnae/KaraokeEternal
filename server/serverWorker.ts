@@ -33,6 +33,7 @@ import { loadCatalog } from './Animation/catalog.js'
 import { startProduction } from './Animation/Production.js'
 import greetingVoiceRouter from './Greetings/voiceRouter.js'
 import greetingAudioRouter, { startGreetingAudio } from './Greetings/audioRouter.js'
+import callRouter, { startCallJobs } from './Animation/Calls/router.js'
 import pushQueuesAndLibrary from './lib/pushQueuesAndLibrary.js'
 import { Server as SocketIO } from 'socket.io'
 import socketActions from './socket.js'
@@ -79,6 +80,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     const stopAnimation = Animation.initialize(io)
     const stopProduction = await startProduction(path.join(env.KES_PATH_DATA, 'animation'), roomId => Animation.publish(roomId))
     const stopGreetingAudio = startGreetingAudio(path.join(env.KES_PATH_DATA, 'greetings'))
+    const stopCalls = await startCallJobs(path.join(env.KES_PATH_DATA, 'animation', 'calls'))
     const stopTransitionVideos = await startTransitionVideos(path.join(env.KES_PATH_DATA, 'transition-video'))
     socketActions(io, jwtKey)
     const stopHousePlaylists = startHousePlaylists(io)
@@ -111,7 +113,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     shutdownHandlers.push(async () => {
       stopAnimation()
       stopHousePlaylists()
-      await Promise.allSettled([stopGreetingAudio(), stopTransitionVideos()])
+      await Promise.allSettled([stopGreetingAudio(), stopCalls(), stopTransitionVideos()])
       await stopProduction()
       return new Promise((resolve) => {
       // also calls http server's close method, which ultimately handles the callback
@@ -224,6 +226,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(roomsRouter.routes())
   baseRouter.use(userRouter.routes())
   baseRouter.use(tablesRouter.routes())
+  baseRouter.use(callRouter.routes())
   baseRouter.use(transitionVideoRouter.routes())
   baseRouter.use(animationRouter.routes())
   baseRouter.use(playlistsRouter.routes())
