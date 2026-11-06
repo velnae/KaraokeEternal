@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 import { installYouTubeTransitionFixture, checkAmbienceHandoff } from './transition-ambience-checks.e2e.mjs'
+import { checkTransitionPresentation } from './transition-presentation-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -284,6 +285,9 @@ try {
   assert.ok(introTiming >= 1950 && introTiming < 4500, `Expected a two-second ambience intro; received ${Math.round(introTiming)} ms`)
   await expect.poll(() => decoration.evaluate(video => video.videoWidth > 0 && !video.paused)).toBe(true)
   await expect(player.getByTestId('announcement-overlay')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(player.getByTestId('transition-incoming')).toContainText('Fixture song')
+  await expect(player.getByTestId('transition-following')).toHaveAttribute('data-queue-id', '2')
+  await expect(player.getByTestId('transition-scene')).not.toContainText('La próxima canción ya está lista.')
   await expect(decoration).toHaveCSS('opacity', '1')
   assert.equal((await emit('server/ANIMATION_SYNC')).payload.ambience?.clip.id, bed.id)
   assert.ok(JSON.parse(first.sequenceJSON).some(asset => asset.kind === 'effect'))
@@ -334,7 +338,7 @@ try {
   await expect.poll(() => songStatus(3)).toBe('PLAYING')
   await emit('server/ANIMATION_REQUEST', { requestId: crypto.randomUUID(), clipId: voice.id })
   await expect(player.locator('[data-testid="transition-scene"] [data-playback="failed"]')).toBeVisible({ timeout: 15000 })
-  await expect(player.getByTestId('announcement-overlay')).toContainText('La próxima canción')
+  await expect(player.getByTestId('announcement-overlay')).toContainText('Fixture song')
   await expect.poll(() => songStatus(4), { timeout: 15000 }).toBe('PLAYING')
   await player.unroute('**/animation/background/videos/*/video')
   await emit('server/ANIMATION_REQUEST', { requestId: crypto.randomUUID(), clipId: voice.id })
@@ -348,6 +352,7 @@ try {
   await player.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
   if (abandoned) await expect.poll(() => abandoned.evaluate(video => video.paused && !video.hasAttribute('src'))).toBe(true)
   await checkAmbienceHandoff({ player, uiBase, emit, db, bed, voice: volumeVoice, httpsUi })
+  await checkTransitionPresentation({ player, uiBase, emit, db, voice: volumeVoice, data })
   assert.deepEqual(errors, [])
   console.log(`PASS video + concurrent ambience + sequential voice/effects, natural boundaries, frozen settings, music handoff, video failure and pause/exit cleanup (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS frontend with isolated API/socket' : ''}). Artifacts: ${data}`)
 } catch (error) {

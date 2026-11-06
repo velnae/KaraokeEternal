@@ -20,11 +20,3 @@
   margin: 0.5rem 0;
   color: var(--secondary);
 }
-
-[data-testid='transition-scene'] .transitionText {
-  position: static;
-  inset: auto;
-  background: transparent;
-  padding: 0;
-  width: 100%;
-}

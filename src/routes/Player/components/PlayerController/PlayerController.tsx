@@ -1,4 +1,5 @@
-import React, { useEffect, useCallback, useRef, useState } from 'react'
+import React, { useEffect, useCallback, useMemo, useRef, useState } from 'react'
+import { ensureState } from 'redux-optimistic-ui'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import Player from '../Player/Player'
 import PlayerTextOverlay from '../PlayerTextOverlay/PlayerTextOverlay'
@@ -10,6 +11,8 @@ import socket from 'lib/socket'
 import useAnimationPlayer from '../Animation/useAnimationPlayer'
 import useGreetingPlayer from '../Animation/useGreetingPlayer'
 import PlayerTransitionScene from '../Animation/PlayerTransitionScene'
+import PlayerTransitionPresentation from '../Animation/PlayerTransitionPresentation'
+import { createTransitionPresentationSelector } from '../Animation/transitionPresentation'
 import useSelectedPlayerBackground from '../Animation/useSelectedPlayerBackground'
 import greetingStyles from 'components/Greetings/Greetings.css'
 import Button from 'components/Button/Button'
@@ -36,6 +39,7 @@ type TransitionScene = { id: string, background: TransitionVideoBackground | nul
 
 const PlayerController = (props: PlayerControllerProps) => {
   const queue = useAppSelector(getRoundRobinQueue)
+  const rawQueue = useAppSelector(state => ensureState(state.queue))
   const player = useAppSelector(state => state.player)
   const playerVisualizer = useAppSelector(state => state.playerVisualizer)
   const prefs = useAppSelector(state => state.prefs)
@@ -57,6 +61,7 @@ const PlayerController = (props: PlayerControllerProps) => {
   const backgroundRef = useRef(selectedBackground)
   backgroundRef.current = selectedBackground
   const [transition, setTransition] = useState<TransitionScene | null>(null)
+  const selectPresentation = useMemo(createTransitionPresentationSelector, [])
   const transitionRef = useRef<TransitionScene | null>(null)
   const updateTransition = useCallback((value: TransitionScene | null) => {
     transitionRef.current = value
@@ -72,20 +77,20 @@ const PlayerController = (props: PlayerControllerProps) => {
     if (player._authority === 'DENIED') return
     dispatch(playerStatus(status))
   }, [dispatch, player._authority])
-  const handleLoad = () => dispatch(playerLoad())
+  const handleLoad = useCallback(() => dispatch(playerLoad()), [dispatch])
   const finishTransition = useCallback(async (fadeMs = 80) => {
     const scene = transitionRef.current
     await animationRef.current.stopTransition(fadeMs)
     if (transitionRef.current === scene) updateTransition(null)
   }, [updateTransition])
-  const handlePlay = () => {
+  const handlePlay = useCallback(() => {
     if (transitionRef.current?.phase === 'loading') {
       void finishTransition().then((): void => {
         if (mounted.current) dispatch(playerPlay())
         return undefined
       })
     } else dispatch(playerPlay())
-  }
+  }, [dispatch, finishTransition])
 
   useEffect(() => {
     const cancel = () => {
@@ -169,11 +174,14 @@ const PlayerController = (props: PlayerControllerProps) => {
     try {
       const upcoming = selection()
       if (upcoming || boundary !== 'idle') await animationRef.current.stopAmbience()
+      // A pause can arrive while the previous ambience is being released.
+      if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       if (announce && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
         && (backgroundRef.current || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)) {
         const scene: TransitionScene = { id: crypto.randomUUID(), background: backgroundRef.current, phase: 'intro' }
         updateTransition(scene)
         const grant = await animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null)
+        if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         if (grant?.background) {
           scene.background = grant.background
           updateTransition({ ...scene })
@@ -349,6 +357,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         ? animation.scene.background ?? null
         : animation.ambientPlaying ? animation.snapshot?.ambience?.background ?? selectedBackground : selectedBackground
   const sceneId = greetings.scene ? `greeting:${greetings.scene.turnKey}` : animation.scene?.interventionId ?? animation.snapshot?.ambience?.id ?? 'boundary'
+  const presentedTracks = selectPresentation({ queue: rawQueue, player, preferences: roomPrefs?.queue, loading: transition?.phase === 'loading' })
   const idleOverlay = (
     <PlayerTextOverlay
       queueItem={queueItem as QueueItem}
@@ -392,24 +401,19 @@ const PlayerController = (props: PlayerControllerProps) => {
       />
       {showScene && (
         <PlayerTransitionScene background={background} playing={!!(transition || animation.scene || greetings.scene || animation.ambientPlaying || player.isPlaying || player._isPlayingNext)} sceneId={sceneId}>
-          {(animation.text || animation.scene) && <div className={`${animationStyles.overlay} ${styles.transitionText}`} role='status' data-testid='announcement-overlay'><p>{animation.text || animation.scene?.displayText}</p></div>}
-          {greetings.intro && (
-            <section className={`${greetingStyles.screen} ${styles.transitionText}`} role='status' data-testid='greeting-intro'>
-              {greetings.performer && <div className={greetingStyles.performer} translate='no'>{`${greetings.performer.requestIntent === 'SING' ? 'Karaoke' : 'Pedido'}: ${greetings.performer.name}${greetings.performer.tableLabel ? ` · ${greetings.performer.tableLabel}` : ''}`}</div>}
-              <p>{greetings.intro}</p>
-            </section>
-          )}
-          {greetings.active && (
-            <section key={greetings.active.greetingId} ref={greetings.confirmMounted} className={`${greetingStyles.screen} ${styles.transitionText}`} role='status' data-testid='greeting-overlay' data-greeting-id={greetings.active.greetingId}>
-              {greetings.performer && <div className={greetingStyles.performer} translate='no'>{`${greetings.performer.requestIntent === 'SING' ? 'Karaoke' : 'Pedido'}: ${greetings.performer.name}${greetings.performer.tableLabel ? ` · ${greetings.performer.tableLabel}` : ''}`}</div>}
-              {greetings.active.recipient && <h2 translate='no'>{`Para ${greetings.active.recipient}`}</h2>}
-              <p translate='no'>{greetings.active.message}</p>
-              <footer translate='no'>{`De ${greetings.active.sender}`}</footer>
-            </section>
-          )}
-          {transition?.phase !== 'intro' && !greetings.active && !greetings.intro && !animation.scene && (foregroundScene
-            ? <div className={`${animationStyles.overlay} ${styles.transitionText}`} role='status'><p>{animation.blocked ? 'Esperando el cierre de la intervención anterior…' : player.isPlaying || player._isPlayingNext ? 'Preparando la próxima canción…' : 'Reproducción en pausa'}</p></div>
-            : idleOverlay)}
+          {foregroundScene
+            ? (
+                <PlayerTransitionPresentation
+                  {...presentedTracks}
+                  venueName={prefs.branding.name}
+                  announcementActive={!!(animation.text || animation.scene)}
+                  greetingIntro={!!greetings.intro}
+                  greeting={greetings.active}
+                  onGreetingMounted={greetings.confirmMounted}
+                  notice={!player.isPlaying && !player._isPlayingNext ? 'Reproducción en pausa' : animation.blocked && !animation.scene && !greetings.scene && transition?.phase !== 'intro' ? 'Preparando la próxima canción…' : undefined}
+                />
+              )
+            : idleOverlay}
         </PlayerTransitionScene>
       )}
       {greetings.error && <p className={greetingStyles.playerNotice} role='status'>{greetings.error}</p>}
