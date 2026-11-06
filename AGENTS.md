@@ -96,3 +96,11 @@ worker for generation, persistence and audio preparation. Preserve exact
 approved scripts and record job IDs for resumable execution. Valid generated
 resources become automatically eligible in the catalog; communicate this
 behavior before submission and preserve the room's playback controls.
+
+## YouTube resource imports from chat — project skill
+
+For downloading or trimming YouTube audio/video and importing it into the audio
+catalog, transition backgrounds or local library, load
+`.opencode/skills/youtube-resource-import/SKILL.md`. Use its import CLI and the
+existing authenticated HTTPS APIs. Preserve receipts for retries, verify the
+target room, and distinguish importing resources from selecting or playing them.

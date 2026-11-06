@@ -18,3 +18,5 @@ node_modules/
 *.tsbuildinfo
 .hugo_build.lock
 .vscode
+# Local AI runtime state
+.atl/
