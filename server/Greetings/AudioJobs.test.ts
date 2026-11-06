@@ -103,7 +103,7 @@ afterEach(async () => {
 
 function greeting (message = '¡Feliz cumpleaños!', roomId = 1, approval: 'APPROVED' | 'PENDING_APPROVAL' = 'APPROVED') {
   const queueId = Queue.add({ roomId, userId: 1, status: approval, song: { source: 'YOUTUBE', sourceId: 'AAAAAAAAAAA', externalId: 'AAAAAAAAAAA', localSongId: null, mediaId: null, mediaType: 'youtube', title: 'Song', artistOrChannel: 'Artist', durationSeconds: 120, thumbnailUrl: null, isPlayable: true } })
-  const greetingId = Greetings.attach({ roomId, userId: 1 }, queueId, { recipient: 'Rocío', message }, {})
+  const greetingId = Greetings.attach({ roomId, userId: 1 }, queueId, { message }, {})
   return { greetingId, queueId }
 }
 
@@ -124,6 +124,27 @@ it('prepares approved, enabled greetings while preserving the queued musical and
   expect(bytes).toBeInstanceOf(Buffer)
   expect((await parseBuffer(bytes!, undefined, { duration: true })).format.duration).toBeGreaterThan(0)
   expect(await jobs.audio(2, first.greetingId)).toBeNull()
+})
+
+it.each(['message', 'sender'])('blocks an unsafe stored %s before calling the voice provider', async (field) => {
+  const first = greeting()
+  db.run(`UPDATE greetings SET ${field}=? WHERE greetingId=?`, ['Puta', first.greetingId])
+  await startJobs()
+  await jobs.tick()
+  expect(model.state.received).toHaveLength(0)
+  expect(allJobs()).toHaveLength(0)
+  expect(await jobs.audio(1, first.greetingId)).toBeNull()
+  expect(Greetings.items(1)[0].status).toBe('REMOVED')
+  expect(Queue.get(1).entities[first.queueId].status).toBe('APPROVED')
+})
+
+it('does not serve previously prepared audio after its message becomes disallowed', async () => {
+  const first = greeting()
+  await startJobs()
+  await waitReady(first.greetingId)
+  db.run('UPDATE greetings SET message=? WHERE greetingId=?', ['Puta', first.greetingId])
+  expect(await jobs.audio(1, first.greetingId)).toBeNull()
+  expect(Greetings.reserve(1, 'player', first.queueId, {})).toBeNull()
 })
 
 it('shares validated audio for equal normalized text, keeping requests and room caches separate', async () => {
@@ -346,7 +367,7 @@ it('sends only plain greeting text with fixed options, while tagged text keeps v
   await startJobs()
   await waitReady(first.greetingId)
   expect(model.state.received).toHaveLength(1)
-  expect(model.state.received[0]).toBe('Para Rocío: --seed 999 Un saludo para todos — De Ana')
+  expect(model.state.received[0]).toBe('--seed 999 Un saludo para todos — De Ana')
   expect(Greetings.items(1).find(item => item.greetingId === tagged.greetingId)).toMatchObject({ status: 'QUEUED', audio: { status: 'unavailable' } })
 })
 

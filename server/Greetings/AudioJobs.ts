@@ -11,6 +11,7 @@ import { GreetingVoiceError } from './GeminiGreetingTts.js'
 import { greetingAudioKey, greetingSpeechText } from './voiceProfile.js'
 import type { Greeting, GreetingAudioStatus, GreetingAsset } from '../../shared/greetings.js'
 import { greetingVoiceSample } from '../../shared/greetingVoice.js'
+import { isGreetingAllowed } from '../../shared/greetings.js'
 
 const run = promisify(execFile)
 const log = getLogger('greeting-audio')
@@ -81,7 +82,13 @@ export default class GreetingAudioJobs {
   private job (id: string) { return db.get<GreetingAudioJob>('SELECT * FROM greetingAudioJobs WHERE jobId=?', [id]) }
 
   private hasConsumers (jobId: string) {
-    return !!db.get(`SELECT 1 ${joins} WHERE g.audioJobId=? AND ${eligible} LIMIT 1`, [jobId])
+    const job = this.job(jobId)
+    return db.all<Greeting>(`SELECT g.* ${joins} WHERE g.audioJobId=? AND ${eligible}`, [jobId])
+      .some((greeting) => {
+        try {
+          return greetingSpeechText(greeting) === job?.spokenText
+        } catch { return false }
+      })
   }
 
   private async scan () {
@@ -92,6 +99,10 @@ export default class GreetingAudioJobs {
     const voice = this.tts.profile()
     if (this.stopped) return
     for (const greeting of pending) {
+      if (!isGreetingAllowed(greeting)) {
+        db.run(`UPDATE greetings SET status='REMOVED',reason='El saludo no cumple las reglas de publicación.',audioJobId=NULL WHERE greetingId=?`, [greeting.greetingId])
+        continue
+      }
       try {
         const text = greetingSpeechText(greeting)
         const key = greetingAudioKey(greeting.roomId, text, voice)
@@ -248,13 +259,13 @@ export default class GreetingAudioJobs {
       AND (g.status='QUEUED' OR EXISTS(SELECT 1 FROM greetingTurns t WHERE t.turnKey=g.turnKey AND t.finished=0 AND t.untilAt>?))`, [greetingId, roomId, Date.now()])
     const greeting = read()
     const job = greeting?.audioJobId && this.job(greeting.audioJobId)
-    if (!greeting || !job || job.status !== 'ready' || job.cancelRequested || !job.filename?.match(/^production\/[a-f0-9-]{36}\.mp3$/)) return null
+    if (!greeting || !isGreetingAllowed(greeting) || !job || job.status !== 'ready' || job.cancelRequested || !job.filename?.match(/^production\/[a-f0-9-]{36}\.mp3$/)) return null
     const profile = this.tts.profile()
     if (greetingAudioKey(roomId, greetingSpeechText(greeting), profile) !== job.cacheKey) return null
     try {
       const bytes = await this.preparedBytes(job)
       const current = read()
-      if (current?.audioJobId !== job.jobId || current.message !== greeting.message || current.recipient !== greeting.recipient || current.sender !== greeting.sender
+      if (current?.audioJobId !== job.jobId || current.message !== greeting.message || current.sender !== greeting.sender
         || greetingAudioKey(roomId, greetingSpeechText(greeting), this.tts.profile()) !== job.cacheKey) return null
       return bytes
     } catch {

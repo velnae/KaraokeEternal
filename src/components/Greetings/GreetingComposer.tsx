@@ -37,7 +37,7 @@ export default function GreetingComposer ({ sender, opportunity, pending, busy, 
   const reason = noticeId ? '' : !connected ? 'Sin conexión. Espere a reconectar.' : !pending ? 'La canción ya no admite saludos.' : opportunity?.reason ?? ''
   let validation = ''
   try {
-    validateGreeting({ recipient: '', message: normalizeGreetingMessage(message) }, sender)
+    validateGreeting({ message: normalizeGreetingMessage(message) }, sender)
   } catch (error) { validation = (error as Error).message }
   const save = async () => {
     if (saving || busy || !connected || noticeId || (!uncertain && (!opportunity?.canAdd || !!validation))) return

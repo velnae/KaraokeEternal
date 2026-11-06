@@ -28,7 +28,7 @@ export default {
       }
       if (operation === 'read') return acknowledge({ payload: Greetings.snapshot(identity, status) })
       if (!Number.isFinite(payload?.expiresAt) || payload.expiresAt < Date.now() || payload.expiresAt > Date.now() + 10000) throw new Error('La orden venció. Actualiza e intenta nuevamente.')
-      if (operation === 'attach') Greetings.attach(identity, number('queueId'), { recipient: '', message: normalizeGreetingMessage(payload.message) }, status)
+      if (operation === 'attach') Greetings.attach(identity, number('queueId'), { message: normalizeGreetingMessage(payload.message) }, status)
       else if (operation === 'remove') Greetings.remove(identity, number('greetingId'))
       else if (operation === 'prepareAudio') {
         if (!identity.isAdmin || typeof payload.enabled !== 'boolean') throw new Error('Solo el operador puede configurar la preparación de voz')

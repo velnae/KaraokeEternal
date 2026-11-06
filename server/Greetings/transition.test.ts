@@ -20,7 +20,7 @@ const asset = (role: GreetingAsset['role'], durationMs: number): GreetingAsset =
   id: role, role, durationMs, checksum: role[0].repeat(64), kind: role === 'bed' ? 'ambience' : 'voice',
   title: role, displayText: role, source: 'fixture', license: 'fixture', url: `api/fixture/${role}`, loop: true,
 })
-const text = { recipient: 'Rocío', message: '¡Feliz cumpleaños!' }
+const text = { message: '¡Feliz cumpleaños!' }
 const ready = ['g', 'i', 'b'].map(value => value.repeat(64))
 beforeEach(() => {
   vi.useFakeTimers()

@@ -29,11 +29,11 @@ export function loadGreetingVoiceProfile (config: GreetingVoiceConfig): Greeting
   return { provider: 'gemini', model: config.model, voice: config.voice, style: config.style, processingRevision: 1 }
 }
 
-export function greetingSpeechText (greeting: Pick<Greeting, 'recipient' | 'message' | 'sender'>) {
+export function greetingSpeechText (greeting: Pick<Greeting, 'message' | 'sender'>) {
   try {
     validateGreeting(greeting, greeting.sender)
   } catch {
-    throw new AudioValidationError('El texto del saludo no es válido para preparar su voz. Se conserva la entrega en pantalla.')
+    throw new AudioValidationError('El saludo no cumple las reglas de publicación. No se preparará su voz.')
   }
   const text = greetingText(greeting, greeting.sender).normalize('NFC').replace(/\s+/gu, ' ').trim()
   if (/[<>[\]]/u.test(text) || [...text].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) {

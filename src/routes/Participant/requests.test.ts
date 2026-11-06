@@ -16,7 +16,7 @@ describe('mobile request confirmation', () => {
   it('freezes singing intent together with the greeting after a lost acknowledgment', async () => {
     const { controller, options, send } = fixture()
     send.mockRejectedValueOnce(new Error('timeout'))
-    await controller.request('video', 'Song', { recipient: '', message: 'Hello' }, 'SING')
+    await controller.request('video', 'Song', { message: 'Hello' }, 'SING')
     const restored = createRequestController(options)
     await restored.request('video', 'Song', null, 'LISTEN')
     expect(send.mock.calls.map(call => call[3])).toEqual(['SING', 'SING'])
@@ -24,19 +24,19 @@ describe('mobile request confirmation', () => {
   })
   it('freezes a greeting through an uncertain acknowledgment and reload', async () => {
     const { controller, options, send } = fixture()
-    const greeting = { recipient: 'Rocío', message: 'Feliz cumpleaños' }
+    const greeting = { message: 'Feliz cumpleaños' }
     send.mockRejectedValueOnce(new Error('timeout'))
     await controller.request('video', 'Song', greeting)
     const restored = createRequestController(options)
     expect(restored.getSnapshot().video.greeting).toEqual(greeting)
-    await restored.request('video', 'Song', { recipient: '', message: 'Changed' })
+    await restored.request('video', 'Song', { message: 'Changed' })
     expect(send.mock.calls.map(call => call[2])).toEqual([greeting, greeting])
   })
 
   it('allows a rejected draft to be retried without a greeting', async () => {
     const { controller, send } = fixture()
     send.mockResolvedValueOnce({ error: 'La ventana cerró' })
-    await controller.request('video', 'Song', { recipient: '', message: 'Hello' })
+    await controller.request('video', 'Song', { message: 'Hello' })
     await controller.request('video', 'Song', null)
     expect(send.mock.calls[1][2]).toBeUndefined()
     expect(controller.getSnapshot().video.phase).toBe('confirmed')

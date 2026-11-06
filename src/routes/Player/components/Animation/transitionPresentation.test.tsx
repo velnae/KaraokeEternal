@@ -138,7 +138,7 @@ describe('public transition information', () => {
   }
 
   it('keeps an attributed greeting with track context, without requiring animator transcript text', () => {
-    const greeting = { greetingId: 7, recipient: 'Carla', message: '¡Feliz cumpleaños!', sender: 'Ana' } as Greeting
+    const greeting = { greetingId: 7, message: '¡Feliz cumpleaños!', sender: 'Ana' } as Greeting
     const html = renderToStaticMarkup(
       <PlayerTransitionPresentation
         incoming={track(1)}
@@ -152,7 +152,7 @@ describe('public transition information', () => {
     expect(html).toContain('data-greeting="true"')
     expect(html).toContain('data-greeting-id="7"')
     expect(html).toContain('¡Feliz cumpleaños!')
-    expect(html).toContain('Para Carla')
+    expect(html).not.toContain('Para Carla')
     expect(html).toContain('De Ana')
     expect(html).toContain('Después')
     expect(html).toContain('announcement-overlay')
@@ -163,5 +163,13 @@ describe('public transition information', () => {
     expect(html).not.toContain('transition-following')
     expect(html).toContain('Elige tu próxima canción')
     expect(html).toContain('announcement-overlay')
+  })
+
+  it('does not render offensive greetings from a stale public payload', () => {
+    const greeting = { greetingId: 7, message: 'Puta', sender: 'Ana' } as Greeting
+    const html = renderToStaticMarkup(<PlayerTransitionPresentation incoming={track(1)} venueName='Il Gatto' greeting={greeting} onGreetingMounted={() => {}} />)
+    expect(html).not.toContain('Puta')
+    expect(html).not.toContain('greeting-overlay')
+    expect(html).toContain('transition-incoming')
   })
 })

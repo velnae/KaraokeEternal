@@ -9,6 +9,8 @@ import { captureTransitionBackground } from '../TransitionVideo/Playback.js'
 import Animation from '../Animation/Animation.js'
 import { catalogClips } from '../Animation/catalog.js'
 import { greetingPlayback, planGreetingTransition } from './transition.js'
+import { isGreetingAllowed } from '../../shared/greetings.js'
+import { publicGuestName } from '../../shared/guestName.js'
 
 export interface GreetingPlayerStatus { queueId?: number, historyJSON?: string, nextUserId?: number | null, isAtQueueEnd?: boolean, queueDecisionAt?: number }
 interface Identity { roomId: number, userId: number, isAdmin?: boolean }
@@ -45,12 +47,12 @@ export default class Greetings {
     const draft = validateGreeting(value, song.userDisplayName)
     if (opportunity.greeting) {
       // The unique musical request is the idempotency key, including lost acknowledgments.
-      if (opportunity.greeting.recipient === draft.recipient && opportunity.greeting.message === draft.message) return opportunity.greeting.greetingId
+      if (opportunity.greeting.message === draft.message) return opportunity.greeting.greetingId
       throw new Error('Este pedido ya tiene un saludo. Puedes consultarlo en Mis pedidos.')
     }
     if (!opportunity.canAdd) throw new Error(opportunity.reason!)
-    const result = db.run('INSERT INTO greetings(queueId,roomId,userId,sender,tableLabel,recipient,message,createdAt) VALUES(?,?,?,?,?,?,?,?)',
-      [queueId, identity.roomId, identity.userId, song.userDisplayName, song.tableLabelSnapshot ?? null, draft.recipient, draft.message, Date.now()])
+    const result = db.run('INSERT INTO greetings(queueId,roomId,userId,sender,tableLabel,message,createdAt) VALUES(?,?,?,?,?,?,?)',
+      [queueId, identity.roomId, identity.userId, song.userDisplayName, song.tableLabelSnapshot ?? null, draft.message, Date.now()])
     return Number(result.lastID)
   }
 
@@ -59,6 +61,13 @@ export default class Greetings {
   }
 
   static reconcile (roomId: number) {
+    for (const item of db.all<Greeting>(`SELECT * FROM greetings WHERE roomId=? AND status IN ('QUEUED','RESERVED','DISPLAYING')`, [roomId])) {
+      if (isGreetingAllowed(item)) continue
+      const reason = 'Saludo retirado: el texto o el remitente no cumple las reglas de publicación.'
+      db.run(`UPDATE greetings SET status='REMOVED',reason=?,audioJobId=NULL WHERE greetingId=?`, [reason, item.greetingId])
+      const turn = item.turnKey && db.get<Delivery>('SELECT * FROM greetingTurns WHERE turnKey=?', [item.turnKey])
+      if (turn && turn.interventionId) Animation.cancel(roomId, reason, turn.interventionId)
+    }
     db.run(`UPDATE greetings SET status='CANCELLED',reason='El pedido musical fue cancelado'
       WHERE roomId=? AND status IN ('QUEUED','RESERVED','DISPLAYING') AND queueId IN
       (SELECT queueId FROM queue WHERE status IN ('REMOVED','REJECTED'))`, [roomId])
@@ -81,7 +90,7 @@ export default class Greetings {
       LEFT JOIN greetingAudioJobs j ON j.jobId=g.audioJobId LEFT JOIN greetingTurns t ON t.turnKey=g.turnKey WHERE g.roomId=? ORDER BY g.greetingId`, [roomId])
       .map(({ audioJobId, audioReason, jobStatus, jobError, durationMs, cancelRequested, voiceStatus, voiceReason, ...item }) => {
         void audioJobId
-        const result: Greeting = { ...item }
+        const result: Greeting = isGreetingAllowed(item) ? { ...item } : { ...item, message: 'Saludo no disponible.', sender: publicGuestName(item.sender) }
         if (voiceStatus) result.playback = { status: voiceStatus, reason: voiceReason }
         if (enabled) result.audio = { status: cancelRequested ? 'cancelled' : jobStatus ?? 'unavailable',
           reason: audioReason ?? jobError ?? (!jobStatus ? 'La entrega en pantalla está disponible mientras se prepara la voz.' : null), durationMs }

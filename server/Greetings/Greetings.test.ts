@@ -26,7 +26,33 @@ afterEach(() => {
 function song (userId = 1, roomId = 1) {
   return Queue.add({ roomId, userId, song: { source: 'YOUTUBE', sourceId: 'AAAAAAAAAAA', externalId: 'AAAAAAAAAAA', localSongId: null, mediaId: null, mediaType: 'youtube', title: 'Song', artistOrChannel: 'Artist', durationSeconds: 120, thumbnailUrl: null, isPlayable: true } })
 }
-const attach = (queueId: number, userId = 1) => Greetings.attach({ roomId: 1, userId }, queueId, { recipient: 'Rocío', message: '¡Feliz cumpleaños!' }, {})
+const attach = (queueId: number, userId = 1) => Greetings.attach({ roomId: 1, userId }, queueId, { message: '¡Feliz cumpleaños!' }, {})
+
+it('rejects offensive direct submissions before persistence without changing music', () => {
+  const queueId = song()
+  expect(() => Greetings.attach(identity, queueId, { message: 'Eres un p3nd3jo' }, {})).toThrow('expresiones no permitidas')
+  expect(db.all('SELECT * FROM greetings')).toEqual([])
+  expect(Queue.get(1).entities[queueId].status).toBe('APPROVED')
+})
+
+it.each(['message', 'sender'])('revalidates stored %s before reserving public delivery', (field) => {
+  const queueId = song()
+  const greetingId = attach(queueId)
+  db.run(`UPDATE greetings SET ${field}=? WHERE greetingId=?`, ['Puta', greetingId])
+  expect(Greetings.reserve(1, 'screen', queueId, {})).toBeNull()
+  expect(Greetings.items(1)[0]).toMatchObject({ status: 'REMOVED', message: 'Saludo no disponible.' })
+  expect(JSON.stringify(Greetings.snapshot(identity))).not.toContain('Puta')
+  expect(Queue.get(1).entities[queueId].status).toBe('APPROVED')
+})
+
+it('blocks a greeting changed after reservation at the display-start gate', () => {
+  const queueId = song()
+  const greetingId = attach(queueId)
+  const grant = Greetings.reserve(1, 'screen', queueId, {})!
+  db.run('UPDATE greetings SET message=? WHERE greetingId=?', ['Puta', greetingId])
+  expect(() => Greetings.event(1, 'screen', grant.turnKey, greetingId, 'start')).toThrow('cambió')
+  expect(Greetings.items(1)[0].status).toBe('REMOVED')
+})
 
 it('attaches to the accepted request within the submission flow and deduplicates a retry', () => {
   const queueId = song()
@@ -35,7 +61,7 @@ it('attaches to the accepted request within the submission flow and deduplicates
   expect(attach(queueId)).toBe(id)
   expect(Greetings.items(1)).toHaveLength(1)
   expect(Greetings.opportunity(identity, queueId, {}).greeting?.greetingId).toBe(id)
-  expect(() => Greetings.attach(identity, queueId, { recipient: '', message: 'Another message' }, {})).toThrow('ya tiene')
+  expect(() => Greetings.attach(identity, queueId, { message: 'Another message' }, {})).toThrow('ya tiene')
   expect(Queue.get(1).entities[queueId].status).toBe('APPROVED')
 })
 
@@ -193,7 +219,7 @@ it('uses the existing FIFO turn semantics and rejects unowned or invalid text', 
   expect(Greetings.reserve(1, 'screen', first, {})!.items).toHaveLength(1)
   const foreign = song(2)
   expect(() => attach(foreign)).toThrow('tu pedido')
-  expect(() => Greetings.attach({ roomId: 1, userId: 2 }, foreign, { recipient: '', message: '<script>hi</script>' }, {})).toThrow('texto simple')
+  expect(() => Greetings.attach({ roomId: 1, userId: 2 }, foreign, { message: '<script>hi</script>' }, {})).toThrow('texto simple')
 })
 
 it('starts a new single-song turn even when only one singer remains', () => {
@@ -206,7 +232,7 @@ it('starts a new single-song turn even when only one singer remains', () => {
   }
   const fourth = song()
   expect(Greetings.order(1).turns[0]).toEqual({ ids: [fourth], startsNewTurn: true })
-  expect(() => Greetings.attach(identity, fourth, { recipient: '', message: 'For the pending song' }, { queueId: played[2], historyJSON: JSON.stringify(played) })).not.toThrow()
+  expect(() => Greetings.attach(identity, fourth, { message: 'For the pending song' }, { queueId: played[2], historyJSON: JSON.stringify(played) })).not.toThrow()
 })
 
 it('preserves the musical ordering of greetings after a pre-turn reorder', () => {

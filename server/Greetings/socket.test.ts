@@ -16,7 +16,7 @@ beforeEach(() => {
   db.exec(`INSERT INTO rooms(roomId,name,status,data) VALUES(1,'Room','open','{}'),(2,'Other','open','{}');
     INSERT INTO users(userId,username,password,name,roleId) VALUES(1,'sender','','Sender',3),(2,'other','','Other',3);
     INSERT INTO queue(queueId,roomId,userId,source,status,origin,title,artistOrChannel,externalId) VALUES(1,1,1,'YOUTUBE','APPROVED','PARTICIPANT','Song','Artist','AAAAAAAAAAA'),(2,2,2,'YOUTUBE','APPROVED','PARTICIPANT','Song','Artist','AAAAAAAAAAA');
-    INSERT INTO greetings(queueId,roomId,userId,sender,recipient,message,createdAt) VALUES(1,1,1,'Sender','','Own',1),(2,2,2,'Other','','Private',1)`)
+    INSERT INTO greetings(queueId,roomId,userId,sender,message,createdAt) VALUES(1,1,1,'Sender','Own',1),(2,2,2,'Other','Private',1)`)
   vi.spyOn(Rooms, 'getPlayerStatus').mockReturnValue(null)
 })
 afterEach(() => {
@@ -61,7 +61,7 @@ it('attaches a message to an owned request once, independently of its music rece
   const payload = { queueId: 1, message: '  ¡Feliz di\u0301a!  ' }
   const first = invoke('attach', payload)
   expect(first.error).toBeUndefined()
-  expect(first.payload.items[0]).toMatchObject({ recipient: '', message: '¡Feliz día!', sender: 'Sender', status: 'QUEUED' })
+  expect(first.payload.items[0]).toMatchObject({ message: '¡Feliz día!', sender: 'Sender', status: 'QUEUED' })
   expect(invoke('attach', payload).payload.items[0].greetingId).toBe(first.payload.items[0].greetingId)
   expect(invoke('attach', { ...payload, message: 'Different message' }).error).toContain('ya tiene')
   expect(invoke('attach', { ...payload, queueId: 2 }).error).toBeTruthy()
@@ -72,7 +72,7 @@ it('attaches a message to an owned request once, independently of its music rece
 
 it('allows pending approval but rejects closed windows and invalid messages', () => {
   db.run('DELETE FROM greetings WHERE queueId=1')
-  for (const message of ['', ' ', null, '<script>', 'x'.repeat(220)]) {
+  for (const message of ['', ' ', null, '<script>', 'x'.repeat(220), 'p3nd3jo', 'Eres un COJUDO', 'Hola\u200b']) {
     expect(invoke('attach', { queueId: 1, message }).error).toBeTruthy()
   }
   db.run(`UPDATE queue SET status='PENDING_APPROVAL' WHERE queueId=1`)

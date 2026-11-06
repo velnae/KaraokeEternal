@@ -50,11 +50,11 @@ describe('durable participant request receipts', () => {
   })
 
   it('atomically stores one attributed greeting and returns it on duplicate delivery', async () => {
-    const action = { payload: { ...request('request-greeting-01').payload, greeting: { recipient: 'Rocío', message: 'Feliz cumpleaños' } } }
+    const action = { payload: { ...request('request-greeting-01').payload, greeting: { message: 'Feliz cumpleaños' } } }
     const ack = vi.fn()
     await Promise.all([handlers[QUEUE_ADD](socket, action, ack), handlers[QUEUE_ADD](socket, action, ack)])
     expect(ack.mock.calls.map(([reply]) => reply.payload.greetingId)).toEqual([1, 1])
-    expect(Greetings.items(1)).toMatchObject([{ sender: 'Test', tableLabel: null, recipient: 'Rocío', status: 'QUEUED' }])
+    expect(Greetings.items(1)).toMatchObject([{ sender: 'Test', tableLabel: null, status: 'QUEUED' }])
     expect(Queue.countPending(1, 1)).toBe(1)
   })
 
@@ -97,7 +97,7 @@ describe('durable participant request receipts', () => {
   })
 
   it('rolls back an invalid greeting without leaving a partially accepted music request', async () => {
-    const action = { payload: { ...request('request-greeting-01').payload, greeting: { recipient: '', message: '' } } }
+    const action = { payload: { ...request('request-greeting-01').payload, greeting: { message: '' } } }
     await expect(handlers[QUEUE_ADD](socket, action, vi.fn())).rejects.toThrow('mensaje')
     expect(Queue.get(1).result).toHaveLength(0)
     expect(Greetings.items(1)).toHaveLength(0)

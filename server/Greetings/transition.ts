@@ -5,6 +5,7 @@ import { leastUsedAudio } from '../Animation/usage.js'
 import { animationPrefs, eligibleAmbience } from '../../shared/animation.js'
 import { defaultGreetingPlayback, GREETING_START_MS, type Greeting, type GreetingPlaybackPrefs, type GreetingPreparation, type GreetingAsset, type GreetingTransition } from '../../shared/greetings.js'
 import { getGreetingAudioAsset } from './audioRouter.js'
+import { isGreetingAllowed } from '../../shared/greetings.js'
 
 export function greetingPlayback (roomId: number) {
   const row = db.get<{ playbackJSON: string, playbackVersion: number, paused: number, audioEnabled: number }>('SELECT * FROM greetingControls WHERE roomId=?', [roomId])
@@ -13,7 +14,8 @@ export function greetingPlayback (roomId: number) {
 }
 
 export async function prepareGreetingTransition (roomId: number, queueId: number): Promise<GreetingPreparation | null> {
-  const item = db.get<Greeting>('SELECT * FROM greetings WHERE roomId=? AND queueId=? AND status=\'QUEUED\'', [roomId, queueId])
+  const stored = db.get<Greeting>('SELECT * FROM greetings WHERE roomId=? AND queueId=? AND status=\'QUEUED\'', [roomId, queueId])
+  const item = stored && isGreetingAllowed(stored) ? stored : undefined
   const song = Queue.get(roomId).entities[queueId]
   if (!item || !song || song.status !== 'APPROVED') return null
   const control = greetingPlayback(roomId)
@@ -37,6 +39,7 @@ export async function prepareGreetingTransition (roomId: number, queueId: number
 
 /** Reserve startup/fade margin inside the 25 s ceiling; never trim spoken content. */
 export function planGreetingTransition (item: Greeting, prepared: GreetingPreparation | null, ready: string[], budgetMs: number, remainingMs = 25000): GreetingTransition | null {
+  if (!isGreetingAllowed(item)) return null
   if (!prepared || prepared.greetingId !== item.greetingId || prepared.queueId !== item.queueId) return null
   const available = prepared.assets.filter(asset => ready.includes(asset.checksum))
   const greeting = available.find(asset => asset.role === 'greeting')

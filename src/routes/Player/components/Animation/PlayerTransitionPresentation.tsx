@@ -1,6 +1,6 @@
 import React from 'react'
 import type { QueueItem } from 'shared/types'
-import type { Greeting } from 'shared/greetings'
+import { isGreetingAllowed, type Greeting } from '../../../../../shared/greetings'
 import { transitionTrack } from './transitionPresentation'
 import styles from './PlayerTransitionPresentation.css'
 
@@ -16,6 +16,7 @@ interface Props {
 }
 
 export default function PlayerTransitionPresentation ({ incoming, following, venueName, announcementActive, greetingIntro, greeting, onGreetingMounted, notice }: Props) {
+  if (greeting && !isGreetingAllowed(greeting)) greeting = null
   const current = incoming && transitionTrack(incoming)
   const next = following && transitionTrack(following)
   const brand = venueName.trim() || 'Il Gatto'
@@ -40,7 +41,6 @@ export default function PlayerTransitionPresentation ({ incoming, following, ven
         </header>
         {greeting && (
           <section key={greeting.greetingId} ref={onGreetingMounted} className={styles.greeting} role='status' data-testid='greeting-overlay' data-greeting-id={greeting.greetingId}>
-            {greeting.recipient && <h2 translate='no'>{`Para ${greeting.recipient}`}</h2>}
             <p translate='no'>{greeting.message}</p>
             <footer translate='no'>{`De ${greeting.sender}`}</footer>
           </section>

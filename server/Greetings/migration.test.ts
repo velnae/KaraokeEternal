@@ -37,11 +37,15 @@ it.each(['early', 'current'] as const)('upgrades %s migration 016 without losing
     const turns = database.all('SELECT * FROM greetingTurns')
     const recorded = database.get<{ up: string }>('SELECT up FROM migrations WHERE id=16')!.up
 
-    database.migrate({ migrationsPath: schemas })
-    database.migrate({ migrationsPath: schemas })
+    // Keep this historical contract scoped to the migrations before the explicit reset.
+    for (const file of fs.readdirSync(schemas)) {
+      if (Number(file.slice(0, 3)) > 16 && Number(file.slice(0, 3)) < 32) fs.copyFileSync(path.join(schemas, file), path.join(legacy, file))
+    }
+    database.migrate({ migrationsPath: legacy })
+    database.migrate({ migrationsPath: legacy })
     expect(database.get<{ count: number }>('SELECT count(*) count FROM migrations WHERE id=17')!.count).toBe(1)
     expect(database.get<{ up: string }>('SELECT up FROM migrations WHERE id=16')!.up).toBe(recorded)
-    expect(database.all('SELECT * FROM queue ORDER BY queueId')).toEqual(requests.map(row => ({ ...row, requestIntent: 'UNKNOWN' })))
+    expect(database.all('SELECT * FROM queue ORDER BY queueId')).toEqual(requests.map(row => ({ ...row, requestIntent: 'UNKNOWN', replacesQueueId: null })))
     expect(database.all('SELECT * FROM greetings ORDER BY greetingId')).toEqual(greetings.map(row => ({ ...row, audioJobId: null, audioReason: null })))
     expect(database.all('SELECT turnKey,roomId,ownerSocketId,untilAt,finished FROM greetingTurns')).toEqual(turns)
     expect(database.all('SELECT queueId,turnKey,position FROM greetingTurnItems ORDER BY queueId')).toEqual([
@@ -81,8 +85,11 @@ it('retires local jobs and settings without losing greeting history or leaving a
       INSERT INTO prefs(key,data) VALUES('localTts','{"installationPath":"/old/tts","autoStart":true,"revision":1}');
       INSERT INTO greetingControls(roomId,audioEnabled) VALUES(1,1);`)
     const before = database.all('SELECT queueId,status,message FROM greetings ORDER BY greetingId')
-    database.migrate({ migrationsPath: schemas })
-    database.migrate({ migrationsPath: schemas })
+    for (const file of fs.readdirSync(schemas)) {
+      if (Number(file.slice(0, 3)) >= 25 && Number(file.slice(0, 3)) < 32) fs.copyFileSync(path.join(schemas, file), path.join(legacy, file))
+    }
+    database.migrate({ migrationsPath: legacy })
+    database.migrate({ migrationsPath: legacy })
     expect(database.all('SELECT queueId,status,message FROM greetings ORDER BY greetingId')).toEqual(before)
     expect(database.all('SELECT DISTINCT audioJobId FROM greetings')).toEqual([{ audioJobId: null }])
     expect(database.all('SELECT DISTINCT status,cancelRequested,updatedAt FROM greetingAudioJobs')).toEqual([{ status: 'cancelled', cancelRequested: 1, updatedAt: 0 }])
@@ -91,6 +98,46 @@ it('retires local jobs and settings without losing greeting history or leaving a
       UPDATE greetingAudioJobs SET status='generating' WHERE jobId='old-ready';`)
     expect(() => database.exec(`UPDATE greetingAudioJobs SET status='generating' WHERE jobId='old-pending'`)).toThrow()
     expect(database.all('PRAGMA foreign_key_check')).toEqual([])
+  } finally {
+    database.close()
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+it('drops the unused recipient and discards old greetings without changing musical requests', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'greeting-message-only-'))
+  const legacy = path.join(directory, 'schemas')
+  const schemas = path.join(import.meta.dirname, '../lib/schemas')
+  fs.mkdirSync(legacy)
+  for (const file of fs.readdirSync(schemas)) {
+    if (Number(file.slice(0, 3)) < 32) fs.copyFileSync(path.join(schemas, file), path.join(legacy, file))
+  }
+  const database = new DatabaseWrapper(path.join(directory, 'db.sqlite'))
+  try {
+    database.migrate({ migrationsPath: legacy })
+    database.exec(`PRAGMA foreign_keys=ON;
+      INSERT INTO rooms(roomId,name,status) VALUES(1,'Room','open');
+      INSERT INTO users(userId,username,name,password,roleId) VALUES(1,'ana','Ana','',4);
+      INSERT INTO queue(queueId,roomId,userId,source,externalId,status,title,artistOrChannel)
+        VALUES(1,1,1,'YOUTUBE','AAAAAAAAAAA','APPROVED','Song','Artist');
+      INSERT INTO greetingTurns(turnKey,roomId,ownerSocketId,untilAt,voiceStatus) VALUES(1,1,'screen',9999999999999,'SCHEDULED');
+      INSERT INTO greetingTurnItems(queueId,turnKey,position) VALUES(1,1,0);
+      INSERT INTO greetingAudioJobs(jobId,roomId,cacheKey,spokenText,profileJSON,status,createdAt,updatedAt)
+        VALUES('old-job',1,'key','Para Rocío: Hola','{}','queued',1,1);
+      INSERT INTO greetings(queueId,roomId,userId,sender,recipient,message,status,createdAt,turnKey,audioJobId)
+        VALUES(1,1,1,'Ana','Rocío','Hola','RESERVED',1,1,'old-job');`)
+    const requests = database.all('SELECT * FROM queue')
+    database.migrate({ migrationsPath: schemas })
+    database.migrate({ migrationsPath: schemas })
+    expect(database.all('SELECT * FROM queue')).toEqual(requests)
+    expect(database.all('SELECT * FROM greetings')).toEqual([])
+    expect(database.all<{ name: string }>('PRAGMA table_info(greetings)').map(column => column.name)).not.toContain('recipient')
+    expect(database.get('SELECT status,cancelRequested,updatedAt FROM greetingAudioJobs')).toEqual({ status: 'cancelled', cancelRequested: 1, updatedAt: 0 })
+    expect(database.get('SELECT finished,voiceStatus FROM greetingTurns')).toEqual({ finished: 1, voiceStatus: 'INTERRUPTED' })
+    expect(database.all('SELECT * FROM greetingTurnItems')).toHaveLength(1)
+    expect(database.all('PRAGMA foreign_key_check')).toEqual([])
+    database.run('INSERT INTO greetings(queueId,roomId,userId,sender,message,createdAt) VALUES(1,1,1,?,?,1)', ['Ana', 'Feliz día'])
+    expect(database.get('SELECT message FROM greetings')).toEqual({ message: 'Feliz día' })
   } finally {
     database.close()
     fs.rmSync(directory, { recursive: true, force: true })

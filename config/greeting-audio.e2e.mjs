@@ -141,6 +141,25 @@ const submit = async (index, message, intent = 'LISTEN') => {
   await expect(requested.getByRole('heading')).toBeFocused()
   await requested.getByRole('button', { name: 'Agregar saludo', exact: true }).click()
   await expect(requested.getByLabel('Para (opcional)')).toHaveCount(0)
+  if (index === 0) {
+    for (const invalid of ['Eres un COJUDO', 'p3nd3jo', 'p.u.t.a']) {
+      await requested.getByLabel('Mensaje', { exact: true }).fill(invalid)
+      await expect(requested.getByRole('alert')).toContainText('expresiones no permitidas')
+      await expect(requested.getByRole('button', { name: 'Guardar saludo', exact: true })).toBeDisabled()
+    }
+    const socket = await connect(guestContext)
+    const rejected = await socket.timeout(3000).emitWithAck('action', { type: 'server/GREETINGS', payload: { operation: 'attach', queueId, message: 'Eres un COJUDO', expiresAt: Date.now() + 2000 } })
+    assert.match(rejected.error, /expresiones no permitidas/)
+    assert.equal(records().length, 0)
+    assert.equal(requests.length, 0)
+    for (const width of [390, 1440]) {
+      await guest.setViewportSize({ width, height: 1000 })
+      await requested.getByLabel('Mensaje', { exact: true }).focus()
+      assert.ok(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+      await guest.screenshot({ path: path.join(data, `greeting-moderation-${width}.png`) })
+    }
+    pass('Offensive greetings are blocked in the form and socket before persistence or voice generation')
+  }
   await requested.getByLabel('Mensaje', { exact: true }).fill(message)
   await requested.getByRole('button', { name: 'Guardar saludo', exact: true }).click()
   await expect(requested.getByRole('group', { name: 'Saludo', exact: true })).toContainText(message)
@@ -156,7 +175,7 @@ try {
   await call(api, 'rooms', { name: 'Other room', status: 'open' })
   const tables = await call(api, 'rooms/1/tables', { code: '4', name: 'Terraza', status: 'active' })
   const { invitation } = await call(api, `rooms/1/tables/${tables[0].tableId}/qr`)
-  await call(api, 'login', { username: 'admin', password: 'greeting-audio-test', roomId: 1 })
+  const operatorIdentity = await call(api, 'login', { username: 'admin', password: 'greeting-audio-test', roomId: 1 })
   await call(foreign, 'login', { username: 'admin', password: 'greeting-audio-test', roomId: 2 })
   db = new DatabaseSync(path.join(data, 'database.sqlite3'))
   db.exec(`INSERT INTO artists(artistId,name,nameNorm) VALUES(1,'Fixture','fixture'); INSERT INTO songs(songId,artistId,title,titleNorm) VALUES(1,1,'Local song','local song');`)
@@ -197,12 +216,22 @@ try {
     })
   })
   admin = await adminContext.newPage()
-  await admin.goto(`${base}account?roomId=1`)
-  await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).click()
-  await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('admin')
-  await admin.getByPlaceholder('contraseña', { exact: true }).fill('greeting-audio-test')
-  await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
-  await expect(admin.getByRole('navigation', { name: 'Secciones de administración' })).toBeVisible()
+  if (development) {
+    // Seed the operator session so this playback check does not depend on the
+    // separate account-mode toggle during development hydration.
+    await adminContext.addCookies((await api.storageState()).cookies)
+    await adminContext.addInitScript(({ identity, origin }) => {
+      if (window.top !== window || location.origin !== origin) return
+      if (!localStorage.getItem('persist:user')) localStorage.setItem('persist:user', JSON.stringify(Object.fromEntries(Object.entries(identity).map(([key, value]) => [key, JSON.stringify(value)]))))
+    }, { identity: operatorIdentity, origin })
+  } else {
+    await admin.goto(`${base}account?roomId=1`)
+    await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).click()
+    await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('admin')
+    await admin.getByPlaceholder('contraseña', { exact: true }).fill('greeting-audio-test')
+    await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
+    await expect(admin.getByRole('navigation', { name: 'Secciones de administración' })).toBeVisible()
+  }
   await admin.goto(`${base}admin/settings/animator?view=greeting-voice`)
   await admin.getByRole('checkbox', { name: 'Generar nuevos saludos con Gemini', exact: true }).check()
   await admin.getByLabel('Solicitudes por minuto', { exact: true }).fill('1000')

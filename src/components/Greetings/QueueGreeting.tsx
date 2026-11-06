@@ -23,7 +23,7 @@ export default function QueueGreeting ({ greeting, paused, busy, onRemove, descr
           : (
               <>
                 <span className={styles.greetingLabel}>Saludo</span>
-                <p translate='no'>{`${greeting.recipient ? `Para ${greeting.recipient}: ` : ''}${greeting.message}`}</p>
+                <p translate='no'>{greeting.message}</p>
                 {operator && failed && greeting.reason
                   ? (
                       <details className={styles.outcome}>

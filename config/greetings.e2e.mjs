@@ -286,7 +286,7 @@ try {
     await expect(requested.getByRole('button', { name: 'Agregar saludo', exact: true })).toHaveCount(0)
   }
   assert.equal(records().length, 2)
-  assert.ok(records().every(row => row.sender === 'Ana' && row.recipient === '' && row.tableLabel.includes('4')))
+  assert.ok(records().every(row => row.sender === 'Ana' && !('recipient' in row) && row.tableLabel.includes('4')))
   const guestSocket = await connect(guestApi ?? guestContext.request)
   const existing = db.prepare('SELECT requestId,externalId FROM queue ORDER BY queueId LIMIT 1').get()
   const duplicate = await emit(guestSocket, 'server/GREETINGS', { operation: 'attach', queueId: records()[0].queueId, message: records()[0].message })
@@ -352,7 +352,7 @@ try {
   await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=2').get().status, { timeout: 10000 }).toBe('PLAYED')
   pass('Queue controls start background-player greetings with frames suspended; each greeting precedes its own song and tab changes preserve delivery')
   await emit(operator, 'server/PLAYER_REQ_PAUSE')
-  const add = (songId, message) => emit(guestSocket, 'server/QUEUE_ADD', { source: 'LOCAL', songId, requestId: crypto.randomUUID(), greeting: { recipient: '', message } })
+  const add = (songId, message) => emit(guestSocket, 'server/QUEUE_ADD', { source: 'LOCAL', songId, requestId: crypto.randomUUID(), greeting: { message } })
   await add(1, 'Quitar antes')
   await add(2, 'Retirar durante')
   const beforeCard = songCard(records().at(-2).queueId)

@@ -36,7 +36,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
     await emit(operator, 'server/GREETINGS', { operation: 'playback', version: snapshot.playbackVersion, settings: { enabled: true, introClipId, ambienceEnabled: true } })
   }
   const add = async (message, requestIntent = 'SING') => {
-    const reply = await emit(guest, 'server/QUEUE_ADD', { source: 'LOCAL', songId: 1, requestId: crypto.randomUUID(), requestIntent, greeting: { recipient: 'Rocío', message } })
+    const reply = await emit(guest, 'server/QUEUE_ADD', { source: 'LOCAL', songId: 1, requestId: crypto.randomUUID(), requestIntent, greeting: { message } })
     const item = db.prepare('SELECT * FROM greetings WHERE greetingId=?').get(reply.payload.greetingId)
     await ready(item.greetingId)
     return item
