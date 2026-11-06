@@ -1,0 +1,77 @@
+{
+  "batchId": "general-voices-01",
+  "expectedRoomId": 1,
+  "expectedRoomName": "Segundo piso karaoke",
+  "expectedModel": "eleven_v4",
+  "approvalContext": "User approved these ten scripts and requested generation in two batches of five on 2026-11-04.",
+  "defaults": {
+    "kind": "voice",
+    "providerId": "elevenlabs",
+    "voiceId": "sKgg4MPUDBy69X7iv3fA",
+    "language": "es",
+    "modes": ["dinner", "mixed", "party"],
+    "revision": 0
+  },
+  "batches": [
+    {
+      "id": "presentations",
+      "inputs": [
+        {
+          "title": "Presentación · Recuerdos",
+          "family": "turn",
+          "text": "[cheerfully] Hay canciones que traen recuerdos. [warmly] Disfrutemos juntos la que viene."
+        },
+        {
+          "title": "Presentación · Pizza y música",
+          "family": "turn",
+          "text": "[warmly] Una porción para compartir y música para acompañar. [cheerfully] ¡Así se disfruta en Il Gatto!"
+        },
+        {
+          "title": "Presentación · Un momento para disfrutar",
+          "family": "turn",
+          "text": "[warmly] Pónganse cómodos y disfruten la compañía. [cheerfully] La siguiente canción está por comenzar."
+        },
+        {
+          "title": "Presentación · Buena energía",
+          "family": "turn",
+          "text": "[excited] ¡Que siga la buena energía! [cheerfully] Abrimos paso a una nueva canción."
+        },
+        {
+          "title": "Presentación · Que hable la música",
+          "family": "turn",
+          "text": "[warmly] A veces, una canción dice más que mil palabras. [cheerfully] Dejemos que suene."
+        }
+      ]
+    },
+    {
+      "id": "closings",
+      "inputs": [
+        {
+          "title": "Cierre · Gracias por estar",
+          "family": "closing",
+          "text": "[warmly] Gracias por acompañarnos. [cheerfully] Ustedes hacen que cada encuentro tenga su propio encanto."
+        },
+        {
+          "title": "Cierre · Buena compañía",
+          "family": "closing",
+          "text": "[cheerfully] Un momento para brindar por la buena compañía. [warmly] ¡Qué gusto compartir estos momentos!"
+        },
+        {
+          "title": "Cierre · Identidad Il Gatto",
+          "family": "closing",
+          "text": "[warmly] En Il Gatto, cada encuentro tiene su propia banda sonora. [cheerfully] Gracias por ser parte."
+        },
+        {
+          "title": "Cierre · Cada quien a su manera",
+          "family": "closing",
+          "text": "[cheerfully] La música se disfruta de muchas maneras. [warmly] Cantando, escuchando o simplemente estando juntos."
+        },
+        {
+          "title": "Cierre · Cierre tranquilo",
+          "family": "closing",
+          "text": "[warmly] Nos quedamos con este momento. Una buena charla, algo rico y la mejor compañía."
+        }
+      ]
+    }
+  ]
+}

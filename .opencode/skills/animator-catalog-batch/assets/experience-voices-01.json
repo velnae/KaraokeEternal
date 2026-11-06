@@ -1,0 +1,40 @@
+{
+  "batchId": "experience-voices-01",
+  "expectedRoomId": 1,
+  "expectedRoomName": "Segundo piso karaoke",
+  "expectedModel": "eleven_v4",
+  "approvalContext": "User approved all twelve experience-focused scripts and requested generation in batches of six.",
+  "routingNote": "Karaoke-only cues use family manual and category karaoke until intent-aware automatic selection is implemented. Dinner messages use closing, dinner only.",
+  "defaults": {
+    "kind": "voice",
+    "providerId": "elevenlabs",
+    "voiceId": "sKgg4MPUDBy69X7iv3fA",
+    "language": "es",
+    "modes": ["dinner", "mixed", "party"],
+    "revision": 0
+  },
+  "batches": [
+    {
+      "id": "karaoke-cues-invitations",
+      "inputs": [
+        { "title": "Karaoke · Señal cálida", "family": "manual", "text": "[warmly] Es momento de compartir una voz. [cheerfully] ¡Comienza un nuevo turno de karaoke!", "category": "karaoke" },
+        { "title": "Karaoke · Acompañar a quien canta", "family": "manual", "text": "[warmly] Compartamos este momento con quienes se animan a cantar. [cheerfully] ¡Adelante con el karaoke!", "category": "karaoke" },
+        { "title": "Karaoke · Un comienzo animado", "family": "manual", "text": "[excited] ¡Llegó su momento! [cheerfully] Comienza un nuevo turno de karaoke. ¡Disfrutémoslo juntos!", "category": "karaoke", "modes": ["mixed", "party"] },
+        { "title": "Karaoke · Una voz en vivo", "family": "manual", "text": "[cheerfully] La siguiente canción viene con voz en vivo. [excited] ¡Disfrutemos este turno de karaoke!", "category": "karaoke", "modes": ["mixed", "party"] },
+        { "title": "Invitación · Disfrutar desde la mesa", "family": "invitation", "text": "[warmly] Si prefieren escuchar, pónganse cómodos. La música también es para disfrutarla desde la mesa." },
+        { "title": "Invitación · Un espacio para cada voz", "family": "invitation", "text": "[warmly] Cada voz tiene su estilo. [cheerfully] Si les dan ganas de cantar, aquí hay un espacio para ustedes." }
+      ]
+    },
+    {
+      "id": "guidance-dinner",
+      "inputs": [
+        { "title": "Invitación · Sin apuro", "family": "invitation", "text": "[warmly] Disfruten a su ritmo. [cheerfully] Si más tarde se animan al karaoke, pueden elegir su canción desde la mesa." },
+        { "title": "Guía · Cómo pedir una canción", "family": "invitation", "text": "[warmly] Escaneen el QR de su mesa, busquen una canción y envíen su pedido." },
+        { "title": "Guía · Escuchar o cantar", "family": "invitation", "text": "[warmly] Al pedir una canción, indiquen si quieren escucharla o cantarla. [cheerfully] Así preparamos el turno adecuado." },
+        { "title": "Guía · Agregar un saludo", "family": "invitation", "text": "[warmly] Al hacer su pedido musical, pueden agregar un saludo para alguien especial." },
+        { "title": "Cena · Música que acompaña", "family": "closing", "text": "[warmly] Buena compañía. Música para acompañar.", "modes": ["dinner"] },
+        { "title": "Cena · Disfrutar la mesa", "family": "closing", "text": "[warmly] Disfruten la mesa y la conversación.", "modes": ["dinner"] }
+      ]
+    }
+  ]
+}

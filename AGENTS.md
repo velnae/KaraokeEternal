@@ -86,3 +86,13 @@ voice-generation integration, load `.opencode/skills/elevenlabs-animator/SKILL.m
 Its local references distinguish provider capabilities from project limits and
 include a copy-ready welcome example. A script suggestion does not authorize
 generation or public playback; follow the user's requested operation.
+
+## Animator catalog batches — project skill
+
+For approved animator audio batches, load
+`.opencode/skills/animator-catalog-batch/SKILL.md` together with
+`elevenlabs-animator`. Use the existing authenticated production API and its
+worker for generation, persistence and audio preparation. Preserve exact
+approved scripts and record job IDs for resumable execution. Valid generated
+resources become automatically eligible in the catalog; communicate this
+behavior before submission and preserve the room's playback controls.

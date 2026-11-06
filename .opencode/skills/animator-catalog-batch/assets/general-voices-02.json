@@ -1,0 +1,57 @@
+{
+  "batchId": "general-voices-02",
+  "expectedRoomId": 1,
+  "expectedRoomName": "Segundo piso karaoke",
+  "expectedModel": "eleven_v4",
+  "approvalContext": "User approved all twenty scripts and confirmed promotion expiry on 2026-11-14 at 14:00 America/Lima. Generate four batches of five.",
+  "defaults": {
+    "kind": "voice",
+    "providerId": "elevenlabs",
+    "voiceId": "sKgg4MPUDBy69X7iv3fA",
+    "language": "es",
+    "modes": ["dinner", "mixed", "party"],
+    "revision": 0
+  },
+  "batches": [
+    {
+      "id": "invitations-celebrations",
+      "inputs": [
+        { "title": "Invitación · La música también la eligen ustedes", "family": "invitation", "text": "[warmly] La música también la eligen ustedes. [cheerfully] Escaneen el QR de su mesa y hagan su pedido." },
+        { "title": "Invitación · Animarse al karaoke", "family": "invitation", "text": "[warmly] No hace falta ser profesional para disfrutar del karaoke. [cheerfully] Elijan su canción y anímense a participar." },
+        { "title": "Invitación · Entre amigos", "family": "invitation", "text": "[playfully] ¿Quién de la mesa se anima primero? [cheerfully] Busquen una canción en el QR y compartan el momento." },
+        { "title": "Celebración · Reconocer la participación", "family": "celebration", "text": "[cheerfully] Un aplauso para quienes se animan a compartir su voz. [warmly] ¡Gracias por sumar alegría a este encuentro!", "celebrationMode": "confirmed" },
+        { "title": "Celebración · Buenos encuentros", "family": "celebration", "text": "[cheerfully] Por los buenos encuentros y las ganas de compartir. [warmly] ¡Que este momento nos deje un lindo recuerdo!", "celebrationMode": "song_end" }
+      ]
+    },
+    {
+      "id": "welcome-promotions",
+      "inputs": [
+        { "title": "Celebración · Energía compartida", "family": "celebration", "text": "[excited] ¡Celebremos este momento! [warmly] Entre música y buena compañía, siempre hay algo que agradecer.", "celebrationMode": "song_end", "modes": ["mixed", "party"] },
+        { "title": "Bienvenida · Bienvenida tranquila", "family": "welcome", "text": "[warmly] Bienvenidos a Il Gatto. Pónganse cómodos: este es su momento para conversar, compartir y disfrutar." },
+        { "title": "Bienvenida · Bienvenida cercana", "family": "welcome", "text": "[cheerfully] ¡Qué gusto recibirlos! [warmly] Aquí se viene a compartir, disfrutar la música y pasarla bien." },
+        { "title": "Promoción · Pizza para compartir", "family": "promotion", "text": "[warmly] Hay sabores que se disfrutan más en compañía. [cheerfully] Consulten la carta y elijan una pizza para compartir.", "validUntil": 1794682800000 },
+        { "title": "Promoción · Bebidas", "family": "promotion", "text": "[cheerfully] ¿Algo para acompañar este momento? [warmly] Revisen nuestras bebidas en la carta y elijan la que más les guste.", "validUntil": 1794682800000 }
+      ]
+    },
+    {
+      "id": "goodbye-booth-invitations",
+      "inputs": [
+        { "title": "Despedida · Hasta otro encuentro", "family": "goodbye", "text": "[warmly] Hasta aquí nuestro encuentro musical. Gracias por elegir Il Gatto. [cheerfully] ¡Nos encantará recibirlos otra vez!" },
+        { "title": "Cabina · El ingrediente secreto", "family": "booth", "text": "[playfully] Aquí el ingrediente secreto no está en la receta… [cheerfully] ¡Está en las ganas de pasarla bien!", "modes": ["mixed", "party"] },
+        { "title": "Invitación · Una canción y un recuerdo", "family": "invitation", "text": "[curious] ¿Qué canción les recuerda un buen momento? [cheerfully] Búsquenla desde el QR y compártanla con la mesa." },
+        { "title": "Invitación · También para escuchar", "family": "invitation", "text": "[warmly] También pueden elegir música para escuchar. [cheerfully] Entren al QR de su mesa y pidan su canción favorita." },
+        { "title": "Celebración · Aplauso y sonrisa", "family": "celebration", "text": "[cheerfully] Los buenos momentos merecen celebrarse. [warmly] ¡Un aplauso y una sonrisa para compartir!", "celebrationMode": "song_end" }
+      ]
+    },
+    {
+      "id": "additional-variants",
+      "inputs": [
+        { "title": "Celebración · Celebración tranquila", "family": "celebration", "text": "[warmly] No todos los festejos necesitan hacer ruido. A veces basta una sonrisa y la compañía de quienes queremos.", "celebrationMode": "song_end" },
+        { "title": "Bienvenida · Dejar la rutina afuera", "family": "welcome", "text": "[warmly] Sean bienvenidos. Dejen la rutina un ratito afuera y disfruten de la mesa, la conversación y la música." },
+        { "title": "Promoción · Algo más para compartir", "family": "promotion", "text": "[cheerfully] ¿Seguimos compartiendo? [warmly] Si se les antoja algo más, consulten la carta y disfruten sin apuro.", "validUntil": 1794682800000 },
+        { "title": "Despedida · Despedida alegre", "family": "goodbye", "text": "[cheerfully] ¡Gracias por ponerle alegría a este encuentro! [warmly] Nos despedimos por hoy, con ganas de volver a compartir." },
+        { "title": "Cabina · Trabajo en equipo", "family": "booth", "text": "[playfully] Compartir la pizza es fácil. Elegir la canción entre todos… [chuckles] ¡Eso sí es trabajo en equipo!", "modes": ["mixed", "party"] }
+      ]
+    }
+  ]
+}
