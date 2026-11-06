@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import User from './User.js'
 
 describe('user-facing account validation', () => {
+  it.each(['Ana María Pérez', 'Puta', 'a'.repeat(25), 'Ana123'])('rejects invalid guest name %s before persistence', async (name) => {
+    await expect(User.create({ name, username: undefined, newPassword: undefined, newPasswordConfirm: undefined, image: undefined }, 'guest')).rejects.toThrow(/nombre|palabras|letras/)
+  })
   it('requires an account identifier and password before accessing stored users', async () => {
     await expect(User.validate({ username: '', password: 'example' }))
       .rejects.toThrow('El nombre de usuario o correo electrónico y la contraseña son obligatorios')

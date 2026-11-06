@@ -1,4 +1,5 @@
 import path from 'path'
+import { publicGuestName } from '../../shared/guestName.js'
 import { db } from '../lib/Database.js'
 import sql from 'sqlate'
 import { QueueItem } from '../../shared/types.js'
@@ -143,6 +144,7 @@ class Queue {
         queue.tableId, queue.tableLabelSnapshot,
         media.mediaId, media.relPath, media.rgTrackGain, media.rgTrackPeak,
         users.name AS userDisplayName, users.dateUpdated AS userDateUpdated,
+        (SELECT name FROM roles WHERE roleId = users.roleId) AS userRole,
         paths.pathId, paths.data AS pathData,
         MAX(isPreferred) AS isPreferred
       FROM queue
@@ -175,6 +177,7 @@ class Queue {
       rgTrackGain: number | null
       rgTrackPeak: number | null
       userDisplayName: string
+      userRole: string
       userDateUpdated: number
       pathId: number | null
       pathData: string | null
@@ -195,6 +198,7 @@ class Queue {
         pathId: unusedPathId,
         pathData: unusedPathData,
         isPreferred: unusedIsPreferred,
+        userRole,
         ...item
       } = row
       void unusedPathId
@@ -202,6 +206,7 @@ class Queue {
       void unusedIsPreferred
       entities[row.queueId] = {
         ...item,
+        userDisplayName: userRole === 'guest' ? publicGuestName(item.userDisplayName) : item.userDisplayName,
         mediaType: row.source === 'YOUTUBE' ? 'youtube' : this.getType(relPath ?? ''),
         isVideoKeyingEnabled: !!pathPrefs?.isVideoKeyingEnabled,
       }

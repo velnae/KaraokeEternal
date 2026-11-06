@@ -13,6 +13,7 @@ import tableRouter from './router.js'
 import userRouter from '../User/router.js'
 import Tables from './Tables.js'
 import User from '../User/User.js'
+import Queue from '../Queue/Queue.js'
 import { participation } from './admission.js'
 
 const app = new Koa()
@@ -81,6 +82,39 @@ it('protects every table administrative endpoint, including nested credentials',
   expect(response.status).toBe(200)
   expect(JSON.stringify(await response.json())).not.toContain(token)
   expect((await call(`rooms/2/tables/${tableId}/qr`, undefined, adminCookie)).status).toBe(422)
+})
+
+it('enforces guest names on direct creation, self edits and administrator edits', async () => {
+  for (const name of ['Ana María Pérez', 'Puta', 'a'.repeat(25), 'Ana123', '']) {
+    const response = await call('user', { role: 'guest', name, roomId: 1, invitation: token })
+    expect(response.status).toBe(403)
+    expect(db.all('SELECT * FROM users')).toHaveLength(0)
+  }
+  const created = await call('user', { role: 'guest', name: '  José   Pérez  ', roomId: 1, invitation: token })
+  expect(created.status).toBe(200)
+  const user = await created.json()
+  expect(user.name).toBe('José Pérez')
+  const cookie = created.headers.get('set-cookie')!.split(';')[0]
+  db.run('INSERT INTO users(userId,username,name,password,roleId) VALUES(100,?,?,?,1)', ['admin', 'Admin', 'unused'])
+  for (const actor of [cookie, adminCookie]) {
+    for (const name of ['Huevón', '', 123, 'Ana María Pérez']) {
+      expect((await call(`user/${user.userId}`, { name }, actor, 'PUT')).status).toBe(400)
+      expect(User.getById(user.userId)).toMatchObject({ name: 'José Pérez' })
+    }
+  }
+  const corrected = await call(`user/${user.userId}`, { name: 'Invitado' }, adminCookie, 'PUT')
+  expect(corrected.status).toBe(200)
+  expect(User.getById(user.userId)).toMatchObject({ name: 'Invitado' })
+})
+
+it('masks a legacy guest name in public queue data until corrected', async () => {
+  const userId = await User.create({ name: 'Ana', username: undefined, newPassword: undefined, newPasswordConfirm: undefined, image: undefined }, 'guest')
+  db.run('UPDATE users SET name=? WHERE userId=?', ['Puta', userId])
+  Queue.add({ roomId: 1, userId, song: { source: 'YOUTUBE', sourceId: 'fixture0001', externalId: 'fixture0001', localSongId: null, mediaId: null, mediaType: 'youtube', title: 'Song', artistOrChannel: 'Artist', thumbnailUrl: null, durationSeconds: 5, isPlayable: true } })
+  expect(Object.values(Queue.get(1).entities)[0].userDisplayName).toBe('Invitado')
+  expect(User.getById(userId)).toMatchObject({ name: 'Puta' })
+  expect((await call(`user/${userId}`, { name: 'José' }, `keToken=${jwt.sign({ userId, isGuest: true }, key)}`, 'PUT')).status).toBe(200)
+  expect(Object.values(Queue.get(1).entities)[0].userDisplayName).toBe('José')
 })
 
 it('rejects direct guest admission and forged room context before creating accounts', async () => {

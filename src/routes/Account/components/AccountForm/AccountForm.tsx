@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import InputImage from 'components/InputImage/InputImage'
 import { UserWithRole } from 'shared/types'
 import styles from './AccountForm.css'
+import { GUEST_NAME_HELP, guestNameError, normalizeGuestName } from 'shared/guestName'
 
 interface AccountFormProps {
   autoFocus?: boolean
@@ -29,6 +30,8 @@ const AccountForm = ({
   const newPasswordConfirm = useRef<HTMLInputElement>(null)
   const name = useRef<HTMLInputElement>(null)
   const role = useRef<HTMLSelectElement>(null)
+  const isGuest = user?.isGuest || user?.role === 'guest'
+  const [nameError, setNameError] = useState<string | null>(null)
   const [prevDateUpdated, setPrevDateUpdated] = useState(user?.dateUpdated)
   const [state, setState] = useState({
     isDirty: false,
@@ -74,9 +77,17 @@ const AccountForm = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const data = new FormData()
+    if (isGuest) {
+      const error = guestNameError(name.current?.value)
+      setNameError(error)
+      if (error) {
+        name.current?.focus()
+        return
+      }
+    }
 
     if (name.current?.value.trim()) {
-      data.append('name', name.current.value.trim())
+      data.append('name', isGuest ? normalizeGuestName(name.current.value) : name.current.value.trim())
     }
 
     if (username.current?.value.trim()) {
@@ -148,11 +159,20 @@ const AccountForm = ({
         <input
           type='text'
           defaultValue={user?.name ?? ''}
-          onChange={updateDirty}
+          onChange={() => {
+            updateDirty()
+            if (nameError && isGuest) setNameError(guestNameError(name.current?.value))
+          }}
           placeholder='nombre para mostrar'
+          aria-label='Nombre para mostrar'
+          aria-invalid={!!nameError || undefined}
+          aria-describedby={isGuest ? 'account-name-help' : undefined}
           ref={name}
         />
       </div>
+      {isGuest && <small id='account-name-help'>{GUEST_NAME_HELP}</small>}
+      {isGuest && guestNameError(user?.name) && <p role='status'>Tu nombre aparece como “Invitado” en la pantalla. Corrígelo aquí y guarda los cambios.</p>}
+      {nameError && <p role='alert'>{nameError}</p>}
 
       {showRole && (
         <select

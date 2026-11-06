@@ -3,6 +3,7 @@ import sql from 'sqlate'
 import crypto from '../lib/crypto.js'
 import Queue from '../Queue/Queue.js'
 import { randomChars } from '../lib/util.js'
+import { validateGuestName } from '../../shared/guestName.js'
 import { User as UserType } from '../../shared/types.js'
 
 export type ServerUser = UserType & {
@@ -79,7 +80,7 @@ class User {
     image,
   }, role = 'standard') {
     username = username?.trim()
-    name = name?.trim()
+    name = role === 'guest' ? validateGuestName(name) : name?.trim()
 
     const fields = new Map()
 

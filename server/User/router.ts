@@ -9,6 +9,7 @@ import Prefs from '../Prefs/Prefs.js'
 import Queue from '../Queue/Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import User from '../User/User.js'
+import { validateGuestName } from '../../shared/guestName.js'
 import { emptyTableContext, enforceConnectedParticipants, joinTable, participation, revokeParticipation, validateInvitation } from '../Tables/admission.js'
 import { QUEUE_PUSH } from '../../shared/actionTypes.js'
 import {
@@ -276,8 +277,16 @@ router.put('/user/:userId', async (ctx) => {
   }
 
   // changing display name?
-  if (name) {
-    name = name.trim()
+  if (name !== undefined) {
+    const target = User.getById(targetId)
+    if (!target) return ctx.throw(404, 'No se encontró el usuario')
+    try {
+      name = target.role === 'guest' || req.body.role === 'guest'
+        ? validateGuestName(name)
+        : typeof name === 'string' ? name.trim() : ''
+    } catch (error) {
+      ctx.throw(400, (error as Error).message)
+    }
 
     if (name.length < NAME_MIN_LENGTH || name.length > NAME_MAX_LENGTH) {
       ctx.throw(400, `El nombre para mostrar debe tener entre ${NAME_MIN_LENGTH} y ${NAME_MAX_LENGTH} caracteres`)
