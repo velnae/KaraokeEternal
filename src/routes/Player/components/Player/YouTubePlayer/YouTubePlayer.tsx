@@ -82,6 +82,7 @@ const loadYouTubeIframeApi = (): Promise<YouTubeApi> => {
 
 interface YouTubePlayerProps {
   controls?: 0 | 1
+  showAutoplayRecovery?: boolean
   height: number
   isPlaying: boolean
   mediaKey: number
@@ -277,7 +278,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
         style={{ width: this.props.width, height: this.props.height }}
       >
         <div className={styles.surface} ref={this.container} />
-        {this.state.autoplayBlocked && this.props.controls !== 0 && (
+        {this.state.autoplayBlocked && (this.props.showAutoplayRecovery ?? this.props.controls !== 0) && (
           <div className={styles.notice} role='status'>
             <p>El navegador bloqueó el inicio de YouTube. Pulse Reproducir aquí para continuar con esta canción.</p>
             <Button variant='primary' onClick={this.retryPlayback}>Reproducir aquí</Button>

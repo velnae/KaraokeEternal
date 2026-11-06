@@ -88,7 +88,7 @@ describe('YouTube player transitions', () => {
     return { commands, event, iframe, onEnd, onError, player, statuses, update }
   }
 
-  it.each([undefined, 0] as const)('uses controls=%s without changing the venue default', (controls) => {
+  it.each([undefined, 0] as const)('uses controls=%s without changing the shared component default', (controls) => {
     const { player, iframe } = setup()
     Object.defineProperty(player, 'props', { value: { ...player.props, controls } })
     player.player = null

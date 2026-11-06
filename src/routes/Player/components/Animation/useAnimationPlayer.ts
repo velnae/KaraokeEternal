@@ -13,6 +13,7 @@ import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, 
 import { playerStatusCancel, playerUpdate } from '../../modules/player'
 import AnnouncementAudio from './AnnouncementAudio'
 import { hasLocalPlaybackProof } from './playbackFence'
+import { needsAnimationClock, ReadinessPublication } from './playerEfficiency'
 
 const voiceRequested = (snapshot?: AnimationSnapshot | null) => !!snapshot && (snapshot.prefs.enabled || snapshot.greetingVoiceEnabled === true)
 
@@ -40,8 +41,11 @@ export default function useAnimationPlayer () {
   const roomId = useAppSelector(state => state.user.roomId)
   const connected = useAppSelector(state => state.animation.connected)
   const isPlaying = useAppSelector(state => state.player.isPlaying)
+  const isIdle = useAppSelector(state => state.player.isAtQueueEnd || state.player.queueId === -1)
   const [, tick] = useState(0)
-  const audio = useRef(new AnnouncementAudio())
+  const audio = useRef<AnnouncementAudio | null>(null)
+  if (!audio.current) audio.current = new AnnouncementAudio()
+  const [readiness] = useState(() => new ReadinessPublication())
   const version = useRef(0)
   const running = useRef(false)
   const mounted = useRef(true)
@@ -70,8 +74,11 @@ export default function useAnimationPlayer () {
     const owner = audioOwnerKey()
     if (!mounted.current || !owner || preparedOwner.current !== owner || !voiceRequested(store.getState().animation.snapshot)) return
     const ready = audio.current.ready
+    const readyClips = ready ? [...audio.current.buffers.keys()].sort() : []
     try {
-      await animationRequest(ANIMATION_READY, { audioUnlocked: ready, readyClips: ready ? [...audio.current.buffers.keys()] : [], transitionBed: true })
+      await readiness.publish(JSON.stringify([owner, ready, readyClips]), async () => {
+        await animationRequest(ANIMATION_READY, { audioUnlocked: ready, readyClips, transitionBed: true })
+      })
       if (mounted.current && owner === audioOwnerKey()) {
         setUnlocked(ready && audio.current.ready)
         if (audio.current.ready) setNeedsGesture(false)
@@ -80,7 +87,7 @@ export default function useAnimationPlayer () {
     } catch (error) {
       if (mounted.current && owner === audioOwnerKey()) setError((error as Error).message)
     }
-  }, [])
+  }, [readiness])
 
   const resumeAudio = useCallback(() => {
     const owner = audioOwnerKey()
@@ -95,17 +102,19 @@ export default function useAnimationPlayer () {
   }, [publishReadiness])
 
   const abort = useCallback(() => {
+    readiness.invalidate()
     ambientUse.current = null
     version.current++
     ambientVersion.current++
     audio.current.stop()
-  }, [])
+  }, [readiness])
 
   useEffect(() => {
     mounted.current = true
     const channel = audio.current
     channel.onUnavailable = () => {
       if (!mounted.current) return
+      readiness.invalidate()
       setUnlocked(false)
       retryActivation(value => value + 1)
       if (socket.connected && store.getState().player._authority === 'GRANTED') {
@@ -160,7 +169,6 @@ export default function useAnimationPlayer () {
     socket.on('action', commands)
     window.addEventListener('pagehide', abort)
     void syncAnimation().catch(() => {})
-    const timer = setInterval(() => tick(value => value + 1), 250)
     return () => {
       mounted.current = false
       channel.onUnavailable = null
@@ -168,13 +176,21 @@ export default function useAnimationPlayer () {
       abort()
       channel.close()
       watch()
-      clearInterval(timer)
       socket.off('disconnect', disconnect)
       socket.off('connect', reconnect)
       socket.off('action', commands)
       window.removeEventListener('pagehide', abort)
     }
-  }, [abort, publishReadiness])
+  }, [abort, publishReadiness, readiness])
+
+  const clockActive = needsAnimationClock(snapshot, {
+    connected: connected && authority === 'GRANTED', idle: isIdle, busy, ambience: ambientPlaying,
+  }, animationTime())
+  useEffect(() => {
+    if (!clockActive) return
+    const timer = setInterval(() => tick(value => value + 1), 250)
+    return () => clearInterval(timer)
+  }, [clockActive])
 
   useEffect(() => {
     if (authority !== 'GRANTED') {

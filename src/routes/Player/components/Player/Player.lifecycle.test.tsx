@@ -3,7 +3,7 @@ import type React from 'react'
 import Player from './Player'
 
 vi.mock('react', () => ({ default: {
-  Component: class {
+  PureComponent: class {
     props: unknown
     state = {}
     constructor (props: unknown) { this.props = props }

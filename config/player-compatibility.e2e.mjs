@@ -97,7 +97,14 @@ try {
   }
   await context.route('**/compatibility-video.webm', route => route.fulfill({ path: path.join(data, 'video.webm'), contentType: 'video/webm' }))
   await context.addInitScript(() => {
-    window.compatibility = { contexts: [], failAudio: true, blockOnce: true, video: null }
+    window.compatibility = { contexts: [], failAudio: true, blockOnce: true, video: null, clockTicks: 0, playerVars: null }
+    const setInterval = window.setInterval
+    window.setInterval = (handler, delay, ...args) => setInterval(typeof handler === 'function' && delay === 250
+      ? (...values) => {
+          window.compatibility.clockTicks++
+          return handler(...values)
+        }
+      : handler, delay, ...args)
     const NativeAudioContext = window.AudioContext
     window.AudioContext = class extends NativeAudioContext {
       constructor (...args) {
@@ -111,6 +118,7 @@ try {
       Player: class {
         constructor (target, options) {
           this.options = options
+          window.compatibility.playerVars = options.playerVars
           this.video = document.createElement('video')
           this.video.style.cssText = 'width:100%;height:100%'
           this.video.setAttribute('data-testid', 'youtube-media-fixture')
@@ -160,14 +168,21 @@ try {
   const dialog = page.getByRole('dialog', { name: 'Pantalla', exact: true })
   await expect(dialog).toBeVisible()
   await expect(dialog).toHaveCSS('display', 'flex')
+  await page.keyboard.press('Control+Alt+k')
+  assert.equal(await page.evaluate(() => document.fullscreenElement), null, 'fullscreen shortcut must not interrupt a dialog')
   const visualizer = dialog.getByRole('checkbox', { name: 'Visualizador', exact: true })
   if (await visualizer.isChecked()) await visualizer.click()
   await expect(visualizer).not.toBeChecked()
   await page.keyboard.press('Escape')
   await expect(dialog).not.toBeVisible()
+  await page.keyboard.press('Control+Alt+k')
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('player-fs-container')
+  assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=1').get().status, 'APPROVED', 'fullscreen does not replace the initial local Play')
+  await page.evaluate(() => document.exitFullscreen())
   await toolbar.getByRole('button', { name: 'Reproducir', exact: true }).click()
   const retry = page.getByRole('button', { name: 'Reproducir aquí', exact: true })
   await expect(retry).toBeVisible()
+  assert.equal(await page.evaluate(() => window.compatibility.playerVars.controls), 0)
   await page.screenshot({ path: path.join(data, 'blocked-desktop.png') })
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(retry).toBeVisible()
@@ -177,9 +192,17 @@ try {
   await page.keyboard.press('Enter')
   await expect(retry).not.toBeVisible()
   await page.setViewportSize({ width: 1440, height: 900 })
+  await expect(toolbar.getByRole('button', { name: 'Activar pantalla completa', exact: true })).toHaveAttribute('aria-keyshortcuts', 'Control+Alt+K')
+  const clockTicks = await page.evaluate(() => window.compatibility.clockTicks)
+  await page.keyboard.press('Control+Alt+k')
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('player-fs-container')
+  assert.equal(await page.evaluate(() => document.fullscreenElement.tagName), 'DIV', 'fullscreen belongs to karaoke, not YouTube')
   await expect.poll(() => page.evaluate(() => window.compatibility.video.currentTime), { timeout: 35000 }).toBeGreaterThan(22)
+  assert.equal(await page.evaluate(() => window.compatibility.clockTicks), clockTicks, 'ordinary music playback does not run the 250 ms animation clock')
   assert.equal(await page.evaluate(() => window.compatibility.contexts.length), 0)
   assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=1').get().status, 'PLAYING')
+  await page.evaluate(() => document.exitFullscreen())
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull()
   await page.evaluate(() => {
     window.compatibility.failAudio = false
   })
@@ -197,6 +220,8 @@ try {
   await expect(page.getByRole('heading', { name: 'Voz de saludos', exact: true })).toBeVisible()
   await expect(page.getByText('Falta la clave de Gemini', { exact: true })).toBeVisible()
   await page.getByLabel('Voz de Gemini', { exact: true }).fill('Kore')
+  await page.keyboard.press('Control+Alt+k')
+  assert.equal(await page.evaluate(() => document.fullscreenElement), null, 'player shortcut does not act in admin forms')
   await page.getByRole('button', { name: 'Guardar ajustes', exact: true }).focus()
   await page.keyboard.press('Enter')
   await expect(page.getByText('Configuración guardada.', { exact: true })).toBeVisible()
@@ -206,7 +231,7 @@ try {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
   await page.screenshot({ path: path.join(data, 'greeting-voice-mobile.png'), fullPage: true })
   assert.deepEqual(errors, [])
-  console.log(`PASS ${await browser.version()}: compiled modal CSS, keyboard autoplay recovery, >22s native media via YouTube API fixture, local audio handoff/cleanup and Gemini settings (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS frontend / isolated API' : ''}). Artifacts: ${data}`)
+  console.log(`PASS ${await browser.version()}: karaoke fullscreen shortcut, controls=0 with keyboard autoplay recovery, no 250ms ticking during >22s native playback, local audio handoff/cleanup and unchanged admin settings (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS frontend / isolated API' : ''}). Artifacts: ${data}`)
 } catch (error) {
   if (page && !page.isClosed()) await page.screenshot({ path: path.join(data, 'failure.png') }).catch(() => {})
   let media = null

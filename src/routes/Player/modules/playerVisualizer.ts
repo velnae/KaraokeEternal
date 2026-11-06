@@ -1,10 +1,10 @@
 import { createAction, createReducer } from '@reduxjs/toolkit'
-import presets from 'butterchurn-presets/all'
+import { getBasePresetKeys, getExtraPresetKeys, getImagePresetKeys, getMD1PresetKeys, getMinimalPresetKeys, getNonMinimalPresetKeys } from 'butterchurn-presets/presetPackMeta'
 import {
   PLAYER_CMD_OPTIONS,
   PLAYER_LOAD,
   PLAYER_VISUALIZER_ERROR,
-} from 'shared/actionTypes'
+} from '../../../../shared/actionTypes.js'
 import { PlaybackOptions } from 'shared/types'
 
 const BAD_PRESETS = [
@@ -12,7 +12,16 @@ const BAD_PRESETS = [
   'Rovastar & Loadus + Zylot - FractalDrop (Spark Machine v2.0)',
 ]
 
-const _presetKeys = Object.keys(presets).filter(key => !BAD_PRESETS.includes(key))
+// Match all.js's merge order, including JavaScript's numeric-key ordering, using
+// only its index. Full definitions stay in the lazy visualizer chunk.
+const _presetKeys = Object.keys(Object.fromEntries([
+  ...getBasePresetKeys().presets,
+  ...getExtraPresetKeys().presets,
+  ...getImagePresetKeys().presets,
+  ...getMD1PresetKeys().presets,
+  ...getMinimalPresetKeys().presets,
+  ...getNonMinimalPresetKeys().presets,
+].map(key => [key, true]))).filter(key => !BAD_PRESETS.includes(key))
 
 const getPreset = (i: number) => ({
   presetKey: _presetKeys[i],

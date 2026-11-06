@@ -29,3 +29,13 @@ declare module 'butterchurn-presets/imageData' {
   const imageData: Record<string, ImageData>
   export default imageData
 }
+
+declare module 'butterchurn-presets/presetPackMeta' {
+  interface PresetPack { presets: string[], chunk: string }
+  export function getBasePresetKeys (): PresetPack
+  export function getExtraPresetKeys (): PresetPack
+  export function getImagePresetKeys (): PresetPack
+  export function getMD1PresetKeys (): PresetPack
+  export function getMinimalPresetKeys (): PresetPack
+  export function getNonMinimalPresetKeys (): PresetPack
+}

@@ -44,7 +44,7 @@ interface State {
   visualizerAudioSourceNode: MediaElementAudioSourceNode | null
 }
 
-class Player extends React.Component<PlayerProps> {
+class Player extends React.PureComponent<PlayerProps> {
   audioCtx: AudioContext | null = null
   audioGainNode: GainNode | null = null
   audioSourceNode: MediaElementAudioSourceNode | null = null
@@ -194,6 +194,8 @@ class Player extends React.Component<PlayerProps> {
 
       return (
         <YouTubePlayer
+          controls={0}
+          showAutoplayRecovery
           height={this.props.height}
           isPlaying={this.props.isPlaying}
           mediaKey={this.props.mediaKey}

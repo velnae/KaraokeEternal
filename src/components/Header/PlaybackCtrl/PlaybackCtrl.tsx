@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { Link, useLocation } from 'react-router'
 import clsx from 'clsx'
@@ -12,13 +12,8 @@ import DisplayCtrl from './DisplayCtrl/DisplayCtrl'
 import styles from './PlaybackCtrl.css'
 import { PlaybackOptions } from 'shared/types'
 import AnimationQuickControls from 'components/Animation/AnimationQuickControls'
-
-const handleFullscreen = () => {
-  if (screenfull.isEnabled) {
-    const el = document.getElementById('player-fs-container')
-    screenfull.request(el)
-  }
-}
+import { isPlayerFullscreenShortcut, PLAYER_FULLSCREEN_SHORTCUT, requestPlayerFullscreen } from 'lib/playerFullscreen'
+import { showErrorMessage } from 'store/modules/ui'
 
 const PlaybackCtrl = () => {
   const [isDisplayCtrlVisible, setDisplayCtrlVisible] = useState(false)
@@ -36,6 +31,20 @@ const PlaybackCtrl = () => {
   const handlePlay = () => dispatch(requestPlay())
   const handlePlayNext = () => dispatch(requestPlayNext())
   const handleVolume = (val: number) => dispatch(requestVolume(val))
+  const handleFullscreen = useCallback(() => {
+    void requestPlayerFullscreen().catch(() => dispatch(showErrorMessage('No se pudo activar la pantalla completa. Intenta nuevamente desde el botón de pantalla completa.')))
+  }, [dispatch])
+
+  useEffect(() => {
+    if (!isPlayer || !screenfull.isEnabled) return
+    const shortcut = (event: KeyboardEvent) => {
+      if (!isPlayerFullscreenShortcut(event) || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return
+      event.preventDefault()
+      handleFullscreen()
+    }
+    window.addEventListener('keydown', shortcut)
+    return () => window.removeEventListener('keydown', shortcut)
+  }, [isPlayer, handleFullscreen])
 
   const toggleDisplayCtrl = () => {
     setDisplayCtrlVisible(!isDisplayCtrlVisible)
@@ -63,7 +72,7 @@ const PlaybackCtrl = () => {
         />
 
         <Button
-          className={clsx(styles.btn, styles.next)}
+          className={styles.btn}
           icon='PLAY_NEXT'
           onClick={handlePlayNext}
           aria-label='Reproducir siguiente canción'
@@ -91,10 +100,12 @@ const PlaybackCtrl = () => {
 
         {isPlayer && screenfull.isEnabled && (
           <Button
-            className={clsx(styles.btn, styles.fullscreen)}
+            className={styles.btn}
             icon='FULLSCREEN'
             onClick={handleFullscreen}
             aria-label='Activar pantalla completa'
+            aria-keyshortcuts='Control+Alt+K'
+            title={`Pantalla completa del karaoke (${PLAYER_FULLSCREEN_SHORTCUT})`}
           />
         )}
       </div>
