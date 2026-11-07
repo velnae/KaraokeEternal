@@ -3,6 +3,13 @@
 **Status: implemented and verified, 2026-11-04.** The paste/review/create flow,
 house integration and HTTPS playback check are complete. Evidence is below.
 
+**Adjustment, 2026-11-07:** imported house playlists now accept any category and
+valid positive duration. Individual requests retain the original restrictions.
+For `PLZnIg3ubO5mU`, 83/84 videos pass; the remaining video disallows embedding.
+Verified with 120 focused tests, typecheck/lint, 13 E2E scenarios in each mode,
+and shared HTTPS UI with an isolated API and real provider metadata. Updated
+evidence is recorded in `docs/HOUSE-PLAYLISTS.md`.
+
 Admins paste a YouTube playlist link, review its name and eligible songs, and
 create an editable room playlist. The existing **Configurar en De la casa**
 action then leads to the separate playback configuration.
@@ -14,7 +21,7 @@ action then leads to the separate playback configuration.
 | Entry point | **Importar desde YouTube**, beside **Nueva lista** in `/admin/playlists`. |
 | Import | A point-in-time copy into a new saved playlist; retain source order and the first occurrence of each video. |
 | Availability | Read playlists accessible with the existing server API key; explain inaccessible/private playlists. |
-| Eligibility | Reuse current Music-category, duration >0 and <=7 minutes, public/processed, embeddable, age and configured-region checks; exclude live/upcoming streams. |
+| Eligibility | Import any category and positive valid duration, including videos over seven minutes. Keep public/processed, embeddable, age and configured-region checks; exclude live/upcoming streams. Individual song requests retain their original Music-category/seven-minute rules. |
 | Limits | Keep 50 lists per room, 200 saved songs and 80-character names. For bounded initial imports, reject source playlists exceeding 200 entries with an actionable message rather than truncate them. |
 | Preview | Editable suggested name, eligible count and omission reasons. Shorten long suggested names to 80 characters visibly. |
 | Completion | Save all accepted entries together, select the created list and offer **Configurar en De la casa**. Creation itself leaves playback selection and queue untouched. |

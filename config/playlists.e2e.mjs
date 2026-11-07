@@ -25,6 +25,7 @@ let server, browser, socket, db
 const errors = []
 const providerCalls = []
 const importedIds = Array.from({ length: 51 }, (_, index) => `fixture${String(index).padStart(4, '0')}`)
+const expectedImportedIds = [...importedIds, 'toolong0001']
 const provider = createHttpServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
   providerCalls.push(url.pathname)
@@ -43,8 +44,8 @@ const provider = createHttpServer(async (req, res) => {
     res.end(JSON.stringify({ items: all.slice(start, start + 50).map((id, index) => ({ contentDetails: { videoId: id }, snippet: { title: `Video ${start + index + 1}`, position: start + index } })), ...(start === 0 && all.length > 50 ? { nextPageToken: 'next' } : {}) }))
   } else if (url.pathname.endsWith('/videos')) {
     res.end(JSON.stringify({ items: url.searchParams.get('id').split(',').filter(id => id !== 'missing0001').reverse().map(id => ({
-      id, snippet: { title: `Música ${id}`, channelTitle: 'Canal de prueba', categoryId: '10', liveBroadcastContent: 'none' },
-      contentDetails: { duration: id === 'toolong0001' ? 'PT8M' : 'PT3M' }, status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
+      id, snippet: { title: `Música ${id}`, channelTitle: 'Canal de prueba', categoryId: id === 'toolong0001' ? '22' : '10', liveBroadcastContent: 'none' },
+      contentDetails: { duration: id === 'toolong0001' ? 'PT7M16S' : 'PT3M' }, status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
     })) }))
   } else {
     res.writeHead(400)
@@ -348,10 +349,9 @@ try {
   const importName = importDialog.getByLabel('Nombre de la lista', { exact: true })
   await expect(importName).toBeFocused()
   assert.equal((await importName.inputValue()).length, 80)
-  await expect(importDialog.getByRole('status')).toHaveText('51 canciones listas para importar')
-  await importDialog.getByText('3 videos omitidos · Ver motivos', { exact: true }).click()
+  await expect(importDialog.getByRole('status')).toHaveText('52 canciones listas para importar')
+  await importDialog.getByText('2 videos omitidos · Ver motivos', { exact: true }).click()
   await expect(importDialog.getByText('Repetida en la lista', { exact: true })).toBeVisible()
-  await expect(importDialog.getByText('Duración no válida: debe ser de hasta 7 minutos', { exact: true })).toBeVisible()
   await expect(importDialog.getByText('Video privado, eliminado o no disponible', { exact: true })).toBeVisible()
   assert.equal(providerCalls.length - requestCount, 5)
   await importName.fill('Repertorio importado')
@@ -368,23 +368,25 @@ try {
   await expect(importDialog.getByRole('alert')).toContainText('No se recibió la confirmación')
   await importDialog.getByRole('button', { name: 'Comprobar creación', exact: true }).click()
   await expect(importDialog).toHaveCount(0)
-  await expect(admin.getByRole('status')).toHaveText('Lista importada. Puedes editarla o configurarla en De la casa.')
+  await expect(admin.getByRole('main').getByRole('status')).toHaveText('Lista importada. Puedes editarla o configurarla en De la casa.')
   let importedSnapshot = await call('rooms/1/playlists')
   assert.equal(importedSnapshot.playlists.length, beforeImports.playlists.length + 1)
   const imported = importedSnapshot.playlists.find(list => list.name === 'Repertorio importado')
-  assert.deepEqual(imported.items.map(item => item.song.sourceId), importedIds)
+  assert.deepEqual(imported.items.map(item => item.song.sourceId), expectedImportedIds)
+  assert.equal(imported.items.at(-1).song.durationSeconds, 436)
+  assert.equal(imported.items.at(-1).song.isPlayable, true)
   assert.deepEqual(importedSnapshot.playback, beforeImports.playback)
   await admin.reload()
   await expect(admin.getByLabel('Lista para editar')).toHaveValue(String(imported.playlistId))
-  await expect(admin.getByRole('list', { name: 'Canciones de la lista' }).getByRole('listitem')).toHaveCount(51)
+  await expect(admin.getByRole('list', { name: 'Canciones de la lista' }).getByRole('listitem')).toHaveCount(52)
   pass('Multi-page import preserves order and omissions, recovers a lost response exactly once, and survives reload')
   await admin.getByRole('link', { name: 'Configurar en De la casa', exact: true }).click()
   await expect(house.getByLabel('Lista predeterminada')).toHaveValue(String(imported.playlistId))
   await house.getByRole('button', { name: 'Guardar cambios', exact: true }).click()
-  await expect(admin.getByRole('button', { name: 'De la casa (51)', exact: true })).toBeVisible()
+  await expect(admin.getByRole('button', { name: 'De la casa (52)', exact: true })).toBeVisible()
   importedSnapshot = await call('rooms/1/playlists')
   assert.equal(importedSnapshot.playback.playlistId, imported.playlistId)
-  assert.deepEqual(db.prepare('SELECT externalId FROM queue WHERE status=\'APPROVED\' AND houseRunId IS NOT NULL ORDER BY queueId').all().map(row => row.externalId), importedIds)
+  assert.deepEqual(db.prepare('SELECT externalId FROM queue WHERE status=\'APPROVED\' AND houseRunId IS NOT NULL ORDER BY queueId').all().map(row => row.externalId), expectedImportedIds)
   pass('Imported songs enter the house queue only through explicit existing playback configuration')
   assert.deepEqual(errors, [])
   console.log(`Evidence: ${data}`)

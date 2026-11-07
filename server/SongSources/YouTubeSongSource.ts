@@ -60,6 +60,8 @@ interface YouTubePlaylistItem {
   contentDetails?: { videoId?: string }
 }
 
+type YouTubeEligibilityPolicy = 'request' | 'playlist'
+
 export interface YouTubeSongSourceAdapter extends SongSourceAdapter {
   inspectPlaylist(playlistId: string): Promise<YouTubePlaylistContents>
 }
@@ -143,7 +145,7 @@ export const createYouTubeSongSource = ({
     return response.items ?? []
   }
 
-  const omissionReason = (video: YouTubeVideo): PlaylistOmissionReason | null => {
+  const omissionReason = (video: YouTubeVideo, policy: YouTubeEligibilityPolicy = 'request'): PlaylistOmissionReason | null => {
     if (!video.id || !video.snippet?.title || !video.snippet.channelTitle) return 'METADATA'
     if (video.status?.privacyStatus !== 'public' || video.status.uploadStatus !== 'processed') return 'UNAVAILABLE'
     if (video.status.embeddable !== true) return 'EMBEDDING'
@@ -152,10 +154,10 @@ export const createYouTubeSongSource = ({
     const isRegionAllowed = !restriction?.allowed || restriction.allowed.includes(regionCode)
     const isRegionBlocked = restriction?.blocked?.includes(regionCode) ?? false
     if (!isRegionAllowed || isRegionBlocked) return 'REGION'
-    return musicVideoOmissionReason(video)
+    return contentOmissionReason(video, policy)
   }
 
-  const normalizeVideo = (video: YouTubeVideo): ResolvedSong | null => {
+  const normalizeVideo = (video: YouTubeVideo, policy: YouTubeEligibilityPolicy = 'request'): ResolvedSong | null => {
     if (!video.id || !video.snippet?.title || !video.snippet.channelTitle) return null
 
     return {
@@ -169,7 +171,7 @@ export const createYouTubeSongSource = ({
       artistOrChannel: decodeHtml(video.snippet.channelTitle),
       durationSeconds: parseIsoDuration(video.contentDetails?.duration),
       thumbnailUrl: selectThumbnail(video.snippet.thumbnails),
-      isPlayable: omissionReason(video) === null,
+      isPlayable: omissionReason(video, policy) === null,
     }
   }
 
@@ -206,10 +208,10 @@ export const createYouTubeSongSource = ({
       entries.forEach((entry, index) => {
         const id = entry.contentDetails?.videoId || ''
         const video = videos.get(id)
-        const reason = id && seen.has(id) ? 'DUPLICATE' : video ? omissionReason(video) : 'UNAVAILABLE'
+        const reason = id && seen.has(id) ? 'DUPLICATE' : video ? omissionReason(video, 'playlist') : 'UNAVAILABLE'
         if (id) seen.add(id)
         if (reason) result.omissions.push({ position: index + 1, title: decodeHtml(entry.snippet?.title || `Video ${index + 1}`), reason })
-        else result.songs.push(normalizeVideo(video!)!)
+        else result.songs.push(normalizeVideo(video!, 'playlist')!)
       })
       return result
     },
@@ -280,14 +282,15 @@ export const parseIsoDuration = (value?: string): number | null => {
   return Number(days) * 86400 + Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds)
 }
 
-const musicVideoOmissionReason = (video: YouTubeVideo): PlaylistOmissionReason | null => {
-  if (video.snippet?.categoryId !== '10') return 'CATEGORY'
-  if (['live', 'upcoming'].includes(video.snippet.liveBroadcastContent ?? '')) return 'LIVE'
+const contentOmissionReason = (video: YouTubeVideo, policy: YouTubeEligibilityPolicy): PlaylistOmissionReason | null => {
+  if (policy === 'request' && video.snippet?.categoryId !== '10') return 'CATEGORY'
+  if (['live', 'upcoming'].includes(video.snippet?.liveBroadcastContent ?? '')) return 'LIVE'
   const duration = parseIsoDuration(video.contentDetails?.duration)
-  return duration !== null && duration > 0 && duration <= YOUTUBE_MAX_DURATION_SECONDS ? null : 'DURATION'
+  if (duration === null || !Number.isSafeInteger(duration) || duration <= 0) return 'DURATION'
+  return policy === 'request' && duration > YOUTUBE_MAX_DURATION_SECONDS ? 'DURATION' : null
 }
 
-const isEligibleMusicVideo = (video: YouTubeVideo): boolean => musicVideoOmissionReason(video) === null
+const isEligibleMusicVideo = (video: YouTubeVideo): boolean => contentOmissionReason(video, 'request') === null
 
 const selectThumbnail = (thumbnails?: Record<string, YouTubeThumbnail>): string | null => {
   return thumbnails?.high?.url ?? thumbnails?.medium?.url ?? thumbnails?.default?.url ?? null

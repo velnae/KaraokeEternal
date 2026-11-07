@@ -42,8 +42,9 @@ describe('YouTube playlist inspection', () => {
     })
     const result = await createYouTubeSongSource({ apiKey: 'secret', fetchImpl }).inspectPlaylist(playlistId)
     expect(result.title).toBe('Music & Friends')
-    expect(result.songs.map(song => song.sourceId)).toEqual(ids)
-    expect(result.omissions.map(item => [item.position, item.reason])).toEqual([[52, 'DUPLICATE'], [53, 'UNAVAILABLE'], [54, 'DURATION']])
+    expect(result.songs.map(song => song.sourceId)).toEqual([...ids, 'toolong0001'])
+    expect(result.songs.at(-1)).toMatchObject({ durationSeconds: 480, isPlayable: true })
+    expect(result.omissions.map(item => [item.position, item.reason])).toEqual([[52, 'DUPLICATE'], [53, 'UNAVAILABLE']])
     expect(fetchImpl).toHaveBeenCalledTimes(5)
     expect(JSON.stringify(result)).not.toContain('secret')
   })
@@ -52,7 +53,11 @@ describe('YouTube playlist inspection', () => {
     [{ status: { embeddable: false, privacyStatus: 'public', uploadStatus: 'processed' } }, 'EMBEDDING'],
     [{ contentDetails: { duration: 'PT3M', contentRating: { ytRating: 'ytAgeRestricted' } } }, 'AGE'],
     [{ contentDetails: { duration: 'PT3M', regionRestriction: { blocked: ['PE'] } } }, 'REGION'],
-    [{ snippet: { title: 'Other', channelTitle: 'Channel', categoryId: '22' } }, 'CATEGORY'],
+    [{ status: { embeddable: true, privacyStatus: 'private', uploadStatus: 'processed' } }, 'UNAVAILABLE'],
+    [{ contentDetails: { duration: 'PT0S' } }, 'DURATION'],
+    [{ contentDetails: {} }, 'DURATION'],
+    [{ contentDetails: { duration: 'invalid' } }, 'DURATION'],
+    [{ snippet: { title: 'Live', channelTitle: 'Channel', categoryId: '22', liveBroadcastContent: 'live' } }, 'LIVE'],
     [{ snippet: { title: 'Live', channelTitle: 'Channel', categoryId: '10', liveBroadcastContent: 'upcoming' } }, 'LIVE'],
   ])('explains rejected videos using the shared eligibility rules', async (overrides, reason) => {
     const fetchImpl = vi.fn()
@@ -62,6 +67,31 @@ describe('YouTube playlist inspection', () => {
     const result = await createYouTubeSongSource({ apiKey: 'secret', fetchImpl }).inspectPlaylist(playlistId)
     expect(result.songs).toHaveLength(0)
     expect(result.omissions[0].reason).toBe(reason)
+  })
+
+  it.each([
+    { categoryId: '22', duration: 'PT3M' },
+    { categoryId: '24', duration: 'PT3M' },
+    { categoryId: '27', duration: 'PT3M' },
+    { categoryId: undefined, duration: 'PT3M' },
+    { categoryId: '22', duration: 'PT7M16S' },
+    { categoryId: '10', duration: 'PT1H2M' },
+  ])('imports category $categoryId and duration $duration without relaxing individual requests', async ({ categoryId, duration }) => {
+    const video = playableVideo('AAAAAAAAAAA')
+    const candidate = { ...video, snippet: { ...video.snippet, title: 'Recorded live performance', categoryId }, contentDetails: { duration } }
+    const fetchImpl = vi.fn(async (url: URL) => {
+      if (url.pathname.endsWith('/playlists')) return jsonResponse({ items: [{ snippet: { title: 'Venue selection' } }] })
+      if (url.pathname.endsWith('/playlistItems')) return jsonResponse({ items: [entry(video.id, 0)] })
+      if (url.pathname.endsWith('/search')) return jsonResponse({ items: [{ id: { videoId: video.id } }] })
+      return jsonResponse({ items: [candidate] })
+    })
+    const source = createYouTubeSongSource({ apiKey: 'secret', fetchImpl })
+    const preview = await source.inspectPlaylist(playlistId)
+    expect(preview.songs).toMatchObject([{ sourceId: video.id, isPlayable: true, durationSeconds: parseIsoDuration(duration) }])
+    expect(preview.omissions).toEqual([])
+    await expect(source.search('recorded performance', { roomId: 1 })).resolves.toEqual([])
+    await expect(source.search(`https://youtu.be/${video.id}`, { roomId: 1 })).rejects.toMatchObject({ code: 'YOUTUBE_VIDEO_UNSUPPORTED' })
+    await expect(source.resolve(video.id, { roomId: 1 })).rejects.toMatchObject({ code: 'YOUTUBE_VIDEO_UNSUPPORTED' })
   })
 
   it('bounds oversized playlists even when the reported count is absent and pagination repeats', async () => {

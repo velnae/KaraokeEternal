@@ -11,7 +11,7 @@ export const playlistOmissionReasons = {
   REGION: 'Video no disponible en la región configurada',
   CATEGORY: 'El video no pertenece a la categoría Música',
   LIVE: 'Emisión en directo o estreno pendiente',
-  DURATION: 'Duración no válida: debe ser de hasta 7 minutos',
+  DURATION: 'El video no tiene una duración válida',
 } as const
 export type PlaylistOmissionReason = keyof typeof playlistOmissionReasons
 export interface PlaylistOmission { position: number, title: string, reason: PlaylistOmissionReason }

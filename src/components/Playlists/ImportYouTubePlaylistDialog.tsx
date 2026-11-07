@@ -83,7 +83,7 @@ export default function ImportYouTubePlaylistDialog ({ roomId, onCreated, onClos
                   Enlace de la lista de YouTube
                   <input autoFocus ref={input => input?.setAttribute('autofocus', '')} type='url' required maxLength={2048} value={url} disabled={!!phase} onChange={event => setUrl(event.target.value)} placeholder='https://www.youtube.com/playlist?list=…' />
                 </label>
-                <p className={styles.help}>Hasta 200 videos. Música de hasta 7 minutos, sin directos.</p>
+                <p className={styles.help}>Hasta 200 videos, de cualquier categoría y duración. Sin directos.</p>
               </>
             )
           : (

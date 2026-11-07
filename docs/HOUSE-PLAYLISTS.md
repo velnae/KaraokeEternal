@@ -52,11 +52,15 @@ video and reports duplicates and unavailable videos. Source playlists above
 200-song and 80-character-name limits. Long suggested names are shortened with
 a visible explanation.
 
-The same eligibility rules as Biblioteca apply: public, processed, embeddable
-Music-category videos of up to seven minutes, excluding live/upcoming streams,
-age restrictions and configured-region restrictions. A music-looking title
-does not override YouTube's category. Private playlists require a different,
-accessible link. Metadata acceptance cannot guarantee future playback.
+Administrators can import videos from any category, including recordings longer
+than seven minutes. Category and length do not decide whether the selected
+repertoire belongs in the venue. Individual searches and song requests retain
+their existing Music-category and seven-minute rules.
+
+Imports still require public, processed, embeddable videos with a valid positive
+duration, excluding live/upcoming streams, age restrictions and configured-region
+restrictions. Private playlists require a different, accessible link. Metadata
+acceptance cannot guarantee future playback.
 
 Reviewing does not save or queue songs. Confirmation saves the complete accepted
 list in one transaction. Repeating confirmation after a lost response recovers
@@ -123,6 +127,26 @@ the same source ID twice reuses the entry. Reordering validates the complete
 item set; cross-room item/list identifiers are rejected.
 
 ## Verification
+
+### Flexible imports — 2026-11-07
+
+- Explicit `playlist` eligibility accepts other/unknown categories and recordings
+  over seven minutes. `request` remains the default for individual search and
+  resolution. Tests verify both policies using the same provider response.
+- 120 focused tests, TypeScript, scoped ESLint and production builds passed.
+  All 13 playlist E2E scenarios passed in development and production, including
+  saving and queuing a 7:16 video categorized outside Music.
+- The supplied `PLZnIg3ubO5mU` list yields 83 accepted videos out of 84.
+  `-4EUIDc-J_0` is accepted at 436 seconds. `5pizyQuLKVA` is omitted because
+  its owner disallows embedding.
+- Verified keyboard import, omission reporting, creation and reload using the
+  shared HTTPS frontend with an isolated production API and live YouTube data.
+  Inspected mobile/desktop screenshots. This check does not claim new playback
+  evidence or a shared-backend write.
+
+Evidence: development `/tmp/karaoke-playlists-e2e-LJCZem`, production
+`/tmp/karaoke-playlists-e2e-HrjKBM`, HTTPS UI
+`/tmp/opencode/relaxed-playlist-3yQEZi`.
 
 ### YouTube import — 2026-11-04
 
