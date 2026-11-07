@@ -44,6 +44,6 @@ export function youtubeQuery (query: string, mode: YouTubeSearchMode) {
   if (youtubeVideoId(trimmed)) return trimmed
   if (mode === 'karaoke' && !/\bkaraoke\b/i.test(trimmed)) return `${trimmed} karaoke`
   if (mode === 'lyrics' && !/\b(letras?|lyrics?)\b/i.test(trimmed)) return `${trimmed} letra lyrics`
-  if (mode === 'music-video' && !/\b(videoclip|video oficial|official (music )?video)\b/i.test(trimmed)) return `${trimmed} official music video`
+  if (mode === 'music-video' && !/\b(videoclip|video oficial|official (music )?video)\b/i.test(trimmed)) return `${trimmed} video oficial`
   return trimmed
 }

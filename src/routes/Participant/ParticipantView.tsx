@@ -273,7 +273,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
               event.preventDefault()
               if (query.trim().length < 2) return
               setSubmitted({ query: query.trim(), intent })
-              void search.submit(query, intent === 'SING' ? 'karaoke' : 'all')
+              void search.submit(query, intent === 'SING' ? 'karaoke' : 'music-video')
             }}
           >
             <fieldset className={styles.searchIntent}>

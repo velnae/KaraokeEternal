@@ -32,7 +32,7 @@ describe('YouTube search intent', () => {
   it('distinguishes formats without changing the local search text', () => {
     expect(youtubeQuery('  Mi canción  ', 'karaoke')).toBe('Mi canción karaoke')
     expect(youtubeQuery('Mi canción', 'lyrics')).toBe('Mi canción letra lyrics')
-    expect(youtubeQuery('Mi canción', 'music-video')).toBe('Mi canción official music video')
+    expect(youtubeQuery('Mi canción', 'music-video')).toBe('Mi canción video oficial')
     expect(youtubeQuery('  Mi canción  ', 'all')).toBe('Mi canción')
   })
 
@@ -41,6 +41,9 @@ describe('YouTube search intent', () => {
     expect(youtubeQuery('Mi canción con letras', 'lyrics')).toBe('Mi canción con letras')
     expect(youtubeQuery('Mi canción official video', 'music-video')).toBe('Mi canción official video')
     expect(youtubeQuery('Mi canción video oficial', 'music-video')).toBe('Mi canción video oficial')
+    expect(youtubeQuery('Mi canción VIDEO OFICIAL', 'music-video')).toBe('Mi canción VIDEO OFICIAL')
+    expect(youtubeQuery('Mi canción videoclip', 'music-video')).toBe('Mi canción videoclip')
+    expect(youtubeQuery('Mi canción official music video', 'music-video')).toBe('Mi canción official music video')
     expect(youtubeQuery('  ', 'karaoke')).toBe('')
   })
 })
