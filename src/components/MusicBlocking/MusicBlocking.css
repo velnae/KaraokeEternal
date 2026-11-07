@@ -1,6 +1,12 @@
 .workspace { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 2rem; align-items: start; }
 .catalog, .form { min-width: 0; display: flex; flex-direction: column; gap: .75rem; }
 .form { padding: 1.25rem; border: 1px solid var(--edge, #45505c); border-radius: .75rem; background: var(--equipment, #18212e); }
+.form.compact { padding: 0; border: 0; background: transparent; }
+.compact p { color: var(--secondary); font-size: 14px; }
+.compact .resourceTitle { color: var(--lyrics); font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+.formActions { display: flex; justify-content: flex-end; gap: 10px; }
+.formActions > button { flex: 1; }
+.compact .formActions { margin-top: 8px; }
 .form h2, .catalog h2 { margin: 0 0 .5rem; }
 .form p, .catalog p { margin: 0; line-height: 1.5; }
 .form input, .form select, .catalog input { width: 100%; min-width: 0; min-height: 44px; padding: .6rem; border: 1px solid var(--edge, #66717e); border-radius: .4rem; color: inherit; background: var(--stage, #18212e); font: inherit; }

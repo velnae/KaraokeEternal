@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useCallback, useId, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { useSwipeable } from 'react-swipeable'
 import { useLongPress } from 'use-long-press'
@@ -21,9 +21,8 @@ import socket from 'lib/socket'
 import store from 'store/store'
 import { QUEUE_ADD } from 'shared/actionTypes'
 import { queuePush } from '../../modules/queue'
-import MusicBlockForm from 'components/MusicBlocking/MusicBlockForm'
-import Modal from 'components/Modal/Modal'
 import type { MusicBlockRule } from 'shared/musicBlocking'
+import QueueItemMenu, { type QueueMenuAction } from './QueueItemMenu'
 
 const LONG_PRESS_THRESHOLD_MS = 700
 
@@ -66,6 +65,7 @@ interface QueueItemProps {
   // actions
   onMoveClick(queueId: number): void
   onRemoveUpcoming: (userId: number) => void
+  onBlock: (rule: MusicBlockRule, title: string, opener: HTMLButtonElement) => void
 }
 
 const QueueItem = ({
@@ -92,6 +92,7 @@ const QueueItem = ({
   isUpcoming,
   onMoveClick,
   onRemoveUpcoming,
+  onBlock,
   origin,
   requestIntent = 'UNKNOWN',
   pctPlayed,
@@ -108,7 +109,14 @@ const QueueItem = ({
   wait,
 }: QueueItemProps) => {
   const [isExpanded, setExpanded] = useState(false)
-  const [blockRule, setBlockRule] = useState<MusicBlockRule | null>(null)
+  const [menuAnchor, setMenuAnchor] = useState<HTMLButtonElement | null>(null)
+  const [focusLast, setFocusLast] = useState(false)
+  const menuId = useId()
+  const menuOpener = useRef<HTMLButtonElement | null>(null)
+  const closeMenu = useCallback((restoreFocus = true) => {
+    setMenuAnchor(null)
+    if (restoreFocus && menuOpener.current?.isConnected) menuOpener.current.focus({ preventScroll: true })
+  }, [])
   const longPressActiveRef = useRef(false)
   const dispatch = useAppDispatch()
   const [recovering, setRecovering] = useState(false)
@@ -165,6 +173,18 @@ const QueueItem = ({
   }
   const handleApproveClick = () => dispatch(approveRequest({ queueId }))
   const handleRejectClick = () => dispatch(rejectRequest({ queueId }))
+  const selectMenuAction = (action: QueueMenuAction) => {
+    closeMenu()
+    if (action === 'remove') handleRemoveClick()
+    else if (action === 'upcoming') {
+      if (window.confirm(`¿Quitar todos los próximos pedidos de «${userDisplayName}»? Su música no quedará bloqueada.`)) onRemoveUpcoming(userId)
+    } else {
+      const rule: MusicBlockRule = action === 'resource'
+        ? { kind: 'resource', source, sourceId: source === 'YOUTUBE' ? externalId! : String(songId) }
+        : action === 'song' ? { kind: 'song', artist, title } : { kind: 'artist', artist, aliases: [] }
+      onBlock(rule, title, menuOpener.current!)
+    }
+  }
 
   const statusLabel: Record<QueueItemStatus, string> = {
     PENDING_APPROVAL: 'Por aprobar',
@@ -339,7 +359,34 @@ const QueueItem = ({
               onClick={handleReplayClick}
             />
           )}
-          {isRemovable && (
+          {isAdmin && (
+            <Button
+              className={styles.danger}
+              icon='DELETE'
+              aria-label='Quitar o bloquear'
+              title='Quitar o bloquear'
+              aria-describedby={`queue-title-${queueId}`}
+              aria-haspopup='menu'
+              aria-expanded={!!menuAnchor}
+              aria-controls={menuAnchor ? menuId : undefined}
+              onClick={(event) => {
+                if (menuAnchor) closeMenu()
+                else {
+                  menuOpener.current = event.currentTarget
+                  setFocusLast(false)
+                  setMenuAnchor(event.currentTarget)
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+                event.preventDefault()
+                menuOpener.current = event.currentTarget
+                setFocusLast(event.key === 'ArrowUp')
+                setMenuAnchor(event.currentTarget)
+              }}
+            />
+          )}
+          {!isAdmin && isRemovable && (
             <Button
               className={clsx(styles.btnRemove, styles.danger)}
               data-hide
@@ -390,14 +437,7 @@ const QueueItem = ({
         </Buttons>
         {greeting && <QueueGreeting operator greeting={greeting} descriptionId={`queue-title-${queueId}`} paused={greetingsPaused} busy={greetingBusy} onRemove={onRemoveGreeting} />}
       </div>
-      {isAdmin && isExpanded && (
-        <div role='group' aria-label={`Bloquear ${title}`}>
-          <Button onClick={() => setBlockRule({ kind: 'song', artist, title })}>Bloquear canción</Button>
-          <Button onClick={() => setBlockRule({ kind: 'resource', source, sourceId: source === 'YOUTUBE' ? externalId! : String(songId) })}>Bloquear este video/archivo</Button>
-          <Button onClick={() => setBlockRule({ kind: 'artist', artist, aliases: [] })}>Bloquear artista</Button>
-        </div>
-      )}
-      {blockRule && <Modal title='Bloquear música' onClose={() => setBlockRule(null)}><MusicBlockForm initial={blockRule} onSaved={() => setBlockRule(null)} /></Modal>}
+      {isAdmin && menuAnchor && <QueueItemMenu id={menuId} anchor={menuAnchor} title={title} local={isLocal} removable={isRemovable} focusLast={focusLast} onClose={closeMenu} onSelect={selectMenuAction} />}
     </div>
   )
 }

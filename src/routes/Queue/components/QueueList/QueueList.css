@@ -36,3 +36,7 @@
 .queueActions > section { padding: 0; min-width: 0; max-width: 100%; }
 .greetingControl { flex-shrink: 0; width: auto; min-height: 44px; padding: 10px 12px; color: var(--secondary); background: var(--equipment); border: 1px solid var(--edge); border-radius: 10px; font-size: 13px; }
 .greetingControl[aria-pressed='true'] { color: var(--amber); border-color: var(--amber); }
+.blockDialog { width: min(480px, calc(100% - 24px)); }
+.blockFeedback { color: var(--cyan); font-size: 14px; line-height: 1.5; }
+.blockFeedback:empty { margin: 0; }
+.blockFeedback:focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; }

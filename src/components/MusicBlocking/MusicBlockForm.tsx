@@ -6,7 +6,14 @@ import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { youtubeVideoId } from 'shared/youtubeSearch'
 import styles from './MusicBlocking.css'
 
-export default function MusicBlockForm ({ initial, onSaved }: { initial?: MusicBlockRule, onSaved?: () => void }) {
+export default function MusicBlockForm ({ initial, onSaved, compact = false, resourceTitle, onCancel, onBusyChange }: {
+  initial?: MusicBlockRule
+  onSaved?: (rule: MusicBlockRule) => void
+  compact?: boolean
+  resourceTitle?: string
+  onCancel?: () => void
+  onBusyChange?: (busy: boolean) => void
+}) {
   const id = useId()
   const dispatch = useAppDispatch()
   const settings = useAppSelector(state => state.prefs.musicBlocking)
@@ -33,26 +40,41 @@ export default function MusicBlockForm ({ initial, onSaved }: { initial?: MusicB
       const validated = validateMusicBlocking({ rules: [rule] }).rules[0]
       if (settings.rules.some(existing => musicRuleKey(existing) === musicRuleKey(validated))) throw new Error('Este bloqueo ya existe. Puede quitarlo desde Música bloqueada.')
       setBusy(true)
+      onBusyChange?.(true)
       await dispatch(saveMusicBlocking({ rules: [...settings.rules, validated] }))
       setStatus('Bloqueo guardado y aplicado a todas las salas.')
       setArtist('')
       setTitle('')
       setSourceId('')
       setAliases('')
-      onSaved?.()
+      onBusyChange?.(false)
+      onSaved?.(validated)
     } catch (cause) {
       setError((cause as Error).message)
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+      onBusyChange?.(false)
+    }
   }
   return (
-    <form className={styles.form} onSubmit={(event) => { void submit(event) }}>
-      <h2>Agregar bloqueo</h2>
-      <label htmlFor={`${id}-kind`}>Bloquear</label>
-      <select id={`${id}-kind`} value={kind} disabled={!!initial || busy} onChange={event => setKind(event.target.value as MusicBlockRule['kind'])}>
-        <option value='artist'>Artista completo</option>
-        <option value='song'>Canción</option>
-        <option value='resource'>Video o archivo</option>
-      </select>
+    <form className={`${styles.form} ${compact ? styles.compact : ''}`} onSubmit={(event) => { void submit(event) }}>
+      {!compact && (
+        <>
+          <h2>Agregar bloqueo</h2>
+          <label htmlFor={`${id}-kind`}>Bloquear</label>
+          <select id={`${id}-kind`} value={kind} disabled={!!initial || busy} onChange={event => setKind(event.target.value as MusicBlockRule['kind'])}>
+            <option value='artist'>Artista completo</option>
+            <option value='song'>Canción</option>
+            <option value='resource'>Video o archivo</option>
+          </select>
+        </>
+      )}
+      {compact && kind === 'resource' && (
+        <>
+          <p className={styles.resourceTitle} translate='no'>{resourceTitle}</p>
+          <p>{source === 'YOUTUBE' ? 'Se bloqueará solo esta versión de YouTube.' : 'Se bloqueará esta canción de la biblioteca local.'}</p>
+        </>
+      )}
       {kind !== 'resource' && (
         <>
           <label htmlFor={`${id}-artist`}>Artista</label>
@@ -60,7 +82,7 @@ export default function MusicBlockForm ({ initial, onSaved }: { initial?: MusicB
           <p>Confirme el artista: el canal de YouTube puede tener otro nombre.</p>
         </>
       )}
-      {kind === 'artist' && (
+      {kind === 'artist' && !compact && (
         <>
           <label htmlFor={`${id}-aliases`}>Alias (separados por comas)</label>
           <input id={`${id}-aliases`} value={aliases} onChange={event => setAliases(event.target.value)} disabled={busy} />
@@ -72,7 +94,7 @@ export default function MusicBlockForm ({ initial, onSaved }: { initial?: MusicB
           <input id={`${id}-title`} value={title} onChange={event => setTitle(event.target.value)} maxLength={200} required disabled={busy} />
         </>
       )}
-      {kind === 'resource' && (
+      {kind === 'resource' && !compact && (
         <>
           <label htmlFor={`${id}-source`}>Origen</label>
           <select id={`${id}-source`} value={source} disabled={busy} onChange={event => setSource(event.target.value as 'YOUTUBE' | 'LOCAL')}>
@@ -83,10 +105,13 @@ export default function MusicBlockForm ({ initial, onSaved }: { initial?: MusicB
           <input id={`${id}-resource`} value={sourceId} onChange={event => setSourceId(event.target.value)} maxLength={300} required disabled={busy} />
         </>
       )}
-      <p>Se retirarán los pedidos coincidentes que esperan reproducción. La canción en curso no se interrumpe.</p>
+      <p>Se aplicará a todas las salas y retirará los pedidos coincidentes que esperan reproducción. La canción en curso no se interrumpe.</p>
       {error && <p role='alert'>{error}</p>}
       <p role='status'>{busy ? 'Guardando…' : status}</p>
-      <Button type='submit' variant='primary' disabled={busy}>{busy ? 'Guardando…' : 'Guardar bloqueo'}</Button>
+      <div className={styles.formActions}>
+        {compact && onCancel && <Button variant='default' disabled={busy} onClick={onCancel}>Cancelar</Button>}
+        <Button type='submit' variant='primary' disabled={busy}>{busy ? 'Guardando…' : compact ? 'Bloquear' : 'Guardar bloqueo'}</Button>
+      </div>
     </form>
   )
 }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import clsx from 'clsx'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { ensureState } from 'redux-optimistic-ui'
@@ -16,10 +16,26 @@ import HousePlaylistControl from 'components/Playlists/HousePlaylistControl'
 import QueueMaintenance from '../QueueMaintenance/QueueMaintenance'
 import { isQueueHistoryHidden } from 'shared/queueCleanup'
 import useGreetings from 'components/Greetings/useGreetings'
+import Modal from 'components/Modal/Modal'
+import MusicBlockForm from 'components/MusicBlocking/MusicBlockForm'
+import { musicRuleLabel, type MusicBlockRule } from 'shared/musicBlocking'
 
 type QueueFilter = 'queue' | 'pending' | 'house'
 
 const QueueList = () => {
+  const [block, setBlock] = useState<{ rule: MusicBlockRule, title: string, opener: HTMLButtonElement } | null>(null)
+  const [blockMessage, setBlockMessage] = useState('')
+  const blockBusy = useRef(false)
+  const feedback = useRef<HTMLParagraphElement>(null)
+  const closeBlock = () => {
+    if (blockBusy.current) return
+    const opener = block?.opener
+    setBlock(null)
+    requestAnimationFrame(() => {
+      if (opener?.isConnected) opener.focus({ preventScroll: true })
+      else feedback.current?.focus({ preventScroll: true })
+    })
+  }
   const artists = useAppSelector(state => state.artists)
   const { errorMessage, isAtQueueEnd, isErrored, isPlaying, position, queueId } = useAppSelector(state => state.status)
 
@@ -148,6 +164,10 @@ const QueueList = () => {
         // actions
         onMoveClick={handleMoveClick}
         onRemoveUpcoming={handleRemoveUpcoming}
+        onBlock={(rule, title, opener) => {
+          setBlockMessage('')
+          setBlock({ rule, title, opener })
+        }}
       />
     )
   })
@@ -195,6 +215,7 @@ const QueueList = () => {
         </div>
       )}
       {greetings.error && <p role='alert'>{greetings.error}</p>}
+      {user.isAdmin && <p ref={feedback} tabIndex={-1} role='status' className={styles.blockFeedback}>{blockMessage}</p>}
       {user.isAdmin && houseIds.length > 0 && queue.housePolicy.reason && (
         <p className={styles.empty} role='status'>
           {`Música de la casa en espera: ${queue.housePolicy.reason === 'backlog' ? 'hay 3 o más pedidos de clientes pendientes.' : 'un pedido lleva 10 minutos o más esperando.'} La lista conserva su orden.`}
@@ -214,6 +235,26 @@ const QueueList = () => {
         <div className={styles.empty}>No hay canciones de la casa aprobadas.</div>
       )}
       <QueueListAnimator queueItems={items.filter(item => item !== null)} />
+      {user.isAdmin && block && (
+        <Modal
+          title={block.rule.kind === 'artist' ? 'Bloquear artista' : block.rule.kind === 'song' ? 'Bloquear canción' : block.rule.source === 'YOUTUBE' ? 'Bloquear este video' : 'Bloquear este archivo'}
+          className={styles.blockDialog}
+          onClose={closeBlock}
+        >
+          <MusicBlockForm
+            compact
+            initial={block.rule}
+            resourceTitle={block.title}
+            onCancel={closeBlock}
+            onBusyChange={(busy) => { blockBusy.current = busy }}
+            onSaved={(rule) => {
+              setBlockMessage(`Bloqueo guardado: ${musicRuleLabel(rule)}. Aplicado a todas las salas.`)
+              setBlock(null)
+              requestAnimationFrame(() => feedback.current?.focus({ preventScroll: true }))
+            }}
+          />
+        </Modal>
+      )}
     </>
   )
 }
