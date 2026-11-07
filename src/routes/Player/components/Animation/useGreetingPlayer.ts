@@ -6,7 +6,7 @@ import { greetingRequest } from 'components/Greetings/api'
 import { greetingDuration, type Greeting, type GreetingAsset, type GreetingGrant, type GreetingPerformer } from 'shared/greetings'
 import { ANIMATION_EVENT, ambienceBedVolume } from 'shared/animation'
 import { animationRequest, animationTime } from 'lib/animationApi'
-import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, PLAYER_EMIT_STATUS } from 'shared/actionTypes'
+import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, PLAYER_EMIT_STATUS } from 'shared/actionTypes'
 import { playerStatusCancel } from '../../modules/player'
 import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
 import GreetingCommitGate from './GreetingCommitGate'
@@ -54,7 +54,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       }
     }
     const command = (action: { type: string }) => {
-      if ([PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY].includes(action.type)) stop()
+      if ([PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY].includes(action.type)) stop()
     }
     const unsubscribe = store.subscribe(() => checkActive.current?.())
     socket.on('disconnect', stop)

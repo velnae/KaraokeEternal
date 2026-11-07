@@ -55,7 +55,7 @@ router.post('/rooms/:roomId/playlists/:playlistId/items', async (ctx) => {
 })
 router.put('/rooms/:roomId/playlists/:playlistId/order', (ctx) => {
   const roomId = Number(ctx.params.roomId)
-  Playlists.reorder(roomId, Number(ctx.params.playlistId), body(ctx).order)
+  Playlists.reorder(roomId, Number(ctx.params.playlistId), body(ctx).order, body(ctx).requireInactive === true)
   ctx.body = Playlists.snapshot(roomId)
 })
 router.delete('/rooms/:roomId/playlists/:playlistId/items/:itemId', (ctx) => {

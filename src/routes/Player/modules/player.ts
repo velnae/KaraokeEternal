@@ -1,11 +1,13 @@
 import { createAction, createReducer } from '@reduxjs/toolkit'
 import { AppThunk } from 'store/store'
 import { CANCEL } from 'redux-throttle'
-import getWebGLSupport from 'lib/getWebGLSupport'
+import getWebGLSupport from '../../../lib/getWebGLSupport'
+import { clearedQueuePlayback } from '../../../../shared/queueCleanup'
 import {
   PLAYER_CMD_NEXT,
   PLAYER_CMD_OPTIONS,
   PLAYER_CMD_PAUSE,
+  PLAYER_CMD_STOP,
   PLAYER_CMD_PLAY,
   PLAYER_CMD_REPLAY,
   PLAYER_CMD_VOLUME,
@@ -20,7 +22,7 @@ import {
   PLAYER_PLAY,
   PLAYER_UPDATE,
   REDUX_SLICE_INJECT_NOOP,
-} from 'shared/actionTypes'
+} from '../../../../shared/actionTypes'
 
 // internal use
 export const playerUpdate = createAction<object>(PLAYER_UPDATE)
@@ -39,6 +41,7 @@ export const playerFailure = createAction<{
 
 // triggered by clients
 const playerCmdPause = createAction(PLAYER_CMD_PAUSE)
+const playerCmdStop = createAction(PLAYER_CMD_STOP)
 const playerCmdPlay = createAction(PLAYER_CMD_PLAY)
 const playerCmdReplay = createAction<{ queueId: number }>(PLAYER_CMD_REPLAY)
 const playerCmdVolume = createAction<number>(PLAYER_CMD_VOLUME)
@@ -134,6 +137,7 @@ export interface PlayerState {
   _lastReplayTime: number
   _isBetweenTracks: boolean
   _isReplayPlayback: boolean
+  _isQueueStopped: boolean
 }
 
 const initialState: PlayerState = {
@@ -164,6 +168,7 @@ const initialState: PlayerState = {
   _lastReplayTime: 0,
   _isBetweenTracks: false,
   _isReplayPlayback: false,
+  _isQueueStopped: false,
 }
 
 const playerReducer = createReducer(initialState, (builder) => {
@@ -181,6 +186,7 @@ const playerReducer = createReducer(initialState, (builder) => {
       state._authorityMessage = ''
     })
     .addCase(playerCmdNext, (state) => {
+      state._isQueueStopped = false
       state._isPlayingNext = true
     })
     .addCase(playerCmdOptions, (state, { payload }) => ({
@@ -192,10 +198,22 @@ const playerReducer = createReducer(initialState, (builder) => {
     .addCase(playerCmdPause, (state) => {
       state.isPlaying = false
     })
+    .addCase(playerCmdStop, state => ({
+      ...state,
+      ...clearedQueuePlayback,
+      _isFetching: false,
+      _isPlayingNext: false,
+      _isReplayingQueueId: null,
+      _isBetweenTracks: false,
+      _isReplayPlayback: false,
+      _isQueueStopped: true,
+    }))
     .addCase(playerCmdPlay, (state) => {
+      state._isQueueStopped = false
       state.isPlaying = true
     })
     .addCase(playerCmdReplay, (state, { payload }) => {
+      state._isQueueStopped = false
       state._isReplayingQueueId = payload.queueId
       state._lastReplayTime = Date.now()
     })

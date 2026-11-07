@@ -61,6 +61,38 @@ it('prepares one full cycle and waits for its last pending song before repeating
   expect(Playlists.get(1, playlistId).items).toHaveLength(3)
 })
 
+it('rejects a stale shuffle after activation without changing saved or prepared order', () => {
+  const ids = Playlists.get(1, playlistId).items.map(item => item.itemId)
+  configure()
+  Playlists.reconcile(1)
+  const prepared = pending()
+  expect(() => Playlists.reorder(1, playlistId, [...ids].reverse(), true)).toThrow('Desactiva la lista')
+  expect(Playlists.get(1, playlistId).items.map(item => item.itemId)).toEqual(ids)
+  expect(pending()).toEqual(prepared)
+})
+
+it('starts a mixed inactive list from its new beginning and preserves that order on repeat', () => {
+  configure()
+  Playlists.reconcile(1)
+  const current = pending()[0].queueId
+  Queue.transition(1, current, 'PLAYING')
+  configure({ enabled: false })
+  const ids = Playlists.get(1, playlistId).items.map(item => item.itemId).reverse()
+  Playlists.reorder(1, playlistId, ids, true)
+  expect(pending()).toEqual([])
+  expect(Queue.get(1).entities[current].status).toBe('PLAYING')
+  close()
+  open({ file: path.join(directory, 'db.sqlite'), ro: false })
+  configure()
+  Playlists.reconcile(1)
+  const firstCycle = pending()
+  expect(firstCycle.map(item => item.title)).toEqual(['Song 3', 'Song 2', 'Song 1'])
+  for (const item of firstCycle) Queue.transition(1, item.queueId, 'PLAYED')
+  Playlists.reconcile(1)
+  expect(pending().map(item => item.title)).toEqual(firstCycle.map(item => item.title))
+  expect(pending().every(item => !firstCycle.some(previous => previous.queueId === item.queueId))).toBe(true)
+})
+
 it('skips blocked repertoire without disabling the house list or reintroducing it on repeat', () => {
   Prefs.set('musicBlocking', { rules: [{ kind: 'resource', source: 'YOUTUBE', sourceId: song(2).sourceId }] })
   configure()

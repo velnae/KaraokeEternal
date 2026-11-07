@@ -5,7 +5,7 @@ import Player from '../Player/Player'
 import PlayerTextOverlay from '../PlayerTextOverlay/PlayerTextOverlay'
 import PlayerQR from '../PlayerQR/PlayerQR'
 import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
-import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, type PlayerState } from '../../modules/player'
+import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, playerStatusCancel, type PlayerState } from '../../modules/player'
 import store from 'store/store'
 import socket from 'lib/socket'
 import useAnimationPlayer from '../Animation/useAnimationPlayer'
@@ -22,7 +22,7 @@ import type { QueueItem } from 'shared/types'
 import { TRANSITION_VIDEO_SCENE, type TransitionVideoBackground } from 'shared/transitionVideo'
 import { animationRequest } from 'lib/animationApi'
 import { TRANSITION_INTRO_MS } from 'shared/animation'
-import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
+import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
 import styles from './PlayerController.css'
 import {
   appendCompletedToHistory,
@@ -120,7 +120,8 @@ const PlayerController = (props: PlayerControllerProps) => {
       void animationRef.current.stopTransition(30)
     }
     const command = (action: { type: string }) => {
-      if ([PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY].includes(action.type)) cancel()
+      if (action.type === PLAYER_CMD_STOP) dispatch(playerStatusCancel())
+      if ([PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY].includes(action.type)) cancel()
     }
     socket.on('action', command)
     socket.on('disconnect', cancel)
@@ -129,7 +130,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       socket.off('disconnect', cancel)
       cancel()
     }
-  }, [roomId, updateTransition])
+  }, [roomId, updateTransition, dispatch])
 
   useEffect(() => {
     if (player._authority !== 'GRANTED') {
@@ -189,7 +190,7 @@ const PlayerController = (props: PlayerControllerProps) => {
 
   const handleLoadNext = useCallback(async (includeCurrentInHistory = true, announce = false, boundary: 'ended' | 'idle' | 'start' = 'ended') => {
     if (!socket.connected || advancing.current || animationRef.current.busy || animationRef.current.blocked
-      || store.getState().player._authority !== 'GRANTED') return
+      || store.getState().player._authority !== 'GRANTED' || store.getState().player._isQueueStopped) return
     advancing.current = true
     const controlVersion = animationRef.current.controlVersion()
     const before = store.getState().player
@@ -365,7 +366,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     && animation.snapshot.active.durationMs <= (animation.snapshot.voiceBudgetRemainingMs ?? 120000)
   const automaticIdleVoice = !animation.snapshot?.active && animation.snapshot?.prefs.enabled && animation.snapshot?.prefs.automation && animation.snapshot?.session?.sessionId
   useEffect(() => {
-    if (!animation.busy && !animation.blocked && animation.unlocked && (pendingIdleVoice || automaticIdleVoice)
+    if (!player._isQueueStopped && !animation.busy && !animation.blocked && animation.unlocked && (pendingIdleVoice || automaticIdleVoice)
       && !player.isErrored && (player.isAtQueueEnd || player.queueId === -1)) {
       void handleLoadNext(false, true, 'idle')
     }
@@ -373,13 +374,13 @@ const PlayerController = (props: PlayerControllerProps) => {
     animation.snapshot?.session?.sessionId, animation.snapshot?.session?.status, animation.snapshot?.pendingEventJSON,
     animation.snapshot?.microphoneOccupied, animation.snapshot?.prefs.enabled, animation.snapshot?.prefs.volume,
     animation.snapshot?.active?.durationMs, animation.snapshot?.voiceBudgetRemainingMs,
-    animation.busy, animation.blocked, animation.unlocked, animation.idleTick, player.isErrored, player.isAtQueueEnd, player.queueId, handleLoadNext, advanceRevision])
+    animation.busy, animation.blocked, animation.unlocked, animation.idleTick, player.isErrored, player.isAtQueueEnd, player.queueId, player._isQueueStopped, handleLoadNext, advanceRevision])
 
   const { startAmbience, ambientPlaying, ambientTick } = animation
   useEffect(() => {
-    if (!advancing.current && !animation.busy && !animation.blocked && animation.unlocked && !ambientPlaying
+    if (!player._isQueueStopped && !advancing.current && !animation.busy && !animation.blocked && animation.unlocked && !ambientPlaying
       && !player.isErrored && (player.isAtQueueEnd || player.queueId === -1)) void startAmbience()
-  }, [animation.snapshot, animation.busy, animation.blocked, animation.unlocked, ambientPlaying, ambientTick, startAmbience, player.isErrored, player.isAtQueueEnd, player.queueId])
+  }, [animation.snapshot, animation.busy, animation.blocked, animation.unlocked, ambientPlaying, ambientTick, startAmbience, player.isErrored, player.isAtQueueEnd, player.queueId, player._isQueueStopped])
 
   // retrying after error?
   useEffect(() => {

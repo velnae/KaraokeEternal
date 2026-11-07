@@ -7,6 +7,7 @@
   padding-inline: 12px;
   overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: none;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--edge) transparent;

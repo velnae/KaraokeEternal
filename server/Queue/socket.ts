@@ -9,6 +9,7 @@ import {
   QUEUE_REMOVE,
   QUEUE_PUSH,
   QUEUE_CLEANUP,
+  PLAYER_CMD_STOP,
 } from '../../shared/actionTypes.js'
 import { normalizeQueuePrefs } from '../../shared/queueRules.js'
 import {
@@ -22,6 +23,8 @@ import { cleanupQueue, cleanupReceipt } from './cleanup.js'
 import Greetings from '../Greetings/Greetings.js'
 import { requestIntent } from '../../shared/requestIntent.js'
 import { db } from '../lib/Database.js'
+import Animation from '../Animation/Animation.js'
+import { clearedQueuePlayback } from '../../shared/queueCleanup.js'
 
 // ------------------------------------
 // Action Handlers
@@ -38,9 +41,18 @@ const ACTION_HANDLERS = {
       const roomId = sock.user.roomId
       const status = Rooms.getPlayerStatus(sock.server, roomId)
       const current = status?.isAtQueueEnd !== true && Number.isSafeInteger(status?.queueId) ? status.queueId : -1
-      const result = payload.checkOnly === true
-        ? cleanupReceipt(roomId, sock.user.userId, payload)
-        : cleanupQueue(roomId, sock.user.userId, payload, current)
+      const previous = cleanupReceipt(roomId, sock.user.userId, payload)
+      const result = payload.checkOnly === true ? previous : previous || cleanupQueue(roomId, sock.user.userId, payload, current)
+      if (result?.operation === 'pending' && !previous && payload.checkOnly !== true) {
+        // Receipt recovery must never stop a newer playback or repeat the clear.
+        for (const player of sock.server.of('/').sockets.values()) {
+          if (player.user?.roomId === roomId && player._lastPlayerStatus) {
+            player._lastPlayerStatus = { ...player._lastPlayerStatus, ...clearedQueuePlayback }
+          }
+        }
+        sock.server.to(Rooms.prefix(roomId)).emit('action', { type: PLAYER_CMD_STOP })
+        Animation.cancel(roomId, 'Cola vaciada por el operador')
+      }
       const queue = Queue.get(roomId)
       acknowledge({ type: QUEUE_CLEANUP + '_SUCCESS', payload: { found: !!result, result, queue } })
       if (result) sock.server.to(Rooms.prefix(roomId)).emit('action', { type: QUEUE_PUSH, payload: queue })

@@ -35,7 +35,6 @@ export default function QueueMaintenance () {
   const [notice, setNotice] = useState('')
   const inFlight = useRef(false)
   const eligible = Object.values(queue.entities).filter(item => item.isOptimistic !== true && (item.queueId !== queueId || isAtQueueEnd))
-  const upcoming = eligible.filter(item => item.isOptimistic !== true && ['PENDING_APPROVAL', 'APPROVED'].includes(item.status)).length
   const history = eligible.filter(item => item.isOptimistic !== true && !isQueueHistoryHidden(item) && ['PLAYED', 'FAILED', 'REJECTED'].includes(item.status)).length
   const clearPending = () => {
     setPending(null)
@@ -88,7 +87,7 @@ export default function QueueMaintenance () {
       clearPending()
       setOperation(null)
       setNotice(result.operation === 'pending'
-        ? `${result.changedCount === 1 ? 'Se quitó 1 pedido' : `Se quitaron ${result.changedCount} pedidos`} de la cola.${result.houseStopped ? ' Se desactivó la lista de la casa.' : ''}`
+        ? `Cola vaciada completamente. Reproducción detenida.${result.houseStopped ? ' Se desactivó la lista de la casa.' : ''}`
         : `${result.changedCount === 1 ? 'Se retiró 1 canción' : `Se retiraron ${result.changedCount} canciones`} del historial visible.`)
     } catch {
       setError('No se recibió la confirmación. Comprueba el resultado antes de repetir la operación.')
@@ -113,7 +112,7 @@ export default function QueueMaintenance () {
         </p>
       )}
       {operation && (
-        <Modal title={operation === 'pending' ? 'Vaciar cola' : 'Limpiar historial'} onClose={() => { if (!busy) setOperation(null) }}>
+        <Modal title={operation === 'pending' ? '¿Vaciar completamente la cola?' : 'Limpiar historial'} onClose={() => { if (!busy) setOperation(null) }}>
           <div className={styles.confirmation}>
             {busy
               ? <p role='status'>Esperando la confirmación del servidor…</p>
@@ -122,9 +121,8 @@ export default function QueueMaintenance () {
                 : operation === 'pending'
                   ? (
                       <>
-                        <p>{upcoming === 1 ? '1 pedido pendiente en esta sala.' : `${upcoming} pedidos pendientes en esta sala.`}</p>
-                        <p>Se quitarán las canciones aprobadas y por aprobar de todas las mesas, incluidas las de la casa y del operador. La reposición automática de la casa se desactivará.</p>
-                        <p>La canción actual podrá terminar. Las listas guardadas y el historial se conservan. Los pedidos nuevos podrán seguir entrando.</p>
+                        <p>Se detendrá la reproducción y se quitarán todas las canciones de esta cola, incluido el historial visible. Tus listas guardadas se conservarán.</p>
+                        <p>También se retirará la canción actual si está pausada y se desactivará la reposición automática de la casa. Los pedidos nuevos podrán seguir entrando después del vaciado.</p>
                       </>
                     )
                   : (

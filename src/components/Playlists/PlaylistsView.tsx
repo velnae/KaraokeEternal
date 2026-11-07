@@ -6,6 +6,7 @@ import { usePlaylists } from './usePlaylists'
 import PlaylistNameDialog from './PlaylistNameDialog'
 import ImportYouTubePlaylistDialog from './ImportYouTubePlaylistDialog'
 import styles from './Playlists.css'
+import { shuffleOrder } from './shuffleOrder'
 
 export default function PlaylistsView () {
   const { roomId, data, busy, error, run, load, accept } = usePlaylists()
@@ -18,6 +19,7 @@ export default function PlaylistsView () {
     requestAnimationFrame(() => importTrigger.current?.focus())
   }
   const selected = data?.playlists.find(list => String(list.playlistId) === params.get('list')) || data?.playlists[0]
+  const selectedIsActive = data?.playback.enabled && data.playback.playlistId === selected?.playlistId
   const selectList = (id: number) => {
     setParams({ list: String(id) })
     setNotice('')
@@ -64,6 +66,20 @@ export default function PlaylistsView () {
             <h2>{`${selected.items.length} ${selected.items.length === 1 ? 'canción' : 'canciones'}`}</h2>
             <div className={styles.actions}>
               <Link className={styles.primaryLink} to={`/library?saveTo=${selected.playlistId}`}>Agregar canciones</Link>
+              <Button
+                variant='default'
+                disabled={busy || selectedIsActive || selected.items.length < 2}
+                aria-describedby='shuffle-help'
+                onClick={async () => {
+                  setNotice('')
+                  const order = shuffleOrder(selected.items.map(item => item.itemId))
+                  if (await run('PUT', `/${selected.playlistId}/order`, { order, requireInactive: true })) {
+                    setNotice('Orden mezclado y guardado. Al activar la lista, comenzará en este orden y lo conservará al repetir.')
+                  }
+                }}
+              >
+                Mezclar y guardar
+              </Button>
               <details className={styles.options} key={selected.playlistId}>
                 <summary>Opciones de la lista</summary>
                 <div className={styles.optionActions}>
@@ -82,6 +98,13 @@ export default function PlaylistsView () {
               </details>
             </div>
           </div>
+          <p id='shuffle-help' className={styles.help}>
+            {selectedIsActive
+              ? 'Desactiva la lista en De la casa antes de mezclarla. La canción actual continuará.'
+              : selected.items.length < 2
+                ? 'Agrega al menos dos canciones para mezclar el orden.'
+                : 'Guarda un orden aleatorio antes de activar la lista. Las repeticiones conservarán ese orden.'}
+          </p>
           <ol className={styles.songs} aria-label='Canciones de la lista'>
             {selected.items.map((item, index) => (
               <li key={item.itemId}>

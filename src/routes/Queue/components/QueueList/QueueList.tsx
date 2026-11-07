@@ -19,6 +19,7 @@ import useGreetings from 'components/Greetings/useGreetings'
 import Modal from 'components/Modal/Modal'
 import MusicBlockForm from 'components/MusicBlocking/MusicBlockForm'
 import { musicRuleLabel, type MusicBlockRule } from 'shared/musicBlocking'
+import { operatorQueue } from '../../selectors/operatorQueue'
 
 type QueueFilter = 'queue' | 'pending' | 'house'
 
@@ -76,11 +77,12 @@ const QueueList = () => {
     const item = rawQueue.entities[queueId]
     return item.isOptimistic !== true && item.origin === 'HOUSE' && item.status === 'APPROVED'
   })
+  const displayOrder = operatorQueue(queue.result, rawQueue.entities, playerHistory, queueId, isAtQueueEnd)
   const selectedResult = user.isAdmin && filter === 'pending'
     ? pendingIds
     : user.isAdmin && filter === 'house'
       ? houseIds
-      : [...ownerFeedbackIds, ...queue.result.filter(queueId => !ownerFeedbackIds.includes(queueId))]
+      : user.isAdmin ? displayOrder : [...ownerFeedbackIds, ...queue.result.filter(queueId => !ownerFeedbackIds.includes(queueId))]
   const result = selectedResult.filter((id) => {
     const item = rawQueue.entities[id]
     return item.isOptimistic === true || !isQueueHistoryHidden(item) || (id === queueId && !isAtQueueEnd)
@@ -234,7 +236,7 @@ const QueueList = () => {
       {user.isAdmin && filter === 'house' && houseIds.length === 0 && (
         <div className={styles.empty}>No hay canciones de la casa aprobadas.</div>
       )}
-      <QueueListAnimator queueItems={items.filter(item => item !== null)} />
+      {user.isAdmin ? items : <QueueListAnimator queueItems={items.filter(item => item !== null)} />}
       {user.isAdmin && block && (
         <Modal
           title={block.rule.kind === 'artist' ? 'Bloquear artista' : block.rule.kind === 'song' ? 'Bloquear canción' : block.rule.source === 'YOUTUBE' ? 'Bloquear este video' : 'Bloquear este archivo'}

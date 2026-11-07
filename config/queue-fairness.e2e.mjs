@@ -101,6 +101,7 @@ try {
   const now = Math.floor(Date.now() / 1000)
   const add = (userId, title, origin, status, created) => Number(db.prepare(`INSERT INTO queue(roomId,userId,songId,prevQueueId,source,title,artistOrChannel,origin,status,dateCreated,dateUpdated,durationSeconds,requestIntent)
     VALUES(1,?,1,(SELECT max(queueId) FROM queue),'LOCAL',?,'Fixture',?,?,?,?,120,'LISTEN')`).run(userId, title, origin, status, created, created).lastInsertRowid)
+  for (let index = 0; index < 12; index++) add(1, `Earlier house ${index}`, 'HOUSE', 'PLAYED', now - 600 + index)
   add(1, 'Earlier customer', 'PARTICIPANT', 'PLAYED', now - 300)
   const house1 = add(1, 'House one', 'HOUSE', 'APPROVED', now - 200)
   const house2 = add(1, 'House two', 'HOUSE', 'APPROVED', now - 200)
@@ -126,7 +127,9 @@ try {
   const player = await adminContext.newPage()
   pages.push(admin, participant, player)
   await admin.goto(`${uiBase}account?roomId=1`)
-  await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).click()
+  await expect(admin.getByRole('heading', { name: 'Fairness test', exact: true })).toBeVisible()
+  await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).focus()
+  await admin.keyboard.press('Enter')
   await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('admin')
   await admin.getByPlaceholder('contraseña', { exact: true }).fill('fairness-test-password')
   await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
@@ -144,10 +147,16 @@ try {
   await player.goto(`${uiBase}player`)
   await expect.poll(() => playerStatus.queueId, { timeout: 20000 }).toBe(-1)
   await player.getByRole('toolbar', { name: 'Controles de reproducción' }).getByRole('button', { name: 'Reproducir', exact: true }).click()
+  const rows = admin.locator('[data-queue-id]')
+  let previouslyPlaying
   const playing = async (id) => {
     await expect.poll(() => playerStatus.queueId, { timeout: 15000 }).toBe(id)
     await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(id).status).toBe('PLAYING')
     await expect.poll(() => player.locator('video').evaluate(video => !video.paused && video.currentTime > 0)).toBe(true)
+    await expect(rows.first()).toHaveAttribute('data-queue-id', String(id))
+    await expect(admin.locator(`[data-queue-id="${id}"]`)).toHaveCount(1)
+    if (previouslyPlaying) await expect(rows.last()).toHaveAttribute('data-queue-id', String(previouslyPlaying))
+    previouslyPlaying = id
   }
   await playing(house1)
   await expect.poll(() => playerStatus.nextUserId).toBe(juanId)
@@ -157,6 +166,45 @@ try {
   await expect(participant.locator(`[data-queue-id="${first}"]`)).toContainText('Próximo turno de cliente')
   await expect(participant.locator(`[data-queue-id="${second}"]`)).toContainText('2 turnos por delante')
   await expect(participant.locator('article[data-queue-id]').first()).toHaveAttribute('data-queue-id', String(first))
+  const nowPlaying = admin.locator(`[data-queue-id="${house1}"]`)
+  await expect(rows.nth(1)).toHaveAttribute('data-queue-id', String(first))
+  await expect(admin.getByRole('region', { name: 'Reproducción actual', exact: true })).toHaveCount(0)
+  await expect(admin.getByRole('region', { name: 'Siguiente en la rotación', exact: true })).toHaveCount(0)
+  await expect(admin.locator('summary').filter({ hasText: /^Historial/ })).toHaveCount(0)
+  assert.ok(await rows.evaluateAll(items => items.every(item => item.parentElement === items[0].parentElement)))
+  await nowPlaying.getByRole('button', { name: 'Más acciones', exact: true }).focus()
+  await admin.keyboard.press('Enter')
+  await expect(nowPlaying.getByRole('button', { name: 'Volver a reproducir canción', exact: true })).toBeVisible()
+  await nowPlaying.getByRole('button', { name: 'Menos acciones', exact: true }).press('Enter')
+  await admin.getByRole('button', { name: 'Por aprobar (0)', exact: true }).click()
+  await expect(rows).toHaveCount(0)
+  await admin.getByRole('button', { name: 'Cola', exact: true }).click()
+  await admin.getByLabel('Filtrar por mesa').selectOption('none')
+  await expect(nowPlaying).toContainText('House one')
+  await expect(rows.nth(1)).toContainText('Juan first')
+  await admin.getByLabel('Filtrar por mesa').selectOption('all')
+  const scrollQueue = async bottom => nowPlaying.evaluate((element, bottom) => {
+    let scroller = element.parentElement
+    while (scroller && getComputedStyle(scroller).overflowY !== 'auto') scroller = scroller.parentElement
+    if (!scroller) throw new Error('Queue scroll container missing')
+    scroller.scrollTop = bottom ? scroller.scrollHeight : 0
+  }, bottom)
+  for (const width of [390, 1440]) {
+    await admin.setViewportSize({ width, height: 844 })
+    await scrollQueue(false)
+    await expect.poll(async () => {
+      const upcoming = await admin.locator(`[data-queue-id="${house2}"]`).boundingBox()
+      const current = await nowPlaying.boundingBox()
+      return Math.abs(upcoming.x - current.x) < 1
+    }).toBe(true)
+    await admin.screenshot({ path: path.join(data, `operator-top-${width}.png`) })
+    await scrollQueue(true)
+    await expect.poll(async () => (await nowPlaying.boundingBox()).y).toBeLessThan(0)
+    await admin.screenshot({ path: path.join(data, `operator-scrolled-${width}.png`) })
+    assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+  }
+  await scrollQueue(false)
+  console.log('PASS original cards share one continuous queue: current first, upcoming next, completed last, with no dock or history accordion')
   await participant.reload()
   await expect(participant.locator(`[data-queue-id="${first}"]`)).toContainText('Próximo turno de cliente')
   for (const width of [390, 1440]) {
@@ -166,6 +214,7 @@ try {
   }
   await emit('server/PLAYER_REQ_NEXT')
   await playing(first)
+  await expect.poll(() => rows.first().evaluate(element => element.parentElement.scrollTop)).toBe(0)
   // Aging suppresses filler even after demand drops from three requests to two.
   db.prepare('UPDATE queue SET dateCreated=? WHERE queueId=?').run(now - 610, second)
   await emit('server/QUEUE_APPROVE', { queueId: second })
@@ -199,6 +248,35 @@ try {
   await expect(retry).toHaveCount(0)
   await emit('server/PLAYER_REQ_NEXT')
   await playing(recovered.queueId)
+  // The same HTTPS operator session prepares a repertoire before activating it.
+  db.exec('INSERT INTO songs(songId,artistId,title,titleNorm) VALUES(2,1,\'Second saved song\',\'second saved song\'); INSERT INTO media(mediaId,songId,pathId,relPath,duration,isPreferred) VALUES(2,2,1,\'song.mp4\',120,1)')
+  const created = await call(api, 'rooms/1/playlists', { name: 'Operator mix' })
+  const listId = created.createdPlaylistId
+  for (const id of [1, 2]) await call(api, `rooms/1/playlists/${listId}/items`, { source: 'LOCAL', sourceId: String(id) })
+  await admin.goto(`${uiBase}admin/playlists?list=${listId}`)
+  const shuffle = admin.getByRole('button', { name: 'Mezclar y guardar', exact: true })
+  await shuffle.focus()
+  await admin.keyboard.press('Enter')
+  await expect(admin.getByText('Orden mezclado y guardado. Al activar la lista, comenzará en este orden y lo conservará al repetir.', { exact: true })).toBeVisible()
+  const saved = (await call(api, 'rooms/1/playlists', undefined, 'GET')).playlists.find(list => list.playlistId === listId)
+  await admin.reload()
+  await expect(admin.getByRole('list', { name: 'Canciones de la lista' }).getByRole('listitem').first()).toContainText(saved.items[0].song.title)
+  for (const width of [390, 1440]) {
+    await admin.setViewportSize({ width, height: 844 })
+    await shuffle.scrollIntoViewIfNeeded()
+    const buttonBounds = await shuffle.boundingBox()
+    const songsBounds = await admin.getByRole('list', { name: 'Canciones de la lista' }).boundingBox()
+    assert.ok(buttonBounds.y + buttonBounds.height <= songsBounds.y, 'Whole-list shuffle must precede song rows')
+    await admin.screenshot({ path: path.join(data, `shuffle-${width}.png`) })
+  }
+  await call(api, 'rooms/1/playlists/playback', { playlistId: listId, enabled: true, repeat: true }, 'PUT')
+  await shuffle.click()
+  await expect(admin.getByRole('alert')).toContainText('Desactiva la lista')
+  await admin.reload()
+  await expect(shuffle).toBeDisabled()
+  await expect(admin.getByText('Desactiva la lista en De la casa antes de mezclarla. La canción actual continuará.', { exact: true })).toBeVisible()
+  assert.deepEqual((await call(api, 'rooms/1/playlists', undefined, 'GET')).playlists.find(list => list.playlistId === listId).items, saved.items)
+  console.log('PASS keyboard playlist shuffle persists; concurrent activation rejects another shuffle and explains recovery')
   assert.deepEqual(errors, [])
   console.log(`PASS keyboard recovery preserves waiting time and owner; ${development ? 'development StrictMode' : 'production'}${httpsUi ? ' with HTTPS assets + isolated APIs' : ''}; evidence: ${data}`)
 } catch (error) {

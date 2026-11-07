@@ -3,12 +3,15 @@ import Queue from '../Queue/Queue.js'
 import Animation from '../Animation/Animation.js'
 import Playlists from '../Playlists/Playlists.js'
 import getLogger from '../lib/Log.js'
+import { db } from '../lib/Database.js'
+import { clearedQueuePlayback } from '../../shared/queueCleanup.js'
 import { PLAYER_WINDOW_REQUEST_MS, playerWindowResult, type PlayerWindowCommand, type PlayerWindowResult } from '../../shared/playerWindow.js'
 
 import {
   PLAYER_CMD_NEXT,
   PLAYER_CMD_OPTIONS,
   PLAYER_CMD_PAUSE,
+  PLAYER_CMD_STOP,
   PLAYER_CMD_PLAY,
   PLAYER_CMD_REPLAY,
   PLAYER_CMD_VOLUME,
@@ -241,11 +244,23 @@ const ACTION_HANDLERS = {
   [PLAYER_EMIT_STATUS]: (sock, { payload }, acknowledge) => {
     if (!adminOnly(sock, PLAYER_EMIT_STATUS, acknowledge)) return
 
+    const wasAuthoritative = Rooms.isAuthoritativePlayer(sock)
     if (!Rooms.claimPlayer(sock.server, sock, sock.user.roomId)) {
       return acknowledge?.({
         type: PLAYER_AUTHORITY_DENIED,
         payload: { message: 'Ya hay otro reproductor activo en esta sala.' },
       })
+    }
+
+    const reported = Number.isSafeInteger(payload?.queueId) && payload.queueId >= 0
+      ? db.get<{ status: string, historyClearedAt: number | null }>('SELECT status,historyClearedAt FROM queue WHERE roomId=? AND queueId=?', [sock.user.roomId, payload.queueId])
+      : null
+    if (reported?.status === 'REMOVED' || (reported?.historyClearedAt && payload.isAtQueueEnd !== true)) {
+      // Ignore delayed status ticks for cleared media. A reconnecting player
+      // may have missed STOP, so reset that newly claimed client as well.
+      if (wasAuthoritative) return acknowledge?.({ type: PLAYER_AUTHORITY_GRANTED })
+      sock.emit('action', { type: PLAYER_CMD_STOP })
+      payload = { ...payload, ...clearedQueuePlayback }
     }
 
     Animation.claim(sock.user.roomId, sock.id)

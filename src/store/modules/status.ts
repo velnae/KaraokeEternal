@@ -9,8 +9,10 @@ import {
   PLAYER_REQ_VOLUME,
   PLAYER_STATUS,
   PLAYER_LEAVE,
-} from 'shared/actionTypes'
+  PLAYER_CMD_STOP,
+} from '../../../shared/actionTypes'
 import { MediaType, PlaybackOptions } from 'shared/types'
+import { clearedQueuePlayback } from '../../../shared/queueCleanup'
 
 // ------------------------------------
 // Actions
@@ -20,6 +22,7 @@ export const requestPause = createAction(PLAYER_REQ_PAUSE)
 export const requestPlayNext = createAction(PLAYER_REQ_NEXT)
 const playerStatus = createAction<object>(PLAYER_STATUS)
 const playerLeave = createAction(PLAYER_LEAVE)
+const playerStop = createAction(PLAYER_CMD_STOP)
 
 export const requestReplay = createAction(PLAYER_REQ_REPLAY, (queueId: number) => ({
   payload: { queueId },
@@ -92,6 +95,7 @@ const initialState: StatusState = {
 
 const statusReducer = createReducer(initialState, (builder) => {
   builder
+    .addCase(playerStop, state => ({ ...state, ...clearedQueuePlayback }))
     .addCase(playerLeave, (state) => {
       state.isPlayerPresent = false
     })

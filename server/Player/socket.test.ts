@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   PLAYER_CMD_NEXT,
   PLAYER_CMD_OPTIONS,
   PLAYER_CMD_PAUSE,
+  PLAYER_CMD_STOP,
   PLAYER_CMD_PLAY,
   PLAYER_CMD_REPLAY,
   PLAYER_CMD_VOLUME,
@@ -26,9 +27,14 @@ import Queue from '../Queue/Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import Playlists from '../Playlists/Playlists.js'
 import ACTION_HANDLERS from './socket.js'
+import { db } from '../lib/Database.js'
 
 vi.mock('../Animation/Animation.js', () => ({ default: { claim: vi.fn(), cancel: vi.fn(), disconnect: vi.fn() } }))
 vi.mock('../Playlists/Playlists.js', () => ({ default: { reconcile: vi.fn(() => false) } }))
+vi.mock('../lib/Database.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../lib/Database.js')>(),
+  db: { get: vi.fn() },
+}))
 
 const failureInfo = vi.hoisted(() => vi.fn())
 const refillError = vi.hoisted(() => vi.fn())
@@ -53,6 +59,7 @@ const createSocket = ({ isAdmin = true } = {}) => {
     id: 'socket-1',
     user: { roomId: 1, userId: 10, isAdmin },
     server,
+    emit,
     _isPlayerAuthoritative: false,
     _lastPlayerStatus: null as unknown,
   }
@@ -66,6 +73,9 @@ const createSocket = ({ isAdmin = true } = {}) => {
 }
 
 describe('player queue lifecycle', () => {
+  beforeEach(() => {
+    vi.mocked(db.get).mockReset().mockReturnValue(undefined)
+  })
   afterEach(() => {
     vi.restoreAllMocks()
     failureInfo.mockClear()
@@ -83,6 +93,39 @@ describe('player queue lifecycle', () => {
       error: 'Solo los administradores pueden controlar la reproducción',
     })
     expect(socket._lastPlayerStatus).toBeNull()
+  })
+
+  it('ignores delayed playing reports for a removed song after a full clear', () => {
+    const { socket, emit } = createSocket()
+    socket._isPlayerAuthoritative = true
+    socket._lastPlayerStatus = { queueId: -1, isPlaying: false, isAtQueueEnd: true }
+    vi.mocked(db.get).mockReturnValue({ status: 'REMOVED', historyClearedAt: null })
+    const sync = vi.spyOn(Queue, 'syncPlayerLifecycle')
+    const acknowledge = vi.fn()
+    ACTION_HANDLERS[PLAYER_EMIT_STATUS](socket, { payload: { queueId: 4, isPlaying: true } }, acknowledge)
+    expect(sync).not.toHaveBeenCalled()
+    expect(emit).not.toHaveBeenCalled()
+    expect(socket._lastPlayerStatus).toMatchObject({ queueId: -1, isPlaying: false })
+    expect(acknowledge).toHaveBeenCalledWith({ type: PLAYER_AUTHORITY_GRANTED })
+  })
+
+  it('stops a reconnecting player that missed a clear instead of restoring cleared playback', () => {
+    const { socket, emit } = createSocket()
+    vi.mocked(db.get).mockReturnValue({ status: 'REMOVED', historyClearedAt: null })
+    vi.spyOn(Queue, 'syncPlayerLifecycle').mockReturnValue(false)
+    ACTION_HANDLERS[PLAYER_EMIT_STATUS](socket, { payload: { queueId: 4, isPlaying: true, position: 42 } }, vi.fn())
+    expect(emit).toHaveBeenCalledWith('action', { type: PLAYER_CMD_STOP })
+    expect(socket._lastPlayerStatus).toMatchObject({ queueId: -1, isPlaying: false, position: 0, isAtQueueEnd: true })
+  })
+
+  it('still accepts idle status after history-only cleanup hides the last completed song', () => {
+    const { socket, emit } = createSocket()
+    vi.mocked(db.get).mockReturnValue({ status: 'PLAYED', historyClearedAt: Date.now() })
+    vi.spyOn(Queue, 'syncPlayerLifecycle').mockReturnValue(false)
+    const payload = { queueId: 4, isAtQueueEnd: true, isPlaying: false, volume: 0.3 }
+    ACTION_HANDLERS[PLAYER_EMIT_STATUS](socket, { payload }, vi.fn())
+    expect(emit).not.toHaveBeenCalledWith('action', { type: PLAYER_CMD_STOP })
+    expect(socket._lastPlayerStatus).toBe(payload)
   })
 
   it('persists player status and pushes the updated queue', () => {

@@ -28,10 +28,15 @@ export function cleanupQueue (roomId: number, actorId: number, input: QueueClean
     if (input.operation === 'pending') {
       houseStopped = Playlists.suspendForQueueCleanup(roomId, currentQueueId)
       db.run('INSERT INTO queueCleanupState(roomId,generation) VALUES(?,1) ON CONFLICT(roomId) DO UPDATE SET generation=generation+1', [roomId])
-      const rows = db.all<{ queueId: number }>(`SELECT queueId FROM queue WHERE roomId=? AND status IN ('PENDING_APPROVAL','APPROVED')
-        AND queueId!=? AND (queueId<=? OR houseRunId IS NOT NULL) ORDER BY queueId`, [roomId, currentQueueId, input.throughQueueId])
-      for (const row of rows) Queue.remove(row.queueId, roomId, true)
-      changedCount = rows.length
+      // A full clear covers the room at commit time, including the playing item.
+      const rows = db.all<{ queueId: number, status: string }>(`SELECT queueId,status FROM queue WHERE roomId=?
+        AND status IN ('PENDING_APPROVAL','APPROVED','PLAYING') ORDER BY queueId`, [roomId])
+      for (const row of rows) {
+        if (row.status === 'PLAYING') Queue.transition(roomId, row.queueId, 'APPROVED')
+        Queue.remove(row.queueId, roomId, true)
+      }
+      changedCount = rows.length + Number(db.run(`UPDATE queue SET historyClearedAt=? WHERE roomId=?
+        AND historyClearedAt IS NULL AND status IN ('PLAYED','FAILED','REJECTED')`, [now, roomId]).changes)
     } else {
       changedCount = Number(db.run(`UPDATE queue SET historyClearedAt=? WHERE roomId=? AND queueId<=? AND queueId!=?
         AND historyClearedAt IS NULL AND status IN ('PLAYED','FAILED','REJECTED')`, [now, roomId, input.throughQueueId, currentQueueId]).changes)

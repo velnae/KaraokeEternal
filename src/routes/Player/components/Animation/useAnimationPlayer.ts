@@ -9,7 +9,7 @@ import {
   ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED,
   animationContext, ambienceBedVolume, interventionPlayback, type Intervention, type AmbienceGrant, type AnimationSnapshot,
 } from 'shared/animation'
-import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, PLAYER_EMIT_STATUS } from 'shared/actionTypes'
+import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, PLAYER_EMIT_STATUS } from 'shared/actionTypes'
 import { isMusicalCurtain } from 'shared/effectCategories'
 import { playerStatusCancel, playerUpdate } from '../../modules/player'
 import AnnouncementAudio from './AnnouncementAudio'
@@ -137,8 +137,8 @@ export default function useAnimationPlayer () {
       store.dispatch(playerUpdate({ _authority: 'PENDING' }))
     }
     const commands = (action: { type: string }) => {
-      if ([PLAYER_CMD_NEXT, PLAYER_CMD_REPLAY, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY].includes(action.type)) {
-        ambientPaused.current = action.type === PLAYER_CMD_PAUSE
+      if ([PLAYER_CMD_NEXT, PLAYER_CMD_REPLAY, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY].includes(action.type)) {
+        ambientPaused.current = action.type === PLAYER_CMD_PAUSE || action.type === PLAYER_CMD_STOP
         abort()
         ambientCursor.current = { clipId: '', offsetMs: 0 }
       }

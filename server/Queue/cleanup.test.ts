@@ -9,7 +9,7 @@ import Playlists from '../Playlists/Playlists.js'
 import Rooms from '../Rooms/Rooms.js'
 import handlers from './socket.js'
 import { youtubeSongSource } from '../SongSources/YouTubeSongSource.js'
-import { QUEUE_ADD, QUEUE_CLEANUP, QUEUE_PUSH } from '../../shared/actionTypes.js'
+import { QUEUE_ADD, QUEUE_CLEANUP, QUEUE_PUSH, PLAYER_CMD_STOP } from '../../shared/actionTypes.js'
 import { isQueueHistoryHidden, type QueueCleanupRequest } from '../../shared/queueCleanup.js'
 import type { ResolvedSong } from '../../shared/songSource.js'
 import { buildRoundRobinQueue } from '../../src/routes/Queue/selectors/roundRobin.js'
@@ -40,7 +40,7 @@ afterEach(() => {
   fs.rmSync(directory, { recursive: true, force: true })
 })
 
-it('clears every pending origin atomically, stops house refill and preserves current song, saved lists and another room', () => {
+it('clears current, pending and visible history atomically, stops house refill and preserves saved lists and another room', () => {
   const played = enqueue()
   Queue.transition(1, played, 'PLAYING')
   Queue.transition(1, played, 'PLAYED')
@@ -55,35 +55,54 @@ it('clears every pending origin atomically, stops house refill and preserves cur
   const generated = db.all<{ queueId: number }>('SELECT queueId FROM queue WHERE houseRunId IS NOT NULL').map(row => row.queueId)
   const input = request()
   const result = cleanupQueue(1, 1, input, current)
-  expect(result).toMatchObject({ changedCount: pending.length + generated.length, houseStopped: true })
+  expect(result).toMatchObject({ changedCount: pending.length + generated.length + 2, houseStopped: true })
   for (const id of [...pending, ...generated]) expect(status(id)).toBe('REMOVED')
-  expect(status(current)).toBe('PLAYING')
+  expect(status(current)).toBe('REMOVED')
   expect(status(played)).toBe('PLAYED')
   expect(status(other)).toBe('APPROVED')
   expect(Playlists.snapshot(1).playback.enabled).toBe(false)
   expect(Playlists.get(1, listId).items).toHaveLength(1)
   expect(Playlists.reconcile(1)).toBe(false)
-  expect(Queue.get(1).result).toEqual([played, current])
+  const cleared = Queue.get(1)
+  expect(cleared.result.filter(id => !isQueueHistoryHidden(cleared.entities[id]))).toEqual([])
   expect(Queue.countPending(1, 1)).toBe(0)
   expect(db.all('PRAGMA foreign_key_check')).toHaveLength(0)
   Queue.syncPlayerLifecycle(1, { queueId: current, historyJSON: JSON.stringify(pending) })
+  expect(status(current)).toBe('REMOVED')
   expect(pending.map(status)).toEqual(pending.map(() => 'REMOVED'))
 })
 
-it('keeps requests newer than the confirmed snapshot and the authoritative current ID even while APPROVED', () => {
+it.each([true, false])('clears every request present at execution and stops current playback when isPlaying=%s', (isPlaying) => {
   const current = enqueue()
   const old = enqueue()
   const input = request()
   const newer = enqueue()
-  const actor = socket(1, true, { queueId: current, isAtQueueEnd: false })
+  const actor = socket(1, true, { queueId: current, isAtQueueEnd: false, isPlaying, position: 42 })
   const ack = vi.fn()
   handlers[QUEUE_CLEANUP](actor, { payload: { ...input, confirmed: true, roomId: 2 } }, ack)
-  expect(status(current)).toBe('APPROVED')
+  expect(status(current)).toBe('REMOVED')
   expect(status(old)).toBe('REMOVED')
-  expect(status(newer)).toBe('APPROVED')
-  expect(ack.mock.calls[0][0].payload.result.changedCount).toBe(1)
+  expect(status(newer)).toBe('REMOVED')
+  expect(ack.mock.calls[0][0].payload.result.changedCount).toBe(3)
+  expect(actor.emit).toHaveBeenCalledWith('action', { type: PLAYER_CMD_STOP })
+  expect(Rooms.getPlayerStatus(actor.server, 1)).toMatchObject({ queueId: -1, isAtQueueEnd: true, isPlaying: false, position: 0 })
   expect(actor.server.to).toHaveBeenCalledWith(Rooms.prefix(1))
   expect(actor.emit).toHaveBeenCalledWith('action', { type: QUEUE_PUSH, payload: Queue.get(1) })
+})
+
+it('receipt recovery never repeats STOP against a subsequent playback', () => {
+  enqueue()
+  const input = request()
+  const actor = socket()
+  const ack = vi.fn()
+  handlers[QUEUE_CLEANUP](actor, { payload: { ...input, confirmed: true } }, ack)
+  const later = enqueue()
+  Queue.transition(1, later, 'PLAYING')
+  actor.emit.mockClear()
+  handlers[QUEUE_CLEANUP](actor, { payload: { ...input, confirmed: true } }, ack)
+  handlers[QUEUE_CLEANUP](actor, { payload: { ...input, checkOnly: true } }, ack)
+  expect(actor.emit).not.toHaveBeenCalledWith('action', { type: PLAYER_CMD_STOP })
+  expect(status(later)).toBe('PLAYING')
 })
 
 it('retains receipts and fairness while hiding terminal history, including after restart and late player reports', () => {

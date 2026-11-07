@@ -87,13 +87,17 @@ export default class Playlists {
       [playlistId, (list.items.at(-1)?.position ?? 0) + 1, song.source, song.sourceId, JSON.stringify(song)])
   }
 
-  static reorder (roomId: number, playlistId: number, order: unknown) {
+  static reorder (roomId: number, playlistId: number, order: unknown, requireInactive = false) {
     const list = this.get(roomId, playlistId)
+    const playback = db.get<PlaybackRow>('SELECT * FROM housePlayback WHERE roomId=? AND playlistId=?', [roomId, playlistId])
+    if (requireInactive && playback?.enabled) throw new Error('Desactiva la lista en De la casa antes de mezclarla. Actualiza las listas para ver su estado.')
     if (!Array.isArray(order) || order.length !== list.items.length || new Set(order).size !== order.length
       || !order.every(id => list.items.some(item => item.itemId === id))) throw new Error('La lista cambió. Actualice antes de ordenar')
     db.exec('BEGIN IMMEDIATE')
     try {
       order.forEach((id, index) => db.run('UPDATE musicPlaylistItems SET position=? WHERE itemId=?', [index + 1, id]))
+      // A newly mixed repertoire starts from the beginning, even after a previous run.
+      if (requireInactive && playback) db.run('UPDATE housePlayback SET cursor=0,runId=?,message=\'\' WHERE roomId=?', [randomUUID(), roomId])
       db.exec('COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')

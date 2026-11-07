@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
+const httpsUi = process.env.KARAOKE_E2E_HTTPS_UI === '1'
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'karaoke-queue-cleanup-e2e-'))
 const log = fs.openSync(path.join(data, 'server.log'), 'a')
 const reservation = createServer()
@@ -18,11 +19,15 @@ const port = reservation.address().port
 await new Promise(resolve => reservation.close(resolve))
 const origin = `http://127.0.0.1:${port}`
 const base = `${origin}/karaoke/`
+const uiBase = httpsUi ? 'https://karaoke.puyu.pe/' : base
 const api = await request.newContext()
 const otherApi = await request.newContext()
 const sockets = []
 const errors = []
 let server, browser, db
+let closing = false
+let dropCleanupAck = false
+const cleanupRequests = []
 const pass = name => console.log(`PASS ${name}`)
 const call = async (url, body, method = body === undefined ? 'GET' : 'POST') => {
   const response = await api.fetch(`${base}api/${url}`, { method, data: body })
@@ -96,8 +101,41 @@ try {
   const otherSocket = await connect(otherApi)
   const otherId = await add(otherSocket, 2)
 
-  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, headless: true })
+  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || '/usr/bin/chromium', headless: true })
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } })
+  if (httpsUi) {
+    // Load tunnel assets but keep commands, data and playback in the isolated room.
+    const forward = async (route, isSocket = false) => {
+      const incoming = route.request()
+      const url = new URL(incoming.url())
+      const suffix = isSocket ? `socket.io/${url.search}` : `api/${url.pathname.split('/api/')[1]}${url.search}`
+      const body = incoming.postData()
+      if (isSocket && body?.includes('"type":"server/QUEUE_CLEANUP"')) {
+        for (const packet of body.split('\x1e')) {
+          if (packet.includes('"type":"server/QUEUE_CLEANUP"')) cleanupRequests.push(JSON.parse(packet.slice(packet.indexOf('[')))[1].payload)
+        }
+      }
+      try {
+        const response = await api.fetch(base + suffix, { method: incoming.method(), data: incoming.postDataBuffer() ?? undefined,
+          headers: { 'accept-encoding': 'identity', ...(incoming.headers()['content-type'] ? { 'content-type': incoming.headers()['content-type'] } : {}) } })
+        if (isSocket && incoming.method() === 'GET' && !url.searchParams.has('sid') && response.status() === 200) {
+          const handshake = JSON.parse((await response.text()).slice(1))
+          handshake.upgrades = []
+          await route.fulfill({ status: 200, contentType: 'text/plain', body: '0' + JSON.stringify(handshake) })
+        } else if (isSocket && dropCleanupAck && (await response.text()).includes('"type":"server/QUEUE_CLEANUP_SUCCESS"')) {
+          dropCleanupAck = false
+          const remaining = (await response.text()).split('\x1e').filter(packet => !packet.includes('"type":"server/QUEUE_CLEANUP_SUCCESS"')).join('\x1e')
+          await route.fulfill({ response, body: remaining || '6' })
+        } else await route.fulfill({ response })
+      } catch (error) {
+        if (!closing) errors.push(error.message)
+        await route.abort().catch(() => {})
+      }
+    }
+    await context.route('https://karaoke.puyu.pe/api/**', route => forward(route))
+    await context.route('https://karaoke.puyu.pe/socket.io/**', route => forward(route, true))
+    await context.routeWebSocket('**/socket.io/**', socket => socket.close())
+  }
   await context.addInitScript(() => {
     const Original = window.WebSocket
     window.cleanupRequests = []
@@ -123,15 +161,17 @@ try {
   })
   context.on('page', page => page.on('pageerror', error => errors.push(error.message)))
   const admin = await context.newPage()
-  await admin.goto(`${base}account?roomId=1`)
-  await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).click()
+  await admin.goto(`${uiBase}account?roomId=1`)
+  await expect(admin.getByRole('heading', { name: room.name, exact: true })).toBeVisible()
+  await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).focus()
+  await admin.keyboard.press('Enter')
   await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('admin')
   await admin.getByPlaceholder('contraseña', { exact: true }).fill('cleanup-test-password')
   await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
   await expect(admin.getByRole('navigation', { name: 'Secciones de administración' })).toBeVisible()
-  await admin.goto(`${base}queue`)
+  await admin.goto(`${uiBase}queue`)
   const player = await context.newPage()
-  await player.goto(`${base}player`)
+  await player.goto(`${uiBase}player`)
   const transport = player.getByRole('toolbar', { name: 'Controles de reproducción' })
   await transport.getByRole('button', { name: 'Reproducir', exact: true }).click()
   await expect.poll(() => db.prepare('SELECT count(*) n FROM queue WHERE roomId=1 AND status=\'PLAYING\'').get().n).toBe(1)
@@ -157,11 +197,32 @@ try {
   await expect(guest.getByRole('button', { name: 'Vaciar cola', exact: true })).toHaveCount(0)
   pass('Participants cannot clear queues and still see their pending request')
 
+  // History-only cleanup preserves both paused media and future requests.
+  await transport.getByRole('button', { name: 'Pausar', exact: true }).click()
+  await expect.poll(() => player.locator('video').evaluate(video => video.paused)).toBe(true)
+  const controls = admin.getByRole('region', { name: 'Limpieza de la cola' })
+  await controls.getByRole('button', { name: 'Limpiar historial', exact: true }).click()
+  const historyDialog = admin.getByRole('dialog', { name: 'Limpiar historial', exact: true })
+  await historyDialog.getByRole('button', { name: 'Limpiar historial', exact: true }).click()
+  await expect(historyDialog).toBeHidden()
+  await expect(admin.locator(`[data-queue-id="${oldPlayed}"]`)).toHaveCount(0)
+  await expect(admin.locator(`[data-queue-id="${oldFailed}"]`)).toHaveCount(0)
+  await expect(admin.locator(`[data-queue-id="${currentId}"]`)).toBeVisible()
+  assert.ok(await player.evaluate(() => document.querySelector('video') === window.currentVideo && window.currentVideo.paused))
+  assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(oldPlayed).status, 'PLAYED')
+  assert.ok(db.prepare('SELECT historyClearedAt FROM queue WHERE queueId=?').get(oldPlayed).historyClearedAt)
+  await admin.reload()
+  await expect(admin.locator(`[data-queue-id="${currentId}"]`)).toBeVisible()
+  await expect(admin.locator(`[data-queue-id="${oldPlayed}"]`)).toHaveCount(0)
+  pass('History cleanup hides completed rows persistently without changing paused playback or pending requests')
+  await transport.getByRole('button', { name: 'Reproducir', exact: true }).click()
+  await expect.poll(() => player.locator('video').evaluate(video => !video.paused)).toBe(true)
+
   const countBefore = pendingCount()
   await admin.getByRole('button', { name: /^Por aprobar/ }).click()
-  const controls = admin.getByRole('region', { name: 'Limpieza de la cola' })
   await controls.getByRole('button', { name: 'Vaciar cola', exact: true }).click()
-  const clearDialog = admin.getByRole('dialog', { name: 'Vaciar cola', exact: true })
+  const clearDialog = admin.getByRole('dialog', { name: '¿Vaciar completamente la cola?', exact: true })
+  await expect(clearDialog).toContainText('Se detendrá la reproducción y se quitarán todas las canciones de esta cola, incluido el historial visible. Tus listas guardadas se conservarán.')
   await expect(clearDialog.getByRole('button', { name: 'Cancelar', exact: true })).toBeFocused()
   await admin.keyboard.press('Escape')
   assert.equal(pendingCount(), countBefore)
@@ -178,7 +239,7 @@ try {
   await admin.keyboard.press('Enter')
   await expect(clearDialog).toBeHidden()
   await expect.poll(pendingCount).toBe(0)
-  await expect(controls.getByRole('status')).toContainText('Se quitaron')
+  await expect(controls.getByRole('status')).toContainText('Cola vaciada completamente. Reproducción detenida.')
   assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(guestRequest).status, 'REMOVED')
   await expect(guest.getByRole('heading', { name: 'Pending song', exact: true })).toHaveCount(0)
   assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(otherId).status, 'APPROVED')
@@ -186,44 +247,47 @@ try {
   assert.equal(db.prepare('SELECT count(*) n FROM musicPlaylistItems').get().n, 1)
   await player.waitForTimeout(1200)
   assert.equal(pendingCount(), 0)
-  assert.ok(await player.evaluate(() => document.querySelector('video') === window.currentVideo && !window.currentVideo.paused && window.currentVideo.currentTime >= window.timeBeforeCleanup))
-  pass('Confirmed clear removes all pending origins across tabs, disables house refill and preserves current audio, lists and other room')
+  await expect(player.locator('video')).toHaveCount(0)
+  assert.ok(await player.evaluate(() => window.currentVideo.paused))
+  assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(currentId).status, 'REMOVED')
+  await admin.getByRole('button', { name: 'Cola', exact: true }).click()
+  await expect(admin.locator('[data-queue-id]')).toHaveCount(0)
+  await expect(transport.getByRole('button', { name: 'Reproducir', exact: true })).toBeVisible()
+  await admin.reload()
+  await expect(admin.getByRole('heading', { name: 'La cola de reproducción está vacía' })).toBeVisible()
+  pass('Full clear stops active media, empties the visible queue, disables house refill and preserves saved lists and other rooms')
+
+  const pausedId = await add(adminSocket, 1, 'OPERATOR')
+  await expect(player.locator('video')).toHaveCount(0)
+  await transport.getByRole('button', { name: 'Reproducir', exact: true }).click()
+  await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(pausedId).status).toBe('PLAYING')
   await transport.getByRole('button', { name: 'Pausar', exact: true }).click()
   await expect.poll(() => player.locator('video').evaluate(video => video.paused)).toBe(true)
-
-  await admin.getByRole('button', { name: 'Cola', exact: true }).click()
-  await expect(admin.locator(`[data-queue-id="${oldPlayed}"]`)).toBeVisible()
-  await controls.getByRole('button', { name: 'Limpiar historial', exact: true }).click()
-  const historyDialog = admin.getByRole('dialog', { name: 'Limpiar historial', exact: true })
-  await historyDialog.getByRole('button', { name: 'Limpiar historial', exact: true }).click()
-  await expect(historyDialog).toBeHidden()
-  await expect(admin.locator(`[data-queue-id="${oldPlayed}"]`)).toHaveCount(0)
-  await expect(admin.locator(`[data-queue-id="${oldFailed}"]`)).toHaveCount(0)
-  await expect(admin.locator(`[data-queue-id="${currentId}"]`)).toBeVisible()
-  assert.ok(await player.evaluate(() => document.querySelector('video') === window.currentVideo && window.currentVideo.paused))
-  assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(oldPlayed).status, 'PLAYED')
-  assert.ok(db.prepare('SELECT historyClearedAt FROM queue WHERE queueId=?').get(oldPlayed).historyClearedAt)
-  await admin.reload()
-  await expect(admin.locator(`[data-queue-id="${currentId}"]`)).toBeVisible()
-  await expect(admin.locator(`[data-queue-id="${oldPlayed}"]`)).toHaveCount(0)
-  pass('History cleanup hides completed rows persistently without deleting receipts or changing paused playback')
+  await controls.getByRole('button', { name: 'Vaciar cola', exact: true }).click()
+  await clearDialog.getByRole('button', { name: 'Vaciar cola', exact: true }).click()
+  await expect(clearDialog).toBeHidden()
+  await expect(player.locator('video')).toHaveCount(0)
+  await expect(admin.locator('[data-queue-id]')).toHaveCount(0)
+  assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(pausedId).status, 'REMOVED')
+  pass('Full clear removes a paused current song as well; new requests wait for explicit playback')
 
   const uncertainId = await add(adminSocket, 2)
   await expect(admin.locator(`[data-queue-id="${uncertainId}"]`)).toBeVisible()
-  await admin.evaluate(() => {
+  if (httpsUi) dropCleanupAck = true
+  else await admin.evaluate(() => {
     window.dropCleanupAck = true
   })
   await controls.getByRole('button', { name: 'Vaciar cola', exact: true }).click()
   await clearDialog.getByRole('button', { name: 'Vaciar cola', exact: true }).click()
   await expect(clearDialog.getByRole('button', { name: 'Comprobar resultado', exact: true })).toBeVisible({ timeout: 15000 })
-  const originalRequest = await admin.evaluate(() => window.cleanupRequests.at(-1))
+  const originalRequest = httpsUi ? cleanupRequests.at(-1) : await admin.evaluate(() => window.cleanupRequests.at(-1))
   assert.equal(originalRequest.checkOnly, false)
   const newRequest = await add(adminSocket, 2)
   await admin.reload()
   await controls.getByRole('button', { name: 'Comprobar resultado', exact: true }).click()
   await clearDialog.getByRole('button', { name: 'Comprobar resultado', exact: true }).click()
   await expect(clearDialog).toBeHidden()
-  const checked = await admin.evaluate(() => window.cleanupRequests.at(-1))
+  const checked = httpsUi ? cleanupRequests.at(-1) : await admin.evaluate(() => window.cleanupRequests.at(-1))
   assert.equal(checked.requestId, originalRequest.requestId)
   assert.equal(checked.checkOnly, true)
   assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(newRequest).status, 'APPROVED')
@@ -242,6 +306,7 @@ try {
   if (browser) for (const context of browser.contexts()) for (const page of context.pages()) console.error(page.url(), await page.locator('body').innerText().catch(() => 'unavailable'))
   throw error
 } finally {
+  closing = true
   sockets.forEach(socket => socket.disconnect())
   await browser?.close()
   await stop()
