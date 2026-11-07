@@ -4,16 +4,18 @@ import styles from './DevPlayerTools.css'
 
 interface DevPlayerToolsProps {
   phase: string
+  diagnostics: string[]
   canSeek: boolean
   isPlaying: boolean
   onSeek(target: 'end' | 'forward'): string | undefined
 }
 
-export default function DevPlayerTools ({ phase, canSeek, isPlaying, onSeek }: DevPlayerToolsProps) {
+export default function DevPlayerTools ({ phase, diagnostics, canSeek, isPlaying, onSeek }: DevPlayerToolsProps) {
   const [feedback, setFeedback] = useState('')
   return (
     <aside className={styles.panel} aria-label='Herramientas de desarrollo'>
       <p role='status'>{`Desarrollo · ${phase}`}</p>
+      {diagnostics.length > 0 && <ul className={styles.diagnostics} aria-label='Diagnóstico del reproductor'>{diagnostics.map((message, index) => <li key={`${index}:${message}`}>{message}</li>)}</ul>}
       {canSeek
         ? (
             <>

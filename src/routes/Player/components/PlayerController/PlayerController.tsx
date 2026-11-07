@@ -14,7 +14,7 @@ import PlayerTransitionScene from '../Animation/PlayerTransitionScene'
 import PlayerTransitionPresentation from '../Animation/PlayerTransitionPresentation'
 import { createTransitionPresentationSelector } from '../Animation/transitionPresentation'
 import useSelectedPlayerBackground from '../Animation/useSelectedPlayerBackground'
-import greetingStyles from 'components/Greetings/Greetings.css'
+import usePlayerDiagnostic, { logPlayerDiagnostic } from 'lib/usePlayerDiagnostic'
 import Button from 'components/Button/Button'
 import animationStyles from 'components/Animation/Animation.css'
 import getRoomPrefs from '../../selectors/getRoomPrefs'
@@ -40,7 +40,7 @@ interface PlayerControllerProps {
   height: number
 }
 
-type TransitionScene = { id: string, background: TransitionVideoBackground | null, phase: 'intro' | 'voice' | 'loading' }
+type TransitionScene = { id: string, background: TransitionVideoBackground | null, phase: 'intro' | 'voice' | 'loading' | 'handoff' | 'exiting' }
 
 const PlayerController = (props: PlayerControllerProps) => {
   const queue = useAppSelector(getPlaybackQueue)
@@ -50,6 +50,7 @@ const PlayerController = (props: PlayerControllerProps) => {
   const prefs = useAppSelector(state => state.prefs)
   const roomPrefs = useAppSelector(getRoomPrefs)
   const roomId = useAppSelector(state => state.user.roomId)
+  const uiError = useAppSelector(state => state.ui.isErrored ? state.ui.errorMessage : null)
   const queueItem = queue.entities[player.queueId]
   const currentIndex = queue.result.indexOf(player.queueId)
   const nextQueueItem = queue.result
@@ -67,6 +68,7 @@ const PlayerController = (props: PlayerControllerProps) => {
   const backgroundRef = useRef(selectedBackground)
   backgroundRef.current = selectedBackground
   const [transition, setTransition] = useState<TransitionScene | null>(null)
+  const [preparingQueueId, setPreparingQueueId] = useState<number | null>(null)
   const selectPresentation = useMemo(createTransitionPresentationSelector, [])
   const transitionRef = useRef<TransitionScene | null>(null)
   const updateTransition = useCallback((value: TransitionScene | null) => {
@@ -92,16 +94,26 @@ const PlayerController = (props: PlayerControllerProps) => {
   }, [updateTransition])
   const handlePlay = useCallback(() => {
     animationRef.current.channel.musicStarted()
-    if (transitionRef.current?.phase === 'loading') {
-      void finishTransition().then((): void => {
-        if (mounted.current) dispatch(playerPlay())
-        return undefined
-      })
+    const scene = transitionRef.current
+    const fadeVisuals = () => {
+      if (!mounted.current || transitionRef.current !== scene) return
+      updateTransition({ ...scene!, phase: 'exiting' })
+      dispatch(playerPlay())
+    }
+    if (scene?.phase === 'loading') {
+      // Local media starts muted until the remaining bed has finished fading.
+      void animationRef.current.stopTransition(80).then(fadeVisuals)
+    } else if (scene?.phase === 'handoff') {
+      fadeVisuals()
     } else dispatch(playerPlay())
-  }, [dispatch, finishTransition])
+  }, [dispatch, updateTransition])
+  const handleVisualExit = useCallback(() => {
+    if (transition?.phase === 'exiting' && transitionRef.current === transition) void finishTransition(0)
+  }, [transition, finishTransition])
 
   useEffect(() => {
     const cancel = () => {
+      setPreparingQueueId(null)
       const scene = transitionRef.current
       if (scene && socket.connected) void animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: true }, 1000).catch(() => {})
       updateTransition(null)
@@ -121,22 +133,31 @@ const PlayerController = (props: PlayerControllerProps) => {
 
   useEffect(() => {
     if (player._authority !== 'GRANTED') {
+      setPreparingQueueId(null)
       updateTransition(null)
       void animationRef.current.stopTransition(30)
     }
   }, [player._authority, updateTransition])
 
   useEffect(() => {
-    if (transition?.phase !== 'loading') return
+    if (transition?.phase !== 'loading' && transition?.phase !== 'handoff') return
     if (!player.isPlaying) {
       void finishTransition(30)
       return
+    }
+    if (transition.phase === 'loading' && queueItem?.source === 'YOUTUBE') {
+      // Release audio first; keep the picture until YouTube actually starts.
+      const scene = transitionRef.current
+      void animationRef.current.stopTransition(80).then((): void => {
+        if (mounted.current && scene && transitionRef.current === scene) updateTransition({ ...scene, phase: 'handoff' })
+        return undefined
+      })
     }
     // A failed/blocked media start must expose its existing controls, not leave
     // an opaque transition over the player's recovery UI indefinitely.
     const timer = setTimeout(() => void finishTransition(), 10000)
     return () => clearTimeout(timer)
-  }, [transition, player.isPlaying, finishTransition])
+  }, [transition, player.isPlaying, queueItem?.source, finishTransition, updateTransition])
 
   const handleReplay = useCallback((queueId: number) => {
     if (!socket.connected || advancing.current || animationRef.current.busy || animationRef.current.blocked) return
@@ -175,7 +196,8 @@ const PlayerController = (props: PlayerControllerProps) => {
     const transitionStartedAt = performance.now()
     const sourceId = before.queueId
     const historyJSON = appendCompletedToHistory(before.historyJSON, includeCurrentInHistory && sourceId >= 0 ? sourceId : undefined)
-    dispatch(playerStatus({ historyJSON, _isBetweenTracks: true, queueDecisionAt: Math.floor(Date.now() / 1000) }))
+    // Replay suppresses announcements for that playback, not the incoming turn.
+    dispatch(playerStatus({ historyJSON, _isBetweenTracks: true, _isReplayPlayback: false, queueDecisionAt: Math.floor(Date.now() / 1000) }))
     const selection = () => {
       const state = store.getState()
       const ordered = getPlaybackQueue(state)
@@ -184,15 +206,19 @@ const PlayerController = (props: PlayerControllerProps) => {
     }
     try {
       const upcoming = selection()
+      setPreparingQueueId(upcoming?.source === 'YOUTUBE' ? upcoming.queueId : null)
       const callRequested = animationRef.current.snapshot?.karaokeCallsEnabled && upcoming?.origin !== 'HOUSE' && upcoming?.requestIntent === 'SING'
+      const scene: TransitionScene | null = (announce || callRequested) && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
+        && (backgroundRef.current || store.getState().rooms.entities[store.getState().user.roomId]?.prefs?.transitionVideo?.mode === 'all'
+          || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)
+        ? { id: crypto.randomUUID(), background: backgroundRef.current ?? animationRef.current.snapshot?.ambience?.background ?? null, phase: 'intro' }
+        : null
+      // Retain the current backdrop before releasing idle ambience or awaiting a new selection.
+      if (scene) updateTransition(scene)
       if (upcoming || boundary !== 'idle') await animationRef.current.stopAmbience()
       // A pause can arrive while the previous ambience is being released.
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
-      if ((announce || callRequested) && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
-        && (backgroundRef.current || store.getState().rooms.entities[store.getState().user.roomId]?.prefs?.transitionVideo?.mode === 'all'
-          || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)) {
-        const scene: TransitionScene = { id: crypto.randomUUID(), background: null, phase: 'intro' }
-        updateTransition(scene)
+      if (scene) {
         // A scene owns one choice across intro, speech and loading. Preview and
         // audio-permit renewals must not consume another position in the rotation.
         const visual = await animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: false }, 1000).catch((): null => null)
@@ -241,6 +267,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         _isPlayingNext: false, _isBetweenTracks: false, _isReplayPlayback: false,
       }))
     } finally {
+      if (mounted.current) setPreparingQueueId(null)
       advancing.current = false
       // A command received during an idle probe must get a fresh transition,
       // including its greeting, after the previous async owner releases it.
@@ -257,6 +284,7 @@ const PlayerController = (props: PlayerControllerProps) => {
   }, [handleLoadNext, player._lastReplayTime, queueItem])
 
   const handleError = useCallback((msg: string, diagnostic?: { category: 'iframe' | 'api-load', code?: number }) => {
+    logPlayerDiagnostic('media', msg, store.getState().user.roomId, queueItem?.queueId)
     updateTransition(null)
     void animationRef.current.stopTransition(30)
     if (!queueItem || (queueItem.source !== 'YOUTUBE' && queueItem.origin !== 'HOUSE')) {
@@ -314,7 +342,8 @@ const PlayerController = (props: PlayerControllerProps) => {
   useEffect(() => {
     if (!animation.busy && !animation.blocked && ((player.isPlaying && (player.queueId === -1 || player._isBetweenTracks)) || player._isPlayingNext)) {
       const first = player.queueId === -1 && !player._isPlayingNext
-      void handleLoadNext(!player._isBetweenTracks, first, first ? 'start' : 'ended')
+      // Next and a resumed boundary need the same full transition as natural end.
+      void handleLoadNext(!player._isBetweenTracks, true, first ? 'start' : 'ended')
     }
   }, [handleLoadNext, player.isPlaying, player.queueId, player._isPlayingNext, player._isBetweenTracks, animation.busy, animation.blocked, advanceRevision])
 
@@ -359,16 +388,6 @@ const PlayerController = (props: PlayerControllerProps) => {
     }
   }, [handleStatus, player.isErrored, player.isPlaying])
 
-  if (player._authority !== 'GRANTED') {
-    const denied = player._authority === 'DENIED'
-    return (
-      <div className={styles.authorityNotice} role='status'>
-        <h1>{denied ? 'Ya hay un reproductor activo' : 'Conectando el reproductor…'}</h1>
-        {denied && <p>Esperando a que se libere la sala.</p>}
-      </div>
-    )
-  }
-
   const foregroundScene = !!transition || !!greetings.scene || !!animation.scene || animation.blocked || animation.busy
     || (player._isBetweenTracks && player.queueId !== -1 && !player.isAtQueueEnd)
   const showScene = animation.connected && (foregroundScene || animation.ambientPlaying) && !player.isErrored
@@ -380,16 +399,47 @@ const PlayerController = (props: PlayerControllerProps) => {
         ? animation.scene.background ?? null
         : animation.ambientPlaying ? animation.snapshot?.ambience?.background ?? selectedBackground : selectedBackground
   const sceneId = greetings.scene ? `greeting:${greetings.scene.turnKey}` : animation.scene?.interventionId ?? animation.snapshot?.ambience?.id ?? 'boundary'
-  const presentedTracks = selectPresentation({ queue: rawQueue, player, preferences: roomPrefs?.queue, loading: transition?.phase === 'loading' })
-  let developmentPhase = ''
-  if (DevPlayerTools) {
-    if (player.isErrored) developmentPhase = 'Error'
-    else if (transition) developmentPhase = { intro: 'Intro', voice: 'Voz', loading: 'Cargando' }[transition.phase]
-    else if (greetings.scene || animation.scene) developmentPhase = 'Voz'
-    else if (animation.blocked || animation.busy || player._isBetweenTracks) developmentPhase = 'Preparando'
-    else if (player.isAtQueueEnd || !queueItem) developmentPhase = 'Ambiente / espera'
-    else developmentPhase = player.isPlaying ? 'Canción' : 'Pausa'
-  }
+  const handingOff = transition?.phase === 'handoff' || transition?.phase === 'exiting'
+  const presentedTracks = selectPresentation({ queue: rawQueue, player, preferences: roomPrefs?.queue, loading: transition?.phase === 'loading' || handingOff })
+  const preparingItem = preparingQueueId === null ? undefined : rawQueue.entities[preparingQueueId]
+  const preparedYouTube = preparingItem && preparingItem.isOptimistic !== true
+    && preparingItem.source === 'YOUTUBE' && preparingItem.status === 'APPROVED' && preparingItem.externalId
+    ? { mediaKey: preparingItem.queueId, videoId: preparingItem.externalId }
+    : null
+  let phase: string
+  if (player._authority === 'PENDING') phase = 'Conectando el reproductor…'
+  else if (player._authority === 'DENIED') phase = 'Esperando a que se libere la sala.'
+  else if (player.isErrored) phase = 'Error'
+  else if (transition) phase = { intro: 'Intro', voice: 'Voz', loading: 'Cargando', handoff: 'Iniciando canción', exiting: 'Fundido' }[transition.phase]
+  else if (greetings.scene || animation.scene) phase = 'Voz'
+  else if (animation.blocked || animation.busy || player._isBetweenTracks) phase = 'Preparando'
+  else if (player.isAtQueueEnd || !queueItem) phase = 'Ambiente / espera'
+  else phase = player.isPlaying ? 'Canción' : 'Pausa'
+  const audioStatus = (animation.snapshot?.prefs.enabled || animation.snapshot?.greetingVoiceEnabled) && !animation.unlocked
+    ? animation.needsGesture ? 'Esperando permiso de sonido' : animation.preparingAudio ? 'Preparando audio…' : 'Conectando audio…'
+    : ''
+  usePlayerDiagnostic('phase', phase, 'info')
+  usePlayerDiagnostic('audio-status', audioStatus, 'info')
+  usePlayerDiagnostic('greeting', greetings.error)
+  usePlayerDiagnostic('animation', animation.error)
+  const developmentTools = DevPlayerTools && (
+    <React.Suspense fallback={null}>
+      <DevPlayerTools
+        key={player.queueId}
+        phase={phase}
+        diagnostics={[audioStatus, greetings.error, animation.error, uiError, player.isErrored && player.errorMessage].filter(Boolean) as string[]}
+        canSeek={queueItem?.source === 'YOUTUBE' && !foregroundScene && !player.isAtQueueEnd && !player.isErrored}
+        isPlaying={player.isPlaying}
+        onSeek={target => mediaPlayerRef.current?.seekForDevelopment(target)}
+      />
+    </React.Suspense>
+  )
+  if (player._authority !== 'GRANTED') return (
+    <>
+      {player._authority === 'DENIED' && <div className={styles.authorityNotice} role='status'><h1>Ya hay un reproductor activo</h1></div>}
+      {developmentTools}
+    </>
+  )
   const idleOverlay = (
     <PlayerTextOverlay
       queueItem={queueItem as QueueItem}
@@ -409,7 +459,9 @@ const PlayerController = (props: PlayerControllerProps) => {
         cdgAlpha={player.cdgAlpha}
         cdgSize={player.cdgSize}
         isPlaying={player.isPlaying}
-        isVisible={!!queueItem && !player.isErrored && !player.isAtQueueEnd && !player._isBetweenTracks && !animation.busy && !animation.blocked}
+        isVisible={!!queueItem && !player.isErrored && !player.isAtQueueEnd && !player._isBetweenTracks && !animation.busy && !animation.blocked
+          && !(queueItem.source === 'YOUTUBE' && transition && !handingOff)}
+        preparedYouTube={preparedYouTube}
         isReplayGainEnabled={prefs.isReplayGainEnabled}
         isVideoKeyingEnabled={!!queueItem?.isVideoKeyingEnabled}
         isWebGLSupported={player.isWebGLSupported}
@@ -428,12 +480,18 @@ const PlayerController = (props: PlayerControllerProps) => {
         rgTrackPeak={queueItem ? queueItem.rgTrackPeak : null}
         source={queueItem?.source}
         visualizer={playerVisualizer}
-        volume={transition ? 0 : player.volume}
+        volume={transition && !handingOff ? 0 : player.volume}
         width={props.width}
         height={props.height}
       />
       {showScene && (
-        <PlayerTransitionScene background={background} playing={!!(transition || animation.scene || greetings.scene || animation.ambientPlaying || player.isPlaying || player._isPlayingNext)} sceneId={sceneId}>
+        <PlayerTransitionScene
+          background={background}
+          playing={!!(transition || animation.scene || greetings.scene || animation.ambientPlaying || player.isPlaying || player._isPlayingNext)}
+          sceneId={sceneId}
+          exiting={transition?.phase === 'exiting'}
+          onExited={handleVisualExit}
+        >
           {foregroundScene
             ? (
                 <PlayerTransitionPresentation
@@ -444,39 +502,26 @@ const PlayerController = (props: PlayerControllerProps) => {
                   greeting={greetings.active}
                   moderationTerms={prefs.moderation.terms}
                   onGreetingMounted={greetings.confirmMounted}
-                  notice={!player.isPlaying && !player._isPlayingNext ? 'Reproducción en pausa' : animation.blocked && !animation.scene && !greetings.scene && transition?.phase !== 'intro' ? 'Preparando la próxima canción…' : undefined}
                 />
               )
             : idleOverlay}
         </PlayerTransitionScene>
       )}
-      {greetings.error && <p className={greetingStyles.playerNotice} role='status'>{greetings.error}</p>}
-      {(animation.snapshot?.prefs.enabled || animation.snapshot?.greetingVoiceEnabled) && !animation.unlocked && (
+      {audioStatus && (animation.needsGesture || animation.error) && (
         <div className={animationStyles.unlock}>
           {animation.needsGesture
             ? (
                 <>
-                  <p>El navegador requiere una interacción en esta pestaña para permitir el sonido. Puede usar Reproducir.</p>
-                  <Button onClick={animation.unlock}>Permitir sonido</Button>
+                  <p>Activa el sonido</p>
+                  <Button variant='primary' onClick={animation.unlock}>Permitir sonido</Button>
                 </>
               )
-            : <p role='status'>{animation.preparingAudio ? 'Preparando audio…' : 'Conectando audio…'}</p>}
-          {animation.error && <p role='alert'>{animation.error}</p>}
+            : <p role='status'>No se pudo activar el sonido.</p>}
           {animation.error && !animation.needsGesture && <Button onClick={animation.unlock}>Reintentar audio</Button>}
         </div>
       )}
       {!showScene && idleOverlay}
-      {DevPlayerTools && (
-        <React.Suspense fallback={null}>
-          <DevPlayerTools
-            key={player.queueId}
-            phase={developmentPhase}
-            canSeek={queueItem?.source === 'YOUTUBE' && !foregroundScene && !player.isAtQueueEnd && !player.isErrored}
-            isPlaying={player.isPlaying}
-            onSeek={target => mediaPlayerRef.current?.seekForDevelopment(target)}
-          />
-        </React.Suspense>
-      )}
+      {developmentTools}
       {roomPrefs?.qr?.isEnabled && (
         <PlayerQR
           height={props.height}

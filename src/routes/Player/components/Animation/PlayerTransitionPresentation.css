@@ -32,7 +32,6 @@
 .following[data-kind='house'] .nextLabel > :last-child { color: var(--amber, #edc47c); }
 .nextTitle { margin: 6px 0 0; color: var(--lyrics, #f4f7ff); font-size: clamp(20px, 2.3cqw, 36px); line-height: 1.2; font-weight: 600; }
 .nextPerson { margin: 6px 0 0; color: #d1d9e8; font-size: clamp(16px, 1.8cqw, 28px); line-height: 1.25; }
-.notice { margin: 0; font-size: clamp(16px, 1.8cqw, 28px); color: var(--amber, #edc47c); }
 
 .presentation[data-greeting='true'] .foreground { justify-content: center; }
 .presentation[data-greeting='true'] .current { display: flex; justify-content: center; align-items: baseline; flex-wrap: wrap; gap: 6px 16px; flex-shrink: 0; }

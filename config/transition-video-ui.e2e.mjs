@@ -206,6 +206,7 @@ export async function runTransitionVideoUiChecks ({ page, uiBase, source, data, 
   await page.unroute(mediaUrl)
   await panel.getByRole('button', { name: 'Reproducir vista previa', exact: true }).click()
   await expect.poll(() => video.evaluate(element => !element.paused && element.currentTime > 0)).toBe(true)
+  await expect(video).toHaveCSS('opacity', '1')
 
   await panel.getByRole('button', { name: 'Pausar vista previa', exact: true }).click()
   await video.evaluate((element) => {

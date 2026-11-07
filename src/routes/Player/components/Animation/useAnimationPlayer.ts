@@ -433,7 +433,6 @@ export default function useAnimationPlayer () {
         }, 1000)
         if (!probe.eligible) return
       }
-      began = performance.now()
       await stopAmbience()
       // Flush the boundary before reserving. Periodic status is throttled and
       // may still describe the preceding (now ended) song as occupying the room.
@@ -443,12 +442,14 @@ export default function useAnimationPlayer () {
       const refreshed = store.getState()
       const room = refreshed.rooms.entities[refreshed.user.roomId]
       const contextKey = animationContext(ensureState(refreshed.queue), room?.prefs?.queue)
-      const remaining = 1000 - (performance.now() - began)
-      if (remaining <= 0 || generation !== version.current) throw new Error('La pausa cambió antes de reservar')
+      if (!mounted.current || generation !== version.current) throw new Error('La pausa cambió antes de reservar')
+      // Status synchronization precedes the permit: it must not consume the
+      // reservation's response budget. The granted startBefore still fences start.
+      began = performance.now()
       const reply = await animationRequest(automatic ? ANIMATION_AUTO : ANIMATION_RESERVE, {
         interventionId: active?.interventionId, playerEpoch: current.playerEpoch, controlVersion: current.controlVersion,
         contextKey, transitionId: crypto.randomUUID(), boundary, sourceQueueId, expectedNextQueueId, replay: state.player._isReplayPlayback,
-      }, Math.floor(remaining))
+      }, 1000)
       grant = reply.grant
       if (!grant) return
       grantRef.current = grant

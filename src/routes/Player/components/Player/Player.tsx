@@ -16,6 +16,7 @@ interface PlayerProps {
   cdgSize: number
   isPlaying: boolean
   isVisible: boolean
+  preparedYouTube?: { mediaKey: number, videoId: string } | null
   isReplayGainEnabled: boolean
   isVideoKeyingEnabled: boolean
   isWebGLSupported: boolean
@@ -189,16 +190,17 @@ class Player extends React.PureComponent<PlayerProps> {
   }
 
   render () {
-    if (!this.props.isVisible || typeof this.props.mediaKey !== 'number') return null
-
     const playerKind = selectPlayerKind(
       this.props.source,
       this.props.mediaType,
       this.props.isVideoKeyingEnabled,
     )
 
-    if (playerKind === 'youtube') {
-      if (!this.props.externalId) return null
+    const prepared = !this.props.isVisible ? this.props.preparedYouTube : null
+    if (prepared || playerKind === 'youtube') {
+      const videoId = prepared?.videoId ?? this.props.externalId
+      const mediaKey = prepared?.mediaKey ?? this.props.mediaKey
+      if (!videoId || typeof mediaKey !== 'number') return null
 
       return (
         <YouTubePlayer
@@ -206,22 +208,23 @@ class Player extends React.PureComponent<PlayerProps> {
           controls={0}
           showAutoplayRecovery
           height={this.props.height}
-          isPlaying={this.props.isPlaying}
-          mediaKey={this.props.mediaKey}
+          isActive={this.props.isVisible}
+          isPlaying={this.props.isVisible && this.props.isPlaying}
+          mediaKey={mediaKey}
           mediaReplayKey={this.props.mediaReplayKey}
           onEnd={this.props.onEnd}
           onError={this.props.onError}
           onLoad={this.props.onLoad}
           onPlay={this.handlePlay}
           onStatus={this.props.onStatus}
-          videoId={this.props.externalId}
+          videoId={videoId}
           volume={this.props.volume}
           width={this.props.width}
         />
       )
     }
 
-    if (typeof this.props.mediaId !== 'number') return null
+    if (!this.props.isVisible || typeof this.props.mediaKey !== 'number' || typeof this.props.mediaId !== 'number') return null
 
     const mediaProps = { ...this.props, onAudioElement: this.handleAudioElement, onPlay: this.handlePlay }
     const media = playerKind === 'cdg'

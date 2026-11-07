@@ -41,10 +41,17 @@ export async function installYouTubePreviewMock (context) {
 
         emitPlaying () { this.options.events.onStateChange({ target: this, data: 1 }) }
         playVideo () { this.emitPlaying() }
-        cueVideoById (id) { this.id = id }
+        cueVideoById (id) {
+          this.id = id
+          queueMicrotask(() => {
+            if (!this.destroyed) this.options.events.onStateChange({ target: this, data: 5 })
+          })
+        }
+
         pauseVideo () { this.options.events.onStateChange({ target: this, data: 2 }) }
         seekTo () {}
         getCurrentTime () { return 2 }
+        getVideoUrl () { return `https://www.youtube.com/watch?v=${this.id}` }
         setVolume (volume) { this.volume = volume }
         setSize (width, height) { Object.assign(this.node.style, { width: `${width}px`, height: `${height}px` }) }
         destroy () {

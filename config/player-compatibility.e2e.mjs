@@ -146,16 +146,25 @@ try {
 
         loadVideoById () {
           this.video.src = `${document.baseURI}compatibility-video.webm`
+          this.playVideo()
+        }
+
+        cueVideoById (id) {
+          this.videoId = id
+          this.video.src = `${document.baseURI}compatibility-video.webm`
+          queueMicrotask(() => this.options.events.onStateChange({ target: this, data: 5 }))
+        }
+
+        playVideo () {
           if (window.compatibility.blockOnce) {
             window.compatibility.blockOnce = false
             queueMicrotask(() => this.options.events.onAutoplayBlocked({ target: this }))
-          } else this.playVideo()
+          } else void this.video.play().catch(() => this.options.events.onAutoplayBlocked({ target: this }))
         }
 
-        cueVideoById () { this.video.src = `${document.baseURI}compatibility-video.webm` }
-        playVideo () { void this.video.play().catch(() => this.options.events.onAutoplayBlocked({ target: this })) }
         pauseVideo () { this.video.pause() }
         getCurrentTime () { return this.video.currentTime }
+        getVideoUrl () { return `https://www.youtube.com/watch?v=${this.videoId}` }
         seekTo (seconds) { this.video.currentTime = seconds }
         setVolume (volume) { this.video.volume = volume / 100 }
         setSize () {}

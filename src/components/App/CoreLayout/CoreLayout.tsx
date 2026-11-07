@@ -15,6 +15,7 @@ import Routes from '../Routes/Routes'
 import AdminNavigation from 'components/Admin/AdminNavigation'
 import adminStyles from 'components/Admin/Admin.css'
 import { clearErrorMessage, setFooterHeight, setHeaderHeight } from 'store/modules/ui'
+import usePlayerDiagnostic from 'lib/usePlayerDiagnostic'
 
 const CoreLayout = () => {
   const isPlayerRoute = useMatch('/player')
@@ -36,6 +37,7 @@ const CoreLayout = () => {
   })
 
   const ui = useAppSelector(state => state.ui)
+  usePlayerDiagnostic('interface', isPlayerRoute && ui.isErrored ? ui.errorMessage : null)
   const closeError = () => dispatch(clearErrorMessage())
   useEffect(() => {
     if (adminShell || isPlayerRoute) dispatch(setFooterHeight(0))
@@ -52,7 +54,7 @@ const CoreLayout = () => {
 
       <SongInfo />
 
-      {ui.isErrored && (
+      {ui.isErrored && !isPlayerRoute && (
         <Modal
           title='Ocurrió un error'
           onClose={closeError}

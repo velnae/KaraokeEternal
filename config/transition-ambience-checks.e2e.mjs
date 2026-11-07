@@ -36,10 +36,16 @@ export async function installYouTubeTransitionFixture (context, mediaPath) {
           this.playVideo()
         }
 
-        cueVideoById () { this.video.src = `${document.baseURI}transition-youtube.mp4` }
+        cueVideoById (id) {
+          this.videoId = id
+          this.video.src = `${document.baseURI}transition-youtube.mp4`
+          queueMicrotask(() => this.options.events.onStateChange({ target: this, data: 5 }))
+        }
+
         playVideo () { void this.video.play().catch(() => this.options.events.onAutoplayBlocked({ target: this })) }
         pauseVideo () { this.video.pause() }
         getCurrentTime () { return this.video.currentTime }
+        getVideoUrl () { return `https://www.youtube.com/watch?v=${this.videoId}` }
         seekTo (seconds) { this.video.currentTime = seconds }
         setVolume (volume) { this.video.volume = volume / 100 }
         setSize () {}

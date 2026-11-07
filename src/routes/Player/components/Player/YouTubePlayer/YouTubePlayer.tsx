@@ -4,11 +4,13 @@ import styles from './YouTubePlayer.css'
 
 const IFRAME_API_URL = 'https://www.youtube.com/iframe_api'
 const STATUS_INTERVAL_MS = 500
+const VIDEO_CUED = 5
 
 interface YouTubePlayerInstance {
   cueVideoById(videoId: string): void
   destroy(): void
   getCurrentTime(): number
+  getVideoUrl(): string
   getDuration(): number
   loadVideoById(videoId: string): void
   pauseVideo(): void
@@ -86,6 +88,7 @@ interface YouTubePlayerProps {
   showAutoplayRecovery?: boolean
   height: number
   isPlaying: boolean
+  isActive?: boolean
   mediaKey: number
   mediaReplayKey?: number
   onEnd(): void
@@ -106,12 +109,15 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
   isReady = false
   mountGeneration = 0
   awaitingPlayback = false
+  awaitingPreparedStart = false
+  cuePending = false
+  preparationError: Parameters<YouTubePlayerProps['onError']> | null = null
   state = { autoplayBlocked: false }
 
   componentDidMount () {
     this.isMounted = true
     const generation = ++this.mountGeneration
-    this.props.onLoad()
+    if (this.props.isActive !== false) this.props.onLoad()
     loadYouTubeIframeApi()
       .then((api): void => {
         if (this.isMounted && generation === this.mountGeneration) this.createPlayer(api)
@@ -119,29 +125,58 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
       })
       .catch((error) => {
         if (this.isMounted && generation === this.mountGeneration) {
-          this.props.onError(error.message, { category: 'api-load' })
+          this.reportError(error.message, { category: 'api-load' })
         }
       })
   }
 
   componentDidUpdate (prevProps: YouTubePlayerProps) {
+    const active = this.props.isActive !== false
+    const activating = active && prevProps.isActive === false
+    const mediaChanged = prevProps.mediaKey !== this.props.mediaKey || prevProps.videoId !== this.props.videoId
+    const replayChanged = prevProps.mediaReplayKey !== this.props.mediaReplayKey
+    if (mediaChanged && this.preparationError?.[1]?.category === 'iframe') this.preparationError = null
+    if (activating) {
+      this.props.onLoad()
+      if (this.preparationError) {
+        const error = this.preparationError
+        this.preparationError = null
+        this.props.onError(...error)
+        return
+      }
+    }
+    if (!active) {
+      this.awaitingPlayback = false
+      this.awaitingPreparedStart = true
+      this.stopStatusUpdates()
+    }
     if (!this.player || !this.isReady) return
 
-    if (prevProps.mediaKey !== this.props.mediaKey || prevProps.videoId !== this.props.videoId) {
+    // Restore volume before starting the prepared video so its opening is audible.
+    if (prevProps.volume !== this.props.volume) this.updateVolume()
+    if (!active) {
+      if (mediaChanged || replayChanged) {
+        this.setState({ autoplayBlocked: false })
+        this.cueVideo()
+      } else if (prevProps.isActive !== false) this.player.pauseVideo()
+    } else if (mediaChanged) {
       this.setState({ autoplayBlocked: false })
-      this.props.onLoad()
+      if (!activating) this.props.onLoad()
       this.awaitingPlayback = this.props.isPlaying
+      this.cuePending = false
       if (this.props.isPlaying) this.player.loadVideoById(this.props.videoId)
-      else this.player.cueVideoById(this.props.videoId)
-    } else if (prevProps.mediaReplayKey !== this.props.mediaReplayKey) {
-      this.player.seekTo(0, true)
-      if (this.props.isPlaying) this.player.playVideo()
-    } else if (prevProps.isPlaying !== this.props.isPlaying) {
+      else this.cueVideo()
+    } else if (replayChanged) {
+      this.awaitingPlayback = this.props.isPlaying
+      if (!this.cuePending) {
+        this.player.seekTo(0, true)
+        if (this.props.isPlaying) this.player.playVideo()
+      }
+    } else if (activating || prevProps.isPlaying !== this.props.isPlaying) {
       this.awaitingPlayback = this.props.isPlaying
       this.updateIsPlaying()
     }
 
-    if (prevProps.volume !== this.props.volume) this.updateVolume()
     if (prevProps.width !== this.props.width || prevProps.height !== this.props.height) {
       this.player.setSize(this.props.width, this.props.height)
     }
@@ -150,6 +185,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
   componentWillUnmount () {
     this.isMounted = false
     this.isReady = false
+    this.cuePending = false
     ++this.mountGeneration
     this.stopStatusUpdates()
     const player = this.player
@@ -189,17 +225,35 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
   handleReady = (event: Pick<YouTubePlayerEvent, 'target'>) => {
     if (!this.isMounted || event.target !== this.player || this.isReady) return
     this.isReady = true
-    this.awaitingPlayback = this.props.isPlaying
+    this.awaitingPlayback = this.props.isActive !== false && this.props.isPlaying
+    this.awaitingPreparedStart = this.props.isActive === false
     this.player.setSize(this.props.width, this.props.height)
     this.updateVolume()
     // Props may have changed while the iframe was initializing.
-    if (this.props.isPlaying) this.player.loadVideoById(this.props.videoId)
-    else this.player.cueVideoById(this.props.videoId)
+    if (this.awaitingPlayback) this.player.loadVideoById(this.props.videoId)
+    else this.cueVideo()
+  }
+
+  cueVideo = () => {
+    this.cuePending = true
+    this.player?.cueVideoById(this.props.videoId)
   }
 
   handleStateChange = (event: YouTubePlayerEvent) => {
     if (!this.isMounted || !this.isReady || event.target !== this.player) return
+    if (event.data === VIDEO_CUED && this.cuePending) {
+      // cueVideoById is asynchronous. A previous cue may finish after replacement.
+      if (new URL(this.player.getVideoUrl()).searchParams.get('v') !== this.props.videoId) return
+      this.cuePending = false
+      if (this.props.isActive !== false && this.props.isPlaying) this.updateIsPlaying()
+      return
+    }
+    if (this.props.isActive === false || this.cuePending) {
+      if (event.data === window.YT?.PlayerState.PLAYING) this.player.pauseVideo()
+      return
+    }
     if (event.data === window.YT?.PlayerState.PLAYING) {
+      this.awaitingPreparedStart = false
       this.awaitingPlayback = false
       this.setState({ autoplayBlocked: false })
       this.props.onPlay()
@@ -207,17 +261,17 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
       this.startStatusUpdates()
     } else if (event.data === window.YT?.PlayerState.PAUSED) {
       // A previous video's pause can arrive while loadVideoById starts the next one.
-      if (!this.awaitingPlayback) this.props.onStatus({ isPlaying: false })
+      if (!this.awaitingPlayback && !this.awaitingPreparedStart) this.props.onStatus({ isPlaying: false })
       this.stopStatusUpdates()
     } else {
       this.stopStatusUpdates()
     }
 
-    if (event.data === window.YT?.PlayerState.ENDED) this.props.onEnd()
+    if (event.data === window.YT?.PlayerState.ENDED && !this.awaitingPreparedStart) this.props.onEnd()
   }
 
   handleAutoplayBlocked = (event: Pick<YouTubePlayerEvent, 'target'>) => {
-    if (!this.isMounted || !this.isReady || event.target !== this.player) return
+    if (!this.isMounted || !this.isReady || event.target !== this.player || this.props.isActive === false) return
     this.awaitingPlayback = false
     this.stopStatusUpdates()
     this.setState({ autoplayBlocked: true })
@@ -226,7 +280,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
   }
 
   retryPlayback = () => {
-    if (!this.isMounted || !this.isReady || !this.player) return
+    if (!this.isMounted || !this.isReady || !this.player || this.props.isActive === false) return
     this.awaitingPlayback = true
     // Keep playVideo synchronous with the local click/keyboard gesture.
     this.player.playVideo()
@@ -234,7 +288,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
 
   seekForDevelopment = (target: 'end' | 'forward'): string | undefined => {
     if (process.env.NODE_ENV !== 'development' || process.env.DEV_PLAYER_TOOLS !== 'true') return
-    if (!this.isMounted || !this.isReady || !this.player || this.awaitingPlayback) {
+    if (!this.isMounted || !this.isReady || !this.player || this.awaitingPlayback || this.props.isActive === false) {
       return 'Esperando al video… Vuelve a intentarlo cuando esté listo.'
     }
     const duration = this.player.getDuration()
@@ -259,16 +313,23 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
       150: 'El propietario del video no permite reproducirlo aquí',
     }
     this.stopStatusUpdates()
-    this.props.onError(`${messages[event.data] ?? 'No se pudo reproducir el video de YouTube'} (código ${event.data})`, {
+    this.reportError(`${messages[event.data] ?? 'No se pudo reproducir el video de YouTube'} (código ${event.data})`, {
       category: 'iframe',
       code: event.data,
     })
   }
 
+  reportError = (...error: Parameters<YouTubePlayerProps['onError']>) => {
+    // Preparation belongs to the upcoming item, not the still-current queue item.
+    if (this.props.isActive === false) this.preparationError = error
+    else this.props.onError(...error)
+  }
+
   updateIsPlaying = () => {
     if (!this.player || !this.isReady) return
-    if (this.props.isPlaying) this.player.playVideo()
-    else this.player.pauseVideo()
+    if (this.props.isPlaying) {
+      if (!this.cuePending) this.player.playVideo()
+    } else this.player.pauseVideo()
   }
 
   updateVolume = () => {
@@ -293,7 +354,9 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
     return (
       <div
         className={styles.container}
-        style={{ width: this.props.width, height: this.props.height }}
+        data-youtube-mode={this.props.isActive === false ? 'preparing' : 'active'}
+        data-youtube-video-id={this.props.videoId}
+        style={{ width: this.props.width, height: this.props.height, display: this.props.isActive === false ? 'none' : undefined }}
       >
         <div className={styles.surface} ref={this.container} />
         {this.state.autoplayBlocked && (this.props.showAutoplayRecovery ?? this.props.controls !== 0) && (

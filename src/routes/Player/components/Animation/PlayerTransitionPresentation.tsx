@@ -13,10 +13,9 @@ interface Props {
   greeting: Greeting | null
   moderationTerms?: readonly string[]
   onGreetingMounted: (node: HTMLElement | null) => void
-  notice?: string
 }
 
-export default function PlayerTransitionPresentation ({ incoming, following, venueName, announcementActive, greetingIntro, greeting, moderationTerms, onGreetingMounted, notice }: Props) {
+export default function PlayerTransitionPresentation ({ incoming, following, venueName, announcementActive, greetingIntro, greeting, moderationTerms, onGreetingMounted }: Props) {
   if (greeting && !isGreetingAllowed(greeting, moderationTerms)) greeting = null
   const current = incoming && transitionTrack(incoming)
   const next = following && transitionTrack(following)
@@ -46,7 +45,6 @@ export default function PlayerTransitionPresentation ({ incoming, following, ven
             <footer translate='no'>{`De ${greeting.sender}`}</footer>
           </section>
         )}
-        {notice && <p className={styles.notice}>{notice}</p>}
       </div>
       {next && (
         <aside className={styles.following} aria-label='Después' data-testid='transition-following' data-queue-id={following?.queueId} data-kind={next.kind}>

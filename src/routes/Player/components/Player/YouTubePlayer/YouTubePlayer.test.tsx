@@ -32,8 +32,9 @@ describe('YouTube player transitions', () => {
     vi.unstubAllEnvs()
   })
 
-  const setup = () => {
+  const setup = (overrides: Partial<Props> = {}) => {
     const commands: string[] = []
+    let cuedVideoId = overrides.videoId ?? 'first'
     const statuses: Array<{ isPlaying?: boolean, position?: number }> = []
     const onEnd = vi.fn()
     const onError = vi.fn()
@@ -43,7 +44,11 @@ describe('YouTube player transitions', () => {
         // The old video's PAUSED notification may arrive during the new load.
         player.handleStateChange({ data: PAUSED, target: iframe })
       }),
-      cueVideoById: vi.fn((id: string) => commands.push(`cue:${id}`)),
+      cueVideoById: vi.fn((id: string) => {
+        commands.push(`cue:${id}`)
+        cuedVideoId = id
+        player.handleStateChange({ data: 5, target: iframe })
+      }),
       pauseVideo: vi.fn(() => commands.push('pause')),
       playVideo: vi.fn(() => commands.push('play')),
       destroy: vi.fn(),
@@ -51,6 +56,7 @@ describe('YouTube player transitions', () => {
       setSize: vi.fn(),
       setVolume: vi.fn(),
       getCurrentTime: vi.fn(() => 0),
+      getVideoUrl: vi.fn(() => `https://www.youtube.com/watch?v=${cuedVideoId}`),
       getDuration: vi.fn(() => 180),
     }
     const makeProps = (overrides: Partial<Props> = {}): Props => ({
@@ -72,7 +78,7 @@ describe('YouTube player transitions', () => {
       width: 1280,
       ...overrides,
     })
-    const player = new YouTubePlayer(makeProps())
+    const player = new YouTubePlayer(makeProps(overrides))
     player.player = iframe as unknown as NonNullable<typeof player.player>
     player.isMounted = true
     player.isReady = true
@@ -186,6 +192,133 @@ describe('YouTube player transitions', () => {
     expect(statuses).not.toContainEqual({ isPlaying: false })
 
     event(PLAYING)
+    expect(player.props.isPlaying).toBe(true)
+    player.componentWillUnmount()
+  })
+
+  it('cues during the transition without publishing playback or advancing the queue', () => {
+    const { player, iframe, update, event, statuses, onEnd } = setup()
+    event(PLAYING)
+    statuses.length = 0
+    vi.mocked(player.props.onPlay).mockClear()
+    update({ isActive: false, isPlaying: false, mediaKey: 2, videoId: 'second' })
+    event(PAUSED)
+    event(ENDED)
+    player.handleAutoplayBlocked({ target: iframe })
+    expect(iframe.cueVideoById).toHaveBeenCalledWith('second')
+    expect(iframe.loadVideoById).not.toHaveBeenCalled()
+    expect(iframe.playVideo).not.toHaveBeenCalled()
+    expect(player.props.onLoad).not.toHaveBeenCalled()
+    expect(player.props.onPlay).not.toHaveBeenCalled()
+    expect(statuses).toEqual([])
+    expect(onEnd).not.toHaveBeenCalled()
+    expect(player.statusTimer).toBeNull()
+    player.componentWillUnmount()
+  })
+
+  it('starts the prepared instance without reloading and ignores a late previous ending', () => {
+    const { player, iframe, update, event, onEnd } = setup()
+    update({ isActive: false, isPlaying: false, mediaKey: 2, videoId: 'second', volume: 0 })
+    update({ isActive: true, isPlaying: true, volume: 0.7 })
+    expect(iframe.loadVideoById).not.toHaveBeenCalled()
+    expect(iframe.playVideo).toHaveBeenCalledOnce()
+    expect(iframe.destroy).not.toHaveBeenCalled()
+    expect(player.props.onLoad).toHaveBeenCalledOnce()
+    expect(iframe.setVolume).toHaveBeenLastCalledWith(70)
+    expect(iframe.setVolume.mock.invocationCallOrder[1]).toBeLessThan(iframe.playVideo.mock.invocationCallOrder[0])
+    event(ENDED)
+    expect(onEnd).not.toHaveBeenCalled()
+    event(PLAYING)
+    event(ENDED)
+    expect(onEnd).toHaveBeenCalledOnce()
+    player.componentWillUnmount()
+  })
+
+  it('cues the same YouTube video from the start for a different queue entry', () => {
+    const { player, iframe, update } = setup()
+    update({ isActive: false, isPlaying: false, mediaKey: 2 })
+    expect(iframe.cueVideoById).toHaveBeenCalledWith('first')
+    update({ isActive: true, isPlaying: true })
+    expect(iframe.playVideo).toHaveBeenCalledOnce()
+    expect(iframe.loadVideoById).not.toHaveBeenCalled()
+    player.componentWillUnmount()
+  })
+
+  it('waits for the matching asynchronous CUED acknowledgement before promotion can play', () => {
+    const { player, iframe, update, event } = setup()
+    iframe.cueVideoById.mockImplementation(() => {})
+    update({ isActive: false, isPlaying: false, mediaKey: 2, videoId: 'second' })
+    update({ isActive: true, isPlaying: true })
+    expect(iframe.playVideo).not.toHaveBeenCalled()
+    event(5)
+    expect(iframe.playVideo).not.toHaveBeenCalled()
+    iframe.getVideoUrl.mockReturnValue('https://www.youtube.com/watch?v=second')
+    event(5)
+    expect(iframe.playVideo).toHaveBeenCalledOnce()
+    expect(iframe.loadVideoById).not.toHaveBeenCalled()
+    player.componentWillUnmount()
+  })
+
+  it('replaces a cancelled preparation and drops errors belonging to that item', () => {
+    const { player, iframe, update, onError } = setup()
+    update({ isActive: false, isPlaying: false, mediaKey: 2, videoId: 'cancelled' })
+    player.handleError({ target: iframe, data: 100 })
+    expect(onError).not.toHaveBeenCalled()
+    update({ mediaKey: 3, videoId: 'replacement' })
+    update({ isActive: true, isPlaying: true })
+    expect(iframe.cueVideoById.mock.calls).toEqual([['cancelled'], ['replacement']])
+    expect(iframe.playVideo).toHaveBeenCalledOnce()
+    expect(onError).not.toHaveBeenCalled()
+    player.componentWillUnmount()
+  })
+
+  it('reports preparation failure only after the affected item becomes active', () => {
+    const { player, iframe, update, onError } = setup()
+    update({ isActive: false, isPlaying: false, mediaKey: 2, videoId: 'missing' })
+    player.handleError({ target: iframe, data: 100 })
+    expect(onError).not.toHaveBeenCalled()
+    update({ isActive: true, isPlaying: true })
+    expect(onError).toHaveBeenCalledWith(expect.any(String), { category: 'iframe', code: 100 })
+    expect(iframe.playVideo).not.toHaveBeenCalled()
+    player.componentWillUnmount()
+  })
+
+  it('prepares the latest selection when iframe readiness arrives during the announcement', () => {
+    const { player, iframe, update } = setup({ isActive: false, isPlaying: false })
+    player.isReady = false
+    update({ mediaKey: 2, videoId: 'second' })
+    player.handleReady({ target: iframe })
+    expect(iframe.cueVideoById).toHaveBeenCalledWith('second')
+    expect(iframe.loadVideoById).not.toHaveBeenCalled()
+    update({ isActive: true, isPlaying: true })
+    expect(iframe.playVideo).toHaveBeenCalledOnce()
+    player.componentWillUnmount()
+  })
+
+  it('does not seek or play a hidden preparation on replay, retries or stray playback events', () => {
+    const { player, iframe, update, event, statuses } = setup()
+    update({ isActive: false, isPlaying: false, mediaKey: 2, videoId: 'second' })
+    update({ mediaReplayKey: 10 })
+    player.retryPlayback()
+    event(PLAYING)
+    expect(iframe.seekTo).not.toHaveBeenCalled()
+    expect(iframe.playVideo).not.toHaveBeenCalled()
+    expect(iframe.pauseVideo).toHaveBeenCalledOnce()
+    expect(statuses).toEqual([])
+    player.componentWillUnmount()
+  })
+
+  it('preserves an explicit pause at promotion and allows a later local autoplay retry', () => {
+    const { player, iframe, update, event } = setup()
+    update({ isActive: false, isPlaying: false, mediaKey: 2, videoId: 'second' })
+    update({ isActive: true })
+    expect(iframe.playVideo).not.toHaveBeenCalled()
+    update({ isPlaying: true })
+    player.handleAutoplayBlocked({ target: iframe })
+    expect(player.state.autoplayBlocked).toBe(true)
+    player.retryPlayback()
+    event(PLAYING)
+    expect(player.state.autoplayBlocked).toBe(false)
     expect(player.props.isPlaying).toBe(true)
     player.componentWillUnmount()
   })

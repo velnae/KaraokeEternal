@@ -18,6 +18,7 @@ import RemotePlayerControls from './RemotePlayerControls'
 
 const PlaybackCtrl = () => {
   const [isDisplayCtrlVisible, setDisplayCtrlVisible] = useState(false)
+  const [fullscreenError, setFullscreenError] = useState(false)
   const location = useLocation()
   const isPlayer = location.pathname.replace(/\/$/, '').endsWith('/player')
 
@@ -33,7 +34,11 @@ const PlaybackCtrl = () => {
   const handlePlayNext = () => dispatch(requestPlayNext())
   const handleVolume = (val: number) => dispatch(requestVolume(val))
   const handleFullscreen = useCallback(() => {
-    void requestPlayerFullscreen().catch(() => dispatch(showErrorMessage('No se pudo activar la pantalla completa. Intenta nuevamente desde el botón de pantalla completa.')))
+    setFullscreenError(false)
+    void requestPlayerFullscreen().catch(() => {
+      setFullscreenError(true)
+      dispatch(showErrorMessage('No se pudo activar la pantalla completa. Intenta nuevamente desde el botón de pantalla completa.'))
+    })
   }, [dispatch])
 
   useEffect(() => {
@@ -89,7 +94,7 @@ const PlaybackCtrl = () => {
       </div>
 
       <div className={styles.viewActions}>
-        {isPlayer && <AnimationQuickControls />}
+        {isPlayer && <AnimationQuickControls player />}
         {!isPlayer && isAdmin && <RemotePlayerControls available={status.isPlayerPresent} />}
         <Button
           className={clsx(styles.btn, styles.displayCtrl)}
@@ -112,6 +117,7 @@ const PlaybackCtrl = () => {
         )}
       </div>
 
+      {fullscreenError && <span role='alert'>No se pudo abrir la pantalla completa. Intenta de nuevo.</span>}
       {isDisplayCtrlVisible && (
         <DisplayCtrl
           cdgAlpha={status.cdgAlpha}
