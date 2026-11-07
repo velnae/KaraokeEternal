@@ -27,7 +27,18 @@ export async function checkRemoteFullscreen ({ player, uiBase, data, db }) {
     const { windowId: adminWindow } = await adminCdp.send('Browser.getWindowForTarget')
     assert.notEqual(adminWindow, playerWindow, 'Admin and player must be different browser windows')
     const button = admin.getByRole('button', { name: 'Pantalla completa del reproductor', exact: true })
+    const controls = button.locator('..').locator('..')
+    const feedback = controls.getByRole('status')
+    const setupHelp = admin.getByRole('button', { name: 'Ver pasos para fullscreen remoto' })
     await expect(button).toBeEnabled()
+    await expect(controls.getByRole('button')).toHaveCount(2)
+    await expect(setupHelp).toHaveCount(0)
+    await expect(feedback).toHaveCSS('clip-path', 'inset(50%)')
+    for (const width of [1440, 390]) {
+      await admin.setViewportSize({ width, height: 900 })
+      assert.equal(Math.round((await controls.boundingBox()).height), 44)
+      await admin.screenshot({ path: path.join(data, `remote-controls-icons-${width}.png`) })
+    }
     await browserCdp.send('Browser.setPermission', {
       permission: { name: 'fullscreen', allowWithoutGesture: true }, setting: 'denied', origin, browserContextId: targetInfo.browserContextId,
     })
@@ -62,9 +73,30 @@ export async function checkRemoteFullscreen ({ player, uiBase, data, db }) {
     await browserCdp.send('Browser.setPermission', {
       permission: { name: 'fullscreen', allowWithoutGesture: true }, setting: 'granted', origin, browserContextId: targetInfo.browserContextId,
     })
+    await read(`window.originalRequestFullscreen = Element.prototype.requestFullscreen;
+      Element.prototype.requestFullscreen = function () { return Promise.reject(new Error('Fixture request failure')) }; true`)
+    await button.click()
+    await expect(feedback).toHaveText('El reproductor no pudo completar la solicitud. Revisa su navegador y vuelve a intentar.')
+    await expect(setupHelp).toHaveCount(0)
+    await read('Element.prototype.requestFullscreen = window.originalRequestFullscreen; true')
+    // Hold one permission query to inspect the real pending UI deterministically.
+    await read(`window.originalPermissionQuery = navigator.permissions.query.bind(navigator.permissions);
+      navigator.permissions.query = descriptor => {
+        navigator.permissions.query = window.originalPermissionQuery;
+        return new Promise(resolve => { window.releaseFullscreenPermission = () => window.originalPermissionQuery(descriptor).then(resolve) });
+      }; true`)
     assert.equal(await read('navigator.userActivation.isActive'), false)
     await button.click()
-    await expect(admin.getByText('El reproductor confirmó la pantalla completa.', { exact: true })).toBeVisible()
+    await expect(button).toHaveAttribute('aria-busy', 'true')
+    await expect(button).toBeDisabled()
+    await expect(setupHelp).toHaveCount(0)
+    await expect(feedback).toHaveText('Esperando confirmación del reproductor…')
+    await expect(feedback).toHaveCSS('clip-path', 'inset(50%)')
+    await read('window.releaseFullscreenPermission()')
+    await expect(feedback).toHaveAttribute('data-result', 'entered')
+    await expect(button).toHaveAttribute('aria-busy', 'false')
+    await expect(feedback).toHaveCSS('clip-path', 'inset(50%)')
+    await expect(setupHelp).toHaveCount(0)
     const confirmed = await read('({target:document.fullscreenElement?.id,request:window.compatibility.fullscreenRequests.at(-1),sameMedia:window.compatibility.video===window.remoteFullscreenVideo,time:window.compatibility.video.currentTime,paused:window.compatibility.video.paused})')
     assert.equal(confirmed.target, 'player-fs-container')
     assert.equal(confirmed.request.active, false, 'Remote fullscreen must succeed without a fresh player gesture')
@@ -75,7 +107,7 @@ export async function checkRemoteFullscreen ({ player, uiBase, data, db }) {
     assert.equal(await admin.evaluate(() => document.fullscreenElement), null, 'Admin must stay out of fullscreen')
     await admin.screenshot({ path: path.join(data, 'remote-fullscreen-confirmed.png') })
     await button.click()
-    await expect(admin.getByText('El reproductor confirmó la pantalla completa.', { exact: true })).toBeVisible()
+    await expect(feedback).toHaveAttribute('data-result', 'entered')
     assert.equal(await read('window.compatibility.fullscreenRequests.length'), before.requests + 1, 'An already-fullscreen player is idempotent')
     console.log('PASS remote fullscreen: separate admin/player windows, denied/granted permission, no player gesture, unchanged media, keyboard help and responsive UI')
     await checkRemoteClose({ admin, player, data, db })

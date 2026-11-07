@@ -10,17 +10,23 @@ Use **Chrome 128 or later** for the player. Chrome 109 and the legacy
 ## Remote fullscreen
 
 The admin's **Pantalla completa del reproductor** icon requests fullscreen for the
-active karaoke player in the same room. It appears beside **Abrir reproductor** before
-connection, with an explanation while unavailable, and in the admin playback
-header once the player connects. It uses the normal toolbar styling, with a tooltip
-and accessible name. **Ver pasos** opens browser setup instructions.
+active karaoke player in the same room. Before connection, the existing **Sin
+reproductor** label and **Abrir reproductor** link explain what to do. Once connected,
+fullscreen and close appear as two normal toolbar icons with tooltips and accessible
+names. Pending requests show activity inside the relevant icon; waiting and success
+announcements remain available to screen readers without adding visible text.
+
+Only errors display supporting text. **Ver pasos** appears after an automatic
+fullscreen permission denial or an unsupported browser configuration, opening the
+existing setup instructions. Connection, timeout and generic request failures do
+not show unrelated setup help. Retrying clears the previous error and help link.
 
 1. Configure automatic fullscreen in the browser/profile running the **player**,
    using the platform instructions below.
 2. Open the player and give it the initial local **Play**.
 3. Detach its tab into a separate window and move it to the desired monitor.
-4. From admin, click **Pantalla completa**. Wait for the player's confirmation.
-   Escape in the player exits fullscreen.
+4. From admin, click the fullscreen icon. It returns to normal after confirmation;
+   the player enters fullscreen. Escape in the player exits fullscreen.
 
 The action targets `#player-fs-container`, including karaoke overlays. It does not
 select a monitor, start/restart music or fullscreen the admin window. Only the
@@ -195,6 +201,17 @@ They simulate browser permission with CDP, not an installed OS policy. Validate
 policy installation and physical monitor/focus behavior on the player's computer.
 The build target is Chrome 128; runtime results should identify the actual browser
 version used.
+
+### Compact remote controls — 2026-11-07
+
+- 10 focused contract/fullscreen tests, typecheck, changed-file ESLint and diff
+  checks passed.
+- HTTPS compatibility passed on Chromium 151.0.7922.173 using isolated API/socket
+  fixtures. Checks cover two icons with no default help, permission-error help,
+  generic failure without setup help, a held pending request, clean retry/success,
+  keyboard navigation and the existing close/reopen flow.
+- Desktop (1440 px) and mobile (390 px) screenshots were inspected. Evidence:
+  `/tmp/opencode/player-compatibility-M0kWB3`.
 
 ### Stable controls and remote close — 2026-11-06
 

@@ -2,7 +2,10 @@
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .help { min-height: 44px; padding: 8px; color: var(--secondary); background: transparent; font-size: 12px; text-decoration: underline; }
 .feedback { margin: 6px 0 0; max-width: 42ch; font-size: 12px; line-height: 1.4; color: var(--amber); overflow-wrap: anywhere; }
-.feedback[data-result='entered'] { color: var(--cyan); }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.pending svg { animation: pending 1s linear infinite; }
+@keyframes pending { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pending svg { animation: none; } }
 .instructions { width: min(680px, calc(100vw - 32px)); }
 .instructions p, .instructions li { line-height: 1.5; }
 .instructions li + li { margin-top: 8px; }

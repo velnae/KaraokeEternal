@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react'
+import clsx from 'clsx'
 import Button from 'components/Button/Button'
 import Modal from 'components/Modal/Modal'
 import { useAppSelector } from 'store/hooks'
@@ -11,7 +12,7 @@ import toolbarStyles from './PlaybackCtrl.css'
 
 export default function RemotePlayerControls ({ available }: { available: boolean }) {
   const roomId = useAppSelector(state => state.user.roomId)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'fullscreen' | 'close' | null>(null)
   const [result, setResult] = useState<PlayerWindowResult | null>(null)
   const [help, setHelp] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
@@ -20,8 +21,9 @@ export default function RemotePlayerControls ({ available }: { available: boolea
   useEffect(() => {
     const requests = generation
     requests.current++
-    setBusy(false)
+    setBusy(null)
     setResult(null)
+    setHelp(false)
     setConfirmClose(false)
     return () => {
       requests.current++
@@ -30,13 +32,14 @@ export default function RemotePlayerControls ({ available }: { available: boolea
 
   const request = async (close = false) => {
     if (busy || !available) return
+    setResult(null)
+    setHelp(false)
     if (!socket.connected) {
       setResult({ status: 'disconnected' })
       return
     }
     const version = ++generation.current
-    setBusy(true)
-    setResult(null)
+    setBusy(close ? 'close' : 'fullscreen')
     try {
       const reply = await socket.timeout(PLAYER_WINDOW_REQUEST_MS + 2000).emitWithAck('action', {
         type: close ? PLAYER_REQ_CLOSE : PLAYER_REQ_FULLSCREEN,
@@ -46,25 +49,25 @@ export default function RemotePlayerControls ({ available }: { available: boolea
     } catch {
       if (generation.current === version) setResult({ status: socket.connected ? 'timeout' : 'disconnected' })
     } finally {
-      if (generation.current === version) setBusy(false)
+      if (generation.current === version) setBusy(null)
     }
   }
   const origin = result?.origin ?? window.location.origin
+  const hasError = available && !!result && !['entered', 'closed'].includes(result.status)
+  const needsSetup = hasError && ['permission-required', 'unsupported'].includes(result.status)
   const policy = JSON.stringify({ AutomaticFullscreenAllowedForUrls: [origin] }, null, 2)
   const registry = `Windows Registry Editor Version 5.00\n\n[HKEY_CURRENT_USER\\Software\\Policies\\Google\\Chrome\\AutomaticFullscreenAllowedForUrls]\n"1"=${JSON.stringify(origin)}`
 
   return (
-    <div className={styles.control} aria-busy={busy}>
+    <div className={styles.control}>
       <div className={styles.actions}>
-        <Button className={toolbarStyles.btn} icon='FULLSCREEN' disabled={!available || busy} onClick={() => void request()} aria-label='Pantalla completa del reproductor' title='Pantalla completa del reproductor' aria-describedby={!available || busy || result ? feedbackId : undefined} />
-        <Button className={toolbarStyles.btn} icon='CLEAR' disabled={!available || busy} onClick={() => setConfirmClose(true)} aria-label='Cerrar reproductor' title='Cerrar reproductor' aria-describedby={!available || busy || result ? feedbackId : undefined} />
-        <Button className={styles.help} onClick={() => setHelp(true)} aria-label='Ver pasos para fullscreen remoto'>Ver pasos</Button>
+        <Button className={clsx(toolbarStyles.btn, busy === 'fullscreen' && styles.pending)} icon={busy === 'fullscreen' ? 'REFRESH' : 'FULLSCREEN'} disabled={!available || !!busy} onClick={() => void request()} aria-label='Pantalla completa del reproductor' title={busy === 'fullscreen' ? 'Solicitando pantalla completa…' : 'Pantalla completa del reproductor'} aria-busy={busy === 'fullscreen'} aria-describedby={feedbackId} />
+        <Button className={clsx(toolbarStyles.btn, busy === 'close' && styles.pending)} icon={busy === 'close' ? 'REFRESH' : 'CLEAR'} disabled={!available || !!busy} onClick={() => setConfirmClose(true)} aria-label='Cerrar reproductor' title={busy === 'close' ? 'Cerrando reproductor…' : 'Cerrar reproductor'} aria-busy={busy === 'close'} aria-describedby={feedbackId} />
+        {needsSetup && <Button className={styles.help} onClick={() => setHelp(true)} aria-label='Ver pasos para fullscreen remoto'>Ver pasos</Button>}
       </div>
-      {(!available || busy || result) && (
-        <p id={feedbackId} className={styles.feedback} role='status' data-result={result?.status}>
-          {!available ? 'Abre el reproductor para continuar.' : busy ? 'Esperando confirmación del reproductor…' : result && playerWindowMessages[result.status]}
-        </p>
-      )}
+      <p id={feedbackId} className={hasError ? styles.feedback : styles.srOnly} role='status' aria-atomic='true' data-result={result?.status}>
+        {!available ? 'Abre el reproductor para continuar.' : busy ? 'Esperando confirmación del reproductor…' : result && playerWindowMessages[result.status]}
+      </p>
       {confirmClose && (
         <Modal
           title='Cerrar reproductor'
