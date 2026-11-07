@@ -5,6 +5,7 @@ import { db } from '../lib/Database.js'
 import getLogger from '../lib/Log.js'
 import { defaultClientBranding } from '../../shared/branding.js'
 import { validateBranding } from './branding.js'
+import { defaultModeration, setModerationTerms, validateModeration } from '../../shared/textModeration.js'
 
 const log = getLogger('Prefs')
 
@@ -15,6 +16,7 @@ class Prefs {
   static get () {
     const prefs = {
       branding: { ...defaultClientBranding },
+      moderation: { terms: [...defaultModeration.terms] },
       paths: { result: [], entities: {} },
       roles: { result: [], entities: {} },
     }
@@ -73,11 +75,13 @@ class Prefs {
    */
   static set (key: string, data: unknown): boolean {
     if (key === 'branding') data = validateBranding(data)
+    if (key === 'moderation') data = validateModeration(data)
     const query = sql`
       REPLACE INTO prefs (key, data)
       VALUES (${key}, ${JSON.stringify(data)})
     `
     const res = db.run(String(query), query.parameters)
+    if (key === 'moderation' && res.changes === 1) setModerationTerms(validateModeration(data).terms)
     return res.changes === 1
   }
 

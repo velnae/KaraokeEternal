@@ -4,6 +4,7 @@ import Library from '../Library/Library.js'
 import Prefs from './Prefs.js'
 import ACTION_HANDLERS from './socket.js'
 import { defaultClientBranding } from '../../shared/branding.js'
+import { defaultModeration } from '../../shared/textModeration.js'
 
 const createSocket = ({ isAdmin = false } = {}) => {
   const emittedTo = new Map<string, ReturnType<typeof vi.fn>>()
@@ -73,6 +74,7 @@ describe('preference mutation authorization', () => {
   it('acknowledges an admin change and pushes preferences only to admins', () => {
     const prefs = {
       branding: defaultClientBranding,
+      moderation: defaultModeration,
       paths: { result: [], entities: {} },
       roles: { result: [], entities: {} },
     }
@@ -96,7 +98,7 @@ describe('preference mutation authorization', () => {
     expect(server.emit).not.toHaveBeenCalled()
   })
 
-  it.each(['branding', 'greetingVoice'])('rejects %s writes through the generic preference socket action', (key) => {
+  it.each(['branding', 'greetingVoice', 'moderation'])('rejects %s writes through the generic preference socket action', (key) => {
     const set = vi.spyOn(Prefs, 'set')
     const acknowledge = vi.fn()
     ACTION_HANDLERS[PREFS_SET](

@@ -8,7 +8,7 @@ export function normalizeGuestName (value: string): string {
   return value.normalize('NFC').trim().replace(/ +/g, ' ')
 }
 
-export function guestNameError (value: unknown): string | null {
+export function guestNameError (value: unknown, terms?: readonly string[]): string | null {
   if (typeof value !== 'string') return GUEST_NAME_HELP
   if (hasInvisibleCharacters(value)) return 'Usa un nombre sin caracteres invisibles ni saltos de línea.'
   const name = normalizeGuestName(value)
@@ -17,7 +17,7 @@ export function guestNameError (value: unknown): string | null {
   if (!namePattern.test(name)) {
     return 'Usa solo letras; puedes incluir tildes, ñ, guion o apóstrofo dentro del nombre.'
   }
-  if (hasOffensiveText(name)) {
+  if (hasOffensiveText(name, terms)) {
     return 'Ese nombre no está permitido. Elige otro.'
   }
   return null

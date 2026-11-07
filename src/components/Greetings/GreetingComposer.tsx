@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef, useState } from 'react'
 import Button from 'components/Button/Button'
 import { greetingMessageLength, greetingMessageLimit, normalizeGreetingMessage, validateGreeting, type GreetingOpportunity } from 'shared/greetings'
 import styles from './Greetings.css'
+import { useAppSelector } from 'store/hooks'
 
 export default function GreetingComposer ({ sender, opportunity, pending, busy, connected, descriptionId, noticeId, onSave }: {
   sender: string
@@ -14,6 +15,7 @@ export default function GreetingComposer ({ sender, opportunity, pending, busy, 
   onSave: (message: string) => Promise<{ ok: boolean, error?: string, uncertain?: boolean }>
 }) {
   const id = useId()
+  const terms = useAppSelector(state => state.prefs.moderation.terms)
   const [open, setOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -37,7 +39,7 @@ export default function GreetingComposer ({ sender, opportunity, pending, busy, 
   const reason = noticeId ? '' : !connected ? 'Sin conexión. Espere a reconectar.' : !pending ? 'La canción ya no admite saludos.' : opportunity?.reason ?? ''
   let validation = ''
   try {
-    validateGreeting({ message: normalizeGreetingMessage(message) }, sender)
+    validateGreeting({ message: normalizeGreetingMessage(message) }, sender, terms)
   } catch (error) { validation = (error as Error).message }
   const save = async () => {
     if (saving || busy || !connected || noticeId || (!uncertain && (!opportunity?.canAdd || !!validation))) return

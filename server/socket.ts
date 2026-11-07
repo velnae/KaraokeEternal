@@ -157,13 +157,15 @@ export default function (io, jwtKey) {
       }
     })
 
-    // push prefs (admin only)
+    // Full settings remain admin-only; moderation also refreshes on participant reconnect.
     if (sock.user.isAdmin) {
       log.verbose('pushing prefs to %s (%s)', sock.user.name, sock.id)
       io.to(sock.id).emit('action', {
         type: PREFS_PUSH,
         payload: Prefs.get(),
       })
+    } else {
+      io.to(sock.id).emit('action', { type: PREFS_PUSH, payload: { moderation: Prefs.get().moderation } })
     }
 
     // push library (only if client's is outdated)

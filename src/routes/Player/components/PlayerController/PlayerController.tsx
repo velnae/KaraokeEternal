@@ -442,6 +442,7 @@ const PlayerController = (props: PlayerControllerProps) => {
                   announcementActive={!!(animation.text || animation.scene || greetings.scene?.transition?.call)}
                   greetingIntro={!!greetings.intro}
                   greeting={greetings.active}
+                  moderationTerms={prefs.moderation.terms}
                   onGreetingMounted={greetings.confirmMounted}
                   notice={!player.isPlaying && !player._isPlayingNext ? 'Reproducción en pausa' : animation.blocked && !animation.scene && !greetings.scene && transition?.phase !== 'intro' ? 'Preparando la próxima canción…' : undefined}
                 />

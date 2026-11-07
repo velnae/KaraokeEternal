@@ -12,6 +12,8 @@ import { PREFS_PATHS_CHANGED, PREFS_PUSH, QUEUE_PUSH } from '../../shared/action
 import { validateBranding } from './branding.js'
 import type { ClientBranding } from '../../shared/branding.js'
 import type { Prefs as PrefsType } from '../../shared/types.js'
+import { validateModeration } from '../../shared/textModeration.js'
+import Greetings from '../Greetings/Greetings.js'
 
 interface RequestWithBody {
   body: Record<string, unknown>
@@ -32,7 +34,7 @@ router.get('/', (ctx) => {
   }
 
   // Only explicitly public preferences are exposed before login.
-  ctx.body = { roles: prefs.roles, branding: prefs.branding }
+  ctx.body = { roles: prefs.roles, branding: prefs.branding, moderation: prefs.moderation }
 })
 
 router.put('/branding', (ctx) => {
@@ -49,6 +51,24 @@ router.put('/branding', (ctx) => {
   ctx.set('Cache-Control', 'no-store')
   ctx.body = { branding }
   ctx.io.emit('action', { type: PREFS_PUSH, payload: { branding } })
+})
+
+router.put('/moderation', (ctx) => {
+  if (!ctx.user.isAdmin) return ctx.throw(403, 'No tiene autorización')
+  let moderation
+  try {
+    moderation = validateModeration((ctx.request as unknown as RequestWithBody).body)
+  } catch (error) {
+    return ctx.throw(422, (error as Error).message)
+  }
+  if (!Prefs.set('moderation', moderation)) return ctx.throw(500, 'No se pudo guardar el diccionario.')
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = { moderation }
+  ctx.io.emit('action', { type: PREFS_PUSH, payload: { moderation } })
+  for (const { room, roomId } of Rooms.getActive(ctx.io)) {
+    Greetings.reconcile(roomId)
+    ctx.io.to(room).emit('action', { type: QUEUE_PUSH, payload: Queue.get(roomId) })
+  }
 })
 
 // add a media path

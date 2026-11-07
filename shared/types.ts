@@ -136,6 +136,7 @@ export interface Media {
 }
 
 export interface Prefs {
+  moderation: import('./textModeration.js').ModerationSettings
   branding: import('./branding.js').ClientBranding
   isFirstRun?: boolean
   isScanning: boolean

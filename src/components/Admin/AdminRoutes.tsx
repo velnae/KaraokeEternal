@@ -11,6 +11,7 @@ import PathPrefs from 'routes/Account/components/Prefs/PathPrefs/PathPrefs'
 import BrandingPrefs from 'routes/Account/components/Prefs/BrandingPrefs/BrandingPrefs'
 import AnimatorSettings from './AnimatorSettings'
 import PlaylistsView from 'components/Playlists/PlaylistsView'
+import ModerationPrefs from 'routes/Account/components/Prefs/ModerationPrefs/ModerationPrefs'
 
 export default function AdminRoutes () {
   const { isAdmin, userId } = useAppSelector(state => state.user)
@@ -35,6 +36,7 @@ export default function AdminRoutes () {
       <Route path='settings/playback' element={<AdminPage title='Reproducción' description='Ajuste el comportamiento del reproductor y el nivel de las canciones.'><PlayerPrefs /></AdminPage>} />
       <Route path='settings/files' element={<AdminPage title='Archivos' description='Administre las carpetas de música y actualice la biblioteca.'><PathPrefs /></AdminPage>} />
       <Route path='settings/branding' element={<AdminPage title='Marca del local' description='Personalice la identidad que ven sus participantes.'><BrandingPrefs /></AdminPage>} />
+      <Route path='settings/moderation' element={<AdminPage title='Moderación' description='Gestione las palabras y frases bloqueadas en nombres y saludos de todas las salas.'><ModerationPrefs /></AdminPage>} />
       <Route path='*' element={<Navigate to='/admin/rooms' replace />} />
     </Routes>
   )

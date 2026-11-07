@@ -5,6 +5,7 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { defaultClientBranding } from '../../shared/branding.js'
 import { PREFS_PUSH } from '../../shared/actionTypes.js'
+import { defaultModeration } from '../../shared/textModeration.js'
 
 vi.mock('../lib/Database.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../lib/Database.js')>()
@@ -59,7 +60,7 @@ describe('branding HTTP and persistence contract', () => {
     const response = await fetch(base)
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
-    expect(await response.json()).toEqual({ roles: { result: [], entities: {} }, branding: defaultClientBranding })
+    expect(await response.json()).toEqual({ roles: { result: [], entities: {} }, branding: defaultClientBranding, moderation: defaultModeration })
   })
 
   it('persists admin changes and broadcasts only public branding', async () => {
@@ -74,7 +75,7 @@ describe('branding HTTP and persistence contract', () => {
     expect(Prefs.get().branding).toEqual(branding)
     expect(db.get<{ data: string }>('SELECT data FROM prefs WHERE key = ?', ['branding'])?.data).toBe(JSON.stringify(branding))
     expect(emit).toHaveBeenCalledWith('action', { type: PREFS_PUSH, payload: { branding } })
-    expect(await (await fetch(base)).json()).toEqual({ roles: { result: [], entities: {} }, branding })
+    expect(await (await fetch(base)).json()).toEqual({ roles: { result: [], entities: {} }, branding, moderation: defaultModeration })
   })
 
   it('denies non-admin writes without persisting or broadcasting', async () => {

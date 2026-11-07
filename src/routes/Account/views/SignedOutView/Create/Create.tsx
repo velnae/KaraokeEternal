@@ -3,6 +3,7 @@ import Button from 'components/Button/Button'
 import InputImage from 'components/InputImage/InputImage'
 import styles from './Create.css'
 import { guestNameError, normalizeGuestName } from 'shared/guestName'
+import { useAppSelector } from 'store/hooks'
 
 interface CreateProps {
   guest: boolean
@@ -25,11 +26,12 @@ const Create = ({
   onSubmit,
   onFirstFieldRef,
 }: CreateProps) => {
+  const terms = useAppSelector(state => state.prefs.moderation.terms)
   const [name, setName] = useState('')
   const [nameTouched, setNameTouched] = useState(false)
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [image, setImage] = useState<Blob | undefined>(undefined)
-  const nameError = guest ? guestNameError(name) : null
+  const nameError = guest ? guestNameError(name, terms) : null
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()

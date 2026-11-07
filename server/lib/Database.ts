@@ -2,6 +2,7 @@ import path from 'path'
 import fs from 'node:fs'
 import { DatabaseSync } from 'node:sqlite' // eslint-disable-line n/no-unsupported-features/node-builtins
 import getLogger from './Log.js'
+import { defaultModeration, setModerationTerms, validateModeration } from '../../shared/textModeration.js'
 
 type SqlParam = string | number | bigint | null | Uint8Array
 
@@ -162,6 +163,7 @@ class Database {
       log.info('Closing database file %s', Database.refs.db.config.filename)
       Database.refs.db.close()
       delete Database.refs.db
+      setModerationTerms(defaultModeration.terms)
     }
   }
 
@@ -185,6 +187,8 @@ class Database {
 
     Database.refs.db = instance
     db = instance
+    const moderation = instance.get<{ data: string }>('SELECT data FROM prefs WHERE key=?', ['moderation'])
+    setModerationTerms(moderation ? validateModeration(JSON.parse(moderation.data)).terms : defaultModeration.terms)
     return instance
   }
 }

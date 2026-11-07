@@ -3,6 +3,7 @@ import InputImage from 'components/InputImage/InputImage'
 import { UserWithRole } from 'shared/types'
 import styles from './AccountForm.css'
 import { GUEST_NAME_HELP, guestNameError, normalizeGuestName } from 'shared/guestName'
+import { useAppSelector } from 'store/hooks'
 
 interface AccountFormProps {
   autoFocus?: boolean
@@ -25,13 +26,15 @@ const AccountForm = ({
   showPassword = true,
   user,
 }: AccountFormProps) => {
+  const terms = useAppSelector(state => state.prefs.moderation.terms)
   const username = useRef<HTMLInputElement>(null)
   const newPassword = useRef<HTMLInputElement>(null)
   const newPasswordConfirm = useRef<HTMLInputElement>(null)
   const name = useRef<HTMLInputElement>(null)
   const role = useRef<HTMLSelectElement>(null)
   const isGuest = user?.isGuest || user?.role === 'guest'
-  const [nameError, setNameError] = useState<string | null>(null)
+  const [checkedName, setCheckedName] = useState<string | null>(null)
+  const nameError = isGuest && checkedName !== null ? guestNameError(checkedName, terms) : null
   const [prevDateUpdated, setPrevDateUpdated] = useState(user?.dateUpdated)
   const [state, setState] = useState({
     isDirty: false,
@@ -78,8 +81,8 @@ const AccountForm = ({
     e.preventDefault()
     const data = new FormData()
     if (isGuest) {
-      const error = guestNameError(name.current?.value)
-      setNameError(error)
+      const error = guestNameError(name.current?.value, terms)
+      setCheckedName(name.current?.value ?? '')
       if (error) {
         name.current?.focus()
         return
@@ -161,7 +164,7 @@ const AccountForm = ({
           defaultValue={user?.name ?? ''}
           onChange={() => {
             updateDirty()
-            if (nameError && isGuest) setNameError(guestNameError(name.current?.value))
+            if (checkedName !== null && isGuest) setCheckedName(name.current?.value ?? '')
           }}
           placeholder='nombre para mostrar'
           aria-label='Nombre para mostrar'
@@ -171,7 +174,7 @@ const AccountForm = ({
         />
       </div>
       {isGuest && <small id='account-name-help'>{GUEST_NAME_HELP}</small>}
-      {isGuest && guestNameError(user?.name) && <p role='status'>Tu nombre aparece como “Invitado” en la pantalla. Corrígelo aquí y guarda los cambios.</p>}
+      {isGuest && guestNameError(user?.name, terms) && <p role='status'>Tu nombre aparece como “Invitado” en la pantalla. Corrígelo aquí y guarda los cambios.</p>}
       {nameError && <p role='alert'>{nameError}</p>}
 
       {showRole && (

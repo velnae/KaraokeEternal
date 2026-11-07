@@ -2,6 +2,7 @@ import { createAction, createAsyncThunk, createReducer } from '@reduxjs/toolkit'
 import type { AppThunk, RootState } from 'store/store'
 import type { Path, Role } from 'shared/types'
 import { defaultClientBranding, type ClientBranding } from 'shared/branding'
+import { defaultModeration, type ModerationSettings } from 'shared/textModeration'
 import {
   PREFS_RECEIVE,
   PREFS_REQUEST,
@@ -66,6 +67,12 @@ export const saveBranding = (branding: ClientBranding): AppThunk<Promise<ClientB
   return response.branding
 }
 
+export const saveModeration = (moderation: ModerationSettings): AppThunk<Promise<ModerationSettings>> => async (dispatch) => {
+  const response = await api.put<{ moderation: ModerationSettings }>('/moderation', { body: moderation })
+  dispatch(receivePrefs(response))
+  return response.moderation
+}
+
 export const requestScan = createAsyncThunk(
   PREFS_REQ_SCANNER_START,
   async (pathId: number) => await api.get(`/path/${pathId}/scan`),
@@ -85,6 +92,7 @@ export const requestScanStop = createAsyncThunk(
 // Reducer
 // ------------------------------------
 export interface PrefsState {
+  moderation: ModerationSettings
   branding: ClientBranding
   isFirstRun?: boolean
   isScanning: boolean
@@ -102,6 +110,7 @@ export interface PrefsState {
 }
 
 const initialState: PrefsState = {
+  moderation: { terms: [...defaultModeration.terms] },
   branding: { ...defaultClientBranding },
   isScanning: false,
   isReplayGainEnabled: false,

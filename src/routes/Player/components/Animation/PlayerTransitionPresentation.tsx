@@ -11,12 +11,13 @@ interface Props {
   announcementActive?: boolean
   greetingIntro?: boolean
   greeting: Greeting | null
+  moderationTerms?: readonly string[]
   onGreetingMounted: (node: HTMLElement | null) => void
   notice?: string
 }
 
-export default function PlayerTransitionPresentation ({ incoming, following, venueName, announcementActive, greetingIntro, greeting, onGreetingMounted, notice }: Props) {
-  if (greeting && !isGreetingAllowed(greeting)) greeting = null
+export default function PlayerTransitionPresentation ({ incoming, following, venueName, announcementActive, greetingIntro, greeting, moderationTerms, onGreetingMounted, notice }: Props) {
+  if (greeting && !isGreetingAllowed(greeting, moderationTerms)) greeting = null
   const current = incoming && transitionTrack(incoming)
   const next = following && transitionTrack(following)
   const brand = venueName.trim() || 'Il Gatto'

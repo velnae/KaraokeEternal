@@ -75,21 +75,21 @@ export function normalizeGreetingMessage (value: unknown): string {
   if (typeof value !== 'string') throw new Error('El mensaje del saludo no es válido.')
   return value.normalize('NFC').replace(/[ \t\r\n]+/g, ' ').trim()
 }
-export function validateGreeting (value: unknown, sender: string): GreetingDraft {
+export function validateGreeting (value: unknown, sender: string, terms?: readonly string[]): GreetingDraft {
   if (!value || typeof value !== 'object') throw new Error('El saludo no es válido')
   const draft = value as GreetingDraft
   if (typeof draft.message !== 'string') throw new Error('El saludo no es válido')
   const message = normalizeGreetingMessage(draft.message)
   if (!message) throw new Error('Escribe un mensaje para incluir el saludo.')
-  if (guestNameError(sender)) throw new Error('Corrige tu nombre en Mi cuenta antes de enviar un saludo.')
+  if (guestNameError(sender, terms)) throw new Error('Corrige tu nombre en Mi cuenta antes de enviar un saludo.')
   if ([...greetingText({ message }, sender.normalize('NFC'))].length > GREETING_LIMIT) throw new Error(`El saludo supera los ${GREETING_LIMIT} caracteres.`)
   if (/[<>]/.test(message) || hasInvisibleCharacters(message)) throw new Error('Usa texto simple en el saludo, sin etiquetas ni caracteres de control.')
-  if (hasOffensiveText(message)) throw new Error('El mensaje contiene expresiones no permitidas. Revisa el texto para enviarlo.')
+  if (hasOffensiveText(message, terms)) throw new Error('El mensaje contiene expresiones no permitidas. Revisa el texto para enviarlo.')
   return { message }
 }
-export function isGreetingAllowed (greeting: GreetingDraft & { sender: string }): boolean {
+export function isGreetingAllowed (greeting: GreetingDraft & { sender: string }, terms?: readonly string[]): boolean {
   try {
-    validateGreeting(greeting, greeting.sender)
+    validateGreeting(greeting, greeting.sender, terms)
     return true
   } catch { return false }
 }
