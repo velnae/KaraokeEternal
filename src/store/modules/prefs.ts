@@ -3,6 +3,7 @@ import type { AppThunk, RootState } from 'store/store'
 import type { Path, Role } from 'shared/types'
 import { defaultClientBranding, type ClientBranding } from 'shared/branding'
 import { defaultModeration, type ModerationSettings } from 'shared/textModeration'
+import { defaultMusicBlocking, type MusicBlocking } from 'shared/musicBlocking'
 import {
   PREFS_RECEIVE,
   PREFS_REQUEST,
@@ -73,6 +74,12 @@ export const saveModeration = (moderation: ModerationSettings): AppThunk<Promise
   return response.moderation
 }
 
+export const saveMusicBlocking = (musicBlocking: MusicBlocking): AppThunk<Promise<MusicBlocking>> => async (dispatch) => {
+  const response = await api.put<{ musicBlocking: MusicBlocking }>('/music-blocking', { body: musicBlocking })
+  dispatch(receivePrefs(response))
+  return response.musicBlocking
+}
+
 export const requestScan = createAsyncThunk(
   PREFS_REQ_SCANNER_START,
   async (pathId: number) => await api.get(`/path/${pathId}/scan`),
@@ -92,6 +99,7 @@ export const requestScanStop = createAsyncThunk(
 // Reducer
 // ------------------------------------
 export interface PrefsState {
+  musicBlocking: MusicBlocking
   moderation: ModerationSettings
   branding: ClientBranding
   isFirstRun?: boolean
@@ -110,6 +118,7 @@ export interface PrefsState {
 }
 
 const initialState: PrefsState = {
+  musicBlocking: defaultMusicBlocking,
   moderation: { terms: [...defaultModeration.terms] },
   branding: { ...defaultClientBranding },
   isScanning: false,

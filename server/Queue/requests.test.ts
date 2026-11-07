@@ -10,6 +10,7 @@ import handlers from './socket.js'
 import Queue from './Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import Greetings from '../Greetings/Greetings.js'
+import Prefs from '../Prefs/Prefs.js'
 
 const song: ResolvedSong = {
   source: 'YOUTUBE', sourceId: 'AAAAAAAAAAA', externalId: 'AAAAAAAAAAA', localSongId: null,
@@ -47,6 +48,18 @@ describe('durable participant request receipts', () => {
     expect(ack.mock.calls[1][0].payload.queueId).toBe(receipt.queueId)
     expect(youtubeSongSource.resolve).toHaveBeenCalledOnce()
     expect(Queue.countPending(1, 1)).toBe(1)
+  })
+
+  it('rejects a direct request after rules change during resolution without consuming a slot', async () => {
+    vi.mocked(youtubeSongSource.resolve).mockImplementation(async () => {
+      Prefs.set('musicBlocking', { rules: [{ kind: 'resource', source: 'YOUTUBE', sourceId: song.sourceId }] })
+      return song
+    })
+    const ack = vi.fn()
+    await handlers[QUEUE_ADD](socket, request('blocked-request-01'), ack)
+    expect(ack.mock.calls[0][0]).toMatchObject({ error: expect.stringContaining('política'), payload: { code: 'MUSIC_BLOCKED' } })
+    expect(Queue.countPending(1, 1)).toBe(0)
+    expect(Queue.get(1).result).toHaveLength(0)
   })
 
   it('atomically stores one attributed greeting and returns it on duplicate delivery', async () => {

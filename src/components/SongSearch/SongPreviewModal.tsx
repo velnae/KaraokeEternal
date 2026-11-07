@@ -27,6 +27,7 @@ export default function SongPreviewModal ({ result, receipt, blocker, onConfirm,
   const [submitted, setSubmitted] = useState(false)
   const sending = submitted && receipt?.phase === 'sending'
   const uncertain = submitted && receipt?.phase === 'uncertain'
+  const musicBlocked = receipt?.code === 'MUSIC_BLOCKED'
 
   useEffect(() => {
     const element = surface.current
@@ -54,7 +55,7 @@ export default function SongPreviewModal ({ result, receipt, blocker, onConfirm,
     setAttempt(value => value + 1)
   }
   const confirm = () => {
-    if (sending || (!uncertain && (state !== 'ready' || blocker))) return
+    if (musicBlocked || sending || (!uncertain && (state !== 'ready' || blocker))) return
     setSubmitted(true)
     onConfirm()
   }
@@ -72,10 +73,12 @@ export default function SongPreviewModal ({ result, receipt, blocker, onConfirm,
       className={styles.modal}
       buttons={(
         <>
-          <Button className={styles.secondary} variant='default' onClick={close} disabled={sending}>Cancelar</Button>
-          <Button variant='primary' onClick={confirm} disabled={sending || (!uncertain && (state !== 'ready' || !!blocker))} aria-describedby={messageId}>
-            {sending ? 'Enviando…' : 'Confirmar'}
-          </Button>
+          <Button className={styles.secondary} variant='default' onClick={close} disabled={sending}>{musicBlocked ? 'Buscar otra canción' : 'Cancelar'}</Button>
+          {!musicBlocked && (
+            <Button variant='primary' onClick={confirm} disabled={sending || (!uncertain && (state !== 'ready' || !!blocker))} aria-describedby={messageId}>
+              {sending ? 'Enviando…' : 'Confirmar'}
+            </Button>
+          )}
         </>
       )}
     >

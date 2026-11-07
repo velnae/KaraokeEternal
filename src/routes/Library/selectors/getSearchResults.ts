@@ -2,6 +2,7 @@ import { ensureState } from 'redux-optimistic-ui'
 import { createSelector } from '@reduxjs/toolkit'
 import { Searcher } from 'fast-fuzzy'
 import { RootState } from 'store/store'
+import { getAllowedArtists, getAllowedSongs } from './getAllowedLibrary'
 
 const getArtists = (state: RootState) => state.artists
 const getSongs = (state: RootState) => state.songs
@@ -65,10 +66,11 @@ const getSongsByView = createSelector(
 )
 
 const getSearchResults = createSelector(
-  [getArtistsByView, getSongsByView],
-  (artistsResult, songsResult) => ({
-    artistsResult,
-    songsResult,
+  [getArtistsByView, getSongsByView, getAllowedArtists, getAllowedSongs, getArtists],
+  (artistsResult, songsResult, artists, songs, allArtists) => ({
+    artistsResult: artistsResult.filter(id => artists.result.includes(id)),
+    songsResult: songsResult.filter(id => songs.has(id)),
+    hasBlocked: songsResult.some(id => !songs.has(id)) || artistsResult.some(id => artists.entities[id].songIds.length < allArtists.entities[id].songIds.length),
   }),
 )
 

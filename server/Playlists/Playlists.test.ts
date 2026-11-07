@@ -5,6 +5,7 @@ import path from 'node:path'
 import { db, open, close } from '../lib/Database.js'
 import Playlists from './Playlists.js'
 import Queue from '../Queue/Queue.js'
+import Prefs from '../Prefs/Prefs.js'
 import type { ResolvedSong } from '../../shared/songSource.js'
 
 let directory: string
@@ -58,6 +59,20 @@ it('prepares one full cycle and waits for its last pending song before repeating
   for (let index = 0; index < 5; index++) Playlists.reconcile(1)
   expect(pending()).toHaveLength(3)
   expect(Playlists.get(1, playlistId).items).toHaveLength(3)
+})
+
+it('skips blocked repertoire without disabling the house list or reintroducing it on repeat', () => {
+  Prefs.set('musicBlocking', { rules: [{ kind: 'resource', source: 'YOUTUBE', sourceId: song(2).sourceId }] })
+  configure()
+  Playlists.reconcile(1)
+  expect(pending().map(item => item.title)).toEqual(['Song 1', 'Song 3'])
+  for (const item of pending()) {
+    Queue.transition(1, item.queueId, 'PLAYING')
+    Queue.transition(1, item.queueId, 'PLAYED')
+  }
+  Playlists.reconcile(1)
+  expect(pending().map(item => item.title)).toEqual(['Song 1', 'Song 3'])
+  expect(Playlists.snapshot(1).playback).toMatchObject({ enabled: true, message: expect.stringContaining('política') })
 })
 
 it('restores selection and prepared queue after reopening the database', () => {

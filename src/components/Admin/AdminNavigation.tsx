@@ -11,6 +11,7 @@ const settings = [
   ['/admin/settings/animator', 'Animador'], ['/admin/settings/playback', 'Reproducción'],
   ['/admin/settings/files', 'Archivos'], ['/admin/settings/branding', 'Marca del local'],
   ['/admin/settings/moderation', 'Moderación'],
+  ['/admin/settings/music-blocking', 'Música bloqueada'],
 ] as const
 
 export default function AdminNavigation () {

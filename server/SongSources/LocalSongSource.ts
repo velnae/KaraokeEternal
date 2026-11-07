@@ -1,6 +1,8 @@
 import path from 'node:path'
 import Library from '../Library/Library.js'
 import Media from '../Media/Media.js'
+import Prefs from '../Prefs/Prefs.js'
+import { findMusicBlock } from '../../shared/musicBlocking.js'
 import type {
   ResolvedSong,
   SongSearchResult,
@@ -17,6 +19,7 @@ export const localSongSource: SongSourceAdapter = {
     void context
     const filter = normalizeSearchText(query)
     const library = Library.get()
+    const settings = Prefs.getMusicBlocking()
 
     if (!library.songs || !library.artists) return []
 
@@ -37,6 +40,7 @@ export const localSongSource: SongSourceAdapter = {
         }
       })
       .filter((song): song is NonNullable<typeof song> => song !== null)
+      .filter(song => !findMusicBlock(song, settings))
       .filter(song => !filter
         || normalizeSearchText(song.title).includes(filter)
         || normalizeSearchText(song.artistOrChannel).includes(filter),

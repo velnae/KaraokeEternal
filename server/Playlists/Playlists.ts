@@ -8,6 +8,8 @@ import { getResolvedSongValidationError, type ResolvedSong } from '../../shared/
 import type { PlaylistSnapshot, SavedPlaylist } from '../../shared/playlists.js'
 import { QUEUE_PUSH } from '../../shared/actionTypes.js'
 import getLogger from '../lib/Log.js'
+import Prefs from '../Prefs/Prefs.js'
+import { findMusicBlock } from '../../shared/musicBlocking.js'
 
 interface PlaybackRow { roomId: number, playlistId: number | null, enabled: number, repeat: number, cursor: number, runId: string, actorId: number | null, message: string }
 const log = getLogger('house-playlists')
@@ -173,9 +175,11 @@ export default class Playlists {
     const failed = this.skipped(state)
     let changed = false
     for (const id of failed) changed = this.clearPending(roomId, id) || changed
-    const available = list.items.filter(item => !failed.includes(item.itemId))
+    const musicBlocking = Prefs.getMusicBlocking()
+    const blocked = list.items.filter(item => findMusicBlock(item.song, musicBlocking))
+    const available = list.items.filter(item => !failed.includes(item.itemId) && !blocked.includes(item))
     if (!available.length) {
-      db.run('UPDATE housePlayback SET message=? WHERE roomId=?', [list.items.length ? 'Todas las canciones fallaron. Revise la lista y pulse Reiniciar lista para reintentarlas.' : 'La lista está vacía. Agregue canciones desde Biblioteca.', roomId])
+      db.run('UPDATE housePlayback SET message=? WHERE roomId=?', [blocked.length ? 'No hay canciones disponibles: revise Música bloqueada y los errores de la lista.' : list.items.length ? 'Todas las canciones fallaron. Revise la lista y pulse Reiniciar lista para reintentarlas.' : 'La lista está vacía. Agregue canciones desde Biblioteca.', roomId])
       return changed
     }
     // Prepare a complete cycle independently of interleaving; wrap only after
@@ -185,6 +189,7 @@ export default class Playlists {
       const prepared = new Set(db.all<{ playlistItemId: number }>('SELECT playlistItemId FROM queue WHERE roomId=? AND houseRunId=? AND status=\'APPROVED\'', [roomId, state.runId]).map(row => row.playlistItemId))
       let cursor = state.cursor
       let message = failed.length ? `${failed.length} canciones omitidas por error. Reinicie la lista para reintentarlas.` : ''
+      if (blocked.length) message += ` ${blocked.length} canciones omitidas por la política de contenido del local.`
       if (state.repeat && prepared.size === 0 && !available.some(item => item.position > cursor)) cursor = 0
       for (const item of available) {
         if (item.position <= cursor || prepared.has(item.itemId)) continue

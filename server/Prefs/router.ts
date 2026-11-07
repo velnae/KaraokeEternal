@@ -14,6 +14,8 @@ import type { ClientBranding } from '../../shared/branding.js'
 import type { Prefs as PrefsType } from '../../shared/types.js'
 import { validateModeration } from '../../shared/textModeration.js'
 import Greetings from '../Greetings/Greetings.js'
+import { validateMusicBlocking } from '../../shared/musicBlocking.js'
+import { db } from '../lib/Database.js'
 
 interface RequestWithBody {
   body: Record<string, unknown>
@@ -34,7 +36,7 @@ router.get('/', (ctx) => {
   }
 
   // Only explicitly public preferences are exposed before login.
-  ctx.body = { roles: prefs.roles, branding: prefs.branding, moderation: prefs.moderation }
+  ctx.body = { roles: prefs.roles, branding: prefs.branding, moderation: prefs.moderation, musicBlocking: prefs.musicBlocking }
 })
 
 router.put('/branding', (ctx) => {
@@ -51,6 +53,34 @@ router.put('/branding', (ctx) => {
   ctx.set('Cache-Control', 'no-store')
   ctx.body = { branding }
   ctx.io.emit('action', { type: PREFS_PUSH, payload: { branding } })
+})
+
+router.put('/music-blocking', (ctx) => {
+  if (!ctx.user.isAdmin) return ctx.throw(403, 'No tiene autorización')
+  let musicBlocking
+  try {
+    musicBlocking = validateMusicBlocking((ctx.request as unknown as RequestWithBody).body)
+  } catch (error) { return ctx.throw(422, (error as Error).message) }
+  const rooms = db.all<{ roomId: number }>('SELECT roomId FROM rooms')
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    if (!Prefs.set('musicBlocking', musicBlocking)) throw new Error('No se pudo guardar el bloqueo.')
+    for (const { roomId } of rooms) {
+      const player = Rooms.getPlayerStatus(ctx.io, roomId)
+      Queue.rejectBlocked(roomId, musicBlocking, player?.isAtQueueEnd ? undefined : player?.queueId)
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = { musicBlocking }
+  ctx.io.emit('action', { type: PREFS_PUSH, payload: { musicBlocking } })
+  for (const { roomId } of rooms) {
+    Greetings.reconcile(roomId)
+    ctx.io.to(Rooms.prefix(roomId)).emit('action', { type: QUEUE_PUSH, payload: Queue.get(roomId) })
+  }
 })
 
 router.put('/moderation', (ctx) => {

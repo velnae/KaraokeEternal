@@ -5,6 +5,7 @@ import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { toggleArtistResultExpanded } from '../../modules/library'
 import getSearchResults from '../../selectors/getSearchResults'
 import getSongsStatus from '../../selectors/getSongsStatus'
+import { getAllowedArtists } from '../../selectors/getAllowedLibrary'
 import PaddedList from 'components/PaddedList/PaddedList'
 import ArtistItem from '../ArtistItem/ArtistItem'
 import SongList from '../SongList/SongList'
@@ -116,7 +117,7 @@ const RowComponent = ({
 
 const SearchResults = ({ ui }: SearchResultsProps) => {
   const dispatch = useAppDispatch()
-  const artists = useAppSelector(state => state.artists)
+  const artists = useAppSelector(getAllowedArtists)
   const expandedArtistResults = useAppSelector(state => state.library.expandedArtistResults)
   const { filterStr, filterStarred } = useAppSelector(state => state.library)
   const { artistsResult, songsResult } = useAppSelector(getSearchResults)

@@ -16,6 +16,7 @@ export interface Song {
 }
 
 export interface QueueItem {
+  rejectionReason?: string | null
   replacesQueueId?: number | null
   historyClearedAt?: number | null
   tableId?: number | null
@@ -136,6 +137,7 @@ export interface Media {
 }
 
 export interface Prefs {
+  musicBlocking: import('./musicBlocking.js').MusicBlocking
   moderation: import('./textModeration.js').ModerationSettings
   branding: import('./branding.js').ClientBranding
   isFirstRun?: boolean

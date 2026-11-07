@@ -30,7 +30,7 @@ it('does not replace API or asset responses with the application index', async (
 
 it('serves admin deep links under the configured base without capturing unrelated paths', async () => {
   const middleware = createClientIndex('/karaoke/', () => '<base href="/">')
-  for (const route of ['rooms', 'users', 'playlists', 'account', 'settings/animator', 'settings/playback', 'settings/files', 'settings/branding', 'settings/moderation']) {
+  for (const route of ['rooms', 'users', 'playlists', 'account', 'settings/animator', 'settings/playback', 'settings/files', 'settings/branding', 'settings/moderation', 'settings/music-blocking']) {
     const ctx = context(`/karaoke/admin/${route}`)
     await middleware(ctx as unknown as Context, vi.fn())
     expect(ctx.status).toBe(200)

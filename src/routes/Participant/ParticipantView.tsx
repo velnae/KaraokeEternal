@@ -25,9 +25,10 @@ import styles from './ParticipantView.css'
 import QueueGreeting from 'components/Greetings/QueueGreeting'
 import GreetingComposer from 'components/Greetings/GreetingComposer'
 import useGreetings from 'components/Greetings/useGreetings'
-import { youtubeSearchCanRetry, youtubeSearchError } from 'shared/youtubeSearch'
+import { youtubeSearchCanRetry, youtubeSearchError, youtubeVideoId } from 'shared/youtubeSearch'
 import { requestIntentLabels, type RequestIntent } from 'shared/requestIntent'
 import searchStyles from 'components/SongSearch/SongSearch.css'
+import { musicBlockedStatus, musicBlockedMessage, musicFilteredMessage, musicAllBlockedMessage } from 'shared/musicBlocking'
 
 const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | 'room' }) => {
   const dispatch = useAppDispatch()
@@ -155,7 +156,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
       <article key={item.queueId} className={styles.card} data-status={item.status} data-queue-id={item.queueId}>
         <div className={styles.details}>
           <div className={styles.cardStatus}>
-            <span className={styles.badge}>{requestStatusLabels[item.status]}</span>
+            <span className={styles.badge}>{item.rejectionReason === 'MUSIC_BLOCKED' ? musicBlockedStatus : requestStatusLabels[item.status]}</span>
             {item.requestIntent && item.requestIntent !== 'UNKNOWN' && <span className={styles.badge}>{requestIntentLabels[item.requestIntent]}</span>}
             {wait !== null && <span className={styles.wait} aria-label={`Espera estimada: ${wait < 1 ? 'menos de 1 minuto' : `${wait} minutos`}`}>{wait < 1 ? '< 1 min' : `≈ ${wait} min`}</span>}
             {item.status === 'APPROVED' && turnsAhead >= 0 && <span className={styles.badge}>{turnsAhead === 0 ? 'Próximo turno de cliente' : `${turnsAhead} ${turnsAhead === 1 ? 'turno' : 'turnos'} por delante`}</span>}
@@ -168,6 +169,12 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
               {item.tableLabelSnapshot && (!personal || item.tableLabelSnapshot !== visibleTable) && <p>{item.tableLabelSnapshot}</p>}
             </div>
           </div>
+          {personal && item.rejectionReason === 'MUSIC_BLOCKED' && (
+            <div role='status'>
+              <p>Tu pedido fue retirado. Puedes elegir otra canción.</p>
+              <Link className={styles.textAction} to='/library'>Buscar otra canción</Link>
+            </div>
+          )}
           {personal && item.status === 'FAILED' && (replacedIds.has(item.queueId)
             ? <p>Ya elegiste un reemplazo para este pedido.</p>
             : (
@@ -311,8 +318,9 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
               </div>
             )}
             {matchesSubmission && search.query && !search.isLoading && !search.error && search.results.length === 0 && (
-              <p className={styles.empty}>Sin resultados.</p>
+              <p className={styles.empty}>{search.blockedCount ? youtubeVideoId(search.query) ? musicBlockedMessage : musicAllBlockedMessage : 'Sin resultados.'}</p>
             )}
+            {matchesSubmission && !search.isLoading && !search.error && search.blockedCount > 0 && search.results.length > 0 && <p className={styles.notice}>{musicFilteredMessage}</p>}
           </div>
           {matchesSubmission && search.results.map((result) => {
             const receipt = receipts[result.sourceId]
@@ -344,7 +352,9 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             <article key={receipt.requestId} className={styles.card}>
               <h2 translate='no'>{receipt.title}</h2>
               {receipt.phase !== 'sending' && <p role='status'>{receipt.phase === 'error' ? receipt.message : 'Sin confirmar'}</p>}
-              <Button disabled={!connected || receipt.phase === 'sending' || (receipt.phase === 'error' && !canRequest)} onClick={() => { void requestSong(receipt.sourceId, receipt.title) }}>{receipt.phase === 'sending' ? 'Enviando…' : receipt.phase === 'error' ? 'Reintentar' : 'Comprobar pedido'}</Button>
+              {receipt.code === 'MUSIC_BLOCKED'
+                ? <Link to='/library'>Buscar otra canción</Link>
+                : <Button disabled={!connected || receipt.phase === 'sending' || (receipt.phase === 'error' && !canRequest)} onClick={() => { void requestSong(receipt.sourceId, receipt.title) }}>{receipt.phase === 'sending' ? 'Enviando…' : receipt.phase === 'error' ? 'Reintentar' : 'Comprobar pedido'}</Button>}
             </article>
           ))}
           {own.length === 0 && unsettled.length === 0 && !queue.isLoading && (

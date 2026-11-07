@@ -8,6 +8,7 @@ export interface RequestReceipt {
   title: string
   phase: 'sending' | 'uncertain' | 'confirmed' | 'error'
   message?: string
+  code?: string
   queueId?: number
   status?: QueueItemStatus
   greeting?: GreetingDraft
@@ -18,7 +19,7 @@ export interface RequestReceipt {
 interface Reply {
   type: string
   error?: string
-  payload?: { queueId: number, status: QueueItemStatus, requestId: string, greetingId?: number, requestIntent?: RequestIntent }
+  payload?: { code?: string, queueId?: number, status?: QueueItemStatus, requestId?: string, greetingId?: number, requestIntent?: RequestIntent }
 }
 
 // Keep the same identifier after a lost acknowledgment, including after a reload.
@@ -33,8 +34,8 @@ export const createRequestController = ({ storage, key, send, makeId }: {
     const saved = JSON.parse(storage.getItem(key) || '{}')
     for (const value of Object.values(saved) as RequestReceipt[]) {
       if (!value || typeof value.sourceId !== 'string' || typeof value.requestId !== 'string') continue
-      const { requestId, sourceId, title, phase, message, queueId, status, greeting, greetingId } = value
-      receipts[sourceId] = { requestId, sourceId, title, phase: phase === 'sending' ? 'uncertain' : phase, message, queueId, status, greeting, greetingId, requestIntent: requestIntent(value.requestIntent) }
+      const { requestId, sourceId, title, phase, message, code, queueId, status, greeting, greetingId } = value
+      receipts[sourceId] = { requestId, sourceId, title, phase: phase === 'sending' ? 'uncertain' : phase, message, code, queueId, status, greeting, greetingId, requestIntent: requestIntent(value.requestIntent) }
     }
   } catch { /* Storage may be unavailable; do not send until persistence succeeds. */ }
   const listeners = new Set<() => void>()
@@ -46,6 +47,14 @@ export const createRequestController = ({ storage, key, send, makeId }: {
 
   return {
     getSnapshot: () => receipts,
+    clearBlockedErrors: () => {
+      if (!Object.values(receipts).some(receipt => receipt.code === 'MUSIC_BLOCKED')) return
+      receipts = Object.fromEntries(Object.entries(receipts).filter(([, receipt]) => receipt.code !== 'MUSIC_BLOCKED'))
+      try {
+        persist()
+      } catch { /* The next request still requires durable storage. */ }
+      listeners.forEach(listener => listener())
+    },
     subscribe: (listener: () => void) => {
       listeners.add(listener)
       return () => {
@@ -71,7 +80,7 @@ export const createRequestController = ({ storage, key, send, makeId }: {
       }
       try {
         const response = await send(sourceId, receipt.requestId, receipt.greeting, receipt.requestIntent)
-        if (response.error) update({ ...receipt, phase: 'error', message: response.error })
+        if (response.error) update({ ...receipt, phase: 'error', message: response.error, code: response.payload?.code })
         else if (response.payload?.requestId === receipt.requestId) {
           // The acknowledgment also carries the room queue; only persist the receipt.
           const { queueId, status, greetingId } = response.payload

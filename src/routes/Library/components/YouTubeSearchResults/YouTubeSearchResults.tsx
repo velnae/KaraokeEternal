@@ -9,8 +9,10 @@ import type { SongSearchResult } from 'shared/songSource'
 import type { QueueItem } from 'shared/types'
 import styles from './YouTubeSearchResults.css'
 import { youtubeSearchCanRetry, youtubeSearchError } from 'shared/youtubeSearch'
+import { musicAllBlockedMessage, musicFilteredMessage } from 'shared/musicBlocking'
 
 interface YouTubeSearchResultsProps {
+  blockedCount?: number
   code: string | null
   error: string | null
   isLoading: boolean
@@ -19,7 +21,7 @@ interface YouTubeSearchResultsProps {
   onRetry?: () => void
 }
 
-export default function YouTubeSearchResults ({ code, error, isLoading, query, results, onRetry }: YouTubeSearchResultsProps) {
+export default function YouTubeSearchResults ({ code, error, isLoading, query, results, blockedCount = 0, onRetry }: YouTubeSearchResultsProps) {
   const connected = useConnection()
   const user = useAppSelector(state => state.user)
   const queue = useAppSelector(state => ensureState(state.queue))
@@ -42,7 +44,7 @@ export default function YouTubeSearchResults ({ code, error, isLoading, query, r
             {connected && onRetry && youtubeSearchCanRetry(code) && <Button variant='default' onClick={onRetry}>Reintentar búsqueda</Button>}
           </>
         )}
-        {query && !isLoading && !error && <p>{results.length ? `${results.length} resultados` : 'Sin resultados. Prueba otro título, artista o tipo de video.'}</p>}
+        {query && !isLoading && !error && <p>{blockedCount ? results.length ? musicFilteredMessage : musicAllBlockedMessage : results.length ? `${results.length} resultados` : 'Sin resultados. Prueba otro título, artista o tipo de video.'}</p>}
       </div>
       {results.map(result => (
         <SongResultCard

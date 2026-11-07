@@ -1,10 +1,8 @@
 import { createSelector } from '@reduxjs/toolkit'
-import { RootState } from 'store/store'
-
-const getArtists = (state: RootState) => state.artists
+import { getAllowedArtists } from './getAllowedLibrary'
 
 const getAlphaPickerMap = createSelector(
-  [getArtists],
+  [getAllowedArtists],
   (artists) => {
     const map: Record<string, number> = { '#': 0 } // letters to row numbers
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')

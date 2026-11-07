@@ -12,6 +12,7 @@ import BrandingPrefs from 'routes/Account/components/Prefs/BrandingPrefs/Brandin
 import AnimatorSettings from './AnimatorSettings'
 import PlaylistsView from 'components/Playlists/PlaylistsView'
 import ModerationPrefs from 'routes/Account/components/Prefs/ModerationPrefs/ModerationPrefs'
+import MusicBlockingPrefs from 'components/MusicBlocking/MusicBlockingPrefs'
 
 export default function AdminRoutes () {
   const { isAdmin, userId } = useAppSelector(state => state.user)
@@ -37,6 +38,7 @@ export default function AdminRoutes () {
       <Route path='settings/files' element={<AdminPage title='Archivos' description='Administre las carpetas de música y actualice la biblioteca.'><PathPrefs /></AdminPage>} />
       <Route path='settings/branding' element={<AdminPage title='Marca del local' description='Personalice la identidad que ven sus participantes.'><BrandingPrefs /></AdminPage>} />
       <Route path='settings/moderation' element={<AdminPage title='Moderación' description='Gestione las palabras y frases bloqueadas en nombres y saludos de todas las salas.'><ModerationPrefs /></AdminPage>} />
+      <Route path='settings/music-blocking' element={<AdminPage title='Música bloqueada' description='Bloquee artistas, canciones o videos en todas las salas. Los cambios se aplican al guardar.'><MusicBlockingPrefs /></AdminPage>} />
       <Route path='*' element={<Navigate to='/admin/rooms' replace />} />
     </Routes>
   )

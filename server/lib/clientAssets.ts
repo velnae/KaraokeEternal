@@ -16,6 +16,7 @@ export const createClientIndex = (urlPath: string, getContent: () => string): Mi
     'account', 'library', 'queue', 'requests', 'player', 'join',
     'admin', 'admin/rooms', 'admin/users', 'admin/playlists', 'admin/account', 'admin/settings/animator',
     'admin/settings/playback', 'admin/settings/files', 'admin/settings/branding', 'admin/settings/moderation',
+    'admin/settings/music-blocking',
   ].map(route => `${urlPath}${route}/`)]
   return (ctx, next) => {
     if (!routes.includes(ctx.request.path.replace(/\/?$/, '/'))) return next()

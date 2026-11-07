@@ -30,6 +30,7 @@ function RequestAction ({ receipt, active, onRequest, admin, house = false, conn
   const uncertain = receipt?.phase === 'uncertain'
   const confirmed = active && !sending && !uncertain
   const action = sending ? (admin ? 'Agregando…' : 'Enviando…') : uncertain ? 'Comprobar pedido' : receipt?.phase === 'error' ? 'Reintentar' : house ? 'Agregar a la casa' : admin ? 'Agregar a la cola' : 'Pedir'
+  if (receipt?.code === 'MUSIC_BLOCKED' && !confirmed) return <span>No disponible. Busca otra canción.</span>
   return confirmed
     ? (
         <Link className={styles.confirmed} data-status={active.status} to={house ? '/queue?view=house' : admin ? '/queue' : '/requests'} state={admin ? undefined : { requestedQueueId: active.queueId }} aria-describedby={description}>
@@ -70,7 +71,7 @@ export default function SongResultCard ({ result, receipt, active, admin = false
   const confirmed = active && !sending && !uncertain
   const description = [`${id}-title`, `${id}-message`, blockerDescriptionId].filter(Boolean).join(' ')
   const openPreview = () => {
-    if (!connected || sending || blocker || unavailable || confirmed || uncertain) return
+    if (!connected || sending || blocker || unavailable || confirmed || uncertain || receipt?.code === 'MUSIC_BLOCKED') return
     opener.current = document.activeElement as HTMLElement | null
     setPreviewOpen(true)
   }

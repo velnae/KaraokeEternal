@@ -75,6 +75,7 @@ describe('preference mutation authorization', () => {
     const prefs = {
       branding: defaultClientBranding,
       moderation: defaultModeration,
+      musicBlocking: { rules: [] },
       paths: { result: [], entities: {} },
       roles: { result: [], entities: {} },
     }
@@ -98,7 +99,7 @@ describe('preference mutation authorization', () => {
     expect(server.emit).not.toHaveBeenCalled()
   })
 
-  it.each(['branding', 'greetingVoice', 'moderation'])('rejects %s writes through the generic preference socket action', (key) => {
+  it.each(['branding', 'greetingVoice', 'moderation', 'musicBlocking'])('rejects %s writes through the generic preference socket action', (key) => {
     const set = vi.spyOn(Prefs, 'set')
     const acknowledge = vi.fn()
     ACTION_HANDLERS[PREFS_SET](

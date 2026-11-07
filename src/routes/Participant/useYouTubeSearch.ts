@@ -4,17 +4,21 @@ import { SONG_SOURCE_SEARCH, SONG_SOURCE_SEARCH_SUCCESS } from 'shared/actionTyp
 import type { SongSearchResult } from 'shared/songSource'
 import { youtubeQuery, type YouTubeSearchMode } from 'shared/youtubeSearch'
 import { useConnection } from './useConnection'
+import { useAppSelector } from 'store/hooks'
+import { findMusicBlock } from 'shared/musicBlocking'
 
 interface SearchState {
+  blockedCount: number
   query: string
   isLoading: boolean
   error: string | null
   code: string | null
   results: SongSearchResult[]
 }
-const empty: SearchState = { query: '', isLoading: false, error: null, code: null, results: [] }
+const empty: SearchState = { query: '', isLoading: false, error: null, code: null, results: [], blockedCount: 0 }
 
 export const useYouTubeSearch = (enabled: boolean) => {
+  const musicBlocking = useAppSelector(state => state.prefs.musicBlocking)
   const [search, setSearch] = useState(empty)
   const sequence = useRef(0)
   const connected = useConnection()
@@ -53,7 +57,7 @@ export const useYouTubeSearch = (enabled: boolean) => {
       })
       if (attempt !== sequence.current) return
       setSearch(response.type === SONG_SOURCE_SEARCH_SUCCESS
-        ? { ...initial, results: response.payload.results }
+        ? { ...initial, results: response.payload.results, blockedCount: response.payload.blockedCount ?? 0 }
         : { ...initial, code: response.payload?.code, error: 'No se pudo buscar en YouTube' })
     } catch {
       if (attempt === sequence.current) setSearch({ ...initial, error: 'No se pudo confirmar la búsqueda', code: 'CONNECTION' })
@@ -65,5 +69,6 @@ export const useYouTubeSearch = (enabled: boolean) => {
     : !connected && search.query
         ? { ...search, isLoading: false, code: 'CONNECTION', error: 'Sin conexión' }
         : search
-  return { ...state, submit }
+  const results = state.results.filter(song => !findMusicBlock(song, musicBlocking))
+  return { ...state, results, blockedCount: state.blockedCount + state.results.length - results.length, submit }
 }

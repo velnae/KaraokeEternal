@@ -5,6 +5,8 @@ import {
 } from '../../shared/actionTypes.js'
 import { getSongSource } from './index.js'
 import { YouTubeApiError } from './YouTubeSongSource.js'
+import Prefs from '../Prefs/Prefs.js'
+import { findMusicBlock } from '../../shared/musicBlocking.js'
 
 const ACTION_HANDLERS = {
   [SONG_SOURCE_SEARCH]: async (sock, { payload }, acknowledge) => {
@@ -20,9 +22,11 @@ const ACTION_HANDLERS = {
 
     try {
       const results = await getSongSource('YOUTUBE').search(query, { roomId })
+      const settings = Prefs.getMusicBlocking()
+      const allowed = results.filter(song => !findMusicBlock(song, settings))
       acknowledge({
         type: SONG_SOURCE_SEARCH_SUCCESS,
-        payload: { query, results },
+        payload: { query, results: allowed, blockedCount: results.length - allowed.length },
       })
     } catch (err) {
       acknowledge({

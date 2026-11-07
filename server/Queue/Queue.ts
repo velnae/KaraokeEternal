@@ -11,10 +11,27 @@ import {
 } from '../../shared/queueLifecycle.js'
 import { getResolvedSongValidationError, type ResolvedSong } from '../../shared/songSource.js'
 import { requestIntent, type RequestIntent } from '../../shared/requestIntent.js'
+import Prefs from '../Prefs/Prefs.js'
+import { findMusicBlock, musicBlockedMessage, type MusicBlocking } from '../../shared/musicBlocking.js'
 
 const HIDDEN_QUEUE_STATUSES = ['REJECTED', 'REMOVED']
 
 class Queue {
+  static assertMusicAllowed (song: Parameters<typeof findMusicBlock>[0]): void {
+    if (findMusicBlock(song, Prefs.getMusicBlocking())) {
+      throw Object.assign(new Error(musicBlockedMessage), { code: 'MUSIC_BLOCKED' })
+    }
+  }
+
+  static rejectBlocked (roomId: number, settings: MusicBlocking, currentQueueId?: number): void {
+    for (const item of Object.values(Queue.get(roomId).entities)) {
+      if (item.queueId === currentQueueId || !['PENDING_APPROVAL', 'APPROVED'].includes(item.status)) continue
+      if (!findMusicBlock({ ...item, sourceId: item.source === 'YOUTUBE' ? item.externalId! : String(item.songId) }, settings)) continue
+      Queue.remove(item.queueId, roomId, true)
+      db.run('UPDATE queue SET status=?, rejectionReason=? WHERE queueId=?', ['REJECTED', 'MUSIC_BLOCKED', item.queueId])
+    }
+  }
+
   static cleanupGeneration (roomId: number): number {
     return db.get<{ generation: number }>('SELECT generation FROM queueCleanupState WHERE roomId=?', [roomId])?.generation ?? 0
   }
@@ -50,6 +67,7 @@ class Queue {
     const validationError = getResolvedSongValidationError(song)
     if (validationError) throw new Error(validationError)
     if (!song.isPlayable) throw new Error('La canción no se puede reproducir')
+    Queue.assertMusicAllowed(song)
 
     const replacement = replacesQueueId === undefined ? undefined : this.getReplacement(roomId, userId, replacesQueueId)
     if (replacement && origin !== 'PARTICIPANT') throw new Error('El reemplazo debe ser un pedido de participante')
@@ -139,7 +157,7 @@ class Queue {
     const query = sql`
       SELECT queueId, songId, userId, prevQueueId,
         queue.origin, queue.source, queue.status, queue.externalId, queue.requestIntent,
-        queue.title, queue.artistOrChannel, queue.durationSeconds, queue.thumbnailUrl,
+        queue.title, queue.artistOrChannel, queue.durationSeconds, queue.thumbnailUrl, queue.rejectionReason,
         queue.dateCreated, queue.dateUpdated, queue.historyClearedAt, queue.replacesQueueId,
         queue.tableId, queue.tableLabelSnapshot,
         media.mediaId, media.relPath, media.rgTrackGain, media.rgTrackPeak,
@@ -157,6 +175,7 @@ class Queue {
     `
     const rows = db.all<{
       queueId: number
+      rejectionReason: string | null
       songId: number | null
       userId: number
       prevQueueId: number | null
@@ -437,6 +456,8 @@ class Queue {
     }
 
     if (status === 'APPROVED') {
+      const item = Queue.get(roomId).entities[queueId]
+      Queue.assertMusicAllowed({ ...item, sourceId: item.source === 'YOUTUBE' ? item.externalId! : String(item.songId) })
       return Queue.transition(roomId, queueId, status)
     }
 

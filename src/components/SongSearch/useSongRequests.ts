@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import store from 'store/store'
 import socket from 'lib/socket'
@@ -8,6 +8,7 @@ import { createRequestController } from 'routes/Participant/requests'
 
 export function useSongRequests (origin: 'PARTICIPANT' | 'HOUSE' = 'PARTICIPANT', replacesQueueId?: number) {
   const { roomId, userId } = useAppSelector(state => state.user)
+  const musicBlocking = useAppSelector(state => state.prefs.musicBlocking)
   const dispatch = useAppDispatch()
   const controller = useMemo(() => createRequestController({
     storage: {
@@ -28,6 +29,9 @@ export function useSongRequests (origin: 'PARTICIPANT' | 'HOUSE' = 'PARTICIPANT'
       return response
     },
   }), [roomId, userId, origin, replacesQueueId, dispatch])
+  useEffect(() => {
+    controller.clearBlockedErrors()
+  }, [controller, musicBlocking])
   const receipts = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
   return { controller, receipts }
 }

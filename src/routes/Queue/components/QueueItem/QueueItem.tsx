@@ -21,6 +21,9 @@ import socket from 'lib/socket'
 import store from 'store/store'
 import { QUEUE_ADD } from 'shared/actionTypes'
 import { queuePush } from '../../modules/queue'
+import MusicBlockForm from 'components/MusicBlocking/MusicBlockForm'
+import Modal from 'components/Modal/Modal'
+import type { MusicBlockRule } from 'shared/musicBlocking'
 
 const LONG_PRESS_THRESHOLD_MS = 700
 
@@ -105,6 +108,7 @@ const QueueItem = ({
   wait,
 }: QueueItemProps) => {
   const [isExpanded, setExpanded] = useState(false)
+  const [blockRule, setBlockRule] = useState<MusicBlockRule | null>(null)
   const longPressActiveRef = useRef(false)
   const dispatch = useAppDispatch()
   const [recovering, setRecovering] = useState(false)
@@ -254,7 +258,7 @@ const QueueItem = ({
 
         <Buttons btnWidth={56} isExpanded={isExpanded} className={styles.btnContainer}>
           {canRecover && <Button icon='REPLAY' aria-label='Reintentar conservando la antigüedad' title='Reintentar conservando la antigüedad' disabled={recovering} onClick={() => { void handleRecoverClick() }} />}
-          {(isInfoable || isMovable || isPlayed || isReplayable || isRemovable || isSkippable) && (
+          {(isAdmin || isInfoable || isMovable || isPlayed || isReplayable || isRemovable || isSkippable) && (
             <Button
               icon={isExpanded ? 'CHEVRON_UP' : 'MORE_HORIZ'}
               aria-label={isExpanded ? 'Menos acciones' : 'Más acciones'}
@@ -386,6 +390,14 @@ const QueueItem = ({
         </Buttons>
         {greeting && <QueueGreeting operator greeting={greeting} descriptionId={`queue-title-${queueId}`} paused={greetingsPaused} busy={greetingBusy} onRemove={onRemoveGreeting} />}
       </div>
+      {isAdmin && isExpanded && (
+        <div role='group' aria-label={`Bloquear ${title}`}>
+          <Button onClick={() => setBlockRule({ kind: 'song', artist, title })}>Bloquear canción</Button>
+          <Button onClick={() => setBlockRule({ kind: 'resource', source, sourceId: source === 'YOUTUBE' ? externalId! : String(songId) })}>Bloquear este video/archivo</Button>
+          <Button onClick={() => setBlockRule({ kind: 'artist', artist, aliases: [] })}>Bloquear artista</Button>
+        </div>
+      )}
+      {blockRule && <Modal title='Bloquear música' onClose={() => setBlockRule(null)}><MusicBlockForm initial={blockRule} onSaved={() => setBlockRule(null)} /></Modal>}
     </div>
   )
 }

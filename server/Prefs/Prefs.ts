@@ -6,6 +6,7 @@ import getLogger from '../lib/Log.js'
 import { defaultClientBranding } from '../../shared/branding.js'
 import { validateBranding } from './branding.js'
 import { defaultModeration, setModerationTerms, validateModeration } from '../../shared/textModeration.js'
+import { defaultMusicBlocking, validateMusicBlocking, type MusicBlocking } from '../../shared/musicBlocking.js'
 
 const log = getLogger('Prefs')
 
@@ -17,6 +18,7 @@ class Prefs {
     const prefs = {
       branding: { ...defaultClientBranding },
       moderation: { terms: [...defaultModeration.terms] },
+      musicBlocking: Prefs.getMusicBlocking(),
       paths: { result: [], entities: {} },
       roles: { result: [], entities: {} },
     }
@@ -74,6 +76,7 @@ class Prefs {
    * @return Success/fail boolean
    */
   static set (key: string, data: unknown): boolean {
+    if (key === 'musicBlocking') data = validateMusicBlocking(data)
     if (key === 'branding') data = validateBranding(data)
     if (key === 'moderation') data = validateModeration(data)
     const query = sql`
@@ -83,6 +86,11 @@ class Prefs {
     const res = db.run(String(query), query.parameters)
     if (key === 'moderation' && res.changes === 1) setModerationTerms(validateModeration(data).terms)
     return res.changes === 1
+  }
+
+  static getMusicBlocking (): MusicBlocking {
+    const row = db.get<{ data: string }>('SELECT data FROM prefs WHERE key=?', ['musicBlocking'])
+    return row ? validateMusicBlocking(JSON.parse(row.data)) : structuredClone(defaultMusicBlocking)
   }
 
   /**

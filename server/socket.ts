@@ -165,7 +165,8 @@ export default function (io, jwtKey) {
         payload: Prefs.get(),
       })
     } else {
-      io.to(sock.id).emit('action', { type: PREFS_PUSH, payload: { moderation: Prefs.get().moderation } })
+      const { moderation, musicBlocking } = Prefs.get()
+      io.to(sock.id).emit('action', { type: PREFS_PUSH, payload: { moderation, musicBlocking } })
     }
 
     // push library (only if client's is outdated)
