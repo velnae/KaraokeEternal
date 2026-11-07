@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import Button from 'components/Button/Button'
 import InputImage from 'components/InputImage/InputImage'
 import styles from './Create.css'
-import { GUEST_NAME_HELP, guestNameError, normalizeGuestName } from 'shared/guestName'
+import { guestNameError, normalizeGuestName } from 'shared/guestName'
 
 interface CreateProps {
   guest: boolean
@@ -84,7 +84,7 @@ const Create = ({
           minLength={2}
           required
           aria-invalid={(nameTouched && !!nameError) || undefined}
-          aria-describedby={guest ? `guest-name-help${nameTouched && nameError ? ' guest-name-error' : ''}` : undefined}
+          aria-describedby={guest && nameTouched && nameError ? 'guest-name-error' : undefined}
           value={name}
           onChange={e => setName(e.target.value)}
           onBlur={() => setNameTouched(true)}
@@ -92,7 +92,6 @@ const Create = ({
         />
       </div>
 
-      {guest && <small id='guest-name-help'>{GUEST_NAME_HELP}</small>}
       {nameTouched && nameError && <small id='guest-name-error' role='alert'>{nameError}</small>}
       <Button type='submit' variant='primary' disabled={isSubmitting}>
         {isSubmitting ? 'Entrando…' : 'Entrar'}

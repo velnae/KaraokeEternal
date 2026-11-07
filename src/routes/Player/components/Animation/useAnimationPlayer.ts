@@ -10,6 +10,7 @@ import {
   animationContext, ambienceBedVolume, interventionPlayback, type Intervention, type AmbienceGrant, type AnimationSnapshot,
 } from 'shared/animation'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, PLAYER_EMIT_STATUS } from 'shared/actionTypes'
+import { isMusicalCurtain } from 'shared/effectCategories'
 import { playerStatusCancel, playerUpdate } from '../../modules/player'
 import AnnouncementAudio from './AnnouncementAudio'
 import { hasLocalPlaybackProof } from './playbackFence'
@@ -282,7 +283,7 @@ export default function useAnimationPlayer () {
     const state = store.getState()
     const current = state.animation.snapshot
     const generation = version.current
-    if (!socket.connected || !audio.current.ready || state.player._authority !== 'GRANTED'
+    if (!socket.connected || !audio.current.ready || audio.current.waitingForMusic || state.player._authority !== 'GRANTED'
       || !current?.prefs.ambienceEnabled || (!current.prefs.enabled && !current.greetingVoiceEnabled)) return null
     let grant: AmbienceGrant | undefined
     try {
@@ -297,7 +298,7 @@ export default function useAnimationPlayer () {
       if (!grant) return null
       const fresh = store.getState()
       if (generation !== version.current || !mounted.current || fresh.player._authority !== 'GRANTED' || !socket.connected
-        || !fresh.animation.snapshot?.prefs.ambienceEnabled) throw new Error('La transición cambió antes de iniciar')
+        || audio.current.waitingForMusic || !fresh.animation.snapshot?.prefs.ambienceEnabled) throw new Error('La transición cambió antes de iniciar')
       const completion = audio.current.playBed(grant.clip.checksum, ambienceBedVolume(fresh.animation.snapshot.prefs), grant.until - animationTime() - 200, grant.clip.loop !== false)
       transitionGrant.current = grant
       const id = grant.id
@@ -322,7 +323,7 @@ export default function useAnimationPlayer () {
   const startAmbience = useCallback(async () => {
     const state = store.getState()
     const current = state.animation.snapshot
-    if (running.current || ambientPaused.current || transitionGrant.current || ambientRun.current || ambientStarting.current || Date.now() < ambientRetryAt.current || !socket.connected || !audio.current.ready
+    if (running.current || audio.current.waitingForMusic || ambientPaused.current || transitionGrant.current || ambientRun.current || ambientStarting.current || Date.now() < ambientRetryAt.current || !socket.connected || !audio.current.ready
       || state.player._authority !== 'GRANTED' || !current?.prefs.enabled || !current.prefs.automation || !current.prefs.ambienceEnabled
       || current.prefs.ambienceVolume === 0
       || current.session?.status !== 'OPEN' || state.player.isErrored
@@ -344,14 +345,14 @@ export default function useAnimationPlayer () {
       store.dispatch(playerStatusCancel())
       const playerStatus = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
       await animationRequest(PLAYER_EMIT_STATUS, { ...playerStatus, visualizer: state.playerVisualizer }, 1000)
-      if (!mounted.current || ambientVersion.current !== generation || !socket.connected || running.current) return
+      if (!mounted.current || ambientVersion.current !== generation || !socket.connected || running.current || audio.current.waitingForMusic) return
       const cursor = ambientUse.current ? ambientCursor.current : { clipId: '', offsetMs: 0 }
       const reply = await animationRequest(ANIMATION_AMBIENCE, { playerEpoch: current.playerEpoch, ...cursor }, 1000)
       grant = reply.ambience
       const fresh = store.getState()
       const prefs = fresh.animation.snapshot?.prefs
       if (!grant) return
-      if (!mounted.current || ambientVersion.current !== generation || !socket.connected || running.current
+      if (!mounted.current || ambientVersion.current !== generation || !socket.connected || running.current || audio.current.waitingForMusic
         || !prefs?.enabled || !prefs.automation || !prefs.ambienceEnabled || prefs.ambienceVolume === 0
         || (prefs.ambienceClipId && prefs.ambienceClipId !== grant.clip.id)
         || fresh.player._authority !== 'GRANTED' || fresh.player.isErrored || !(fresh.player.isAtQueueEnd || fresh.player.queueId === -1)
@@ -467,13 +468,23 @@ export default function useAnimationPlayer () {
       sessionStorage.setItem(storageKey, '1')
       attempted.current.add(grant.interventionId)
       const { sequence: assets, bed } = interventionPlayback(grant)
+      const prepareAsset = async (asset: typeof assets[number]) => {
+        if (isMusicalCurtain(asset)) await audio.current.holdAmbienceUntilMusic()
+        const latest = store.getState()
+        return mounted.current && generation === version.current && socket.connected && audio.current.ready
+          && latest.player._authority === 'GRANTED' && latest.animation.snapshot?.prefs.enabled
+          && latest.animation.snapshot.prefs.volume > 0 && !latest.animation.snapshot.active?.stopRequestedAt
+          && latest.animation.snapshot.active?.interventionId === grant!.interventionId
+          && animationTime() < grant!.leaseUntil!
+      }
       ambientUse.current = null
+      if (!await prepareAsset(assets[0]) || animationTime() >= grant.startBefore!) throw new Error('La pausa cambió antes de iniciar el audio')
       const completion = audio.current.play(assets[0].checksum, latestSnapshot.prefs.volume)
       started = true
       setScene(grant)
       setText(assets.length === 1 || assets[0].kind === 'voice' ? grant.displayText : '')
       let bedStarted = false
-      if (bed && ownsBed) {
+      if (bed && ownsBed && !audio.current.waitingForMusic) {
         try {
           void audio.current.playBed(bed.checksum, ambienceBedVolume(latestSnapshot.prefs),
             Math.min(grant.durationMs + 250, grant.leaseUntil! - animationTime() - 100), bed.loop !== false)
@@ -489,6 +500,10 @@ export default function useAnimationPlayer () {
       for (const asset of assets.slice(1)) {
         const latest = store.getState().animation.snapshot
         if (outcome !== 'ENDED' || version.current !== generation || !socket.connected || latest?.active?.stopRequestedAt || latest?.active?.interventionId !== grant.interventionId) {
+          outcome = 'STOPPED'
+          break
+        }
+        if (!await prepareAsset(asset)) {
           outcome = 'STOPPED'
           break
         }

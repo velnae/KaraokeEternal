@@ -9,6 +9,7 @@ interface YouTubePlayerInstance {
   cueVideoById(videoId: string): void
   destroy(): void
   getCurrentTime(): number
+  getDuration(): number
   loadVideoById(videoId: string): void
   pauseVideo(): void
   playVideo(): void
@@ -229,6 +230,23 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
     this.awaitingPlayback = true
     // Keep playVideo synchronous with the local click/keyboard gesture.
     this.player.playVideo()
+  }
+
+  seekForDevelopment = (target: 'end' | 'forward'): string | undefined => {
+    if (process.env.NODE_ENV !== 'development' || process.env.DEV_PLAYER_TOOLS !== 'true') return
+    if (!this.isMounted || !this.isReady || !this.player || this.awaitingPlayback) {
+      return 'Esperando al video… Vuelve a intentarlo cuando esté listo.'
+    }
+    const duration = this.player.getDuration()
+    const position = this.player.getCurrentTime()
+    if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(position)) {
+      return 'Esperando al video… Reproduce la canción y vuelve a intentarlo.'
+    }
+    // Leave a real playback tail: only YouTube's ENDED event advances the queue.
+    const seconds = target === 'end' ? Math.max(0, duration - 5) : Math.max(0, Math.min(position + 30, duration - 1))
+    this.player.seekTo(seconds, true)
+    if (!this.props.isPlaying) this.player.pauseVideo()
+    return this.props.isPlaying ? 'Salto aplicado. La canción terminará normalmente.' : 'Salto aplicado. Pulsa Reproducir para continuar.'
   }
 
   handleError = (event: YouTubePlayerEvent) => {

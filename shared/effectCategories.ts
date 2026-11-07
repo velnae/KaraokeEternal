@@ -1,4 +1,4 @@
-import type { EffectType } from './animation.js'
+import type { AnimationClip, EffectType } from './animation.js'
 
 export const effectCategories = [
   { value: 'appreciation', label: 'Agradecimiento', recommended: '2–3 s', effectType: 'short' },
@@ -17,3 +17,6 @@ export function effectCategory (value?: string) {
 // Keep unknown legacy labels; an ambiguous "aplauso" needs operator classification.
 export const effectCategoryValue = (value?: string) => effectCategory(value)?.value ?? value ?? ''
 export const effectCategoryLabel = (value?: string) => effectCategory(value)?.label ?? value ?? ''
+
+export const isMusicalCurtain = (clip: Pick<AnimationClip, 'kind' | 'effectType' | 'category'>) => clip.kind === 'effect'
+  && (clip.effectType === 'transition' || effectCategoryValue(clip.category) === 'transition')

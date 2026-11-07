@@ -22,10 +22,20 @@ export default class AnnouncementAudio {
   private bedFinish: (() => void) | null = null
   private bedVolumeChange: ((volume: number) => void) | null = null
   private bedCompletion: Promise<'ENDED' | 'STOPPED'> | null = null
+  private ambienceHeld = false
   readonly maxDecodedBytes = 64 * 1024 * 1024
 
   get decodedBytes () { return [...this.buffers.values()].reduce((total, buffer) => total + buffer.length * buffer.numberOfChannels * 4, 0) }
   get hasBed () { return !!this.bedStop }
+  get waitingForMusic () { return this.ambienceHeld }
+
+  // A curtain owns the musical handoff, including an empty queue or slow load.
+  holdAmbienceUntilMusic () {
+    this.ambienceHeld = true
+    return this.stopBed(200)
+  }
+
+  musicStarted () { this.ambienceHeld = false }
   get readyChecksums () {
     return [...new Set([this.playingChecksum, this.bedChecksum, ...this.callKeys, ...this.greetingKeys, ...this.buffers.keys()])]
       .filter((hash): hash is string => !!hash && this.buffers.has(hash)).slice(0, 30)
@@ -176,7 +186,7 @@ export default class AnnouncementAudio {
   playBed (checksum: string, volume: number, durationMs: number, loop = false) {
     const context = this.context
     const buffer = this.buffers.get(checksum)
-    if (!context || context.state !== 'running' || !buffer || this.bedStop || durationMs <= 0) throw new Error('El fondo no está disponible')
+    if (!context || context.state !== 'running' || !buffer || this.bedStop || this.ambienceHeld || durationMs <= 0) throw new Error('El fondo no está disponible')
     const duration = Math.min(TRANSITION_BED_MS / 1000, durationMs / 1000, loop ? Infinity : buffer.duration)
     const until = context.currentTime + duration
     this.bedChecksum = checksum
@@ -252,6 +262,7 @@ export default class AnnouncementAudio {
     const context = this.context
     const buffer = this.buffers.get(checksum)
     if (!context || context.state !== 'running' || !buffer || this.stopSource) throw new Error('El canal de voz no está disponible')
+    if (segment?.renewable && this.ambienceHeld) throw new Error('El ambiente espera a la siguiente canción')
     const offset = Math.max(0, (segment?.offsetMs ?? 0) / 1000)
     const duration = segment?.renewable ? buffer.duration - offset : Math.min(buffer.duration - offset, (segment?.durationMs ?? buffer.duration * 1000) / 1000)
     if (duration <= 0 || (segment?.renewable && (!Number.isFinite(segment.durationMs) || segment.durationMs <= 0))) throw new Error('Tramo de audio no válido')

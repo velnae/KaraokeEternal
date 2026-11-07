@@ -56,6 +56,14 @@ class Player extends React.PureComponent<PlayerProps> {
     visualizerAudioSourceNode: null,
   }
 
+  youtubePlayer = React.createRef<YouTubePlayer>()
+
+  seekForDevelopment = (target: 'end' | 'forward'): string | undefined => {
+    if (process.env.NODE_ENV === 'development' && process.env.DEV_PLAYER_TOOLS === 'true') {
+      return this.youtubePlayer.current?.seekForDevelopment(target) ?? 'Esperando al video… Vuelve a intentarlo cuando esté listo.'
+    }
+  }
+
   componentDidMount () {
     // StrictMode immediately remounts the same instance and media element.
     // Keep its source/context association alive across that synchronous cycle.
@@ -194,6 +202,7 @@ class Player extends React.PureComponent<PlayerProps> {
 
       return (
         <YouTubePlayer
+          ref={this.youtubePlayer}
           controls={0}
           showAutoplayRecovery
           height={this.props.height}

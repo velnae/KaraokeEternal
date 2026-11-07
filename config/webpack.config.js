@@ -52,7 +52,7 @@ let config = {
       __KE_URL_LICENSE__: JSON.stringify('/licenses.txt'),
       __KE_URL_REPO__: JSON.stringify('https://www.karaoke-eternal.com/repo'),
       __KE_URL_SPONSOR__: JSON.stringify('https://www.karaoke-eternal.com/sponsor'),
-    })),
+    }, { 'process.env.DEV_PLAYER_TOOLS': JSON.stringify(__DEV__ && process.env.DEV_PLAYER_TOOLS === 'true' ? 'true' : 'false') })),
     new CaseSensitivePathsPlugin(),
     new MiniCssExtractPlugin({
       filename: '[name].[fullhash].css',

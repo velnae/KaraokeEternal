@@ -69,8 +69,10 @@ export default function JoinView () {
     }
   }
 
+  const showsGuestForm = !loading && !user.isAdmin && !!destination && !user.userId
+
   return (
-    <main style={{ padding: `${headerHeight + 24}px 20px 100px`, maxWidth: 560, margin: 'auto' }}>
+    <main style={{ padding: `${headerHeight + (showsGuestForm ? 0 : 24)}px 20px 100px`, maxWidth: 560, margin: 'auto' }}>
       {loading
         ? <p role='status'>Verificando mesa…</p>
         : user.isAdmin

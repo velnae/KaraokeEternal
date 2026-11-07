@@ -102,6 +102,43 @@ it('prepares while autoplay is blocked and resumes the same decoded audio after 
   audio.close()
 })
 
+it('fades a curtain bed completely and blocks every ambience source until music actually starts', async () => {
+  const audio = new AnnouncementAudio()
+  const source = { connect: vi.fn(node => node), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null as (() => void) | null }
+  const gain = { connect: vi.fn(), disconnect: vi.fn(), gain: { value: 0.2, cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() } }
+  audio.context = { state: 'running', currentTime: 1, destination: {}, createBufferSource: () => source, createGain: () => gain,
+    addEventListener: vi.fn(), removeEventListener: vi.fn(), close: async () => {} } as unknown as AudioContext
+  audio.buffers.set('bed', { duration: 30 } as AudioBuffer)
+  const segment = { offsetMs: 0, durationMs: 10000, renewable: true, loop: true }
+  try {
+    void audio.playBed('bed', 0.2, 25000)
+    let faded = false
+    const handoff = audio.holdAmbienceUntilMusic().then((): void => {
+      faded = true
+      return undefined
+    })
+    expect(source.stop).toHaveBeenLastCalledWith(1.2)
+    await Promise.resolve()
+    expect(faded).toBe(false)
+    source.onended!()
+    await handoff
+    expect(source.disconnect).toHaveBeenCalled()
+    expect(() => audio.playBed('bed', 0.2, 25000)).toThrow('El fondo no está disponible')
+    expect(() => audio.play('bed', 0.2, segment)).toThrow('El ambiente espera')
+    audio.stop()
+    expect(audio.waitingForMusic).toBe(true)
+    // Speech remains available during the wait, but may not recreate its bed.
+    const voice = audio.play('bed', 0.5)
+    source.onended!()
+    await expect(voice).resolves.toBe('ENDED')
+    expect(audio.waitingForMusic).toBe(true)
+    audio.musicStarted()
+    const ambience = audio.play('bed', 0.2, segment)
+    audio.close()
+    await expect(ambience).resolves.toBe('STOPPED')
+  } finally { audio.close() }
+})
+
 it('bounds a blocked resume attempt and can retry without replacing the context', async () => {
   vi.useFakeTimers()
   const audio = new AnnouncementAudio()

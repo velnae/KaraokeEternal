@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
-import { installYouTubeTransitionFixture, checkAmbienceHandoff } from './transition-ambience-checks.e2e.mjs'
+import { installYouTubeTransitionFixture, checkAmbienceHandoff, checkCurtainSilence } from './transition-ambience-checks.e2e.mjs'
 import { checkTransitionPresentation } from './transition-presentation-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
@@ -56,12 +56,12 @@ const emit = async (type, payload = {}) => {
   assert.ok(!response.error, response.error)
   return response
 }
-const uploadAudio = async (id, kind, family, seconds, frequency) => {
+const uploadAudio = async (id, kind, family, seconds, frequency, category = 'transition') => {
   const file = path.join(data, `${id}.wav`)
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `sine=frequency=${frequency}:sample_rate=44100`, '-t', String(seconds), file])
   const response = await api.post(`${base}api/animation/resources/upload`, { multipart: { requestId: id, title: id, kind,
     metadata: JSON.stringify({ text: family === 'closing' ? 'Gracias por cantar. Seguimos con la próxima canción.' : 'La próxima canción ya está lista.',
-      family, modes: ['mixed'], category: kind === 'effect' ? 'transition' : '', effectType: kind === 'effect' ? 'transition' : undefined,
+      family, modes: ['mixed'], category: kind === 'effect' ? category : '', effectType: kind === 'effect' ? category === 'transition' ? 'transition' : 'short' : undefined,
       loop: kind === 'ambience' ? true : undefined }),
     file: { name: `${id}.wav`, mimeType: 'audio/wav', buffer: fs.readFileSync(file) } } })
   assert.equal(response.status(), 200, await response.text())
@@ -88,6 +88,7 @@ try {
   const volumeVoice = await uploadAudio('volume-check', 'voice', 'manual', 8, 550)
   await uploadAudio('closing', 'voice', 'closing', 1.8, 440)
   const effect = await uploadAudio('separator', 'effect', 'manual', 0.8, 660)
+  const shortEffect = await uploadAudio('notification', 'effect', 'manual', 0.8, 770, 'notification')
   const bed = await uploadAudio('pause-bed', 'ambience', 'manual', 7, 110)
   const alternateBed = await uploadAudio('alternate-bed', 'ambience', 'manual', 7, 140)
   const uploaded = await api.post(`${base}api/animation/background/upload`, { multipart: {
@@ -311,7 +312,13 @@ try {
   await expect.poll(() => songStatus(2), { timeout: 15000 }).toBe('PLAYING')
   const trace = await player.evaluate(() => window.transitionTrace)
   assert.ok(trace.starts.some(event => event.kind === 'voice' && event.active.includes('ambience')))
-  assert.ok(trace.starts.some(event => event.kind === 'effect' && event.active.includes('ambience')))
+  assert.ok(trace.starts.some(event => event.kind === 'effect'))
+  assert.ok(trace.starts.filter(event => event.kind === 'effect').every(event => !event.active.includes('ambience')), 'musical curtains play without an ambience bed')
+  for (const curtain of trace.starts.filter(event => event.kind === 'effect')) {
+    const nextMusic = trace.music.find(event => event.at > curtain.at)
+    assert.ok(nextMusic, 'a song follows each automatic curtain')
+    assert.ok(!trace.starts.some(event => event.kind === 'ambience' && event.at > curtain.at && event.at < nextMusic.at), 'ambience never returns between the curtain and music')
+  }
   assert.ok(trace.music.filter(event => !event.gainRegistered).every(event => event.active.length === 0 || event.volume === 0), 'native media stays muted beneath the transition')
   assert.ok(trace.musicSamples.some(sample => sample.rms > 0.001), 'the music output probe must observe real audio after handoff')
   assert.ok(trace.musicSamples.every(sample => sample.rms < 0.001 || sample.active.length === 0), 'decoded music becomes audible only after the transition bed stops')
@@ -352,9 +359,10 @@ try {
   await player.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
   if (abandoned) await expect.poll(() => abandoned.evaluate(video => video.paused && !video.hasAttribute('src'))).toBe(true)
   await checkAmbienceHandoff({ player, uiBase, emit, db, bed, voice: volumeVoice, httpsUi })
+  await checkCurtainSilence({ player, emit, db, effect, shortEffect })
   if (process.env.KARAOKE_E2E_TRANSITION_ONLY !== '1') await checkTransitionPresentation({ player, uiBase, emit, db, voice: volumeVoice, data })
   assert.deepEqual(errors, [])
-  console.log(`PASS video + concurrent ambience + sequential voice/effects, natural boundaries, frozen settings, music handoff, video failure and pause/exit cleanup (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS frontend with isolated API/socket' : ''}). Artifacts: ${data}`)
+  console.log(`PASS video + voice bed + exclusive musical curtains, natural boundaries, frozen settings, music handoff, video failure and pause/exit cleanup (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS frontend with isolated API/socket' : ''}). Artifacts: ${data}`)
 } catch (error) {
   if (player && !player.isClosed()) {
     await player.screenshot({ path: path.join(data, 'failure.png') })

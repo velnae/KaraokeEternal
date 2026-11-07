@@ -10,6 +10,7 @@ vi.mock('react', () => ({ default: {
     setState (state: object) { Object.assign(this.state, state) }
   },
   lazy: (): null => null,
+  createRef: () => ({ current: null as unknown }),
 } }))
 vi.mock('./CDGPlayer/CDGPlayer', () => ({ default: (): null => null }))
 vi.mock('./MP4Player/MP4Player', () => ({ default: (): null => null }))

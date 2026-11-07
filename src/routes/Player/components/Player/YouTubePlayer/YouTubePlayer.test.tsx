@@ -29,6 +29,7 @@ describe('YouTube player transitions', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
   })
 
   const setup = () => {
@@ -50,6 +51,7 @@ describe('YouTube player transitions', () => {
       setSize: vi.fn(),
       setVolume: vi.fn(),
       getCurrentTime: vi.fn(() => 0),
+      getDuration: vi.fn(() => 180),
     }
     const makeProps = (overrides: Partial<Props> = {}): Props => ({
       height: 720,
@@ -103,6 +105,75 @@ describe('YouTube player transitions', () => {
       playerVars: expect.objectContaining({ controls: controls ?? 1 }),
     }))
     player.componentWillUnmount()
+  })
+
+  describe('development seeking', () => {
+    beforeEach(() => {
+      vi.stubEnv('NODE_ENV', 'development')
+      vi.stubEnv('DEV_PLAYER_TOOLS', 'true')
+    })
+
+    it('seeks near the end without simulating completion', () => {
+      const { player, iframe, event, onEnd } = setup()
+      player.seekForDevelopment('end')
+      expect(iframe.seekTo).toHaveBeenCalledWith(175, true)
+      expect(onEnd).not.toHaveBeenCalled()
+      event(ENDED)
+      expect(onEnd).toHaveBeenCalledOnce()
+      player.componentWillUnmount()
+    })
+
+    it('advances from the actual iframe time and leaves a real tail at the end', () => {
+      const { player, iframe } = setup()
+      iframe.getCurrentTime.mockReturnValue(60)
+      player.seekForDevelopment('forward')
+      expect(iframe.seekTo).toHaveBeenLastCalledWith(90, true)
+      iframe.getCurrentTime.mockReturnValue(170)
+      player.seekForDevelopment('forward')
+      expect(iframe.seekTo).toHaveBeenLastCalledWith(179, true)
+      iframe.getDuration.mockReturnValue(3)
+      player.seekForDevelopment('end')
+      expect(iframe.seekTo).toHaveBeenLastCalledWith(0, true)
+      player.componentWillUnmount()
+    })
+
+    it('preserves pause instead of starting playback', () => {
+      const { player, iframe, update } = setup()
+      update({ isPlaying: false })
+      expect(player.seekForDevelopment('end')).toContain('Pulsa Reproducir')
+      expect(iframe.pauseVideo).toHaveBeenCalledTimes(2)
+      expect(iframe.playVideo).not.toHaveBeenCalled()
+      player.componentWillUnmount()
+    })
+
+    it.each([0, NaN, Infinity])('waits for valid duration metadata (%s)', (duration) => {
+      const { player, iframe } = setup()
+      iframe.getDuration.mockReturnValue(duration)
+      expect(player.seekForDevelopment('end')).toContain('Esperando al video')
+      expect(iframe.seekTo).not.toHaveBeenCalled()
+      player.componentWillUnmount()
+    })
+
+    it('does not seek before readiness, during a new load or after unmount', () => {
+      const { player, iframe } = setup()
+      player.isReady = false
+      player.seekForDevelopment('end')
+      player.isReady = true
+      player.awaitingPlayback = true
+      player.seekForDevelopment('forward')
+      player.componentWillUnmount()
+      player.seekForDevelopment('end')
+      expect(iframe.seekTo).not.toHaveBeenCalled()
+    })
+
+    it.each([['production', 'true'], ['development', 'false'], ['development', '']])('is unavailable in %s with flag %s', (mode, flag) => {
+      vi.stubEnv('NODE_ENV', mode)
+      vi.stubEnv('DEV_PLAYER_TOOLS', flag)
+      const { player, iframe } = setup()
+      player.seekForDevelopment('end')
+      expect(iframe.seekTo).not.toHaveBeenCalled()
+      player.componentWillUnmount()
+    })
   })
 
   it('keeps the next video playing despite a PAUSED event from the old video during load', () => {

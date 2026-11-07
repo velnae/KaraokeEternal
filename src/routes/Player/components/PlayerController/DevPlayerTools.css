@@ -1,0 +1,20 @@
+.panel {
+  position: absolute;
+  z-index: 10;
+  bottom: 12px;
+  left: 12px;
+  width: min(360px, calc(100% - 24px));
+  padding: 12px;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  background: var(--equipment);
+  color: var(--lyrics);
+  text-align: left;
+  font-size: 14px;
+}
+
+.panel p { margin: 0 0 8px; color: var(--cyan); }
+.panel small { display: block; color: var(--secondary); line-height: 1.4; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.actions button { min-height: 44px; font-size: 14px; padding: 8px 12px; }
+.actions button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }

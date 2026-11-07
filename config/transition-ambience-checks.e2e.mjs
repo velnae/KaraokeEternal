@@ -101,3 +101,52 @@ export async function checkAmbienceHandoff ({ player, uiBase, emit, db, bed, voi
   await expect.poll(level).toBeCloseTo(before * 2, 2)
   console.log(`PASS YouTube API fixture end → ambience ${Math.round(delay)} ms; live idle and voice-bed volume`)
 }
+
+export async function checkCurtainSilence ({ player, emit, db, effect, shortEffect }) {
+  await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.active, { timeout: 15000 }).toBeNull()
+  await expect.poll(() => player.evaluate(() => window.transitionTrace.active.includes('ambience'))).toBe(true)
+  const shortRequest = crypto.randomUUID()
+  await emit('server/ANIMATION_REQUEST', { requestId: shortRequest, clipId: shortEffect.id })
+  await expect.poll(() => db.prepare('SELECT status FROM animationInterventions WHERE requestId=?').get(shortRequest)?.status).toBe('PLAYED')
+  await expect.poll(() => player.evaluate(() => window.transitionTrace.active.includes('ambience'))).toBe(true)
+  const starts = await player.evaluate(() => window.transitionTrace.starts.length)
+  const requestId = crypto.randomUUID()
+  await emit('server/ANIMATION_REQUEST', { requestId, clipId: effect.id })
+  await expect.poll(() => db.prepare('SELECT status FROM animationInterventions WHERE requestId=?').get(requestId)?.status).toBe('PLAYED')
+  const silentSince = await player.evaluate(() => performance.now())
+  // Exercise idle retries and operator commands without allowing a song to start.
+  await emit('server/PLAYER_REQ_PAUSE')
+  await emit('server/PLAYER_REQ_PLAY')
+  await player.waitForTimeout(2200)
+  const idle = await player.evaluate(starts => window.transitionTrace.starts.slice(starts), starts)
+  assert.deepEqual(idle.map(event => event.kind), ['effect'], 'an idle curtain does not start its own bed or resume pause ambience')
+  assert.deepEqual(idle[0].active, [], 'the first/only curtain asset starts alone')
+
+  let releaseMedia
+  const mediaReady = new Promise((resolve) => {
+    releaseMedia = resolve
+  })
+  const media = '**/api/media/1?*'
+  await player.route(media, async (route) => {
+    await mediaReady
+    await route.fallback()
+  })
+  try {
+    await emit('server/QUEUE_ADD', { songId: 1, requestId: crypto.randomUUID() })
+    const queueId = db.prepare('SELECT max(queueId) id FROM queue').get().id
+    await expect(player.getByTestId('transition-scene')).toBeVisible()
+    await player.waitForTimeout(3000)
+    const waiting = await player.evaluate(since => ({ starts: window.transitionTrace.starts.filter(event => event.at > since),
+      music: window.transitionTrace.music.filter(event => event.at > since) }), silentSince)
+    assert.equal(waiting.music.length, 0, 'the fixture holds next-song loading')
+    assert.equal(waiting.starts.filter(event => event.kind === 'ambience').length, 0, 'loading the next song must stay silent after a curtain')
+    releaseMedia()
+    await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(queueId).status, { timeout: 15000 }).toBe('PLAYING')
+    await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(queueId).status, { timeout: 10000 }).toBe('PLAYED')
+    await expect.poll(() => player.evaluate(() => window.transitionTrace.active.includes('ambience')), { timeout: 10000 }).toBe(true)
+  } finally {
+    releaseMedia()
+    await player.unroute(media)
+  }
+  console.log('PASS manual curtain → silent empty queue and delayed loading → next song → normal idle ambience')
+}
