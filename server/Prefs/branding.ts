@@ -1,10 +1,10 @@
-import { MAX_BRANDING_LOGO_BYTES, normalizeBrandingSupportUrl, type ClientBranding } from '../../shared/branding.js'
+import { MAX_BRANDING_LOGO_BYTES, normalizeBrandingSupportUrl, validatePlayerBranding, type ClientBranding } from '../../shared/branding.js'
 
 export function validateBranding (input: unknown): ClientBranding {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('La marca del cliente no es válida.')
   }
-  const { name, logoSrc, supportUrl } = input as Record<string, unknown>
+  const { name, logoSrc, supportUrl, player } = input as Record<string, unknown>
   if (typeof name !== 'string' || name.trim().length > 100
     || typeof logoSrc !== 'string' || typeof supportUrl !== 'string') {
     throw new Error('Revise el nombre, el logo y el enlace de soporte.')
@@ -33,5 +33,5 @@ export function validateBranding (input: unknown): ClientBranding {
     }
   }
 
-  return { name: name.trim(), logoSrc, supportUrl: url }
+  return { name: name.trim(), logoSrc, supportUrl: url, player: validatePlayerBranding(player) }
 }

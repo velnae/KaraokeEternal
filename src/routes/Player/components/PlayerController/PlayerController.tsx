@@ -4,6 +4,8 @@ import { useAppDispatch, useAppSelector } from 'store/hooks'
 import Player from '../Player/Player'
 import PlayerTextOverlay from '../PlayerTextOverlay/PlayerTextOverlay'
 import PlayerQR from '../PlayerQR/PlayerQR'
+import PlayerBranding from 'components/PlayerBranding/PlayerBranding'
+import { getPlayerBranding } from 'shared/branding'
 import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
 import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, playerStatusCancel, type PlayerState } from '../../modules/player'
 import store from 'store/store'
@@ -452,6 +454,11 @@ const PlayerController = (props: PlayerControllerProps) => {
       {developmentTools}
     </>
   )
+  const youtubeSong = queueItem?.source === 'YOUTUBE' && !player.isAtQueueEnd && !player._isQueueStopped
+    && !foregroundScene && !showScene
+  const showBranding = youtubeSong && !player.isErrored && !player._isFetching && !player._isBetweenTracks
+    && !player._isPlayingNext && player._isReplayingQueueId === null
+  const logoVisible = showBranding && getPlayerBranding(prefs.branding.player).showLogo && !!prefs.branding.logoSrc
   const idleOverlay = (
     <PlayerTextOverlay
       queueItem={queueItem as QueueItem}
@@ -461,6 +468,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       isErrored={player.isErrored}
       width={props.width}
       height={props.height}
+      logoVisible={logoVisible}
     />
   )
 
@@ -533,8 +541,9 @@ const PlayerController = (props: PlayerControllerProps) => {
         </div>
       )}
       {!showScene && idleOverlay}
+      {showBranding && <PlayerBranding key={queueItem.queueId} branding={prefs.branding} intent={queueItem.requestIntent} isPlaying={player.isPlaying} />}
       {developmentTools}
-      {roomPrefs?.qr?.isEnabled && (
+      {roomPrefs?.qr?.isEnabled && !youtubeSong && (
         <PlayerQR
           height={props.height}
           prefs={roomPrefs.qr}

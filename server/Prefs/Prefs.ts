@@ -3,7 +3,7 @@ import sql from 'sqlate'
 import crypto from 'crypto'
 import { db } from '../lib/Database.js'
 import getLogger from '../lib/Log.js'
-import { defaultClientBranding } from '../../shared/branding.js'
+import { defaultClientBranding, getPlayerBranding } from '../../shared/branding.js'
 import { validateBranding } from './branding.js'
 import { defaultModeration, setModerationTerms, validateModeration } from '../../shared/textModeration.js'
 import { defaultMusicBlocking, validateMusicBlocking, type MusicBlocking } from '../../shared/musicBlocking.js'
@@ -35,6 +35,8 @@ class Prefs {
         prefs[row.key] = JSON.parse(row.data)
       })
     }
+
+    prefs.branding = { ...prefs.branding, player: getPlayerBranding(prefs.branding.player) }
 
     // include roles
     {

@@ -4,8 +4,9 @@ import ClientBranding from 'components/ClientBranding/ClientBranding'
 import Icon from 'components/Icon/Icon'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { saveBranding } from 'store/modules/prefs'
-import { defaultClientBranding, normalizeBrandingSupportUrl } from 'shared/branding'
+import { defaultClientBranding, getPlayerBranding, normalizeBrandingSupportUrl, validatePlayerBranding } from 'shared/branding'
 import prepareBrandingLogo from 'lib/prepareBrandingLogo'
+import PlayerBrandingFields from './PlayerBrandingFields'
 import styles from './BrandingPrefs.css'
 
 const BrandingPrefs = () => {
@@ -45,7 +46,8 @@ const BrandingPrefs = () => {
   const change = (values: Partial<typeof draft>) => {
     const next = { ...draft, ...values }
     setDraft(next)
-    setDirty(next.name !== branding.name || next.logoSrc !== branding.logoSrc || next.supportUrl !== branding.supportUrl)
+    setDirty(next.name !== branding.name || next.logoSrc !== branding.logoSrc || next.supportUrl !== branding.supportUrl
+      || JSON.stringify(getPlayerBranding(next.player)) !== JSON.stringify(getPlayerBranding(branding.player)))
     setStatus('')
     setError('')
   }
@@ -74,6 +76,16 @@ const BrandingPrefs = () => {
       supportRef.current?.focus()
       return
     }
+    try {
+      validatePlayerBranding(draft.player)
+    } catch (cause) {
+      setError((cause as Error).message)
+      const invalidColor = event.currentTarget.querySelector<HTMLInputElement>('[data-branding-color][aria-invalid="true"]')
+      const invalidTitle = Array.from(event.currentTarget.querySelectorAll<HTMLInputElement>('[data-message-title]')).find(input => !input.value.trim())
+      const invalidField = invalidColor ?? invalidTitle
+      invalidField?.focus()
+      return
+    }
     setOperation('save')
     setError('')
     setStatus('')
@@ -94,7 +106,7 @@ const BrandingPrefs = () => {
       <header className={styles.header}>
         <div>
           <h3 id={`${id}-title`}>Marca del cliente</h3>
-          <p>La identidad que verán sus usuarios al entrar al karaoke.</p>
+          <p>La identidad del acceso y los elementos de marca que acompañan las canciones.</p>
         </div>
         <span className={styles.currentBrand}>
           {branding.name.trim() ? 'En uso: marca del cliente' : 'En uso: marca del software'}
@@ -158,7 +170,7 @@ const BrandingPrefs = () => {
                 accept='image/png,image/jpeg'
                 onChange={chooseLogo}
               />
-              <p id={`${id}-logo-help`} className={styles.hint}>PNG o JPG · Hasta 5 MB. Se mostrará centrado encima de “Karaoke”.</p>
+              <p id={`${id}-logo-help`} className={styles.hint}>PNG o JPG · Hasta 5 MB. Este mismo logo se usa en el acceso y, si lo activa, en el reproductor.</p>
               {!hasName && draft.logoSrc && (
                 <p className={styles.notice}>
                   Agregue el nombre del cliente para mostrar este logo en el acceso.
@@ -211,19 +223,22 @@ const BrandingPrefs = () => {
           </figure>
         </div>
 
+        <PlayerBrandingFields branding={draft} onChange={player => change({ player })} />
+
         <div className={styles.resetRow}>
           <Icon icon='INFO_OUTLINE' size={18} />
           <p>La sección Acerca de mantiene los datos y créditos del software.</p>
           <Button
             type='button'
             className={styles.textButton}
-            disabled={!draft.name && !draft.logoSrc && !draft.supportUrl}
+            disabled={!draft.name && !draft.logoSrc && !draft.supportUrl
+              && JSON.stringify(getPlayerBranding(draft.player)) === JSON.stringify(getPlayerBranding(defaultClientBranding.player))}
             onClick={() => {
               change({ ...defaultClientBranding })
               setSupportTouched(false)
             }}
           >
-            Usar marca del software
+            Restablecer marca y opciones
           </Button>
         </div>
       </fieldset>

@@ -16,9 +16,10 @@ interface PlayerTextOverlayProps {
   isErrored: boolean
   width: number
   height: number
+  logoVisible?: boolean
 }
 
-const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueItem, queueItem, width, height }: PlayerTextOverlayProps) => {
+const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueItem, queueItem, width, height, logoVisible }: PlayerTextOverlayProps) => {
   const dispatch = useAppDispatch()
   let content
 
@@ -50,7 +51,7 @@ const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueIte
       </section>
     )
   } else {
-    content = <UpNow queueItem={queueItem} />
+    content = <UpNow queueItem={queueItem} alignLeft={logoVisible} />
   }
 
   return <div style={{ width, height }} className={styles.container}>{content}</div>

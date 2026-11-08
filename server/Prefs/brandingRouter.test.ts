@@ -3,7 +3,7 @@ import Koa from 'koa'
 import { koaBody } from 'koa-body'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { defaultClientBranding } from '../../shared/branding.js'
+import { defaultClientBranding, defaultPlayerBranding } from '../../shared/branding.js'
 import { PREFS_PUSH } from '../../shared/actionTypes.js'
 import { defaultModeration } from '../../shared/textModeration.js'
 
@@ -65,9 +65,11 @@ describe('branding HTTP and persistence contract', () => {
 
   it('persists admin changes and broadcasts only public branding', async () => {
     const branding = {
+      ...defaultClientBranding,
       name: 'Venue',
       logoSrc: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=',
       supportUrl: 'https://example.com/help',
+      player: { ...defaultPlayerBranding, showLogo: true, showAnnouncements: true, alignment: 'center', backgroundColor: '#6b5143' },
     }
     const response = await save({ ...branding, supportUrl: ' HTTPS:example.com/help ' })
     expect(response.status).toBe(200)
@@ -81,6 +83,31 @@ describe('branding HTTP and persistence contract', () => {
   it('denies non-admin writes without persisting or broadcasting', async () => {
     expect((await save({ ...defaultClientBranding, name: 'Unauthorized' }, false)).status).toBe(401)
     expect(Prefs.get().branding).toEqual(defaultClientBranding)
+    expect(emit).not.toHaveBeenCalled()
+  })
+
+  it('loads older saved brands with player controls off and the table invitation ready', async () => {
+    const legacy = { name: 'Existing venue', logoSrc: '', supportUrl: '' }
+    db.run('INSERT INTO prefs (key, data) VALUES (?, ?)', ['branding', JSON.stringify(legacy)])
+    expect(await (await fetch(base)).json()).toMatchObject({ branding: { ...legacy, player: defaultPlayerBranding } })
+    expect(JSON.parse(db.get<{ data: string }>('SELECT data FROM prefs WHERE key = ?', ['branding'])!.data)).toEqual(legacy)
+  })
+
+  it('rejects invalid announcements without changing the brand or broadcasting', async () => {
+    const branding = { ...defaultClientBranding, name: 'Original', player: { ...defaultPlayerBranding, showLogo: true } }
+    await save(branding)
+    emit.mockClear()
+    expect((await save({ ...branding, player: { ...branding.player, messages: [{ title: '', text: 'Invalid' }] } })).status).toBe(422)
+    expect(Prefs.get().branding).toEqual(branding)
+    expect(emit).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid background atomically', async () => {
+    const branding = { ...defaultClientBranding, player: { ...defaultPlayerBranding, alignment: 'center', backgroundColor: '#6b5143' } }
+    await save(branding)
+    emit.mockClear()
+    expect((await save({ ...branding, player: { ...branding.player, backgroundColor: 'transparent' } })).status).toBe(422)
+    expect(Prefs.get().branding).toEqual(branding)
     expect(emit).not.toHaveBeenCalled()
   })
 
