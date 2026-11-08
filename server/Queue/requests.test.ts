@@ -81,6 +81,28 @@ describe('durable participant request receipts', () => {
     expect(Queue.countPending(1, 1)).toBe(1)
   })
 
+  it('rejects a direct singing request using the resolved title and allows retrying it for listening', async () => {
+    vi.mocked(youtubeSongSource.resolve).mockResolvedValue({ ...song, title: 'Antología (video oficial)' })
+    const payload = { ...request('karaoke-title-0001').payload, title: 'Forged Karaoke title', requestIntent: 'SING' }
+    const ack = vi.fn()
+    await handlers[QUEUE_ADD](socket, { payload }, ack)
+    expect(ack.mock.calls[0][0]).toMatchObject({ type: QUEUE_ADD + '_ERROR', payload: { code: 'KARAOKE_TITLE_REQUIRED' } })
+    expect(Queue.get(1).result).toHaveLength(0)
+    expect(Queue.countPending(1, 1)).toBe(0)
+    expect(Queue.getRequest(1, 1, payload.requestId)).toBeUndefined()
+    await handlers[QUEUE_ADD](socket, { payload: { ...payload, requestIntent: 'LISTEN' } }, ack)
+    expect(ack.mock.calls[1][0].payload.requestIntent).toBe('LISTEN')
+    expect(Queue.countPending(1, 1)).toBe(1)
+  })
+
+  it.each(['Karaokanta - Antología', 'Canción KARAOKE con voz guía'])('accepts a singing request matching the prefix: %s', async (title) => {
+    vi.mocked(youtubeSongSource.resolve).mockResolvedValue({ ...song, title })
+    const ack = vi.fn()
+    await handlers[QUEUE_ADD](socket, { payload: { ...request('karaoke-title-0001').payload, requestIntent: 'SING' } }, ack)
+    expect(ack.mock.calls[0][0].payload.requestIntent).toBe('SING')
+    expect(Queue.get(1).entities[1].title).toBe(title)
+  })
+
   it('does not infer karaoke from a video title and rejects invalid intent without inserting a request', async () => {
     await expect(handlers[QUEUE_ADD](socket, { payload: { ...request('request-intent-01').payload, requestIntent: 'AUTO_DETECT' } }, vi.fn())).rejects.toThrow('Elija')
     expect(Queue.get(1).result).toHaveLength(0)
@@ -92,7 +114,7 @@ describe('durable participant request receipts', () => {
   it.each([420, 421])('revalidates the duration at enqueue, even without a prior search (%i seconds)', async (duration) => {
     const source = createYouTubeSongSource({ apiKey: 'test', fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [{
       id: song.sourceId,
-      snippet: { title: 'Song', channelTitle: 'Singer', categoryId: '10', liveBroadcastContent: 'none' },
+      snippet: { title: 'Song Karaoke', channelTitle: 'Singer', categoryId: '10', liveBroadcastContent: 'none' },
       contentDetails: { duration: `PT${duration}S` },
       status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
     }] }))) })

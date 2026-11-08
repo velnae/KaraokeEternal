@@ -18,15 +18,21 @@ const listen = async (server) => {
   return server.address().port
 }
 const ids = ['fixture0001', 'fixture0002', 'fixture0003']
+const nonKaraokeId = 'fixture0004'
+const titles = ['Canción Karaoke', 'Karaokanta - Canción', 'Canción KARAOKE con voz guía']
 let searchCalls = 0
+let lastSearchQuery = ''
 const provider = createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost')
-  if (url.pathname.endsWith('/search')) searchCalls++
+  if (url.pathname.endsWith('/search')) {
+    searchCalls++
+    lastSearchQuery = url.searchParams.get('q')
+  }
   res.setHeader('Content-Type', 'application/json')
   res.end(JSON.stringify({ items: url.pathname.endsWith('/search')
-    ? ids.map(videoId => ({ id: { videoId } }))
+    ? [...ids, nonKaraokeId].map(videoId => ({ id: { videoId } }))
     : url.searchParams.get('id').split(',').map(id => ({
-        id, snippet: { title: `Canción ${id}`, channelTitle: 'Canal de prueba', categoryId: '10', liveBroadcastContent: 'none', thumbnails: {} },
+        id, snippet: { title: titles[ids.indexOf(id)] ?? `Canción ${id} video oficial`, channelTitle: 'Canal de prueba', categoryId: '10', liveBroadcastContent: 'none', thumbnails: {} },
         contentDetails: { duration: 'PT3M' }, status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
       })) }))
 })
@@ -84,7 +90,7 @@ try {
   const page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(`${uiBase}account?roomId=1`)
-  await page.getByLabel('Tu nombre').fill('Cliente vista previa')
+  await page.getByLabel('Tu nombre').fill('Cliente prueba')
   await page.getByRole('button', { name: 'Entrar', exact: true }).click()
   await expect(page).toHaveURL(`${uiBase}library`)
   const search = async () => {
@@ -95,6 +101,34 @@ try {
     await input.press('Enter')
     await expect(page.locator('article[data-source-id]')).toHaveCount(3)
   }
+  const input = page.getByRole('searchbox', { name: 'Buscar canción o artista' })
+  await input.fill('Canción')
+  await input.press('Enter')
+  await expect(page.locator('article[data-source-id]')).toHaveCount(4)
+  assert.equal(lastSearchQuery, 'Canción video oficial')
+  await page.getByRole('radio', { name: 'Cantar karaoke', exact: true }).focus()
+  await page.keyboard.press('Space')
+  await input.press('Enter')
+  await expect(page.locator('article[data-source-id]')).toHaveCount(3)
+  assert.equal(lastSearchQuery, 'Canción karaoke')
+  await expect(page.getByRole('heading', { name: titles[1], exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: titles[2], exact: true })).toBeVisible()
+  await input.fill(`https://youtu.be/${nonKaraokeId}`)
+  await input.press('Enter')
+  const titleNotice = page.getByText('Para cantar, elige un video con «karaoke» o «Karaokanta» en el título. Busca otra versión o cambia a «Escuchar música».', { exact: true })
+  await expect(titleNotice).toBeVisible()
+  await expect(page.locator('article[data-source-id]')).toHaveCount(0)
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 })
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+    await page.screenshot({ path: path.join(data, `karaoke-title-${width}.png`) })
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('radio', { name: 'Escuchar música', exact: true }).check()
+  await input.press('Enter')
+  await expect(page.locator(`[data-source-id="${nonKaraokeId}"]`)).toBeVisible()
+  assert.equal(count(), 0)
+  pass('Karao title filter, guide vocals allowed, keyboard mode switch and direct-link recovery to listening')
   await search()
   const searchesBeforeClear = searchCalls
   const clearSearch = page.getByRole('button', { name: 'Limpiar búsqueda', exact: true })

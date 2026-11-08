@@ -25,7 +25,7 @@ import styles from './ParticipantView.css'
 import QueueGreeting from 'components/Greetings/QueueGreeting'
 import GreetingComposer from 'components/Greetings/GreetingComposer'
 import useGreetings from 'components/Greetings/useGreetings'
-import { youtubeSearchCanRetry, youtubeSearchError, youtubeVideoId } from 'shared/youtubeSearch'
+import { isKaraokeTitle, karaokeTitleRequiredMessage, youtubeSearchCanRetry, youtubeSearchError, youtubeVideoId } from 'shared/youtubeSearch'
 import { requestIntentLabels, type RequestIntent } from 'shared/requestIntent'
 import searchStyles from 'components/SongSearch/SongSearch.css'
 import { musicBlockedStatus, musicBlockedMessage, musicFilteredMessage, musicAllBlockedMessage } from 'shared/musicBlocking'
@@ -51,6 +51,8 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
   const [submitted, setSubmitted] = useState<{ query: string, intent: RequestIntent } | null>(null)
   const search = useYouTubeSearch(page === 'search')
   const matchesSubmission = submitted?.query === query.trim() && submitted.intent === intent
+  const results = submitted?.intent === 'SING' ? search.results.filter(result => isKaraokeTitle(result.title)) : search.results
+  const karaokeFilteredCount = search.results.length - results.length
   const [cancelling, setCancelling] = useState<number | null>(null)
   const [cancelMessage, setCancelMessage] = useState('')
   const replacementId = Number(new URLSearchParams(location.search).get('replace')) || undefined
@@ -317,12 +319,15 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
                 {youtubeSearchCanRetry(search.code) && <Button disabled={!connected} onClick={() => { void search.submit(search.query) }}>Reintentar</Button>}
               </div>
             )}
-            {matchesSubmission && search.query && !search.isLoading && !search.error && search.results.length === 0 && (
+            {matchesSubmission && search.query && !search.isLoading && !search.error && results.length === 0 && karaokeFilteredCount === 0 && (
               <p className={styles.empty}>{search.blockedCount ? youtubeVideoId(search.query) ? musicBlockedMessage : musicAllBlockedMessage : 'Sin resultados.'}</p>
             )}
             {matchesSubmission && !search.isLoading && !search.error && search.blockedCount > 0 && search.results.length > 0 && <p className={styles.notice}>{musicFilteredMessage}</p>}
+            {matchesSubmission && !search.isLoading && !search.error && karaokeFilteredCount > 0 && (
+              <p className={styles.notice}>{results.length === 0 ? karaokeTitleRequiredMessage : 'Solo mostramos videos con «karao» en el inicio de una palabra del título, como «karaoke» o «Karaokanta».'}</p>
+            )}
           </div>
-          {matchesSubmission && search.results.map((result) => {
+          {matchesSubmission && results.map((result) => {
             const receipt = receipts[result.sourceId]
             const active = own.find(item => item.externalId === result.sourceId && (isPendingRequest(item) || item.status === 'PLAYING'))
             return (
@@ -352,7 +357,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             <article key={receipt.requestId} className={styles.card}>
               <h2 translate='no'>{receipt.title}</h2>
               {receipt.phase !== 'sending' && <p role='status'>{receipt.phase === 'error' ? receipt.message : 'Sin confirmar'}</p>}
-              {receipt.code === 'MUSIC_BLOCKED'
+              {['MUSIC_BLOCKED', 'KARAOKE_TITLE_REQUIRED'].includes(receipt.code ?? '')
                 ? <Link to='/library'>Buscar otra canción</Link>
                 : <Button disabled={!connected || receipt.phase === 'sending' || (receipt.phase === 'error' && !canRequest)} onClick={() => { void requestSong(receipt.sourceId, receipt.title) }}>{receipt.phase === 'sending' ? 'Enviando…' : receipt.phase === 'error' ? 'Reintentar' : 'Comprobar pedido'}</Button>}
             </article>

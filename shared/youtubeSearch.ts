@@ -10,6 +10,10 @@ export const youtubeSearchModes = [
 
 export type YouTubeSearchMode = typeof youtubeSearchModes[number]['value']
 
+const karaokeTitlePattern = new RegExp('(?:^|[^\\p{L}\\p{N}_])karao', 'iu')
+export const isKaraokeTitle = (title: string): boolean => karaokeTitlePattern.test(title)
+export const karaokeTitleRequiredMessage = 'Para cantar, elige un video con «karaoke» o «Karaokanta» en el título. Busca otra versión o cambia a «Escuchar música».'
+
 export function youtubeVideoId (query: string): string | null {
   try {
     const url = new URL(query.trim())

@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { youtubeQuery, youtubeVideoId, youtubeSearchCanRetry, youtubeSearchError } from './youtubeSearch.js'
+import { isKaraokeTitle, youtubeQuery, youtubeVideoId, youtubeSearchCanRetry, youtubeSearchError } from './youtubeSearch.js'
 
 describe('YouTube search intent', () => {
+  it.each(['Karaokanta - Antología', 'Antología (KARAOKE)', 'Karaokes de ayer', 'Canción — karao', 'Karaoke con voz guía', 'Karaoke with guide vocals'])('accepts karaoke title prefixes without excluding vocal versions: %s', (title) => {
+    expect(isKaraokeTitle(title)).toBe(true)
+  })
+
+  it.each(['Antología (video oficial)', 'Instrumental sin voz', 'MiKaraoke', 'éKaraoke', ''])('rejects titles without a word starting with karao: %s', (title) => {
+    expect(isKaraokeTitle(title)).toBe(false)
+  })
+
   it.each([
     'https://youtu.be/AAAAAAAAAAA?si=example',
     'https://www.youtube.com/watch?v=AAAAAAAAAAA&t=10',

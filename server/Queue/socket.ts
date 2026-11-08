@@ -196,8 +196,9 @@ const ACTION_HANDLERS = {
       if (payload.greeting !== undefined) db.exec('RELEASE request_greeting')
     } catch (error) {
       if (payload.greeting !== undefined) db.exec('ROLLBACK TO request_greeting; RELEASE request_greeting')
-      if ((error as { code?: string }).code === 'MUSIC_BLOCKED') {
-        return acknowledge({ type: QUEUE_ADD + '_ERROR', error: (error as Error).message, payload: { code: 'MUSIC_BLOCKED' } })
+      const code = (error as { code?: string }).code
+      if (code === 'MUSIC_BLOCKED' || code === 'KARAOKE_TITLE_REQUIRED') {
+        return acknowledge({ type: QUEUE_ADD + '_ERROR', error: (error as Error).message, payload: { code } })
       }
       throw error
     }

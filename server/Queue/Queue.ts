@@ -11,6 +11,7 @@ import {
 } from '../../shared/queueLifecycle.js'
 import { getResolvedSongValidationError, type ResolvedSong } from '../../shared/songSource.js'
 import { requestIntent, type RequestIntent } from '../../shared/requestIntent.js'
+import { isKaraokeTitle, karaokeTitleRequiredMessage } from '../../shared/youtubeSearch.js'
 import Prefs from '../Prefs/Prefs.js'
 import { findMusicBlock, musicBlockedMessage, type MusicBlocking } from '../../shared/musicBlocking.js'
 
@@ -69,6 +70,11 @@ class Queue {
     if (!song.isPlayable) throw new Error('La canción no se puede reproducir')
     Queue.assertMusicAllowed(song)
 
+    const normalizedIntent = origin === 'HOUSE' ? 'LISTEN' : requestIntent(intent)
+    if (song.source === 'YOUTUBE' && normalizedIntent === 'SING' && !isKaraokeTitle(song.title)) {
+      throw Object.assign(new Error(karaokeTitleRequiredMessage), { code: 'KARAOKE_TITLE_REQUIRED' })
+    }
+
     const replacement = replacesQueueId === undefined ? undefined : this.getReplacement(roomId, userId, replacesQueueId)
     if (replacement && origin !== 'PARTICIPANT') throw new Error('El reemplazo debe ser un pedido de participante')
 
@@ -89,7 +95,7 @@ class Queue {
       )
     )`)
     fields.set('origin', origin)
-    fields.set('requestIntent', origin === 'HOUSE' ? 'LISTEN' : requestIntent(intent))
+    fields.set('requestIntent', normalizedIntent)
     fields.set('source', song.source)
     fields.set('status', status)
     fields.set('externalId', song.externalId)
