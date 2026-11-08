@@ -105,7 +105,7 @@ export default function LogoImageFields ({ logo, hasBrandLogo, onChange, onUploa
               {logo.mode === 'alternating' && (
                 <>
                   <NumberControl label='Tiempo estático (s)' value={logo.staticSeconds} limit={displayLimits.logo.staticSeconds} onChange={staticSeconds => onChange({ staticSeconds })} />
-                  <NumberControl label='Tiempo animado (s)' value={logo.animatedSeconds} limit={displayLimits.logo.animatedSeconds} onChange={animatedSeconds => onChange({ animatedSeconds })} />
+                  <NumberControl label='Tiempo animado (s)' value={logo.animatedSeconds} limit={displayLimits.logo.animatedSeconds} inputStep={displayLimits.logo.animatedSeconds[2]} onChange={animatedSeconds => onChange({ animatedSeconds })} />
                 </>
               )}
             </>

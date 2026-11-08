@@ -1,0 +1,25 @@
+[Unit]
+Description=Karaoke Eternal
+After=network.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=karaoke
+Group=psacln
+WorkingDirectory=/var/www/vhosts/karaoke.puyu.pe/karaoke-current
+Environment=NODE_ENV=production
+Environment=KES_HOST=127.0.0.1
+Environment=PATH=/opt/plesk/node/24/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/plesk/node/24/bin/node --env-file=/var/www/vhosts/karaoke.puyu.pe/httpdocs/.env build/server/main.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=90
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

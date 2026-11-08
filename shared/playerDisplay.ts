@@ -50,7 +50,7 @@ export interface PlayerDisplaySettings {
 
 // Values in pixels are measured on the FHD reference; offsets/widths are percentages.
 export const displayLimits = {
-  logo: { scale: [25, 300, 5], marginX: [0, 20, 0.5], marginY: [0, 20, 0.5], opacity: [10, 100, 5], staticSeconds: [5, 300, 1], animatedSeconds: [1, 30, 1] },
+  logo: { scale: [25, 300, 5], marginX: [0, 20, 0.5], marginY: [0, 20, 0.5], opacity: [10, 100, 5], staticSeconds: [5, 300, 1], animatedSeconds: [1, 30, 0.01] },
   announcement: {
     width: [20, 96, 0.1], offsetX: [-20, 20, 0.5], marginY: [0, 20, 0.5], padding: [0, 60, 1],
     textScale: [60, 180, 5], backgroundOpacity: [20, 100, 5], borderWidth: [0, 8, 0.5],

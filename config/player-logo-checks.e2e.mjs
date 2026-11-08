@@ -80,7 +80,16 @@ export async function checkPlayerLogo ({ editor, player, call, emit, uiBase, dat
   const motion = await upload('gif', gif)
   await expect(form.getByLabel('Presentación del logo', { exact: true })).toHaveValue('alternating')
   await form.getByRole('spinbutton', { name: 'Tiempo estático (s)', exact: true }).fill('5')
-  await form.getByRole('spinbutton', { name: 'Tiempo animado (s)', exact: true }).fill('3')
+  const animatedTime = form.getByRole('spinbutton', { name: 'Tiempo animado (s)', exact: true })
+  const animatedSlider = form.getByRole('slider', { name: 'Tiempo animado (s) (deslizador)', exact: true })
+  await animatedTime.fill('3.24')
+  await animatedTime.press('ArrowUp')
+  await expect(animatedTime).toHaveValue('3.25')
+  await animatedSlider.focus()
+  await animatedSlider.press('ArrowRight')
+  await expect(animatedTime).toHaveValue('3.26')
+  await animatedSlider.press('ArrowLeft')
+  await expect(animatedTime).toHaveValue('3.25')
   let downloads = 0
   player.on('response', (response) => {
     if (response.url().endsWith(`/api/player-logo-images/${motion.id}/image`) && response.status() === 200) downloads++
@@ -131,7 +140,7 @@ export async function checkPlayerLogo ({ editor, player, call, emit, uiBase, dat
   assert.equal(config.logo.staticImageId, still.id)
   assert.equal(config.logo.animatedImageId, motion.id)
   assert.equal(config.logo.staticSeconds, 5)
-  assert.equal(config.logo.animatedSeconds, 3)
+  assert.equal(config.logo.animatedSeconds, 3.25)
   await form.getByRole('button', { name: 'Quitar PNG', exact: true }).click()
   await form.getByLabel('Presentación del logo', { exact: true }).selectOption('animated')
   await save()

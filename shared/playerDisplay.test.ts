@@ -3,6 +3,12 @@ import { defaultPlayerDisplay, displayLimits, resetDisplayAppearance, validatePl
 import { resolvePlayerLogo } from './playerLogo.js'
 
 describe('player display contract', () => {
+  it.each([1.01, 3.25, 6.75, 29.99])('preserves fractional animated duration %s', (animatedSeconds) => {
+    const settings = validatePlayerDisplay({ logo: { animatedSeconds } })
+    expect(settings.logo.animatedSeconds).toBe(animatedSeconds)
+    expect(resetDisplayAppearance(settings).logo.animatedSeconds).toBe(animatedSeconds)
+  })
+
   it('keeps legacy brand source and supports independent PNG, GIF-only and alternating resources', () => {
     const png = '11111111-1111-1111-1111-111111111111'
     const gif = '22222222-2222-2222-2222-222222222222'

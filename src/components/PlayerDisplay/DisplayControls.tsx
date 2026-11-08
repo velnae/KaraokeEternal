@@ -2,14 +2,14 @@ import React, { useId } from 'react'
 import { isDisplayColor } from 'shared/playerDisplay'
 import styles from './PlayerDisplaySettings.css'
 
-export function NumberControl ({ label, value, limit, onChange }: { label: string, value: number, limit: readonly number[], onChange(value: number): void }) {
+export function NumberControl ({ label, value, limit, inputStep = 'any', onChange }: { label: string, value: number, limit: readonly number[], inputStep?: number | 'any', onChange(value: number): void }) {
   const id = useId()
   return (
     <div className={styles.field}>
       <label htmlFor={id}>{label}</label>
       <div className={styles.numberControls}>
         <input type='range' aria-label={`${label} (deslizador)`} min={limit[0]} max={limit[1]} step={limit[2]} value={Number.isFinite(value) ? value : limit[0]} onChange={event => onChange(event.currentTarget.valueAsNumber)} />
-        <input id={id} type='number' required min={limit[0]} max={limit[1]} step='any' value={Number.isFinite(value) ? value : ''} onChange={event => onChange(event.currentTarget.valueAsNumber)} />
+        <input id={id} type='number' required min={limit[0]} max={limit[1]} step={inputStep} value={Number.isFinite(value) ? value : ''} onChange={event => onChange(event.currentTarget.valueAsNumber)} />
       </div>
     </div>
   )

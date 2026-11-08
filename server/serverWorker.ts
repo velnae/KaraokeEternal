@@ -97,7 +97,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     IPC.use(IPCMediaActions(io))
 
     // success callback in 3rd arg
-    server.listen(env.KES_PORT, () => {
+    server.listen(env.KES_PORT, process.env.KES_HOST || undefined, () => {
       const port = server.address().port
       const url = `http://${getIPAddress()}${port === 80 ? '' : ':' + port}${urlPath}`
       log.info(`Web server running at ${url}`)
