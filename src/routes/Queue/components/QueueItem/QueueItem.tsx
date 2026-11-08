@@ -4,9 +4,11 @@ import { useSwipeable } from 'react-swipeable'
 import { useLongPress } from 'use-long-press'
 import { useAppDispatch } from 'store/hooks'
 import Button from 'components/Button/Button'
+import Icon from 'components/Icon/Icon'
 import ButtonStar from 'components/ButtonStar/ButtonStar'
 import Buttons from 'components/Buttons/Buttons'
 import UserImage from 'components/UserImage/UserImage'
+import SongArtwork from 'components/SongArtwork/SongArtwork'
 import { requestPlayNext, requestReplay } from 'store/modules/status'
 import { showSongInfo } from 'store/modules/songInfo'
 import { toggleSongStarred } from 'store/modules/userStars'
@@ -27,6 +29,8 @@ import QueueItemMenu, { type QueueMenuAction } from './QueueItemMenu'
 const LONG_PRESS_THRESHOLD_MS = 700
 
 interface QueueItemProps {
+  thumbnailUrl?: string | null
+  durationSeconds?: number | null
   canRecover?: boolean
   greeting?: Greeting
   greetingsPaused?: boolean
@@ -69,6 +73,8 @@ interface QueueItemProps {
 }
 
 const QueueItem = ({
+  thumbnailUrl,
+  durationSeconds,
   canRecover = false,
   greeting,
   greetingsPaused,
@@ -146,6 +152,7 @@ const QueueItem = ({
 
   const handleErrorInfoClick = () => dispatch(showErrorMessage(errorMessage))
   const isLocal = source === 'LOCAL' && typeof songId === 'number'
+  const isHouseCard = isAdmin && origin === 'HOUSE'
   const canModerate = isAdmin && status === 'PENDING_APPROVAL'
   const handleInfoClick = () => {
     if (typeof songId === 'number') dispatch(showSongInfo(songId))
@@ -176,7 +183,18 @@ const QueueItem = ({
   const selectMenuAction = (action: QueueMenuAction) => {
     closeMenu()
     if (action === 'remove') handleRemoveClick()
-    else if (action === 'upcoming') {
+    else if (action === 'move') handleMoveClick()
+    else if (action === 'requeue') handleRequeueClick()
+    else if (action === 'replay') handleReplayClick()
+    else if (action === 'skip') handleSkipClick()
+    else if (action === 'info') handleInfoClick()
+    else if (action === 'star') handleStarClick()
+    else if (action === 'skip-upcoming') {
+      if (window.confirm(`¿Saltar esta canción y quitar todas las próximas canciones de "${userDisplayName}"?`)) {
+        onRemoveUpcoming(userId)
+        handleSkipClick()
+      }
+    } else if (action === 'upcoming') {
       if (window.confirm(`¿Quitar todos los próximos pedidos de «${userDisplayName}»? Su música no quedará bloqueada.`)) onRemoveUpcoming(userId)
     } else {
       const rule: MusicBlockRule = action === 'resource'
@@ -226,59 +244,83 @@ const QueueItem = ({
 
   return (
     <div
-      {...swipeHandlers}
+      {...(isAdmin ? {} : swipeHandlers)}
       data-queue-id={queueId}
       data-status={status}
       className={clsx(
         styles.container,
+        isAdmin && styles.operatorCard,
         isCurrent && styles.current,
         isCurrent && !isPlaying && styles.paused,
       )}
       style={{ '--progress': (isCurrent && pctPlayed < 2 ? 2 : pctPlayed) + '%' } as React.CSSProperties}
     >
       <div className={styles.content}>
-        <div className={clsx(styles.imageContainer, isPlayed && styles.greyed)}>
-          <UserImage userId={userId} dateUpdated={userDateUpdated} />
-          <div className={styles.waitContainer}>
-            {isUpcoming && (
-              <div className={clsx(styles.wait, isOwner && styles.isOwner)}>
-                {wait}
-              </div>
-            )}
+        {isAdmin && (
+          <div className={clsx(styles.artwork, isPlayed && styles.greyed)}>
+            <SongArtwork thumbnailUrl={thumbnailUrl} durationSeconds={durationSeconds} />
           </div>
-        </div>
+        )}
+        {!isAdmin && (
+          <div className={clsx(styles.imageContainer, isPlayed && styles.greyed)}>
+            <UserImage userId={userId} dateUpdated={userDateUpdated} />
+            <div className={styles.waitContainer}>
+              {!isAdmin && isUpcoming && (
+                <div className={clsx(styles.wait, isOwner && styles.isOwner)}>
+                  {wait}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className={clsx(styles.primary, isPlayed && styles.greyed)} translate='no'>
           <div className={styles.innerPrimary}>
             <h2 id={`queue-title-${queueId}`} className={styles.title}>{title}</h2>
             <div className={styles.artist}>{artist}</div>
           </div>
-          <div className={clsx(styles.user, isOwner && styles.isOwner)}>
-            {userDisplayName}
-            {tableLabelSnapshot && (
+          <div className={styles.context}>
+            <div className={clsx(styles.user, !isHouseCard && isOwner && styles.isOwner)}>
+              {isAdmin && <Icon icon={isHouseCard ? 'HOME' : 'PERSON'} size={16} />}
               <span>
-                {' '}
-                ·
-                {tableLabelSnapshot}
+                {isHouseCard ? 'De la casa' : userDisplayName}
+                {tableLabelSnapshot && (
+                  <span>
+                    {' '}
+                    ·
+                    {tableLabelSnapshot}
+                  </span>
+                )}
               </span>
-            )}
+            </div>
+            {isAdmin && isUpcoming && wait && <span className={styles.waitEstimate} aria-label={`Espera aproximada: ${wait}`}>{`≈ ${wait}`}</span>}
           </div>
           <div className={styles.badges}>
             {recovering && <span role='status'>Reintentando pedido…</span>}
-            <div className={clsx(styles.status, (status === 'REJECTED' || status === 'FAILED') && styles.rejected)}>
-              {statusLabel[status]}
-              {requestIntent !== 'UNKNOWN' && ` · ${requestIntentLabels[requestIntent]}`}
-            </div>
-            {origin !== 'PARTICIPANT' && <div className={clsx(styles.origin, styles[origin.toLowerCase()])}>{origin === 'HOUSE' ? 'De la casa' : 'Operador'}</div>}
-            <div className={clsx(styles.source, source === 'YOUTUBE' && styles.youtube)}>
-              {source === 'YOUTUBE' ? 'YouTube' : 'Local'}
-            </div>
+            {(!isAdmin || status !== 'APPROVED' || isCurrent) && (
+              <div className={clsx(styles.status, (status === 'REJECTED' || status === 'FAILED') && styles.rejected)}>
+                {isAdmin && isCurrent ? isErrored ? 'Error de reproducción' : isPlaying ? 'En reproducción' : 'En pausa' : statusLabel[status]}
+                {!isAdmin && requestIntent !== 'UNKNOWN' && ` · ${requestIntentLabels[requestIntent]}`}
+              </div>
+            )}
+            {isAdmin && requestIntent !== 'UNKNOWN' && (
+              <span className={clsx(styles.intent, requestIntent === 'SING' && styles.karaoke)} data-intent={requestIntent} aria-label={requestIntentLabels[requestIntent]}>
+                {requestIntent === 'SING' && <Icon icon='MICROPHONE' size={14} />}
+                {requestIntent === 'SING' ? 'Karaoke' : 'Escuchar'}
+              </span>
+            )}
+            {origin !== 'PARTICIPANT' && !isHouseCard && <div className={clsx(styles.origin, styles[origin.toLowerCase()])}>{origin === 'HOUSE' ? 'De la casa' : 'Operador'}</div>}
+            {(!isAdmin || source === 'LOCAL') && (
+              <div className={clsx(styles.source, source === 'YOUTUBE' && styles.youtube)}>
+                {source === 'YOUTUBE' ? 'YouTube' : 'Local'}
+              </div>
+            )}
           </div>
         </div>
 
         <Buttons btnWidth={56} isExpanded={isExpanded} className={styles.btnContainer}>
           {canRecover && <Button icon='REPLAY' aria-label='Reintentar conservando la antigüedad' title='Reintentar conservando la antigüedad' disabled={recovering} onClick={() => { void handleRecoverClick() }} />}
-          {(isAdmin || isInfoable || isMovable || isPlayed || isReplayable || isRemovable || isSkippable) && (
+          {!isAdmin && (isInfoable || isMovable || isPlayed || isReplayable || isRemovable || isSkippable) && (
             <Button
               icon={isExpanded ? 'CHEVRON_UP' : 'MORE_HORIZ'}
               aria-label={isExpanded ? 'Menos acciones' : 'Más acciones'}
@@ -295,7 +337,7 @@ const QueueItem = ({
               onClick={handleErrorInfoClick}
             />
           )}
-          {isLocal && (
+          {!isAdmin && isLocal && (
             <ButtonStar
               className={styles.btnStar}
               isStarred={isStarred}
@@ -303,7 +345,7 @@ const QueueItem = ({
               count={starCount}
             />
           )}
-          {isInfoable && (
+          {!isAdmin && isInfoable && (
             <Button
               className={styles.active}
               data-hide
@@ -332,7 +374,7 @@ const QueueItem = ({
               Rechazar
             </Button>
           )}
-          {isMovable && (
+          {!isAdmin && isMovable && (
             <Button
               className={clsx(styles.btnMove, styles.active)}
               data-hide
@@ -341,7 +383,7 @@ const QueueItem = ({
               onClick={handleMoveClick}
             />
           )}
-          {isPlayed && (
+          {!isAdmin && isPlayed && (
             <Button
               className={clsx(styles.btnAdd, styles.active)}
               data-hide
@@ -350,7 +392,7 @@ const QueueItem = ({
               onClick={handleRequeueClick}
             />
           )}
-          {isReplayable && (
+          {!isAdmin && isReplayable && (
             <Button
               className={clsx(styles.active, styles.danger)}
               data-hide
@@ -361,10 +403,9 @@ const QueueItem = ({
           )}
           {isAdmin && (
             <Button
-              className={styles.danger}
-              icon='DELETE'
-              aria-label='Quitar o bloquear'
-              title='Quitar o bloquear'
+              icon='MORE_HORIZ'
+              aria-label='Acciones de la canción'
+              title='Acciones de la canción'
               aria-describedby={`queue-title-${queueId}`}
               aria-haspopup='menu'
               aria-expanded={!!menuAnchor}
@@ -410,7 +451,7 @@ const QueueItem = ({
               {...bindRemovePressHandlers()}
             />
           )}
-          {isSkippable && (
+          {!isAdmin && isSkippable && (
             <Button
               className={clsx(styles.btnPlayNext, styles.danger)}
               data-hide
@@ -437,7 +478,7 @@ const QueueItem = ({
         </Buttons>
         {greeting && <QueueGreeting operator greeting={greeting} descriptionId={`queue-title-${queueId}`} paused={greetingsPaused} busy={greetingBusy} onRemove={onRemoveGreeting} />}
       </div>
-      {isAdmin && menuAnchor && <QueueItemMenu id={menuId} anchor={menuAnchor} title={title} local={isLocal} removable={isRemovable} focusLast={focusLast} onClose={closeMenu} onSelect={selectMenuAction} />}
+      {isAdmin && menuAnchor && <QueueItemMenu id={menuId} anchor={menuAnchor} title={title} local={isLocal} removable={isRemovable} movable={isMovable} replayable={isReplayable} requeueable={isPlayed} skippable={isSkippable} infoable={isInfoable} starred={isStarred} focusLast={focusLast} onClose={closeMenu} onSelect={selectMenuAction} />}
     </div>
   )
 }

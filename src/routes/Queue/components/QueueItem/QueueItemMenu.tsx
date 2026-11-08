@@ -4,14 +4,20 @@ import Icon from 'components/Icon/Icon'
 import theme from 'styles/karaokeTheme.css'
 import styles from './QueueItemMenu.css'
 
-export type QueueMenuAction = 'remove' | 'resource' | 'song' | 'artist' | 'upcoming'
+export type QueueMenuAction = 'remove' | 'resource' | 'song' | 'artist' | 'upcoming' | 'move' | 'requeue' | 'replay' | 'skip' | 'skip-upcoming' | 'info' | 'star'
 
-export default function QueueItemMenu ({ id, anchor, title, local, removable, focusLast, onClose, onSelect }: {
+export default function QueueItemMenu ({ id, anchor, title, local, removable, movable, replayable, requeueable, skippable, infoable, starred, focusLast, onClose, onSelect }: {
   id: string
   anchor: HTMLButtonElement
   title: string
   local: boolean
   removable: boolean
+  movable: boolean
+  replayable: boolean
+  requeueable: boolean
+  skippable: boolean
+  infoable: boolean
+  starred: boolean
   focusLast: boolean
   onClose: (restoreFocus?: boolean) => void
   onSelect: (action: QueueMenuAction) => void
@@ -98,7 +104,14 @@ export default function QueueItemMenu ({ id, anchor, title, local, removable, fo
 
   // The portal keeps the menu outside clipped/animated queue cards.
   return createPortal(
-    <div ref={menu} id={id} className={`${theme.theme} ${styles.menu}`} style={position} role='menu' aria-label={`Quitar o bloquear: ${title}`} onKeyDown={keyDown}>
+    <div ref={menu} id={id} className={`${theme.theme} ${styles.menu}`} style={position} role='menu' aria-label={`Acciones: ${title}`} onKeyDown={keyDown}>
+      {movable && item('move', 'Mover canción al inicio', 'Adelantar dentro de su turno', 'MOVE_TOP')}
+      {skippable && item('skip', 'Reproducir siguiente canción', 'Terminar la canción actual', 'PLAY_NEXT')}
+      {replayable && item('replay', 'Volver a reproducir canción', 'Reproducir desde el comienzo', 'REPLAY')}
+      {requeueable && item('requeue', 'Volver a agregar a la cola', 'Crear un nuevo pedido', 'PLUS')}
+      {local && item('star', starred ? 'Quitar de favoritas' : 'Marcar como favorita', 'Tus canciones guardadas', 'STAR_FULL')}
+      {infoable && item('info', 'Información de la canción', 'Archivo y versiones disponibles', 'INFO_OUTLINE')}
+      {(movable || skippable || replayable || requeueable || local || infoable) && <div role='separator' className={styles.separator} />}
       {removable && item('remove', 'Quitar de la cola', 'Solo retira este pedido', 'DELETE')}
       {removable && <div role='separator' className={styles.separator} />}
       {item('resource', local ? 'Bloquear este archivo' : 'Bloquear este video', local ? 'Solo esta canción local' : 'Solo esta versión de YouTube', 'CLEAR')}
@@ -106,6 +119,7 @@ export default function QueueItemMenu ({ id, anchor, title, local, removable, fo
       {item('artist', 'Bloquear artista…', 'Todo su repertorio', 'PERSON')}
       {removable && <div role='separator' className={styles.separator} />}
       {removable && item('upcoming', 'Quitar próximos pedidos', 'De este participante, sin bloquear su música', 'DELETE')}
+      {skippable && item('skip-upcoming', 'Saltar y quitar próximos pedidos', 'De este participante, sin bloquear su música', 'PLAY_NEXT')}
     </div>,
     document.body,
   )

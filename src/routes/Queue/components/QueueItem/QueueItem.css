@@ -19,6 +19,7 @@
 .artist, .user { margin: 4px 0; color: var(--secondary); font-size: 13px; overflow-wrap: anywhere; }
 .user { color: var(--lyrics); font-weight: 500; }
 .badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.badges:empty { display: none; }
 .origin, .source, .status { padding: 3px 7px; border-radius: 6px; background: var(--stage); color: var(--secondary); font-size: 12px; }
 .status { color: var(--cyan); }
 .container[data-status='PENDING_APPROVAL'] .status { color: var(--amber); }
@@ -43,6 +44,37 @@
 .container.current { border-color: var(--cyan); }
 .container.current::after { content: ''; position: absolute; pointer-events: none; height: 3px; bottom: 0; left: 0; width: var(--progress, 0%); max-width: 100%; background: var(--cyan); }
 .container.current.paused::after { background: var(--amber); }
+.context { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.waitEstimate { margin-left: auto; color: var(--secondary); font-size: 12px; white-space: nowrap; }
+.intent { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--edge); border-radius: 6px; color: var(--secondary); font-size: 12px; line-height: 1.4; }
+.intent.karaoke { border-color: transparent; background: var(--amber); color: var(--stage); font-weight: 650; }
+.operatorCard .content {
+  grid-template-columns: 80px minmax(0, 1fr) auto;
+  grid-template-areas: 'art song actions' 'identity identity identity' 'badges badges badges';
+  align-items: start;
+  gap: 8px 12px;
+}
+.artwork { grid-area: art; min-width: 0; }
+.operatorCard .primary { display: contents; }
+.operatorCard .primary.greyed > * { opacity: .8; }
+.operatorCard .innerPrimary { grid-area: song; }
+.operatorCard .context { grid-area: identity; min-width: 0; }
+.operatorCard .user { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.operatorCard .user svg { flex-shrink: 0; margin-top: 2px; color: var(--secondary); }
+.operatorCard .badges { grid-area: badges; margin-top: 0; }
+.operatorCard .btnContainer { grid-area: actions; align-self: start; max-width: 96px; gap: 4px; }
+.operatorCard[data-status='PENDING_APPROVAL'] .btnContainer { grid-area: auto; grid-column: 1 / -1; max-width: none; }
+@media (min-width: 1000px) {
+  .operatorCard .content {
+    grid-template-columns: 104px minmax(0, 1fr) minmax(120px, 180px) minmax(100px, 160px) auto;
+    grid-template-areas: 'art song identity badges actions';
+    align-items: center;
+    column-gap: 16px;
+  }
+  .operatorCard .context { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .operatorCard .waitEstimate { margin-left: 22px; }
+  .operatorCard .btnContainer { align-self: center; }
+}
 @media (min-width: 720px) {
   .content { grid-template-columns: 64px minmax(0, 1fr) minmax(100px, 220px); }
   .imageContainer { width: 64px; height: 64px; }

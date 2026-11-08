@@ -19,9 +19,11 @@ const listen = async (server) => {
 }
 const songs = [
   { id: 'fixture0001', title: 'Faraón Love Shady - Tema', channel: 'Karaoke Channel' },
-  { id: 'fixture0002', title: 'Canción permitida', channel: 'Artista de prueba' },
-  { id: 'fixture0003', title: 'Otra canción', channel: 'Otro artista' },
+  { id: 'fixture0002', title: 'Canción permitida (Karaoke)', channel: 'Artista de prueba' },
+  { id: 'fixture0003', title: 'Otra canción (Karaoke)', channel: 'Otro artista' },
 ]
+const thumbnail = 'https://i.ytimg.com/vi/fixture0002/hqdefault.jpg'
+let thumbnailFails = false
 const provider = createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost')
   res.setHeader('content-type', 'application/json')
@@ -32,8 +34,8 @@ const provider = createServer((req, res) => {
   } else {
     const ids = url.searchParams.get('id').split(',')
     res.end(JSON.stringify({ items: songs.filter(song => ids.includes(song.id)).map(song => ({
-      id: song.id, snippet: { title: song.title, channelTitle: song.channel, categoryId: '10', liveBroadcastContent: 'none', thumbnails: {} },
-      contentDetails: { duration: 'PT3M' }, status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
+      id: song.id, snippet: { title: song.title, channelTitle: song.channel, categoryId: '10', liveBroadcastContent: 'none', thumbnails: song.id === 'fixture0002' ? { high: { url: thumbnail } } : {} },
+      contentDetails: { duration: song.id === 'fixture0002' ? 'PT3M5S' : 'PT3M' }, status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
     })) }))
   }
 })
@@ -65,6 +67,9 @@ const contextFor = async (width, identity) => {
     localStorage.setItem('persist:user', JSON.stringify(Object.fromEntries(Object.entries(identity).map(([key, value]) => [key, JSON.stringify(value)]))))
   }, identity)
   await installYouTubePreviewMock(context)
+  await context.route(thumbnail, route => route.fulfill(thumbnailFails
+    ? { status: 404, body: '' }
+    : { contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#111a28"/><circle cx="90" cy="90" r="55" fill="#76e0ec"/><path d="M180 30h30v120h-30zm50 30h30v90h-30z" fill="#edc47c"/></svg>' }))
   if (uiOrigin !== origin) {
     // Exercise tunnel-served UI against isolated authenticated APIs and socket polling.
     await context.route(/\/(api|socket\.io)\//, async (route) => {
@@ -128,18 +133,53 @@ try {
   await guest.getByRole('button', { name: 'Pedir', exact: true }).click()
   await confirmSongPreview(guest)
   await expect(guest).toHaveURL(`${uiOrigin}/requests`)
-  await expect(guest.getByRole('heading', { name: 'Canción permitida', exact: true })).toBeVisible()
+  await expect(guest.getByRole('dialog')).toHaveCount(0)
+  await expect(guest.getByRole('heading', { name: songs[1].title, exact: true })).toBeVisible()
+  await guest.getByRole('button', { name: 'Agregar saludo', exact: true }).click()
+  await guest.getByLabel('Mensaje', { exact: true }).fill('Un saludo para quienes nos acompañan esta noche. Gracias por compartir esta canción con nosotros.')
+  await guest.getByRole('button', { name: 'Guardar saludo', exact: true }).click()
+  await expect(guest.getByRole('group', { name: 'Saludo', exact: true })).toBeVisible()
   const queueId = db.prepare('SELECT queueId FROM queue WHERE externalId=?').get('fixture0002').queueId
+  db.prepare('UPDATE queue SET status=? WHERE queueId=?').run('PENDING_APPROVAL', queueId)
 
   // Block directly from the operator queue, using the exact resource identity.
   await admin.goto(`${uiOrigin}/queue`)
-  const queueItem = admin.locator(`[data-queue-id="${queueId}"]`).filter({ has: admin.getByRole('heading', { name: 'Canción permitida', exact: true }) }).last()
-  const trigger = queueItem.getByRole('button', { name: 'Quitar o bloquear', exact: true })
-  const menu = admin.getByRole('menu', { name: 'Quitar o bloquear: Canción permitida', exact: true })
+  await admin.getByRole('button', { name: 'Por aprobar (1)', exact: true }).click()
+  const pendingCard = admin.locator(`[data-queue-id="${queueId}"]`)
+  await expect(pendingCard.getByRole('button', { name: 'Rechazar solicitud', exact: true })).toBeVisible()
+  for (const width of [390, 1440]) {
+    await admin.setViewportSize({ width, height: 900 })
+    await pendingCard.screenshot({ path: path.join(directory, `queue-pending-${width}.png`) })
+    assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+  }
+  await pendingCard.getByRole('button', { name: 'Aprobar solicitud', exact: true }).click()
+  await admin.getByRole('button', { name: 'Cola', exact: true }).click()
+  const queueItem = admin.locator(`[data-queue-id="${queueId}"]`)
+  await expect(queueItem.getByText('YouTube', { exact: true })).toHaveCount(0)
+  await expect(queueItem.getByText('Aprobada', { exact: true })).toHaveCount(0)
+  await expect(queueItem.locator('[data-intent="SING"]')).toHaveText('Karaoke')
+  await expect(queueItem.getByRole('button', { name: 'Acciones de la canción', exact: true })).toHaveCount(1)
+  await expect(queueItem.getByRole('button', { name: 'Más acciones', exact: true })).toHaveCount(0)
+  await expect(queueItem.getByLabel('Duración: 3:05', { exact: true })).toBeVisible()
+  await expect.poll(() => queueItem.locator('img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true)
+  const greeting = queueItem.getByRole('group', { name: 'Saludo', exact: true })
+  await expect(greeting).toBeVisible()
+  const trigger = queueItem.getByRole('button', { name: 'Acciones de la canción', exact: true })
+  const menu = admin.getByRole('menu', { name: `Acciones: ${songs[1].title}`, exact: true })
   for (const [width, height] of [[1440, 900], [390, 844], [320, 480]]) {
     await admin.setViewportSize({ width, height })
     await trigger.scrollIntoViewIfNeeded()
     const before = await queueItem.boundingBox()
+    const picture = await queueItem.locator('img').locator('..').boundingBox()
+    const duration = await queueItem.getByLabel('Duración: 3:05', { exact: true }).boundingBox()
+    const caption = await queueItem.getByRole('heading').boundingBox()
+    const intent = await queueItem.locator('[data-intent]').boundingBox()
+    assert.ok(Math.abs(picture.width / picture.height - 16 / 9) < 0.02)
+    assert.ok(duration.x >= picture.x && duration.y + duration.height <= picture.y + picture.height + 1)
+    assert.ok((await greeting.boundingBox()).width >= before.width - 36, 'greeting spans the entire card')
+    if (width === 1440) assert.ok(intent.x > caption.x + caption.width, 'desktop metadata uses the horizontal space')
+    else assert.ok(intent.y > caption.y + caption.height, 'mobile metadata stacks below the title')
+    await queueItem.screenshot({ path: path.join(directory, `queue-artwork-${width}.png`) })
     await trigger.focus()
     await admin.keyboard.press('ArrowDown')
     await expect(menu.getByRole('menuitem').first()).toBeFocused()
@@ -151,11 +191,30 @@ try {
     await expect(menu.getByRole('menuitem').last()).toBeFocused()
     await admin.keyboard.press('Home')
     await admin.keyboard.press('ArrowDown')
+    await expect(menu.getByRole('menuitem', { name: /^Quitar de la cola/ })).toBeFocused()
+    await admin.keyboard.press('ArrowDown')
     await expect(menu.getByRole('menuitem', { name: /^Bloquear este video/ })).toBeFocused()
     await admin.keyboard.press('Escape')
     await expect(menu).toHaveCount(0)
     await expect(trigger).toBeFocused()
   }
+  // Failed images keep their reserved frame and valid duration; unknown duration is omitted.
+  thumbnailFails = true
+  db.prepare('UPDATE queue SET durationSeconds=?,title=? WHERE queueId=?').run(3735, 'Presentación completa de la canción con un título extenso para comprobar el espacio disponible del operador', queueId)
+  await admin.reload()
+  await expect(queueItem.getByLabel('Duración: 1:02:15', { exact: true })).toBeVisible()
+  await expect(queueItem.locator('img')).toHaveCount(0)
+  for (const width of [390, 1440]) {
+    await admin.setViewportSize({ width, height: 900 })
+    await queueItem.screenshot({ path: path.join(directory, `queue-artwork-fallback-${width}.png`) })
+    assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+  }
+  db.prepare('UPDATE queue SET durationSeconds=NULL WHERE queueId=?').run(queueId)
+  await admin.reload()
+  await expect(queueItem.locator('[aria-label^="Duración:"]')).toHaveCount(0)
+  thumbnailFails = false
+  db.prepare('UPDATE queue SET durationSeconds=?,title=? WHERE queueId=?').run(185, songs[1].title, queueId)
+  await admin.reload()
   await admin.setViewportSize({ width: 390, height: 844 })
   await trigger.click()
   await admin.mouse.click(2, 842)
@@ -173,7 +232,7 @@ try {
     const dialog = admin.getByRole('dialog', { name: `Bloquear ${kind}`, exact: true })
     await expect(dialog.getByLabel('Artista', { exact: true })).toHaveValue('Artista de prueba')
     await expect(dialog.getByRole('combobox')).toHaveCount(0)
-    if (kind === 'canción') await expect(dialog.getByLabel('Título de la canción')).toHaveValue('Canción permitida')
+    if (kind === 'canción') await expect(dialog.getByLabel('Título de la canción')).toHaveValue(songs[1].title)
     await dialog.getByRole('button', { name: 'Cancelar', exact: true }).click()
     await expect(dialog).toHaveCount(0)
     await expect(trigger).toBeFocused()
@@ -182,7 +241,7 @@ try {
   await menu.getByRole('menuitem', { name: /^Bloquear este video/ }).click()
   const blockDialog = admin.getByRole('dialog', { name: 'Bloquear este video', exact: true })
   await expect(blockDialog.getByRole('textbox')).toHaveCount(0)
-  await expect(blockDialog.getByText('Canción permitida', { exact: true })).toBeVisible()
+  await expect(blockDialog.getByText(songs[1].title, { exact: true })).toBeVisible()
   await admin.screenshot({ path: path.join(directory, 'queue-block-dialog-mobile.png'), fullPage: true })
   await admin.route('**/api/prefs/music-blocking', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'No se pudo guardar el bloqueo.' }) }))
   await blockDialog.getByRole('button', { name: 'Bloquear', exact: true }).click()
@@ -218,7 +277,7 @@ try {
   await expect(guest).toHaveURL(`${uiOrigin}/requests`)
   const removableId = db.prepare('SELECT queueId FROM queue WHERE status=? ORDER BY queueId DESC LIMIT 1').get('APPROVED').queueId
   await admin.goto(`${uiOrigin}/queue`)
-  await admin.locator(`[data-queue-id="${removableId}"]`).getByRole('button', { name: 'Quitar o bloquear', exact: true }).click()
+  await admin.locator(`[data-queue-id="${removableId}"]`).getByRole('button', { name: 'Acciones de la canción', exact: true }).click()
   await admin.getByRole('menuitem', { name: /^Quitar de la cola/ }).click()
   await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(removableId).status).toBe('REMOVED')
   assert.equal(JSON.parse(db.prepare('SELECT data FROM prefs WHERE key=?').get('musicBlocking').data).rules.length, 1)
@@ -232,11 +291,11 @@ try {
     await expect(guest).toHaveURL(`${uiOrigin}/requests`)
   }
   await admin.reload()
-  await admin.getByRole('button', { name: 'Quitar o bloquear', exact: true }).first().click()
+  await admin.getByRole('button', { name: 'Acciones de la canción', exact: true }).first().click()
   admin.once('dialog', dialog => dialog.dismiss())
   await admin.getByRole('menuitem', { name: /^Quitar próximos pedidos/ }).click()
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM queue WHERE status=?').get('APPROVED').count, 2)
-  await admin.getByRole('button', { name: 'Quitar o bloquear', exact: true }).first().click()
+  await admin.getByRole('button', { name: 'Acciones de la canción', exact: true }).first().click()
   admin.once('dialog', dialog => dialog.accept())
   await admin.getByRole('menuitem', { name: /^Quitar próximos pedidos/ }).click()
   await expect.poll(() => db.prepare('SELECT COUNT(*) AS count FROM queue WHERE status=?').get('APPROVED').count).toBe(0)
@@ -261,7 +320,7 @@ try {
   const songId = db.prepare('INSERT INTO songs(artistId,title,titleNorm) VALUES(?,?,?)').run(artistId, 'Canción local', 'cancion local').lastInsertRowid
   const localId = db.prepare('INSERT INTO queue(roomId,userId,songId,source,status,origin,title,artistOrChannel) VALUES(?,?,?,?,?,?,?,?)').run(1, identity.userId, songId, 'LOCAL', 'APPROVED', 'PARTICIPANT', 'Canción local', 'Artista local').lastInsertRowid
   await admin.goto(`${uiOrigin}/queue`)
-  const localTrigger = admin.locator(`[data-queue-id="${localId}"]`).getByRole('button', { name: 'Quitar o bloquear', exact: true })
+  const localTrigger = admin.locator(`[data-queue-id="${localId}"]`).getByRole('button', { name: 'Acciones de la canción', exact: true })
   await localTrigger.click()
   await admin.getByRole('menuitem', { name: /^Bloquear este archivo/ }).click()
   const localDialog = admin.getByRole('dialog', { name: 'Bloquear este archivo', exact: true })

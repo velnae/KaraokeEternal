@@ -18,6 +18,14 @@ export function formatDuration (sec: number) {
   return `${m}:${s < 10 ? '0' + s : s}`
 }
 
+export function formatMediaDuration (seconds?: number | null): string | null {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 1) return null
+  const total = Math.floor(seconds)
+  const hours = Math.floor(total / 3600)
+  if (!hours) return formatDuration(total)
+  return `${hours}:${String(Math.floor(total / 60) % 60).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
 export function formatSeconds (sec: number, fuzzy = false) {
   if (sec >= 60 && fuzzy) return Math.round(sec / 60) + 'm'
 

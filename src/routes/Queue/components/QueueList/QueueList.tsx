@@ -62,6 +62,7 @@ const QueueList = () => {
   for (const item of Object.values(rawQueue.entities)) {
     if (item.isOptimistic !== true && !isQueueHistoryHidden(item) && item.tableId) tableOptions.set(item.tableId, item.tableLabelSnapshot || `Mesa ${item.tableId}`)
   }
+  const activeTableFilter = tableOptions.size > 0 && (tableFilter === 'none' || tableOptions.has(Number(tableFilter))) ? tableFilter : 'all'
 
   const pendingIds = rawQueue.result.filter((queueId) => {
     const item = rawQueue.entities[queueId]
@@ -113,10 +114,17 @@ const QueueList = () => {
   }
 
   // build children array
-  const items = result.map((qId) => {
+  const visibleResult = result.filter((id) => {
+    const item = rawQueue.entities[id]
+    return item.isOptimistic !== true
+      && (!user.isAdmin || activeTableFilter === 'all' || String(item.tableId ?? 'none') === activeTableFilter)
+  })
+  const historyStart = user.isAdmin && filter === 'queue'
+    ? visibleResult.find(id => (isAtQueueEnd || id !== queueId) && playerHistory.includes(id))
+    : undefined
+  const items = visibleResult.map((qId) => {
     const item = rawQueue.entities[qId]
     if (item.isOptimistic === true) return null
-    if (user.isAdmin && tableFilter !== 'all' && String(item.tableId ?? 'none') !== tableFilter) return null
 
     const localSong = typeof item.songId === 'number' ? songs.entities[item.songId] : undefined
     const duration = item.durationSeconds ?? localSong?.duration ?? 0
@@ -135,6 +143,7 @@ const QueueList = () => {
     return (
       <QueueItem
         {...item}
+        durationSeconds={duration > 0 ? duration : null}
         artist={item.artistOrChannel || (localSong ? artists.entities[localSong.artistId]?.name : '')}
         errorMessage={isCurrent && errorMessage ? errorMessage : ''}
         isCurrent={isCurrent}
@@ -178,11 +187,13 @@ const QueueList = () => {
     <>
       {user.isAdmin && (
         <div className={styles.filters}>
-          <select aria-label='Filtrar por mesa' value={tableFilter} onChange={e => setTableFilter(e.target.value)}>
-            <option value='all'>Todas las mesas</option>
-            <option value='none'>Sin mesa</option>
-            {[...tableOptions].map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-          </select>
+          {tableOptions.size > 0 && (
+            <select aria-label='Filtrar por mesa' value={activeTableFilter} onChange={e => setTableFilter(e.target.value)}>
+              <option value='all'>Todas las mesas</option>
+              <option value='none'>Sin mesa</option>
+              {[...tableOptions].map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          )}
           <Button
             className={clsx(styles.filter, filter === 'queue' && styles.active)}
             aria-pressed={filter === 'queue'}
@@ -219,8 +230,8 @@ const QueueList = () => {
       {greetings.error && <p role='alert'>{greetings.error}</p>}
       {user.isAdmin && <p ref={feedback} tabIndex={-1} role='status' className={styles.blockFeedback}>{blockMessage}</p>}
       {user.isAdmin && houseIds.length > 0 && queue.housePolicy.reason && (
-        <p className={styles.empty} role='status'>
-          {`Música de la casa en espera: ${queue.housePolicy.reason === 'backlog' ? 'hay 3 o más pedidos de clientes pendientes.' : 'un pedido lleva 10 minutos o más esperando.'} La lista conserva su orden.`}
+        <p className={styles.houseNotice} role='status'>
+          {`De la casa en espera: ${queue.housePolicy.reason === 'backlog' ? 'hay 3 o más pedidos pendientes.' : 'un pedido lleva 10 minutos o más esperando.'}`}
         </p>
       )}
       {user.isAdmin && filter === 'house' && <HousePlaylistControl key={user.roomId} />}
@@ -236,7 +247,11 @@ const QueueList = () => {
       {user.isAdmin && filter === 'house' && houseIds.length === 0 && (
         <div className={styles.empty}>No hay canciones de la casa aprobadas.</div>
       )}
-      {user.isAdmin ? items : <QueueListAnimator queueItems={items.filter(item => item !== null)} />}
+      {user.isAdmin
+        ? items.flatMap((item, index) => visibleResult[index] === historyStart
+            ? [<h2 key='queue-history' className={styles.historySeparator}>Historial</h2>, item]
+            : [item])
+        : <QueueListAnimator queueItems={items.filter(item => item !== null)} />}
       {user.isAdmin && block && (
         <Modal
           title={block.rule.kind === 'artist' ? 'Bloquear artista' : block.rule.kind === 'song' ? 'Bloquear canción' : block.rule.source === 'YOUTUBE' ? 'Bloquear este video' : 'Bloquear este archivo'}

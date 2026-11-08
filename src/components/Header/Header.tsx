@@ -57,13 +57,14 @@ const Header = React.forwardRef<HTMLDivElement>((_, ref) => {
 
   const location = useLocation()
   const isPlayer = location.pathname.replace(/\/$/, '').endsWith('/player')
+  const isQueue = location.pathname.replace(/\/$/, '').endsWith('/queue')
 
   const dispatch = useAppDispatch()
   const cancelScan = () => dispatch(requestScanStop())
 
   return (
     <div className={clsx(styles.container)} ref={ref}>
-      {isAdmin && !isPlayer && isPlayerPresent
+      {isAdmin && !isPlayer && !isQueue && isPlayerPresent
         && <UpNext isUpNext={isUpNext} isUpNow={isUpNow} wait={wait} />}
 
       {isAdmin

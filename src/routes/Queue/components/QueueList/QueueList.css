@@ -3,10 +3,16 @@
   top: 0;
   z-index: 2;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 10px 0;
   background: var(--stage);
   border-bottom: 1px solid var(--edge);
+}
+.filters select { min-width: 0; max-width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: 10px; color: var(--lyrics); background: var(--equipment); }
+.houseNotice { margin: 8px 0; padding: 8px 12px; border-left: 2px solid var(--amber); color: var(--secondary); font-size: 13px; line-height: 1.5; }
+@media (max-width: 719px) {
+  .filters select { flex-basis: 100%; }
 }
 
 .filter {
@@ -40,3 +46,5 @@
 .blockFeedback { color: var(--cyan); font-size: 14px; line-height: 1.5; }
 .blockFeedback:empty { margin: 0; }
 .blockFeedback:focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; }
+.historySeparator { display: flex; align-items: center; gap: 12px; margin: 24px 0 12px; color: var(--secondary); font-size: 13px; font-weight: 500; }
+.historySeparator::before, .historySeparator::after { content: ''; flex: 1; height: 1px; background: var(--edge); }
