@@ -66,7 +66,11 @@ router.put('/player-display', (ctx) => {
   } catch (error) {
     ctx.throw(422, (error as Error).message)
   }
-  if (!Prefs.set('playerDisplay', playerDisplay)) ctx.throw(500, 'No se pudo guardar la configuración de pantalla.')
+  try {
+    if (!Prefs.set('playerDisplay', playerDisplay)) ctx.throw(500, 'No se pudo guardar la configuración de pantalla.')
+  } catch (error) {
+    ctx.throw((error as { status?: number }).status ?? 500, (error as Error).message)
+  }
   ctx.set('Cache-Control', 'no-store')
   ctx.body = { playerDisplay }
   ctx.io.emit('action', { type: PREFS_PUSH, payload: { playerDisplay } })

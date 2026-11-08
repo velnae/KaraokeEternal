@@ -24,6 +24,9 @@ export async function installYouTubeTransitionFixture (context, mediaPath) {
           window.youtubeTransition.video = this.video
           for (const [event, state] of [['playing', 1], ['pause', 2], ['ended', 0]]) {
             this.video.addEventListener(event, () => {
+              // Changing the fixture's src pauses HTML video; that is not a YouTube user pause.
+              if (state === 2 && this.loading) return
+              if (state === 1) this.loading = false
               if (state === 0) window.youtubeTransition.endedAt = performance.now()
               if (state !== 2 || !this.video.ended) options.events.onStateChange({ target: this, data: state })
             })
@@ -31,18 +34,27 @@ export async function installYouTubeTransitionFixture (context, mediaPath) {
           queueMicrotask(() => options.events.onReady({ target: this }))
         }
 
-        loadVideoById () {
+        loadVideoById (id) {
+          this.videoId = id
+          this.loading = true
           this.video.src = `${document.baseURI}transition-youtube.mp4`
           this.playVideo()
         }
 
         cueVideoById (id) {
+          this.loading = true
           this.videoId = id
           this.video.src = `${document.baseURI}transition-youtube.mp4`
           queueMicrotask(() => this.options.events.onStateChange({ target: this, data: 5 }))
         }
 
-        playVideo () { void this.video.play().catch(() => this.options.events.onAutoplayBlocked({ target: this })) }
+        playVideo () {
+          void this.video.play().catch((error) => {
+            if (error.name === 'NotAllowedError') this.options.events.onAutoplayBlocked({ target: this })
+            else if (error.name !== 'AbortError') throw error
+          })
+        }
+
         pauseVideo () { this.video.pause() }
         getCurrentTime () { return this.video.currentTime }
         getVideoUrl () { return `https://www.youtube.com/watch?v=${this.videoId}` }

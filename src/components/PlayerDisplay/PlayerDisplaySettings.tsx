@@ -1,5 +1,4 @@
-import React, { useId, useState } from 'react'
-import { Link } from 'react-router'
+import React, { useEffect, useId, useRef, useState } from 'react'
 import Button from 'components/Button/Button'
 import InputCheckbox from 'components/InputCheckbox/InputCheckbox'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
@@ -10,6 +9,8 @@ import {
 } from 'shared/playerDisplay'
 import { ColorControl, NumberControl } from './DisplayControls'
 import DisplayPreview from './DisplayPreview'
+import LogoImageFields from './LogoImageFields'
+import { discardPlayerLogo } from 'lib/playerLogoApi'
 import styles from './PlayerDisplaySettings.css'
 
 const positionLabels = {
@@ -24,6 +25,19 @@ export default function PlayerDisplaySettings () {
   const [draft, setDraft] = useState<Settings | null>(null)
   const [tab, setTab] = useState('logo')
   const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const staged = useRef(new Set<string>())
+  useEffect(() => {
+    const resources = staged.current
+    return () => {
+      for (const id of resources) void discardPlayerLogo(id).catch(() => {})
+      resources.clear()
+    }
+  }, [])
+  const discardUploads = (keep: (string | null)[] = []) => {
+    for (const id of staged.current) if (!keep.includes(id)) void discardPlayerLogo(id).catch(() => {})
+    staged.current.clear()
+  }
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const id = useId()
@@ -42,12 +56,13 @@ export default function PlayerDisplaySettings () {
   }
   const save = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (busy || !dirty) return
+    if (busy || uploading || !dirty) return
     let value: Settings
     try {
       value = validatePlayerDisplay(settings)
     } catch (cause) {
       setError((cause as Error).message)
+      if ((cause as { field?: string }).field === 'logo') setTab('logo')
       const invalid = event.currentTarget.querySelector<HTMLInputElement>('input:invalid')
         ?? Array.from(event.currentTarget.querySelectorAll<HTMLInputElement>('[data-message-title]')).find(input => !input.value.trim())
       if (invalid) {
@@ -62,6 +77,7 @@ export default function PlayerDisplaySettings () {
     setError('')
     try {
       await dispatch(savePlayerDisplay(value))
+      discardUploads([value.logo.staticImageId, value.logo.animatedImageId])
       setDraft(null)
       setStatus('Cambios guardados.')
     } catch (cause) {
@@ -72,7 +88,7 @@ export default function PlayerDisplaySettings () {
   return (
     <form className={styles.form} onSubmit={save} aria-label='Configuración de pantalla' noValidate>
       <DisplayPreview branding={branding} settings={settings} />
-      <fieldset disabled={busy} className={styles.controls}>
+      <fieldset disabled={busy || uploading} className={styles.controls}>
         <legend className={styles.srOnly}>Elementos de pantalla</legend>
         <div className={styles.tabs} role='group' aria-label='Ajustes de pantalla'>
           {([['logo', 'Logo'], ['announcement', 'Comunicados'], ['appearance', 'Apariencia']] as const).map(([key, label]) => (
@@ -81,8 +97,7 @@ export default function PlayerDisplaySettings () {
         </div>
         <section id={`${id}-logo`} data-section='logo' hidden={tab !== 'logo'}>
           <InputCheckbox label='Mostrar logo en el reproductor' checked={logo.enabled} onChange={event => changeLogo({ enabled: event.currentTarget.checked })} />
-          {!branding.logoSrc && <p className={styles.notice}>Agregue un logo para mostrarlo en pantalla.</p>}
-          <Link className={styles.link} to='/admin/settings/branding'>{branding.logoSrc ? 'Cambiar logo en Marca del local' : 'Subir logo en Marca del local'}</Link>
+          <LogoImageFields logo={logo} hasBrandLogo={!!branding.logoSrc} onChange={changeLogo} onUploaded={id => staged.current.add(id)} onBusy={setUploading} />
           <NumberControl label='Tamaño del logo (%)' value={logo.scale} limit={displayLimits.logo.scale} onChange={scale => changeLogo({ scale })} />
           <label className={styles.field}>
             Posición del logo
@@ -149,17 +164,18 @@ export default function PlayerDisplaySettings () {
       </fieldset>
       <footer className={styles.footer}>
         <div>
-          <p role='status'>{busy ? 'Guardando…' : dirty ? 'Cambios sin guardar' : status || 'Sin cambios pendientes'}</p>
+          <p role='status'>{uploading ? 'Preparando imagen…' : busy ? 'Guardando…' : dirty ? 'Cambios sin guardar' : status || 'Sin cambios pendientes'}</p>
           {error && <p role='alert' className={styles.error}>{error}</p>}
         </div>
         <div className={styles.actions}>
-          <Button type='button' className={styles.link} disabled={busy} onClick={() => change(resetDisplayAppearance(settings))}>Restablecer apariencia</Button>
+          <Button type='button' className={styles.link} disabled={busy || uploading} onClick={() => change(resetDisplayAppearance(settings))}>Restablecer apariencia</Button>
           {dirty && (
             <Button
               type='button'
               className={styles.secondary}
-              disabled={busy}
+              disabled={busy || uploading}
               onClick={() => {
+                discardUploads()
                 setDraft(null)
                 setError('')
                 setStatus('')
@@ -168,7 +184,7 @@ export default function PlayerDisplaySettings () {
               Descartar
             </Button>
           )}
-          <Button type='submit' variant='primary' className={styles.apply} disabled={busy || !dirty}>Aplicar cambios</Button>
+          <Button type='submit' variant='primary' className={styles.apply} disabled={busy || uploading || !dirty}>Aplicar cambios</Button>
         </div>
       </footer>
     </form>

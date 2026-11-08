@@ -5,6 +5,7 @@ import { db } from '../lib/Database.js'
 import getLogger from '../lib/Log.js'
 import { defaultClientBranding } from '../../shared/branding.js'
 import { defaultPlayerDisplay, validatePlayerDisplay } from '../../shared/playerDisplay.js'
+import { saveDisplayWithImages } from '../PlayerLogo/Store.js'
 import { validateBranding } from './branding.js'
 import { defaultModeration, setModerationTerms, validateModeration } from '../../shared/textModeration.js'
 import { defaultMusicBlocking, validateMusicBlocking, type MusicBlocking } from '../../shared/musicBlocking.js'
@@ -82,7 +83,7 @@ class Prefs {
   static set (key: string, data: unknown): boolean {
     if (key === 'musicBlocking') data = validateMusicBlocking(data)
     if (key === 'branding') data = validateBranding(data)
-    if (key === 'playerDisplay') data = validatePlayerDisplay(data)
+    if (key === 'playerDisplay') return saveDisplayWithImages(validatePlayerDisplay(data))
     if (key === 'moderation') data = validateModeration(data)
     const query = sql`
       REPLACE INTO prefs (key, data)

@@ -20,6 +20,8 @@ import Prefs from './Prefs/Prefs.js'
 import libraryRouter from './Library/router.js'
 import mediaRouter from './Media/router.js'
 import prefsRouter from './Prefs/router.js'
+import { PlayerLogoStore } from './PlayerLogo/Store.js'
+import { createPlayerLogoRouter, isPlayerLogoPath } from './PlayerLogo/router.js'
 import roomsRouter from './Rooms/router.js'
 import userRouter from './User/router.js'
 import tablesRouter from './Tables/router.js'
@@ -53,6 +55,8 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   const jwtKey = Prefs.getJwtKey(env.KES_ROTATE_KEY)
   await loadCatalog(path.join(env.KES_PATH_DATA, 'animation'), path.join(env.KES_PATH_ASSETS, 'animation'))
   const app = new Koa()
+  const playerLogos = new PlayerLogoStore(path.join(env.KES_PATH_DATA, 'player-logo-images'))
+  await playerLogos.start()
   let server, io
 
   // called when middleware is finalized
@@ -116,7 +120,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     shutdownHandlers.push(async () => {
       stopAnimation()
       stopHousePlaylists()
-      await Promise.allSettled([stopGreetingAudio(), stopCalls(), stopTransitionVideos(), stopBirthdays()])
+      await Promise.allSettled([stopGreetingAudio(), stopCalls(), stopTransitionVideos(), stopBirthdays(), playerLogos.stop()])
       await stopProduction()
       return new Promise((resolve) => {
       // also calls http server's close method, which ultimately handles the callback
@@ -167,7 +171,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
 
   app.use(koaFavicon(path.join(env.KES_PATH_ASSETS, 'favicon.ico')))
   // Background media owns range handling, including suffixes and 416 responses.
-  app.use((ctx, next) => isTransitionVideoPath(ctx.path, urlPath) ? next() : koaRange(ctx, next))
+  app.use((ctx, next) => isTransitionVideoPath(ctx.path, urlPath) || isPlayerLogoPath(ctx.path, urlPath) ? next() : koaRange(ctx, next))
 
   // all http requests
   app.use(async (ctx, next) => {
@@ -207,7 +211,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   const parseAudio = koaBody({ multipart: true, formidable: { maxFileSize: 20 * 1024 * 1024, maxTotalFileSize: 20 * 1024 * 1024, maxFiles: 1, maxFieldsSize: 64 * 1024 } })
   app.use((ctx, next) => {
     // This router authenticates before its own bounded parsers touch the body.
-    if (isTransitionVideoPath(ctx.path, urlPath)) return next()
+    if (isTransitionVideoPath(ctx.path, urlPath) || isPlayerLogoPath(ctx.path, urlPath)) return next()
     if (ctx.path.startsWith(`${urlPath}api/birthdays/`)) {
       if (!ctx.user?.isAdmin || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
       return ctx.path.replace(/\/+$/, '') === `${urlPath}api/birthdays/upload` ? parseAudio(ctx, next) : parseBody(ctx, next)
@@ -228,6 +232,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(libraryRouter.routes())
   baseRouter.use(mediaRouter.routes())
   baseRouter.use(prefsRouter.routes())
+  baseRouter.use(createPlayerLogoRouter(playerLogos).routes())
   baseRouter.use(greetingVoiceRouter.routes())
   baseRouter.use(greetingAudioRouter.routes())
   baseRouter.use(roomsRouter.routes())

@@ -8,6 +8,7 @@ import PlayerDisplayOverlay from 'components/PlayerDisplay/PlayerDisplayOverlay'
 import { turnPlacement } from 'components/PlayerDisplay/layout'
 import useBirthdayPlayer from '../Birthday/useBirthdayPlayer'
 import BirthdayScene from '../Birthday/BirthdayScene'
+import { resolvePlayerLogo } from 'shared/playerLogo'
 import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
 import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, playerStatusCancel, type PlayerState } from '../../modules/player'
 import store from 'store/store'
@@ -487,7 +488,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     && !foregroundScene && !showScene
   const showBranding = youtubeSong && !player.isErrored && !player._isFetching && !player._isBetweenTracks
     && !player._isPlayingNext && player._isReplayingQueueId === null
-  const logoVisible = showBranding && prefs.playerDisplay.logo.enabled && !!prefs.branding.logoSrc
+  const logoVisible = showBranding && prefs.playerDisplay.logo.enabled && !!resolvePlayerLogo(prefs.playerDisplay.logo, prefs.branding.logoSrc).still
   const turn = turnPlacement(prefs.playerDisplay, props, logoVisible, showBranding && prefs.playerDisplay.announcement.enabled && queueItem.requestIntent === 'LISTEN')
   const idleOverlay = (
     <PlayerTextOverlay

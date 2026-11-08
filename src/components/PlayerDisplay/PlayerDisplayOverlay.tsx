@@ -6,6 +6,7 @@ import { defaultPlayerDisplay, isDisplayColor, type PlayerDisplaySettings } from
 import type { RequestIntent } from 'shared/requestIntent'
 import { displayForeground, displayLayout, type DisplayViewport } from './layout'
 import styles from './PlayerDisplayOverlay.css'
+import PlayerLogo from './PlayerLogo'
 
 interface Props {
   branding: ClientBranding
@@ -17,7 +18,6 @@ interface Props {
 
 const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying }: Props) => {
   const { logo, announcement: a } = settings
-  const [failedLogo, setFailedLogo] = useState<string | null>(null)
   const [index, setIndex] = useState(0)
   const [fitting, setFitting] = useState({ settings, width: viewport.width, height: viewport.height, scale: 1 })
   const fit = fitting.settings === settings && fitting.width === viewport.width && fitting.height === viewport.height ? fitting.scale : 1
@@ -78,13 +78,12 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying 
 
   return (
     <div className={styles.container} data-testid='player-display-overlay'>
-      {logo.enabled && branding.logoSrc && failedLogo !== branding.logoSrc && (
-        <img
-          className={styles.logo}
+      {logo.enabled && (
+        <PlayerLogo
+          branding={branding}
+          logo={logo}
+          isPlaying={isPlaying}
           style={{ ...layout.logo, opacity: (Number.isFinite(logo.opacity) ? logo.opacity : 100) / 100, objectPosition: logo.position.replace('-', ' ') }}
-          src={branding.logoSrc}
-          alt={branding.name ? `Logo de ${branding.name}` : 'Logo del local'}
-          onError={() => setFailedLogo(branding.logoSrc)}
         />
       )}
       {announce && (
