@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import InputImage from 'components/InputImage/InputImage'
 import { UserWithRole } from 'shared/types'
 import styles from './AccountForm.css'
-import { GUEST_NAME_HELP, guestNameError, normalizeGuestName } from 'shared/guestName'
+import { guestNameError, normalizeGuestName } from 'shared/guestName'
 import { useAppSelector } from 'store/hooks'
 
 interface AccountFormProps {
@@ -169,13 +169,12 @@ const AccountForm = ({
           placeholder='nombre para mostrar'
           aria-label='Nombre para mostrar'
           aria-invalid={!!nameError || undefined}
-          aria-describedby={isGuest ? 'account-name-help' : undefined}
+          aria-describedby={nameError ? 'account-name-error' : undefined}
           ref={name}
         />
       </div>
-      {isGuest && <small id='account-name-help'>{GUEST_NAME_HELP}</small>}
       {isGuest && guestNameError(user?.name, terms) && <p role='status'>Tu nombre aparece como “Invitado” en la pantalla. Corrígelo aquí y guarda los cambios.</p>}
-      {nameError && <p role='alert'>{nameError}</p>}
+      {nameError && <p id='account-name-error' role='alert'>{nameError}</p>}
 
       {showRole && (
         <select

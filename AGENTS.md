@@ -58,16 +58,27 @@ failures and untested behavior honestly; fix regressions introduced by the chang
 
 For every task that creates or changes UI/UX (layout, styling, interaction,
 controls, loading/empty/error states, or accessibility), load and follow the
-Anthropic `frontend-design` skill **before editing the interface**:
+Anthropic `frontend-design` skill and the local `karaoke-ui` skill **before editing
+the interface**:
 
 - Skill: `.opencode/skills/frontend-design/SKILL.md`
 - Provenance: `.opencode/skills/frontend-design/SOURCE.md`
+- Project UI rules: `.opencode/skills/karaoke-ui/SKILL.md`
 
 Reuse the existing karaoke theme, components and application structure. For new
 or reshaped interfaces, define visual hierarchy and interaction states briefly
 before implementation; a separate design document is not required. For visual
 changes, inspect screenshots at mobile and desktop sizes. Preserve Spanish UI
 copy and use English identifiers and technical comments.
+
+Prioritize an intuitive, simple UI with fewer elements. Do not add supporting
+text that repeats controls, explains internal rules, or describes obvious
+behavior. Use clear labels and visual hierarchy instead. If users can complete
+the action without reading an explanation, omit it; do not replace it with a
+tooltip, badge, or help icon by default. Show brief, actionable messages only
+when an error, a blocking condition, or an empty state needs guidance. Preserve
+essential status feedback and accessible labels. Apply these rules to every UI
+change, not only the karaoke search.
 
 Do not leave primary actions disabled without a visible explanation and a next
 step. Distinguish requesting an announcement from authorizing public playback:
@@ -77,7 +88,8 @@ Verify the changed flow with Playwright, including keyboard use for affected
 controls and responsive layouts for visual changes. Keep checks focused on the
 changed behavior; use the quality table above for player/audio lifecycle changes.
 
-Keep the vendored skill unchanged; document project conventions here.
+Keep the vendored skill unchanged; document project conventions here and apply
+them through the local `karaoke-ui` companion skill.
 
 ## Expressive animator audio — project skill
 

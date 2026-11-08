@@ -28,7 +28,7 @@ import useGreetings from 'components/Greetings/useGreetings'
 import { isKaraokeTitle, karaokeTitleRequiredMessage, youtubeSearchCanRetry, youtubeSearchError, youtubeVideoId } from 'shared/youtubeSearch'
 import { requestIntentLabels, type RequestIntent } from 'shared/requestIntent'
 import searchStyles from 'components/SongSearch/SongSearch.css'
-import { musicBlockedStatus, musicBlockedMessage, musicFilteredMessage, musicAllBlockedMessage } from 'shared/musicBlocking'
+import { musicBlockedStatus, musicBlockedMessage, musicAllBlockedMessage } from 'shared/musicBlocking'
 
 const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | 'room' }) => {
   const dispatch = useAppDispatch()
@@ -151,17 +151,22 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
   const renderItem = (item: QueueItem, personal: boolean) => {
     const index = upcoming.findIndex(entry => entry.queueId === item.queueId)
     const turnsAhead = ordered.turns.findIndex(turn => turn.ids.includes(item.queueId))
-    const wait = activePlayer && status.isPlaying && current && index >= 0 && item.status === 'APPROVED'
+    const isNext = activePlayer && item.status === 'APPROVED' && next?.queueId === item.queueId
+    let label: string = requestStatusLabels[item.status]
+    if (personal && item.status === 'APPROVED') label = isNext ? 'Sigue tu canción' : 'En cola'
+    if (personal && item.status === 'PLAYING') label = 'Reproduciendo'
+    if (item.rejectionReason === 'MUSIC_BLOCKED') label = musicBlockedStatus
+    const wait = !(personal && isNext) && activePlayer && status.isPlaying && current && index >= 0 && item.status === 'APPROVED'
       ? estimatedWait(upcoming.slice(0, index), status.queueId, status.position)
       : null
     return (
       <article key={item.queueId} className={styles.card} data-status={item.status} data-queue-id={item.queueId}>
         <div className={styles.details}>
           <div className={styles.cardStatus}>
-            <span className={styles.badge}>{item.rejectionReason === 'MUSIC_BLOCKED' ? musicBlockedStatus : requestStatusLabels[item.status]}</span>
-            {item.requestIntent && item.requestIntent !== 'UNKNOWN' && <span className={styles.badge}>{requestIntentLabels[item.requestIntent]}</span>}
+            <span className={styles.badge}>{label}</span>
+            {!personal && item.requestIntent && item.requestIntent !== 'UNKNOWN' && <span className={styles.badge}>{requestIntentLabels[item.requestIntent]}</span>}
             {wait !== null && <span className={styles.wait} aria-label={`Espera estimada: ${wait < 1 ? 'menos de 1 minuto' : `${wait} minutos`}`}>{wait < 1 ? '< 1 min' : `≈ ${wait} min`}</span>}
-            {item.status === 'APPROVED' && turnsAhead >= 0 && <span className={styles.badge}>{turnsAhead === 0 ? 'Próximo turno de cliente' : `${turnsAhead} ${turnsAhead === 1 ? 'turno' : 'turnos'} por delante`}</span>}
+            {!personal && item.status === 'APPROVED' && turnsAhead >= 0 && <span className={styles.badge}>{turnsAhead === 0 ? 'Próximo turno de cliente' : `${turnsAhead} ${turnsAhead === 1 ? 'turno' : 'turnos'} por delante`}</span>}
           </div>
           <div className={styles.queuedSong}>
             <SongArtwork thumbnailUrl={item.thumbnailUrl} />
@@ -173,15 +178,15 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
           </div>
           {personal && item.rejectionReason === 'MUSIC_BLOCKED' && (
             <div role='status'>
-              <p>Tu pedido fue retirado. Puedes elegir otra canción.</p>
+              <p>Tu pedido fue retirado.</p>
               <Link className={styles.textAction} to='/library'>Buscar otra canción</Link>
             </div>
           )}
           {personal && item.status === 'FAILED' && (replacedIds.has(item.queueId)
-            ? <p>Ya elegiste un reemplazo para este pedido.</p>
+            ? <p>Pedido reemplazado.</p>
             : (
                 <>
-                  <p>La canción falló. Puedes elegir otra versión conservando la antigüedad de tu pedido.</p>
+                  <p>La canción falló. Conservas tu turno al reemplazarla.</p>
                   <Link className={styles.textAction} to={`/library?replace=${item.queueId}`}>Buscar otra versión</Link>
                 </>
               ))}
@@ -245,10 +250,10 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
       </div>
       {pageNotice && <p id={noticeId} role='status' className={styles.notice}>{pageNotice}</p>}
       {visibleTable && <p className={styles.notice}>{visibleTable}</p>}
-      {activePlayer && nextParticipant?.userId === user.userId && <p role='status' className={styles.notice}>{next?.origin === 'HOUSE' ? 'Tu turno sigue después de la música de la casa' : 'Tu turno sigue'}</p>}
+      {page !== 'requests' && activePlayer && nextParticipant?.userId === user.userId && <p role='status' className={styles.notice}>{next?.origin === 'HOUSE' ? 'Tu turno sigue después de la música de la casa' : 'Tu turno sigue'}</p>}
       {page === 'search' && replacement && (
         <p className={styles.notice}>
-          {`Elige el reemplazo de «${replacement.title}». Conservaremos la antigüedad de tu pedido. `}
+          {`Reemplazando «${replacement.title}». `}
           <Link to='/library'>Cancelar reemplazo</Link>
         </p>
       )}
@@ -322,9 +327,8 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
             {matchesSubmission && search.query && !search.isLoading && !search.error && results.length === 0 && karaokeFilteredCount === 0 && (
               <p className={styles.empty}>{search.blockedCount ? youtubeVideoId(search.query) ? musicBlockedMessage : musicAllBlockedMessage : 'Sin resultados.'}</p>
             )}
-            {matchesSubmission && !search.isLoading && !search.error && search.blockedCount > 0 && search.results.length > 0 && <p className={styles.notice}>{musicFilteredMessage}</p>}
-            {matchesSubmission && !search.isLoading && !search.error && karaokeFilteredCount > 0 && (
-              <p className={styles.notice}>{results.length === 0 ? karaokeTitleRequiredMessage : 'Solo mostramos videos con «karao» en el inicio de una palabra del título, como «karaoke» o «Karaokanta».'}</p>
+            {matchesSubmission && !search.isLoading && !search.error && karaokeFilteredCount > 0 && results.length === 0 && (
+              <p className={styles.notice}>{karaokeTitleRequiredMessage}</p>
             )}
           </div>
           {matchesSubmission && results.map((result) => {
@@ -350,7 +354,6 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
 
       {page === 'requests' && (
         <>
-          <p className={styles.searchHelp}>Una canción por persona en cada turno. La espera es aproximada e incluye la música programada.</p>
           {cancelMessage && <p role='status'>{cancelMessage}</p>}
           {connected && greetings.error && <p role='alert' className={styles.notice}>{greetings.error}</p>}
           {unsettled.map(receipt => (

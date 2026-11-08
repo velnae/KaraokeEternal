@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 import { installYouTubePreviewMock } from './fixtures/youtube-preview.mjs'
+import { checkParticipantStatuses } from './participant-status-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -113,6 +114,11 @@ try {
   assert.equal(lastSearchQuery, 'Canción karaoke')
   await expect(page.getByRole('heading', { name: titles[1], exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: titles[2], exact: true })).toBeVisible()
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.screenshot({ path: path.join(data, `karaoke-results-${width}.png`) })
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
   await input.fill(`https://youtu.be/${nonKaraokeId}`)
   await input.press('Enter')
   const titleNotice = page.getByText('Para cantar, elige un video con «karaoke» o «Karaokanta» en el título. Busca otra versión o cambia a «Escuchar música».', { exact: true })
@@ -155,7 +161,7 @@ try {
   await expect(confirm).toBeDisabled()
   await expect(dialog.getByText('Comprobando reproducción…')).toBeVisible()
   assert.equal(count(), 0, 'opening/ready/cued must not enqueue')
-  await page.evaluate(() => window.previewTest.play())
+  await dialog.getByRole('button', { name: 'Reproducir video simulado', exact: true }).click()
   await expect(confirm).toBeEnabled()
   assert.equal(await page.evaluate(() => window.previewTest.instances.filter(p => !p.destroyed).at(-1).options.playerVars.controls), 0)
   await expect(dialog.getByRole('group', { name: 'Controles de vista previa' })).toHaveCount(0)
@@ -263,6 +269,28 @@ try {
   await expect(page.getByRole('button', { name: 'Agregar saludo', exact: true })).toBeVisible()
   assert.equal(await page.evaluate(() => window.previewTest.instances.filter(p => !p.destroyed).length), 0)
   pass('Confirm submits one request with intent, navigates to Mis pedidos and preserves greeting flow')
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.screenshot({ path: path.join(data, `requests-${width}.png`) })
+  }
+  await page.goto(`${uiBase}account`)
+  const displayName = page.getByRole('textbox', { name: 'Nombre para mostrar', exact: true })
+  await expect(displayName).toHaveValue('Cliente prueba')
+  await expect(displayName).not.toHaveAttribute('aria-describedby')
+  await displayName.fill('Uno Dos Tres')
+  await page.getByRole('button', { name: 'Actualizar cuenta', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  await expect(displayName).toBeFocused()
+  await expect(displayName).toHaveAttribute('aria-invalid', 'true')
+  await expect(displayName).toHaveAccessibleDescription('Escribe solo una o dos palabras.')
+  await displayName.fill('Cliente prueba')
+  await expect(displayName).not.toHaveAttribute('aria-describedby')
+  await expect(page.locator('#account-name-error')).toHaveCount(0)
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.screenshot({ path: path.join(data, `account-${width}.png`) })
+  }
+  pass('Guest name validation remains accessible and clears after correction')
   assert.deepEqual(errors, [])
   console.log(`Evidence: ${data}; mode=${development ? 'development/StrictMode' : 'production'}; UI=${uiBase}; simulated provider/player`)
   if (process.env.KARAOKE_E2E_REAL_PREVIEW === '1') {
@@ -302,6 +330,8 @@ try {
       pass(`Real HTTPS YouTube iframe: ${id} ${blocked ? 'restriction detected' : 'playback confirmed'}; isolated metadata/backend, no requests submitted`)
     }
   }
+  await checkParticipantStatuses({ page, api, db, base, uiBase, data, queueId: row.queueId })
+  assert.deepEqual(errors, [])
 } catch (error) {
   console.error(`Evidence: ${data}`, errors)
   for (const context of browser?.contexts() ?? []) for (const page of context.pages()) {
