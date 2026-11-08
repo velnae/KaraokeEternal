@@ -15,8 +15,13 @@ import AnimationQuickControls from 'components/Animation/AnimationQuickControls'
 import { isPlayerFullscreenShortcut, PLAYER_FULLSCREEN_SHORTCUT, requestPlayerFullscreen } from 'lib/playerFullscreen'
 import { showErrorMessage } from 'store/modules/ui'
 import RemotePlayerControls from './RemotePlayerControls'
+import useBirthdaySync from 'components/Birthdays/useBirthdaySync'
+import { selectBirthdays } from 'store/modules/birthdays'
+import { nextBirthday } from 'shared/playbackSequence'
 
 const PlaybackCtrl = () => {
+  useBirthdaySync()
+  const birthday = nextBirthday(useAppSelector(selectBirthdays))
   const [isDisplayCtrlVisible, setDisplayCtrlVisible] = useState(false)
   const [fullscreenError, setFullscreenError] = useState(false)
   const location = useLocation()
@@ -66,7 +71,7 @@ const PlaybackCtrl = () => {
         {isPlayer && <Link to='/queue' className={styles.back} aria-label='Volver a la cola'><Icon icon='CHEVRON_LEFT' size={24} /></Link>}
         <div>
           <strong translate='no'>{roomName || 'Reproductor'}</strong>
-          <span>{status.isAtQueueEnd || status.queueId < 0 ? 'En espera' : status.isPlaying ? 'Reproduciendo' : 'En pausa'}</span>
+          <span>{birthday?.playback === 'playing' ? `Cumpleaños de ${birthday.name}` : status.isAtQueueEnd || status.queueId < 0 ? 'En espera' : status.isPlaying ? 'Reproduciendo' : 'En pausa'}</span>
         </div>
       </div>
       <div className={styles.transport}>

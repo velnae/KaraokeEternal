@@ -1,0 +1,32 @@
+.panel { position: sticky; top: 0; z-index: 3; max-height: 45vh; overflow: auto; padding: var(--space-m); margin-bottom: var(--space-m); background: var(--panel-bg-color); border-radius: var(--border-radius); }
+.heading, .actions, .queued { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-s); }
+.heading { gap: var(--space-m); }
+.heading h2 { margin: 0 auto 0 0; font-size: var(--font-size-m); }
+.card { display: flex; flex-wrap: wrap; gap: var(--space-m); align-items: center; padding: var(--space-m) 0; border-top: 1px solid var(--color-gray-3); margin-top: var(--space-m); }
+.identity { flex: 1 1 16rem; }
+.identity h3, .identity p { margin: .25rem 0; }
+.identity h3 { font-size: var(--font-size-l); }
+.card > .actions { flex: 0 1 auto; }
+.actions > button { width: auto; flex: 0 0 auto; }
+.script { flex-basis: 100%; }
+.script p { max-width: 70ch; }
+.form, .settings { display: grid; gap: var(--space-m); max-width: 70rem; }
+.form { min-width: min(24rem, 70vw); }
+.form label, .settings label { display: grid; gap: var(--space-xs); min-width: 0; }
+.form input, .settings input { padding: var(--space-s); min-width: 0; border-radius: var(--border-radius); font: inherit; }
+.form select, .settings select { max-width: 100%; }
+.settings fieldset { display: grid; gap: var(--space-m); border: 1px solid var(--color-gray-3); border-radius: var(--border-radius); padding: var(--space-m); min-width: 0; }
+.settings legend { font-size: var(--font-size-m); padding: 0 var(--space-s); }
+.rule { display: grid; grid-template-columns: 1fr 5rem 5rem 2fr auto; align-items: end; gap: var(--space-s); }
+.resource { display: grid; grid-template-columns: 1fr 1fr auto; gap: var(--space-m); align-items: end; }
+.preview { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-m); margin-top: var(--space-m); }
+.queued { border-left: 4px solid var(--link-color); background: var(--panel-bg-color); padding: var(--space-m); margin: var(--space-s) 0; }
+.queued strong { flex: 1; font-size: var(--font-size-m); }
+.panel summary, .settings summary { cursor: pointer; padding: var(--space-s) 0; }
+@media (max-width: 640px) {
+  .panel { position: static; max-height: none; overflow: visible; }
+  .rule, .resource { grid-template-columns: 1fr; }
+  .card { align-items: stretch; }
+  .card .actions { width: 100%; }
+  .preview audio { max-width: 100%; }
+}

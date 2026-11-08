@@ -24,6 +24,8 @@ import roomsRouter from './Rooms/router.js'
 import userRouter from './User/router.js'
 import tablesRouter from './Tables/router.js'
 import animationRouter from './Animation/router.js'
+import birthdayRouter from './Birthdays/router.js'
+import { startBirthdays } from './Birthdays/Service.js'
 import transitionVideoRouter, { isTransitionVideoPath } from './TransitionVideo/router.js'
 import { startTransitionVideos } from './TransitionVideo/Service.js'
 import playlistsRouter from './Playlists/router.js'
@@ -82,6 +84,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     const stopGreetingAudio = startGreetingAudio(path.join(env.KES_PATH_DATA, 'greetings'))
     const stopCalls = await startCallJobs(path.join(env.KES_PATH_DATA, 'animation', 'calls'))
     const stopTransitionVideos = await startTransitionVideos(path.join(env.KES_PATH_DATA, 'transition-video'))
+    const stopBirthdays = await startBirthdays(path.join(env.KES_PATH_DATA, 'birthdays'), io)
     socketActions(io, jwtKey)
     const stopHousePlaylists = startHousePlaylists(io)
 
@@ -113,7 +116,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     shutdownHandlers.push(async () => {
       stopAnimation()
       stopHousePlaylists()
-      await Promise.allSettled([stopGreetingAudio(), stopCalls(), stopTransitionVideos()])
+      await Promise.allSettled([stopGreetingAudio(), stopCalls(), stopTransitionVideos(), stopBirthdays()])
       await stopProduction()
       return new Promise((resolve) => {
       // also calls http server's close method, which ultimately handles the callback
@@ -205,6 +208,10 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   app.use((ctx, next) => {
     // This router authenticates before its own bounded parsers touch the body.
     if (isTransitionVideoPath(ctx.path, urlPath)) return next()
+    if (ctx.path.startsWith(`${urlPath}api/birthdays/`)) {
+      if (!ctx.user?.isAdmin || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
+      return ctx.path.replace(/\/+$/, '') === `${urlPath}api/birthdays/upload` ? parseAudio(ctx, next) : parseBody(ctx, next)
+    }
     const audioPath = ctx.path.slice(`${urlPath}api/animation/resources/`.length)
     if (ctx.path.startsWith(`${urlPath}api/animation/resources/`) && (audioPath === 'upload' || /^[\w-]+\/replace\/?$/.test(audioPath))) {
       if (!ctx.user?.isAdmin || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
@@ -229,6 +236,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(callRouter.routes())
   baseRouter.use(transitionVideoRouter.routes())
   baseRouter.use(animationRouter.routes())
+  baseRouter.use(birthdayRouter.routes())
   baseRouter.use(playlistsRouter.routes())
   app.use(baseRouter.routes())
 

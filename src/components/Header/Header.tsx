@@ -12,6 +12,8 @@ import PlaybackCtrl from './PlaybackCtrl/PlaybackCtrl'
 import ProgressBar from './ProgressBar/ProgressBar'
 import UpNext from './UpNext/UpNext'
 import styles from './Header.css'
+import { selectBirthdays } from 'store/modules/birthdays'
+import { nextBirthday } from 'shared/playbackSequence'
 
 // selectors
 const getIsAtQueueEnd = (state: RootState) => state.status.isAtQueueEnd
@@ -32,14 +34,14 @@ const getUserWait = createSelector(
 )
 
 const getStatusProps = createSelector(
-  [getRoundRobinQueue, getQueueId, getIsAtQueueEnd, getUserId],
-  (queue, queueId, isAtQueueEnd, userId) => {
+  [getRoundRobinQueue, getQueueId, getIsAtQueueEnd, getUserId, selectBirthdays],
+  (queue, queueId, isAtQueueEnd, userId, birthdays) => {
     const { result, entities } = queue
     const curIdx = result.indexOf(queueId)
     const curItem = entities[queueId]
 
     return {
-      isUpNext: result[curIdx + 1] ? entities[result[curIdx + 1]].userId === userId : false,
+      isUpNext: !nextBirthday(birthdays) && (result[curIdx + 1] ? entities[result[curIdx + 1]].userId === userId : false),
       isUpNow: curItem ? !isAtQueueEnd && curItem.userId === userId : false,
     }
   },

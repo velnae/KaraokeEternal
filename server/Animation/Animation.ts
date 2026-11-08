@@ -17,6 +17,7 @@ import { callsEnabled, prepareCall, validCall } from './Calls/Playback.js'
 import { callControls } from './Calls/Store.js'
 import { getCallAutomation } from './Calls/Automation.js'
 import type { CallContext } from '../../shared/karaokeCalls.js'
+import { birthdayOwnsAudio } from '../Birthdays/Store.js'
 
 type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[], transitionBed: boolean }
 export interface AnimationIdentity { roomId: number, userId: number, socketId: string }
@@ -101,6 +102,7 @@ export default class Animation {
 
   /** Greetings share the same exclusive intervention, epoch and persisted room fence. */
   static reserveGreeting (identity: AnimationIdentity, queueId: number, assets: AnimationClip[], durationMs: number, voiceMs: number, text: string, call?: CallContext): Intervention | null {
+    if (birthdayOwnsAudio(identity.roomId)) return null
     const owner = owners.get(identity.roomId)
     const snapshot = Animation.snapshot(identity.roomId)
     const now = Date.now()
@@ -272,6 +274,7 @@ export default class Animation {
   }
 
   static reserve (identity: AnimationIdentity, input: Reservation, status: { queueId?: number, isAtQueueEnd?: boolean, isErrored?: boolean }) {
+    if (birthdayOwnsAudio(identity.roomId)) throw new Error('El cumpleaños está en reproducción.')
     Animation.sweep()
     const now = Date.now()
     const snapshot = Animation.snapshot(identity.roomId)
@@ -347,6 +350,7 @@ export default class Animation {
   }
 
   static automaticPlan (identity: AnimationIdentity, input: Reservation) {
+    if (birthdayOwnsAudio(identity.roomId)) return null
     const roomId = identity.roomId
     Animation.sweep()
     const prefs = animationPrefs(Animation.room(roomId).prefs.animation)
@@ -441,6 +445,7 @@ export default class Animation {
   }
 
   static reserveTransitionAmbience (identity: AnimationIdentity, epoch: number, status: { queueId?: number, isAtQueueEnd?: boolean, isErrored?: boolean }, transition: NonNullable<AmbienceGrant['transition']>) {
+    if (birthdayOwnsAudio(identity.roomId)) return null
     const roomId = identity.roomId
     const snapshot = Animation.snapshot(roomId)
     const owner = owners.get(roomId)
@@ -467,6 +472,7 @@ export default class Animation {
   }
 
   static reserveAmbience (identity: AnimationIdentity, epoch: number, status: { queueId?: number, isAtQueueEnd?: boolean, isErrored?: boolean }, clipId?: string, offsetMs = 0) {
+    if (birthdayOwnsAudio(identity.roomId)) return null
     const roomId = identity.roomId
     const snapshot = Animation.snapshot(roomId)
     const prefs = animationPrefs(snapshot.prefs)

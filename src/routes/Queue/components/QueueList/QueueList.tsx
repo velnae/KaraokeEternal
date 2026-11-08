@@ -20,10 +20,17 @@ import Modal from 'components/Modal/Modal'
 import MusicBlockForm from 'components/MusicBlocking/MusicBlockForm'
 import { musicRuleLabel, type MusicBlockRule } from 'shared/musicBlocking'
 import { operatorQueue } from '../../selectors/operatorQueue'
+import BirthdayPanel from 'components/Birthdays/BirthdayPanel'
+import BirthdayQueueItem from 'components/Birthdays/BirthdayQueueItem'
+import useBirthdaySync from 'components/Birthdays/useBirthdaySync'
+import { selectBirthdays } from 'store/modules/birthdays'
+import { playbackSequence } from 'shared/playbackSequence'
 
 type QueueFilter = 'queue' | 'pending' | 'house'
 
 const QueueList = () => {
+  useBirthdaySync()
+  const birthdays = useAppSelector(selectBirthdays)
   const [block, setBlock] = useState<{ rule: MusicBlockRule, title: string, opener: HTMLButtonElement } | null>(null)
   const [blockMessage, setBlockMessage] = useState('')
   const blockBusy = useRef(false)
@@ -185,6 +192,7 @@ const QueueList = () => {
 
   return (
     <>
+      {user.isAdmin && <BirthdayPanel key={user.roomId} />}
       {user.isAdmin && (
         <div className={styles.filters}>
           {tableOptions.size > 0 && (
@@ -235,7 +243,7 @@ const QueueList = () => {
         </p>
       )}
       {user.isAdmin && filter === 'house' && <HousePlaylistControl key={user.roomId} />}
-      {user.isAdmin && filter === 'queue' && result.length === 0 && (
+      {user.isAdmin && filter === 'queue' && result.length === 0 && !birthdays.length && (
         <div className={styles.empty}>
           <h1>La cola de reproducción está vacía</h1>
           <Link to='/library'>Buscar una canción</Link>
@@ -248,10 +256,17 @@ const QueueList = () => {
         <div className={styles.empty}>No hay canciones de la casa aprobadas.</div>
       )}
       {user.isAdmin
-        ? items.flatMap((item, index) => visibleResult[index] === historyStart
-            ? [<h2 key='queue-history' className={styles.historySeparator}>Historial</h2>, item]
-            : [item])
-        : <QueueListAnimator queueItems={items.filter(item => item !== null)} />}
+        ? playbackSequence(visibleResult, filter === 'queue' ? birthdays : [], isAtQueueEnd ? -1 : queueId).flatMap((entry) => {
+            if (entry.kind === 'birthday') return [<BirthdayQueueItem key={entry.event.id} event={entry.event} />]
+            const item = items[visibleResult.indexOf(entry.queueId)]
+            return entry.queueId === historyStart ? [<h2 key='queue-history' className={styles.historySeparator}>Historial</h2>, item] : [item]
+          })
+        : (
+            <QueueListAnimator queueItems={playbackSequence(visibleResult, birthdays, isAtQueueEnd ? -1 : queueId).flatMap(entry => entry.kind === 'birthday'
+              ? [<BirthdayQueueItem key={entry.event.id} event={entry.event} />]
+              : [items[visibleResult.indexOf(entry.queueId)]]).filter(item => item !== null)}
+            />
+          )}
       {user.isAdmin && block && (
         <Modal
           title={block.rule.kind === 'artist' ? 'Bloquear artista' : block.rule.kind === 'song' ? 'Bloquear canción' : block.rule.source === 'YOUTUBE' ? 'Bloquear este video' : 'Bloquear este archivo'}

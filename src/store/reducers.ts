@@ -14,11 +14,13 @@ import ui from './modules/ui'
 import user from './modules/user'
 import userStars from './modules/userStars'
 import animation from './modules/animation'
+import birthdays from './modules/birthdays'
 
 export interface LazyLoadedSlices {} // eslint-disable-line @typescript-eslint/no-empty-object-type
 
 const combinedReducer = combineSlices({
   animation,
+  birthdays,
   artists,
   library,
   prefs,

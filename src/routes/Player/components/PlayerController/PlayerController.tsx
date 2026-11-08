@@ -6,6 +6,8 @@ import PlayerTextOverlay from '../PlayerTextOverlay/PlayerTextOverlay'
 import PlayerQR from '../PlayerQR/PlayerQR'
 import PlayerDisplayOverlay from 'components/PlayerDisplay/PlayerDisplayOverlay'
 import { turnPlacement } from 'components/PlayerDisplay/layout'
+import useBirthdayPlayer from '../Birthday/useBirthdayPlayer'
+import BirthdayScene from '../Birthday/BirthdayScene'
 import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
 import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, playerStatusCancel, type PlayerState } from '../../modules/player'
 import store from 'store/store'
@@ -65,6 +67,9 @@ const PlayerController = (props: PlayerControllerProps) => {
   const mounted = useRef(true)
   const mediaPlayerRef = useRef<Player>(null)
   const animation = useAnimationPlayer()
+  const birthday = useBirthdayPlayer(animation.channel)
+  const birthdayRef = useRef(birthday)
+  birthdayRef.current = birthday
   const greetings = useGreetingPlayer(animation.channel, animation.refreshReadiness, animation.markStopped)
   const selectedBackground = useSelectedPlayerBackground(roomId, roomPrefs?.transitionVideo, player._authority === 'GRANTED')
   const backgroundRef = useRef(selectedBackground)
@@ -209,6 +214,11 @@ const PlayerController = (props: PlayerControllerProps) => {
       return ordered.result.slice(index + 1).map(id => ordered.entities[id]).find(item => item.status === 'APPROVED')
     }
     try {
+      if (birthdayRef.current.pending) await animationRef.current.stopAmbience()
+      const celebration = await birthdayRef.current.attempt(boundary, sourceId)
+      if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
+      if (celebration === 'waiting') return
+      if (celebration === 'finished') dispatch(playerStatus({ isPlaying: true }))
       const upcoming = selection()
       setPreparingQueueId(upcoming?.source === 'YOUTUBE' ? upcoming.queueId : null)
       const callRequested = animationRef.current.snapshot?.karaokeCallsEnabled && upcoming?.origin !== 'HOUSE' && upcoming?.requestIntent === 'SING'
@@ -253,6 +263,12 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (!socket.connected || current._authority !== 'GRANTED' || current._isReplayingQueueId !== null || animationRef.current.isBlocked()) return
       // Read the current intent, never restore the pre-announcement pause state.
       if (!current.isPlaying && !current._isPlayingNext) return
+      // An approval can arrive while a normal announcement is running.
+      if (birthdayRef.current.pending) {
+        await finishTransition()
+        const celebration = await birthdayRef.current.attempt(boundary, sourceId)
+        if (celebration === 'waiting' || !mounted.current || controlVersion !== animationRef.current.controlVersion()) return
+      }
       // Keep the song whose transition just ran, unless it was cancelled.
       const reserved = upcoming && ensureState(store.getState().queue).entities[upcoming.queueId]
       if (reserved?.isOptimistic !== true && reserved?.origin === 'HOUSE' && reserved.status === 'APPROVED') {
@@ -288,6 +304,19 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (mounted.current && (retryHouseSelection || controlVersion !== animationRef.current.controlVersion())) retryAdvance(value => value + 1)
     }
   }, [dispatch, finishTransition, updateTransition])
+
+  useEffect(() => {
+    if (!birthday.pending || birthday.busy || player._authority !== 'GRANTED') return
+    const probe = () => {
+      const current = store.getState().player
+      if (!current._isQueueStopped && (current.isAtQueueEnd || current.queueId === -1 || current._isBetweenTracks)) {
+        void handleLoadNext(false, false, current.queueId === -1 || current.isAtQueueEnd ? 'idle' : 'ended')
+      }
+    }
+    probe()
+    const timer = setInterval(probe, 1000)
+    return () => clearInterval(timer)
+  }, [birthday.pending, birthday.busy, player._authority, handleLoadNext])
 
   const handleEnd = useCallback(() => {
     if (!queueItem) return
@@ -391,9 +420,9 @@ const PlayerController = (props: PlayerControllerProps) => {
 
   const { startAmbience, ambientPlaying, ambientTick } = animation
   useEffect(() => {
-    if (!player._isQueueStopped && !advancing.current && !animation.busy && !animation.blocked && animation.unlocked && !ambientPlaying
+    if (!birthday.pending && !birthday.busy && !player._isQueueStopped && !advancing.current && !animation.busy && !animation.blocked && animation.unlocked && !ambientPlaying
       && !player.isErrored && (player.isAtQueueEnd || player.queueId === -1)) void startAmbience()
-  }, [animation.snapshot, animation.busy, animation.blocked, animation.unlocked, ambientPlaying, ambientTick, startAmbience, player.isErrored, player.isAtQueueEnd, player.queueId, player._isQueueStopped])
+  }, [birthday.pending, birthday.busy, animation.snapshot, animation.busy, animation.blocked, animation.unlocked, ambientPlaying, ambientTick, startAmbience, player.isErrored, player.isAtQueueEnd, player.queueId, player._isQueueStopped])
 
   // retrying after error?
   useEffect(() => {
@@ -402,7 +431,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     }
   }, [handleStatus, player.isErrored, player.isPlaying])
 
-  const foregroundScene = !!transition || !!greetings.scene || !!animation.scene || animation.blocked || animation.busy
+  const foregroundScene = birthday.busy || !!transition || !!greetings.scene || !!animation.scene || animation.blocked || animation.busy
     || (player._isBetweenTracks && player.queueId !== -1 && !player.isAtQueueEnd)
   const showScene = animation.connected && (foregroundScene || animation.ambientPlaying) && !player.isErrored
   const background = transition
@@ -443,7 +472,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         phase={phase}
         diagnostics={[audioStatus, greetings.error, animation.error, uiError, player.isErrored && player.errorMessage].filter(Boolean) as string[]}
         canSeek={queueItem?.source === 'YOUTUBE' && !foregroundScene && !player.isAtQueueEnd && !player.isErrored}
-        isPlaying={player.isPlaying}
+        isPlaying={player.isPlaying && !birthday.busy}
         onSeek={target => mediaPlayerRef.current?.seekForDevelopment(target)}
       />
     </React.Suspense>
@@ -479,7 +508,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         ref={mediaPlayerRef}
         cdgAlpha={player.cdgAlpha}
         cdgSize={player.cdgSize}
-        isPlaying={player.isPlaying}
+        isPlaying={player.isPlaying && !birthday.busy}
         isVisible={!!queueItem && !player.isErrored && !player.isAtQueueEnd && !player._isBetweenTracks && !animation.busy && !animation.blocked
           && !(queueItem.source === 'YOUTUBE' && transition && !handingOff)}
         preparedYouTube={preparedYouTube}
@@ -505,7 +534,8 @@ const PlayerController = (props: PlayerControllerProps) => {
         width={props.width}
         height={props.height}
       />
-      {showScene && (
+      {birthday.scene && <BirthdayScene key={birthday.scene.grant.event.id} grant={birthday.scene.grant} />}
+      {showScene && !birthday.scene && (
         <PlayerTransitionScene
           background={background}
           playing={!!(transition || animation.scene || greetings.scene || animation.ambientPlaying || player.isPlaying || player._isPlayingNext)}
@@ -513,35 +543,44 @@ const PlayerController = (props: PlayerControllerProps) => {
           exiting={transition?.phase === 'exiting'}
           onExited={handleVisualExit}
         >
-          {foregroundScene
+          {birthday.pendingEvent
             ? (
-                <PlayerTransitionPresentation
-                  {...presentedTracks}
-                  venueName={prefs.branding.name}
-                  announcementActive={!!(animation.text || animation.scene || greetings.scene?.transition?.call)}
-                  greetingIntro={!!greetings.intro}
-                  greeting={greetings.active}
-                  moderationTerms={prefs.moderation.terms}
-                  onGreetingMounted={greetings.confirmMounted}
-                />
+                <div className={styles.authorityNotice} role='status'>
+                  <h1>{`Cumpleaños de ${birthday.pendingEvent.name}`}</h1>
+                  <p>Preparando la celebración…</p>
+                </div>
               )
-            : idleOverlay}
+            : foregroundScene
+              ? (
+                  <PlayerTransitionPresentation
+                    {...presentedTracks}
+                    venueName={prefs.branding.name}
+                    announcementActive={!!(animation.text || animation.scene || greetings.scene?.transition?.call)}
+                    greetingIntro={!!greetings.intro}
+                    greeting={greetings.active}
+                    moderationTerms={prefs.moderation.terms}
+                    onGreetingMounted={greetings.confirmMounted}
+                  />
+                )
+              : idleOverlay}
         </PlayerTransitionScene>
       )}
-      {audioStatus && (animation.needsGesture || animation.error) && (
+      {(birthday.needsSound || birthday.needsVolume || (audioStatus && (animation.needsGesture || animation.error))) && (
         <div className={animationStyles.unlock}>
-          {animation.needsGesture
+          {animation.needsGesture || birthday.needsSound
             ? (
                 <>
                   <p>Activa el sonido</p>
-                  <Button variant='primary' onClick={animation.unlock}>Permitir sonido</Button>
+                  <Button variant='primary' onClick={birthday.needsSound ? birthday.unlock : animation.unlock}>Permitir sonido</Button>
                 </>
               )
-            : <p role='status'>No se pudo activar el sonido.</p>}
+            : animation.error ? <p role='status'>No se pudo activar el sonido.</p> : null}
           {animation.error && !animation.needsGesture && <Button onClick={animation.unlock}>Reintentar audio</Button>}
+          {birthday.error && <p role='alert'>{birthday.error}</p>}
+          {birthday.needsVolume && <p role='status'>Suba el volumen para iniciar el cumpleaños.</p>}
         </div>
       )}
-      {!showScene && idleOverlay}
+      {!showScene && !birthday.scene && idleOverlay}
       {showBranding && <PlayerDisplayOverlay key={queueItem.queueId} branding={prefs.branding} settings={prefs.playerDisplay} viewport={props} intent={queueItem.requestIntent} isPlaying={player.isPlaying} />}
       {developmentTools}
       {roomPrefs?.qr?.isEnabled && !youtubeSong && (

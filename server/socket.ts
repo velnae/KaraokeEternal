@@ -5,6 +5,8 @@ import Library from './Library/Library.js'
 import LibrarySocket from './Library/socket.js'
 import PlayerSocket from './Player/socket.js'
 import AnimationSocket from './Animation/socket.js'
+import BirthdaySocket from './Birthdays/socket.js'
+import { birthdayService } from './Birthdays/Service.js'
 import Animation from './Animation/Animation.js'
 import Greetings from './Greetings/Greetings.js'
 import GreetingsSocket from './Greetings/socket.js'
@@ -39,6 +41,7 @@ const handlers = {
   ...QueueSocket,
   ...PlayerSocket,
   ...AnimationSocket,
+  ...BirthdaySocket,
   ...GreetingsSocket,
   ...PrefsSocket,
   ...RoomsSocket,
@@ -104,6 +107,7 @@ export default function (io, jwtKey) {
       const wasAuthoritativePlayer = Rooms.isAuthoritativePlayer(sock)
       if (wasAuthoritativePlayer) Greetings.interrupt(sock.user.roomId, 'La pantalla se desconectó', sock.id)
       if (wasAuthoritativePlayer) Animation.disconnect(sock.user.roomId, sock.id)
+      if (wasAuthoritativePlayer) birthdayService().interrupt(sock.user.roomId, 'El reproductor se desconectó.', sock.id)
       sock._isPlayerAuthoritative = false
 
       // Only the authoritative player ending its session can interrupt playback.

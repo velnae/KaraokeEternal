@@ -14,9 +14,10 @@ import PlaylistsView from 'components/Playlists/PlaylistsView'
 import ModerationPrefs from 'routes/Account/components/Prefs/ModerationPrefs/ModerationPrefs'
 import MusicBlockingPrefs from 'components/MusicBlocking/MusicBlockingPrefs'
 import PlayerDisplaySettings from 'components/PlayerDisplay/PlayerDisplaySettings'
+import BirthdaySettings from 'components/Birthdays/BirthdaySettings'
 
 export default function AdminRoutes () {
-  const { isAdmin, userId } = useAppSelector(state => state.user)
+  const { isAdmin, userId, roomId } = useAppSelector(state => state.user)
   const location = useLocation()
   if (!isAdmin) return <Navigate to={userId === null ? `/account?redirect=${encodeURIComponent(location.pathname + location.search)}` : '/queue'} replace />
   return (
@@ -35,6 +36,7 @@ export default function AdminRoutes () {
         )}
       />
       <Route path='settings/animator' element={<AdminPage title='Animador' description=''><AnimatorSettings /></AdminPage>} />
+      <Route path='settings/birthdays' element={<AdminPage title='Cumpleaños' description=''><BirthdaySettings key={roomId} /></AdminPage>} />
       <Route path='settings/playback' element={<AdminPage title='Reproducción' description='Ajuste el comportamiento del reproductor y el nivel de las canciones.'><PlayerPrefs /></AdminPage>} />
       <Route path='settings/display' element={<AdminPage title='Pantalla del reproductor' description='Todo el local · Referencia FHD (1920 × 1080)'><PlayerDisplaySettings /></AdminPage>} />
       <Route path='settings/files' element={<AdminPage title='Archivos' description='Administre las carpetas de música y actualice la biblioteca.'><PathPrefs /></AdminPage>} />

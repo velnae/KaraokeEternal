@@ -2,6 +2,8 @@ import { RootState } from 'store/store'
 import { createSelector } from '@reduxjs/toolkit'
 import getPlayerHistory from './getPlayerHistory'
 import getRoundRobinQueue from './getRoundRobinQueue'
+import { selectBirthdays } from 'store/modules/birthdays'
+import { birthdayWaitSeconds } from 'shared/playbackSequence'
 
 const getPosition = (state: RootState) => state.status.position
 const getQueue = (state: RootState) => getRoundRobinQueue(state)
@@ -9,8 +11,8 @@ const getQueueId = (state: RootState) => state.status.queueId
 const getSongs = (state: RootState) => state.songs
 
 const getWaits = createSelector(
-  [getQueue, getQueueId, getPlayerHistory, getPosition, getSongs],
-  (queue, queueId, history, position, songs) => {
+  [getQueue, getQueueId, getPlayerHistory, getPosition, getSongs, selectBirthdays],
+  (queue, queueId, history, position, songs, birthdays) => {
     const curIdx = queue.result.indexOf(queueId)
     const waits: Record<number, number> = {}
     let curWait = 0
@@ -33,7 +35,7 @@ const getWaits = createSelector(
         nextWait = duration
       }
 
-      waits[queueId] = curWait
+      waits[queueId] = curWait + (i > curIdx ? birthdayWaitSeconds(birthdays) : 0)
     })
 
     return waits
