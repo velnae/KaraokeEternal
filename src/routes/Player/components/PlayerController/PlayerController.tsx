@@ -195,6 +195,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     const controlVersion = animationRef.current.controlVersion()
     const before = store.getState().player
     const transitionStartedAt = performance.now()
+    let retryHouseSelection = false
     const sourceId = before.queueId
     const historyJSON = appendCompletedToHistory(before.historyJSON, includeCurrentInHistory && sourceId >= 0 ? sourceId : undefined)
     // Replay suppresses announcements for that playback, not the incoming turn.
@@ -252,6 +253,16 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (!current.isPlaying && !current._isPlayingNext) return
       // Keep the song whose transition just ran, unless it was cancelled.
       const reserved = upcoming && ensureState(store.getState().queue).entities[upcoming.queueId]
+      if (reserved?.isOptimistic !== true && reserved?.origin === 'HOUSE' && reserved.status === 'APPROVED') {
+        // A customer's reserved turn is protected; house filler must still yield
+        // to demand or aging that changed while the transition was running.
+        const { housePolicy } = getPlaybackQueue(store.getState(), Math.floor(Date.now() / 1000))
+        if (housePolicy.pendingCount > 0 && housePolicy.limit === 0) {
+          await finishTransition()
+          retryHouseSelection = true
+          return
+        }
+      }
       const next = reserved?.isOptimistic !== true && reserved?.status === 'APPROVED' ? reserved : selection()
       if (!next) {
         await finishTransition()
@@ -272,7 +283,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       advancing.current = false
       // A command received during an idle probe must get a fresh transition,
       // including its greeting, after the previous async owner releases it.
-      if (mounted.current && controlVersion !== animationRef.current.controlVersion()) retryAdvance(value => value + 1)
+      if (mounted.current && (retryHouseSelection || controlVersion !== animationRef.current.controlVersion())) retryAdvance(value => value + 1)
     }
   }, [dispatch, finishTransition, updateTransition])
 

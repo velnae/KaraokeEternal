@@ -31,13 +31,13 @@ const getRoundRobinQueue = createSelector(
 export default getRoundRobinQueue
 
 // The authoritative player must not select from its delayed status echo.
-export const getPlaybackQueue = (state: RootState) => getRoundRobinQueue({
+export const getPlaybackQueue = (state: RootState, queueDecisionAt = state.player.queueDecisionAt) => getRoundRobinQueue({
   ...state,
   status: {
     ...state.status,
     queueId: state.player.queueId,
     historyJSON: state.player.historyJSON,
     nextUserId: state.player.nextUserId,
-    queueDecisionAt: state.player.queueDecisionAt,
+    queueDecisionAt,
   },
 })

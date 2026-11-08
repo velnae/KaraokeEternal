@@ -6,6 +6,7 @@ import { io } from 'socket.io-client'
 import fs from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
+import { checkHouseTransitionRevalidation } from './house-transition-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -277,6 +278,8 @@ try {
   await expect(admin.getByText('Desactiva la lista en De la casa antes de mezclarla. La canción actual continuará.', { exact: true })).toBeVisible()
   assert.deepEqual((await call(api, 'rooms/1/playlists', undefined, 'GET')).playlists.find(list => list.playlistId === listId).items, saved.items)
   console.log('PASS keyboard playlist shuffle persists; concurrent activation rejects another shuffle and explains recovery')
+  await checkHouseTransitionRevalidation({ player, db, emit, uiBase, getStatus: () => playerStatus,
+    call: (endpoint, body, method = body === undefined ? 'GET' : 'POST') => call(api, endpoint, body, method) })
   assert.deepEqual(errors, [])
   console.log(`PASS keyboard recovery preserves waiting time and owner; ${development ? 'development StrictMode' : 'production'}${httpsUi ? ' with HTTPS assets + isolated APIs' : ''}; evidence: ${data}`)
 } catch (error) {
