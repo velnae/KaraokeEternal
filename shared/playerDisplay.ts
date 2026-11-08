@@ -1,3 +1,5 @@
+import { isPlayerLogoId } from './playerLogo.js'
+
 export const DISPLAY_REFERENCE = { width: 1920, height: 1080 } as const
 export const DISPLAY_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const
 export const DISPLAY_ANCHORS = ['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-center', 'bottom-right'] as const
@@ -11,6 +13,12 @@ export const isDisplayColor = (value: unknown): value is string => typeof value 
 
 export interface PlayerDisplaySettings {
   logo: {
+    source: 'brand' | 'custom'
+    mode: 'static' | 'animated' | 'alternating'
+    staticImageId: string | null
+    animatedImageId: string | null
+    staticSeconds: number
+    animatedSeconds: number
     enabled: boolean
     scale: number
     position: DisplayCorner
@@ -42,7 +50,7 @@ export interface PlayerDisplaySettings {
 
 // Values in pixels are measured on the FHD reference; offsets/widths are percentages.
 export const displayLimits = {
-  logo: { scale: [25, 300, 5], marginX: [0, 20, 0.5], marginY: [0, 20, 0.5], opacity: [10, 100, 5] },
+  logo: { scale: [25, 300, 5], marginX: [0, 20, 0.5], marginY: [0, 20, 0.5], opacity: [10, 100, 5], staticSeconds: [5, 300, 1], animatedSeconds: [1, 30, 1] },
   announcement: {
     width: [20, 96, 0.1], offsetX: [-20, 20, 0.5], marginY: [0, 20, 0.5], padding: [0, 60, 1],
     textScale: [60, 180, 5], backgroundOpacity: [20, 100, 5], borderWidth: [0, 8, 0.5],
@@ -51,7 +59,8 @@ export const displayLimits = {
 } as const
 
 export const defaultPlayerDisplay: PlayerDisplaySettings = {
-  logo: { enabled: false, scale: 100, position: 'top-right', marginX: 2.5, marginY: 3, opacity: 100 },
+  logo: { enabled: false, scale: 100, position: 'top-right', marginX: 2.5, marginY: 3, opacity: 100,
+    source: 'brand', mode: 'static', staticImageId: null, animatedImageId: null, staticSeconds: 60, animatedSeconds: 6 },
   announcement: {
     enabled: false, width: 39.6, position: 'bottom-center', offsetX: 0, marginY: 4, padding: 20,
     textScale: 100, alignment: 'left', textColor: null, showIcon: true, backgroundColor: '#030509',
@@ -86,6 +95,12 @@ const choice = <T extends string>(value: unknown, fallback: T, choices: readonly
   return value as T
 }
 
+const imageId = (value: unknown): string | null => {
+  if (value === undefined || value === null) return null
+  if (!isPlayerLogoId(value)) throw Object.assign(new Error('Seleccione una imagen de pantalla válida.'), { field: 'logo' })
+  return value
+}
+
 export function validatePlayerDisplay (input: unknown): PlayerDisplaySettings {
   const settings = object(input)
   const logo = object(settings.logo)
@@ -94,8 +109,13 @@ export function validatePlayerDisplay (input: unknown): PlayerDisplaySettings {
   const a = defaultPlayerDisplay.announcement
   const messages = announcement.messages === undefined ? a.messages : announcement.messages
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > MAX_DISPLAY_MESSAGES) throw new Error('Agregue entre 1 y 5 comunicados.')
-  return {
+  const result: PlayerDisplaySettings = {
     logo: {
+      source: choice(logo.source, l.source, ['brand', 'custom']),
+      mode: choice(logo.mode, l.mode, ['static', 'animated', 'alternating']),
+      staticImageId: imageId(logo.staticImageId), animatedImageId: imageId(logo.animatedImageId),
+      staticSeconds: number(logo.staticSeconds, l.staticSeconds, displayLimits.logo.staticSeconds, 'Tiempo estático'),
+      animatedSeconds: number(logo.animatedSeconds, l.animatedSeconds, displayLimits.logo.animatedSeconds, 'Tiempo animado'),
       enabled: boolean(logo.enabled, l.enabled), position: choice(logo.position, l.position, DISPLAY_CORNERS),
       scale: number(logo.scale, l.scale, displayLimits.logo.scale, 'Tamaño del logo'),
       marginX: number(logo.marginX, l.marginX, displayLimits.logo.marginX, 'Margen lateral del logo'),
@@ -127,11 +147,18 @@ export function validatePlayerDisplay (input: unknown): PlayerDisplaySettings {
       }),
     },
   }
+  if (result.logo.source === 'custom' && result.logo.enabled) {
+    if (!result.logo.staticImageId && !result.logo.animatedImageId) throw Object.assign(new Error('Suba una imagen PNG o GIF para el logo personalizado.'), { field: 'logo' })
+    if (result.logo.mode !== 'static' && !result.logo.animatedImageId) throw Object.assign(new Error('Suba un GIF para usar el modo animado o intermitente.'), { field: 'logo' })
+  }
+  return result
 }
 
 export function resetDisplayAppearance (settings: PlayerDisplaySettings): PlayerDisplaySettings {
   return {
-    logo: { ...defaultPlayerDisplay.logo, enabled: settings.logo.enabled },
+    logo: { ...defaultPlayerDisplay.logo, enabled: settings.logo.enabled,
+      source: settings.logo.source, mode: settings.logo.mode, staticImageId: settings.logo.staticImageId,
+      animatedImageId: settings.logo.animatedImageId, staticSeconds: settings.logo.staticSeconds, animatedSeconds: settings.logo.animatedSeconds },
     announcement: { ...defaultPlayerDisplay.announcement, enabled: settings.announcement.enabled,
       messages: settings.announcement.messages.map(message => ({ ...message })), intervalSeconds: settings.announcement.intervalSeconds },
   }

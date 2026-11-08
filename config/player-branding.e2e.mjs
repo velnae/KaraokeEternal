@@ -8,6 +8,7 @@ import path from 'node:path'
 import assert from 'node:assert/strict'
 import { installYouTubeTransitionFixture } from './transition-ambience-checks.e2e.mjs'
 import { checkPlayerDisplay } from './player-display-checks.e2e.mjs'
+import { checkPlayerLogo } from './player-logo-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -112,7 +113,18 @@ try {
       const headers = { 'accept-encoding': 'identity' }
       for (const name of ['content-type', 'range', 'if-range']) if (incoming.headers()[name]) headers[name] = incoming.headers()[name]
       try {
-        const response = await api.fetch(base + suffix, { method: incoming.method(), headers, data: incoming.postDataBuffer() ?? undefined, timeout: 35000 })
+        let response
+        const logoKind = url.pathname.match(/\/player-logo-images\/(png|gif)$/)?.[1]
+        if (logoKind && incoming.method() === 'POST' && headers['content-type']?.startsWith('multipart/')) {
+          // Chromium's intercepted multipart body omits file bytes. Rebuild only our known
+          // fixtures; native browser uploads are separately exercised by local dev/prod runs.
+          const filename = incoming.postDataBuffer()?.toString('utf8').match(/filename="([^"]+)"/)?.[1]
+          assert.equal(filename, `logo.${logoKind}`)
+          delete headers['content-type']
+          response = await api.post(base + suffix, { headers, multipart: {
+            file: { name: filename, mimeType: `image/${logoKind}`, buffer: fs.readFileSync(path.join(data, filename)) },
+          } })
+        } else response = await api.fetch(base + suffix, { method: incoming.method(), headers, data: incoming.postDataBuffer() ?? undefined, timeout: 35000 })
         if (socketTraffic && incoming.method() === 'GET' && !url.searchParams.has('sid') && response.status() === 200) {
           const handshake = JSON.parse((await response.text()).slice(1))
           handshake.upgrades = []
@@ -151,9 +163,11 @@ try {
   editor = await context.newPage()
   player = await context.newPage()
   for (const page of [editor, player]) page.on('pageerror', error => errors.push(error.message))
-  await checkPlayerDisplay({ browser, context, editor, player, api, secondApi, call, emit, db, base, uiBase, data, realYouTube, errors })
+  const logoOnly = process.env.KARAOKE_E2E_LOGO_ONLY === '1'
+  if (!logoOnly) await checkPlayerDisplay({ browser, context, editor, player, api, secondApi, call, emit, db, base, uiBase, data, realYouTube, errors })
+  if (logoOnly || process.env.KARAOKE_E2E_LOGO === '1') await checkPlayerLogo({ editor, player, call, emit, uiBase, data, realYouTube, initialize: logoOnly })
   assert.deepEqual(errors, [])
-  console.log(`PASS display checklist (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS origin + isolated API/socket' : ''}${worktreeUi ? ', worktree assets' : ''}${realYouTube ? ', real YouTube' : ', media fixture'}). Artifacts: ${data}`)
+  console.log(`PASS ${logoOnly ? 'custom-logo regression' : 'display checklist'} (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS origin + isolated API/socket' : ''}${worktreeUi ? ', worktree assets' : ''}${realYouTube ? ', real YouTube' : ', media fixture'}). Artifacts: ${data}`)
 } catch (error) {
   for (const [name, page] of [['player', player], ['editor', editor]]) if (page && !page.isClosed()) await page.screenshot({ path: path.join(data, `${name}-failure.png`) }).catch(() => {})
   console.error({ artifacts: data, errors })

@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import { defaultPlayerDisplay, displayLimits, resetDisplayAppearance, validatePlayerDisplay } from './playerDisplay.js'
+import { resolvePlayerLogo } from './playerLogo.js'
 
 describe('player display contract', () => {
+  it('keeps legacy brand source and supports independent PNG, GIF-only and alternating resources', () => {
+    const png = '11111111-1111-1111-1111-111111111111'
+    const gif = '22222222-2222-2222-2222-222222222222'
+    expect(validatePlayerDisplay({ logo: { enabled: true } }).logo.source).toBe('brand')
+    const custom = validatePlayerDisplay({ logo: { enabled: true, source: 'custom', mode: 'alternating', staticImageId: png, animatedImageId: gif, staticSeconds: 12, animatedSeconds: 3 } })
+    expect(resolvePlayerLogo(custom.logo, 'brand.png')).toEqual({
+      still: `api/player-logo-images/${png}/image`, fallback: `api/player-logo-images/${gif}/poster`, animated: `api/player-logo-images/${gif}/image`,
+    })
+    expect(resetDisplayAppearance(custom).logo).toMatchObject({ source: 'custom', mode: 'alternating', staticImageId: png, animatedImageId: gif, staticSeconds: 12, animatedSeconds: 3 })
+    const gifOnly = validatePlayerDisplay({ logo: { ...custom.logo, staticImageId: null } })
+    expect(resolvePlayerLogo(gifOnly.logo, '').still).toBe(`api/player-logo-images/${gif}/poster`)
+    expect(resolvePlayerLogo({ ...custom.logo, source: 'brand' }, 'brand.png')).toEqual({ still: 'brand.png', fallback: '', animated: '' })
+  })
+
+  it.each([
+    { source: 'remote' }, { mode: 'random' }, { staticImageId: '../../etc/passwd' }, { animatedImageId: 'data:image/gif;base64,x' },
+    { enabled: true, source: 'custom' },
+    { enabled: true, source: 'custom', mode: 'animated', staticImageId: '11111111-1111-1111-1111-111111111111' },
+  ])('rejects invalid logo choices: %j', logo => expect(() => validatePlayerDisplay({ logo })).toThrow())
+
   it('fills nested defaults and normalizes only allowed fields', () => {
     expect(validatePlayerDisplay({})).toEqual(defaultPlayerDisplay)
     const display = validatePlayerDisplay({ logo: { enabled: true, junk: 1 }, announcement: { backgroundColor: '#6B5143', messages: [{ title: ' Hola ', text: ' Mesa ', html: '<b/>' }] } })
