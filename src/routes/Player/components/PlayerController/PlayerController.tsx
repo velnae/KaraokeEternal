@@ -4,8 +4,8 @@ import { useAppDispatch, useAppSelector } from 'store/hooks'
 import Player from '../Player/Player'
 import PlayerTextOverlay from '../PlayerTextOverlay/PlayerTextOverlay'
 import PlayerQR from '../PlayerQR/PlayerQR'
-import PlayerBranding from 'components/PlayerBranding/PlayerBranding'
-import { getPlayerBranding } from 'shared/branding'
+import PlayerDisplayOverlay from 'components/PlayerDisplay/PlayerDisplayOverlay'
+import { turnPlacement } from 'components/PlayerDisplay/layout'
 import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
 import { playerLeave, playerError, playerFailure, playerLoad, playerPlay, playerStatus, playerStatusCancel, type PlayerState } from '../../modules/player'
 import store from 'store/store'
@@ -458,7 +458,8 @@ const PlayerController = (props: PlayerControllerProps) => {
     && !foregroundScene && !showScene
   const showBranding = youtubeSong && !player.isErrored && !player._isFetching && !player._isBetweenTracks
     && !player._isPlayingNext && player._isReplayingQueueId === null
-  const logoVisible = showBranding && getPlayerBranding(prefs.branding.player).showLogo && !!prefs.branding.logoSrc
+  const logoVisible = showBranding && prefs.playerDisplay.logo.enabled && !!prefs.branding.logoSrc
+  const turn = turnPlacement(prefs.playerDisplay, props, logoVisible, showBranding && prefs.playerDisplay.announcement.enabled && queueItem.requestIntent === 'LISTEN')
   const idleOverlay = (
     <PlayerTextOverlay
       queueItem={queueItem as QueueItem}
@@ -468,7 +469,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       isErrored={player.isErrored}
       width={props.width}
       height={props.height}
-      logoVisible={logoVisible}
+      turnPlacement={turn}
     />
   )
 
@@ -541,7 +542,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         </div>
       )}
       {!showScene && idleOverlay}
-      {showBranding && <PlayerBranding key={queueItem.queueId} branding={prefs.branding} intent={queueItem.requestIntent} isPlaying={player.isPlaying} />}
+      {showBranding && <PlayerDisplayOverlay key={queueItem.queueId} branding={prefs.branding} settings={prefs.playerDisplay} viewport={props} intent={queueItem.requestIntent} isPlaying={player.isPlaying} />}
       {developmentTools}
       {roomPrefs?.qr?.isEnabled && !youtubeSong && (
         <PlayerQR

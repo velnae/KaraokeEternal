@@ -10,6 +10,7 @@ import Rooms from '../Rooms/Rooms.js'
 import Queue from '../Queue/Queue.js'
 import { PREFS_PATHS_CHANGED, PREFS_PUSH, QUEUE_PUSH } from '../../shared/actionTypes.js'
 import { validateBranding } from './branding.js'
+import { validatePlayerDisplay, type PlayerDisplaySettings } from '../../shared/playerDisplay.js'
 import type { ClientBranding } from '../../shared/branding.js'
 import type { Prefs as PrefsType } from '../../shared/types.js'
 import { validateModeration } from '../../shared/textModeration.js'
@@ -36,7 +37,7 @@ router.get('/', (ctx) => {
   }
 
   // Only explicitly public preferences are exposed before login.
-  ctx.body = { roles: prefs.roles, branding: prefs.branding, moderation: prefs.moderation, musicBlocking: prefs.musicBlocking }
+  ctx.body = { roles: prefs.roles, branding: prefs.branding, playerDisplay: prefs.playerDisplay, moderation: prefs.moderation, musicBlocking: prefs.musicBlocking }
 })
 
 router.put('/branding', (ctx) => {
@@ -53,6 +54,22 @@ router.put('/branding', (ctx) => {
   ctx.set('Cache-Control', 'no-store')
   ctx.body = { branding }
   ctx.io.emit('action', { type: PREFS_PUSH, payload: { branding } })
+})
+
+router.put('/player-display', (ctx) => {
+  if (!ctx.user.isAdmin) ctx.throw(403, 'No tiene autorización')
+  let playerDisplay: PlayerDisplaySettings
+  try {
+    const body = (ctx.request as unknown as RequestWithBody).body
+    if (!body || typeof body !== 'object' || Array.isArray(body)) ctx.throw(422, 'Revise la configuración de pantalla.')
+    playerDisplay = validatePlayerDisplay(body)
+  } catch (error) {
+    ctx.throw(422, (error as Error).message)
+  }
+  if (!Prefs.set('playerDisplay', playerDisplay)) ctx.throw(500, 'No se pudo guardar la configuración de pantalla.')
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = { playerDisplay }
+  ctx.io.emit('action', { type: PREFS_PUSH, payload: { playerDisplay } })
 })
 
 router.put('/music-blocking', (ctx) => {

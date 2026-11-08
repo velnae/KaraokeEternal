@@ -2,6 +2,7 @@ import { createAction, createAsyncThunk, createReducer } from '@reduxjs/toolkit'
 import type { AppThunk, RootState } from 'store/store'
 import type { Path, Role } from 'shared/types'
 import { defaultClientBranding, type ClientBranding } from 'shared/branding'
+import { defaultPlayerDisplay, type PlayerDisplaySettings } from 'shared/playerDisplay'
 import { defaultModeration, type ModerationSettings } from 'shared/textModeration'
 import { defaultMusicBlocking, type MusicBlocking } from 'shared/musicBlocking'
 import {
@@ -74,6 +75,12 @@ export const saveModeration = (moderation: ModerationSettings): AppThunk<Promise
   return response.moderation
 }
 
+export const savePlayerDisplay = (playerDisplay: PlayerDisplaySettings): AppThunk<Promise<PlayerDisplaySettings>> => async (dispatch) => {
+  const response = await api.put<{ playerDisplay: PlayerDisplaySettings }>('/player-display', { body: playerDisplay })
+  dispatch(receivePrefs(response))
+  return response.playerDisplay
+}
+
 export const saveMusicBlocking = (musicBlocking: MusicBlocking): AppThunk<Promise<MusicBlocking>> => async (dispatch) => {
   const response = await api.put<{ musicBlocking: MusicBlocking }>('/music-blocking', { body: musicBlocking })
   dispatch(receivePrefs(response))
@@ -99,6 +106,7 @@ export const requestScanStop = createAsyncThunk(
 // Reducer
 // ------------------------------------
 export interface PrefsState {
+  playerDisplay: PlayerDisplaySettings
   musicBlocking: MusicBlocking
   moderation: ModerationSettings
   branding: ClientBranding
@@ -118,6 +126,7 @@ export interface PrefsState {
 }
 
 const initialState: PrefsState = {
+  playerDisplay: defaultPlayerDisplay,
   musicBlocking: defaultMusicBlocking,
   moderation: { terms: [...defaultModeration.terms] },
   branding: { ...defaultClientBranding },

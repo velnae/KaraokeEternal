@@ -6,6 +6,7 @@ import UpNow from './UpNow/UpNow'
 import Icon from 'components/Icon/Icon'
 import Button from 'components/Button/Button'
 import type { QueueItem } from 'shared/types'
+import type { DisplayCorner } from 'shared/playerDisplay'
 import styles from './PlayerTextOverlay.css'
 
 interface PlayerTextOverlayProps {
@@ -16,10 +17,10 @@ interface PlayerTextOverlayProps {
   isErrored: boolean
   width: number
   height: number
-  logoVisible?: boolean
+  turnPlacement?: { position: DisplayCorner, maxWidth: number }
 }
 
-const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueItem, queueItem, width, height, logoVisible }: PlayerTextOverlayProps) => {
+const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueItem, queueItem, width, height, turnPlacement }: PlayerTextOverlayProps) => {
   const dispatch = useAppDispatch()
   let content
 
@@ -51,7 +52,7 @@ const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueIte
       </section>
     )
   } else {
-    content = <UpNow queueItem={queueItem} alignLeft={logoVisible} />
+    content = <UpNow queueItem={queueItem} placement={turnPlacement} />
   }
 
   return <div style={{ width, height }} className={styles.container}>{content}</div>

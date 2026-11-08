@@ -3,7 +3,8 @@ import sql from 'sqlate'
 import crypto from 'crypto'
 import { db } from '../lib/Database.js'
 import getLogger from '../lib/Log.js'
-import { defaultClientBranding, getPlayerBranding } from '../../shared/branding.js'
+import { defaultClientBranding } from '../../shared/branding.js'
+import { defaultPlayerDisplay, validatePlayerDisplay } from '../../shared/playerDisplay.js'
 import { validateBranding } from './branding.js'
 import { defaultModeration, setModerationTerms, validateModeration } from '../../shared/textModeration.js'
 import { defaultMusicBlocking, validateMusicBlocking, type MusicBlocking } from '../../shared/musicBlocking.js'
@@ -17,6 +18,7 @@ class Prefs {
   static get () {
     const prefs = {
       branding: { ...defaultClientBranding },
+      playerDisplay: defaultPlayerDisplay,
       moderation: { terms: [...defaultModeration.terms] },
       musicBlocking: Prefs.getMusicBlocking(),
       paths: { result: [], entities: {} },
@@ -36,7 +38,7 @@ class Prefs {
       })
     }
 
-    prefs.branding = { ...prefs.branding, player: getPlayerBranding(prefs.branding.player) }
+    prefs.playerDisplay = validatePlayerDisplay(prefs.playerDisplay)
 
     // include roles
     {
@@ -80,6 +82,7 @@ class Prefs {
   static set (key: string, data: unknown): boolean {
     if (key === 'musicBlocking') data = validateMusicBlocking(data)
     if (key === 'branding') data = validateBranding(data)
+    if (key === 'playerDisplay') data = validatePlayerDisplay(data)
     if (key === 'moderation') data = validateModeration(data)
     const query = sql`
       REPLACE INTO prefs (key, data)

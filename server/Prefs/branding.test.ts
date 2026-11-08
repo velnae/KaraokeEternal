@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { validateBranding } from './branding.js'
-import { defaultClientBranding, defaultPlayerBranding, MAX_BRANDING_LOGO_BYTES } from '../../shared/branding.js'
+import { defaultClientBranding, MAX_BRANDING_LOGO_BYTES } from '../../shared/branding.js'
 
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='
 
@@ -54,37 +54,7 @@ describe('client branding validation', () => {
       .toThrow('PNG')
   })
 
-  it('normalizes player messages and keeps the two visibility settings independent', () => {
-    const player = { showLogo: false, showAnnouncements: true, messages: [{ title: '  Bienvenidos  ', text: '  El escenario es suyo.  ', html: '<script/>' }] }
-    expect(validateBranding({ ...defaultClientBranding, player }).player).toEqual({
-      ...defaultPlayerBranding, showLogo: false, showAnnouncements: true, messages: [{ title: 'Bienvenidos', text: 'El escenario es suyo.' }],
-    })
-    expect(validateBranding({ ...defaultClientBranding, player: { ...player, showLogo: true, showAnnouncements: false } }).player)
-      .toMatchObject({ showLogo: true, showAnnouncements: false })
-  })
-
-  it('preserves legacy appearance and normalizes configurable background colors', () => {
-    const legacy = { showLogo: true, showAnnouncements: true, messages: [{ title: 'Aviso', text: '' }] }
-    expect(validateBranding({ ...defaultClientBranding, player: legacy }).player)
-      .toEqual({ ...defaultPlayerBranding, ...legacy })
-    expect(validateBranding({ ...defaultClientBranding, player: { ...legacy, alignment: 'center', backgroundColor: '#6B5143' } }).player)
-      .toMatchObject({ alignment: 'center', backgroundColor: '#6b5143' })
-  })
-
-  it.each([
-    { alignment: 'justify' }, { alignment: null }, { backgroundColor: 'brown' },
-    { backgroundColor: '#fff' }, { backgroundColor: '#12345678' }, { backgroundColor: '#zzzzzz' },
-    { backgroundColor: 'url(https://example.com)' }, { backgroundColor: null },
-  ])('rejects invalid appearance: %j', (appearance) => {
-    expect(() => validateBranding({ ...defaultClientBranding, player: { ...defaultPlayerBranding, ...appearance } })).toThrow()
-  })
-
-  it.each([
-    null, [], { ...defaultPlayerBranding, showLogo: 'true' }, { ...defaultPlayerBranding, showAnnouncements: 1 },
-    { ...defaultPlayerBranding, messages: [] }, { ...defaultPlayerBranding, messages: Array(6).fill({ title: 'Aviso', text: '' }) },
-    ...[null, 'Aviso', { title: ' ', text: '' }, { title: 'x'.repeat(61), text: '' }, { title: 'Aviso', text: 'x'.repeat(101) }, { title: 'Aviso', text: 42 }]
-      .map(message => ({ ...defaultPlayerBranding, messages: [message] })),
-  ])('rejects invalid player configuration: %j', (player) => {
-    expect(() => validateBranding({ ...defaultClientBranding, player })).toThrow()
+  it('ignores legacy screen fields when saving brand identity', () => {
+    expect(validateBranding({ ...defaultClientBranding, player: { showLogo: false } })).toEqual(defaultClientBranding)
   })
 })

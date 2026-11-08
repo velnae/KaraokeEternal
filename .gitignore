@@ -2,7 +2,7 @@ build/
 dockerfiles/
 docs/public/
 docs/resources/
-node_modules/
+node_modules
 /.atl/
 /.codegraph/
 /.playwright-mcp/

@@ -3,7 +3,8 @@ import Koa from 'koa'
 import { koaBody } from 'koa-body'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { defaultClientBranding, defaultPlayerBranding } from '../../shared/branding.js'
+import { defaultClientBranding } from '../../shared/branding.js'
+import { defaultPlayerDisplay } from '../../shared/playerDisplay.js'
 import { PREFS_PUSH } from '../../shared/actionTypes.js'
 import { defaultModeration } from '../../shared/textModeration.js'
 
@@ -69,7 +70,6 @@ describe('branding HTTP and persistence contract', () => {
       name: 'Venue',
       logoSrc: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=',
       supportUrl: 'https://example.com/help',
-      player: { ...defaultPlayerBranding, showLogo: true, showAnnouncements: true, alignment: 'center', backgroundColor: '#6b5143' },
     }
     const response = await save({ ...branding, supportUrl: ' HTTPS:example.com/help ' })
     expect(response.status).toBe(200)
@@ -86,29 +86,11 @@ describe('branding HTTP and persistence contract', () => {
     expect(emit).not.toHaveBeenCalled()
   })
 
-  it('loads older saved brands with player controls off and the table invitation ready', async () => {
+  it('loads older saved brands independently of screen defaults', async () => {
     const legacy = { name: 'Existing venue', logoSrc: '', supportUrl: '' }
     db.run('INSERT INTO prefs (key, data) VALUES (?, ?)', ['branding', JSON.stringify(legacy)])
-    expect(await (await fetch(base)).json()).toMatchObject({ branding: { ...legacy, player: defaultPlayerBranding } })
+    expect(await (await fetch(base)).json()).toMatchObject({ branding: legacy, playerDisplay: defaultPlayerDisplay })
     expect(JSON.parse(db.get<{ data: string }>('SELECT data FROM prefs WHERE key = ?', ['branding'])!.data)).toEqual(legacy)
-  })
-
-  it('rejects invalid announcements without changing the brand or broadcasting', async () => {
-    const branding = { ...defaultClientBranding, name: 'Original', player: { ...defaultPlayerBranding, showLogo: true } }
-    await save(branding)
-    emit.mockClear()
-    expect((await save({ ...branding, player: { ...branding.player, messages: [{ title: '', text: 'Invalid' }] } })).status).toBe(422)
-    expect(Prefs.get().branding).toEqual(branding)
-    expect(emit).not.toHaveBeenCalled()
-  })
-
-  it('rejects an invalid background atomically', async () => {
-    const branding = { ...defaultClientBranding, player: { ...defaultPlayerBranding, alignment: 'center', backgroundColor: '#6b5143' } }
-    await save(branding)
-    emit.mockClear()
-    expect((await save({ ...branding, player: { ...branding.player, backgroundColor: 'transparent' } })).status).toBe(422)
-    expect(Prefs.get().branding).toEqual(branding)
-    expect(emit).not.toHaveBeenCalled()
   })
 
   it('rejects invalid changes atomically and allows resetting the brand', async () => {
@@ -121,5 +103,40 @@ describe('branding HTTP and persistence contract', () => {
     expect(emit).not.toHaveBeenCalled()
     expect((await save(defaultClientBranding)).status).toBe(200)
     expect(Prefs.get().branding).toEqual(defaultClientBranding)
+  })
+})
+
+const saveDisplay = (body: unknown, admin = true) => fetch(`${base}/player-display`, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json', 'test-admin': String(admin) }, body: JSON.stringify(body),
+})
+
+describe('global player display HTTP contract', () => {
+  it('persists and broadcasts a global configuration independently from brand identity', async () => {
+    const playerDisplay = { ...defaultPlayerDisplay, logo: { ...defaultPlayerDisplay.logo, enabled: true },
+      announcement: { ...defaultPlayerDisplay.announcement, enabled: true, alignment: 'center', backgroundColor: '#6b5143' } }
+    expect((await saveDisplay(playerDisplay)).status).toBe(200)
+    expect(Prefs.get().playerDisplay).toEqual(playerDisplay)
+    expect(emit).toHaveBeenCalledWith('action', { type: PREFS_PUSH, payload: { playerDisplay } })
+    await save({ ...defaultClientBranding, name: 'New venue', player: { showLogo: false } })
+    await save(defaultClientBranding)
+    expect(Prefs.get().playerDisplay).toEqual(playerDisplay)
+    expect(await (await fetch(base)).json()).toMatchObject({ playerDisplay })
+  })
+
+  it('rejects non-admin and invalid writes without persistence or push', async () => {
+    expect((await saveDisplay(defaultPlayerDisplay, false)).status).toBe(403)
+    expect((await saveDisplay({ announcement: { backgroundColor: 'transparent' } })).status).toBe(422)
+    expect((await saveDisplay({ logo: { scale: 301 } })).status).toBe(422)
+    expect(Prefs.get().playerDisplay).toEqual(defaultPlayerDisplay)
+    expect(db.get('SELECT data FROM prefs WHERE key=?', ['playerDisplay'])).toBeUndefined()
+    expect(emit).not.toHaveBeenCalled()
+  })
+
+  it('does not broadcast when persistence fails', async () => {
+    const set = vi.spyOn(Prefs, 'set').mockReturnValueOnce(false)
+    try {
+      expect((await saveDisplay(defaultPlayerDisplay)).status).toBe(500)
+      expect(emit).not.toHaveBeenCalled()
+    } finally { set.mockRestore() }
   })
 })

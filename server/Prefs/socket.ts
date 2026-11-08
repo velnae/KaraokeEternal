@@ -14,6 +14,9 @@ const ACTION_HANDLERS = {
     }
 
     // These settings have validated HTTP update routes and dedicated lifecycle handling.
+    if (payload.key === 'playerDisplay') {
+      return acknowledge({ type: PREFS_SET + _ERROR, error: 'Use Ajustes → Pantalla para guardar los cambios.' })
+    }
     if (payload.key === 'musicBlocking') {
       return acknowledge({ type: PREFS_SET + _ERROR, error: 'Use Ajustes → Música bloqueada para guardar las reglas.' })
     }

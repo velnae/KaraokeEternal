@@ -1,12 +1,12 @@
 import React, { useEffect, useId, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import Button from 'components/Button/Button'
 import ClientBranding from 'components/ClientBranding/ClientBranding'
 import Icon from 'components/Icon/Icon'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { saveBranding } from 'store/modules/prefs'
-import { defaultClientBranding, getPlayerBranding, normalizeBrandingSupportUrl, validatePlayerBranding } from 'shared/branding'
+import { defaultClientBranding, normalizeBrandingSupportUrl } from 'shared/branding'
 import prepareBrandingLogo from 'lib/prepareBrandingLogo'
-import PlayerBrandingFields from './PlayerBrandingFields'
 import styles from './BrandingPrefs.css'
 
 const BrandingPrefs = () => {
@@ -46,8 +46,7 @@ const BrandingPrefs = () => {
   const change = (values: Partial<typeof draft>) => {
     const next = { ...draft, ...values }
     setDraft(next)
-    setDirty(next.name !== branding.name || next.logoSrc !== branding.logoSrc || next.supportUrl !== branding.supportUrl
-      || JSON.stringify(getPlayerBranding(next.player)) !== JSON.stringify(getPlayerBranding(branding.player)))
+    setDirty(next.name !== branding.name || next.logoSrc !== branding.logoSrc || next.supportUrl !== branding.supportUrl)
     setStatus('')
     setError('')
   }
@@ -76,16 +75,6 @@ const BrandingPrefs = () => {
       supportRef.current?.focus()
       return
     }
-    try {
-      validatePlayerBranding(draft.player)
-    } catch (cause) {
-      setError((cause as Error).message)
-      const invalidColor = event.currentTarget.querySelector<HTMLInputElement>('[data-branding-color][aria-invalid="true"]')
-      const invalidTitle = Array.from(event.currentTarget.querySelectorAll<HTMLInputElement>('[data-message-title]')).find(input => !input.value.trim())
-      const invalidField = invalidColor ?? invalidTitle
-      invalidField?.focus()
-      return
-    }
     setOperation('save')
     setError('')
     setStatus('')
@@ -106,7 +95,6 @@ const BrandingPrefs = () => {
       <header className={styles.header}>
         <div>
           <h3 id={`${id}-title`}>Marca del cliente</h3>
-          <p>La identidad del acceso y los elementos de marca que acompañan las canciones.</p>
         </div>
         <span className={styles.currentBrand}>
           {branding.name.trim() ? 'En uso: marca del cliente' : 'En uso: marca del software'}
@@ -223,7 +211,7 @@ const BrandingPrefs = () => {
           </figure>
         </div>
 
-        <PlayerBrandingFields branding={draft} onChange={player => change({ player })} />
+        <Link to='/admin/settings/display' className={styles.textButton}>Configurar pantalla del reproductor</Link>
 
         <div className={styles.resetRow}>
           <Icon icon='INFO_OUTLINE' size={18} />
@@ -231,14 +219,13 @@ const BrandingPrefs = () => {
           <Button
             type='button'
             className={styles.textButton}
-            disabled={!draft.name && !draft.logoSrc && !draft.supportUrl
-              && JSON.stringify(getPlayerBranding(draft.player)) === JSON.stringify(getPlayerBranding(defaultClientBranding.player))}
+            disabled={!draft.name && !draft.logoSrc && !draft.supportUrl}
             onClick={() => {
               change({ ...defaultClientBranding })
               setSupportTouched(false)
             }}
           >
-            Restablecer marca y opciones
+            Restablecer marca
           </Button>
         </div>
       </fieldset>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import clsx from 'clsx'
+import type { DisplayCorner } from 'shared/playerDisplay'
 import { CSSTransition } from 'react-transition-group'
 import UserImage from 'components/UserImage/UserImage'
 import type { QueueItem } from 'shared/types'
@@ -7,10 +7,10 @@ import styles from './UpNow.css'
 
 interface UpNowProps {
   queueItem: QueueItem
-  alignLeft?: boolean
+  placement?: { position: DisplayCorner, maxWidth: number }
 }
 
-const UpNow = ({ queueItem, alignLeft }: UpNowProps) => {
+const UpNow = ({ queueItem, placement }: UpNowProps) => {
   const [show, setShow] = useState(false)
   const timeoutID = useRef<ReturnType<typeof setTimeout> | null>(null)
   const nodeRef = useRef<HTMLDivElement | null>(null)
@@ -47,7 +47,7 @@ const UpNow = ({ queueItem, alignLeft }: UpNowProps) => {
         exitActive: styles.exitActive,
       }}
     >
-      <div ref={nodeRef} className={clsx(styles.container, alignLeft && styles.left)} translate='no'>
+      <div ref={nodeRef} className={styles.container} data-position={placement?.position ?? 'top-right'} style={{ maxWidth: placement?.maxWidth }} translate='no'>
         <div className={styles.innerContainer}>
           <UserImage
             userId={queueItem.userId}

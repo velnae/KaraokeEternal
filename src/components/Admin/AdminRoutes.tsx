@@ -13,6 +13,7 @@ import AnimatorSettings from './AnimatorSettings'
 import PlaylistsView from 'components/Playlists/PlaylistsView'
 import ModerationPrefs from 'routes/Account/components/Prefs/ModerationPrefs/ModerationPrefs'
 import MusicBlockingPrefs from 'components/MusicBlocking/MusicBlockingPrefs'
+import PlayerDisplaySettings from 'components/PlayerDisplay/PlayerDisplaySettings'
 
 export default function AdminRoutes () {
   const { isAdmin, userId } = useAppSelector(state => state.user)
@@ -35,6 +36,7 @@ export default function AdminRoutes () {
       />
       <Route path='settings/animator' element={<AdminPage title='Animador' description=''><AnimatorSettings /></AdminPage>} />
       <Route path='settings/playback' element={<AdminPage title='Reproducción' description='Ajuste el comportamiento del reproductor y el nivel de las canciones.'><PlayerPrefs /></AdminPage>} />
+      <Route path='settings/display' element={<AdminPage title='Pantalla del reproductor' description='Todo el local · Referencia FHD (1920 × 1080)'><PlayerDisplaySettings /></AdminPage>} />
       <Route path='settings/files' element={<AdminPage title='Archivos' description='Administre las carpetas de música y actualice la biblioteca.'><PathPrefs /></AdminPage>} />
       <Route path='settings/branding' element={<AdminPage title='Marca del local' description='Personalice la identidad que ven sus participantes.'><BrandingPrefs /></AdminPage>} />
       <Route path='settings/moderation' element={<AdminPage title='Moderación' description='Gestione las palabras y frases bloqueadas en nombres y saludos de todas las salas.'><ModerationPrefs /></AdminPage>} />

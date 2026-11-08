@@ -137,6 +137,7 @@ export interface Media {
 }
 
 export interface Prefs {
+  playerDisplay: import('./playerDisplay.js').PlayerDisplaySettings
   musicBlocking: import('./musicBlocking.js').MusicBlocking
   moderation: import('./textModeration.js').ModerationSettings
   branding: import('./branding.js').ClientBranding
