@@ -123,14 +123,26 @@ export async function checkPhraseBank ({ editor, call, uiBase, data }) {
   await expect(imageSize).toHaveValue('105')
   await imageSize.fill('200')
   await expect(banner.locator('img')).toHaveCSS('width', '72px')
-  for (const text of ['Aviso uno', 'Aviso dos', 'Primera frase', 'Aviso uno', 'Aviso dos', 'Segunda frase', 'Aviso uno', 'Aviso dos', 'Primera frase']) {
-    await expect(current).toContainText(text)
+  let previousPhrase = null
+  for (const expected of ['Aviso uno', 'Aviso dos', null, 'Aviso uno', 'Aviso dos', null, 'Aviso uno', 'Aviso dos', null]) {
+    if (expected) await expect(current).toContainText(expected)
+    else await expect(current).toHaveText(/^(Primera|Segunda) frase$/)
+    const text = expected ?? (await current.textContent()).trim()
+    if (!expected) {
+      assert.notEqual(text, previousPhrase, 'consecutive rounds must choose different phrases')
+      previousPhrase = text
+      await form.getByLabel('Fondo de prueba').selectOption('light')
+      await expect(current).toHaveText(text)
+      await editor.clock.runFor(1000)
+      await expect(current).toHaveText(text)
+      await form.getByLabel('Fondo de prueba').selectOption('dark')
+    }
     await expect(banner.locator('svg')).toHaveCount(0)
     await expect(banner.locator('img')).toHaveCount(text.startsWith('Aviso') ? 1 : 0)
     if (text.startsWith('Aviso')) await expect(banner.locator('img')).toHaveCSS('width', text === 'Aviso uno' ? '72px' : '27px')
     if (text === 'Aviso dos') await expect.poll(() => banner.locator('img').evaluate(image => image.naturalWidth)).toBe(120)
     await banner.screenshot({ path: path.join(data, `announcement-${text.replaceAll(' ', '-')}.png`), animations: 'disabled' })
-    await editor.clock.runFor(5000)
+    await editor.clock.runFor(expected ? 5000 : 4000)
   }
   await secondMessage.getByRole('button', { name: 'Quitar imagen', exact: true }).click()
   await scene.selectOption('SING')

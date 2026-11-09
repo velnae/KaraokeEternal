@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { announcementAtTurn, defaultPlayerDisplay, displayLimits, resetDisplayAppearance, validatePlayerDisplay } from './playerDisplay.js'
+import { announcementAtTurn, defaultPlayerDisplay, displayLimits, pickAnnouncementPhrase, resetDisplayAppearance, validatePlayerDisplay } from './playerDisplay.js'
 import { resolvePlayerLogo } from './playerLogo.js'
 
 describe('player display contract', () => {
@@ -60,16 +60,24 @@ describe('player display contract', () => {
     expect(() => validatePlayerDisplay({ announcement: { phrases: ['', 'Valid', 'x'.repeat(101)] } })).toThrow('Línea 3')
   })
 
-  it('shows every announcement before one phrase and traverses the bank before repeating', () => {
+  it('randomly selects phrases without immediately repeating the same text', () => {
+    expect(pickAnnouncementPhrase(['A', 'B', 'C'], null, () => 0.99)).toBe('C')
+    expect(pickAnnouncementPhrase(['A', 'A', 'B', 'C'], 'A', () => 0)).toBe('B')
+    expect(pickAnnouncementPhrase(['A', 'B', 'C'], 'A', () => 0.99)).toBe('C')
+    expect(pickAnnouncementPhrase(['A', 'A'], 'A')).toBe('A')
+    expect(pickAnnouncementPhrase(['', ' '], null)).toBeNull()
+  })
+
+  it('shows every announcement before the selected phrase and keeps that selection stable', () => {
     const { announcement } = validatePlayerDisplay({ announcement: {
       messages: [{ title: 'A', text: '' }, { title: 'B', text: '' }],
       phrases: ['First', 'Second'], showPhraseAfterMessages: true,
     } })
     const displayed = Array.from({ length: 9 }, (_, turn) => {
-      const { position, phrase } = announcementAtTurn(announcement, turn)
+      const { position, phrase } = announcementAtTurn(announcement, turn, 'Second')
       return announcement.messages[position]?.title ?? phrase
     })
-    expect(displayed).toEqual(['A', 'B', 'First', 'A', 'B', 'Second', 'A', 'B', 'First'])
+    expect(displayed).toEqual(['A', 'B', 'Second', 'A', 'B', 'Second', 'A', 'B', 'Second'])
     for (const settings of [{ ...announcement, phrases: [] }, { ...announcement, showPhraseAfterMessages: false }]) {
       expect(Array.from({ length: 4 }, (_, turn) => announcementAtTurn(settings, turn).position)).toEqual([0, 1, 0, 1])
       expect(announcementAtTurn(settings, 2).phrase).toBeNull()

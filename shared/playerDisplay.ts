@@ -186,11 +186,17 @@ export function resetDisplayAppearance (settings: PlayerDisplaySettings): Player
   }
 }
 
-export function announcementAtTurn (announcement: PlayerDisplaySettings['announcement'], turn: number) {
+export function pickAnnouncementPhrase (phrases: string[], previous: string | null, random = Math.random): string | null {
+  const available = [...new Set(phrases.map(phrase => phrase.trim()).filter(Boolean))]
+  const candidates = available.length > 1 ? available.filter(phrase => phrase !== previous) : available
+  return candidates.length ? candidates[Math.floor(random() * candidates.length)] : null
+}
+
+export function announcementAtTurn (announcement: PlayerDisplaySettings['announcement'], turn: number, selectedPhrase: string | null = null) {
   const phrases = announcement.phrases.filter(phrase => phrase.trim())
   const hasPhrase = announcement.showPhraseAfterMessages && phrases.length > 0
   const cycleLength = announcement.messages.length + (hasPhrase ? 1 : 0)
   const position = turn % cycleLength
-  const phrase = hasPhrase ? phrases[Math.floor(turn / cycleLength) % phrases.length] : null
+  const phrase = hasPhrase ? phrases.includes(selectedPhrase ?? '') ? selectedPhrase : phrases[0] : null
   return { position, phrase, cycleLength }
 }

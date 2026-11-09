@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { ClientBranding } from 'shared/branding'
-import { ANNOUNCEMENT_IMAGE_SCALE_LIMIT, announcementAtTurn, defaultPlayerDisplay, isDisplayColor, type PlayerDisplaySettings } from 'shared/playerDisplay'
+import { ANNOUNCEMENT_IMAGE_SCALE_LIMIT, announcementAtTurn, defaultPlayerDisplay, isDisplayColor, pickAnnouncementPhrase, type PlayerDisplaySettings } from 'shared/playerDisplay'
 import type { RequestIntent } from 'shared/requestIntent'
 import { displayForeground, displayLayout, type DisplayViewport } from './layout'
 import styles from './PlayerDisplayOverlay.css'
@@ -18,8 +18,8 @@ interface Props {
 
 const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying }: Props) => {
   const { logo, announcement: a } = settings
-  const [index, setIndex] = useState(0)
-  const { position: currentPosition, phrase, cycleLength } = announcementAtTurn(a, index)
+  const [rotation, setRotation] = useState<{ turn: number, phrase: string | null }>({ turn: 0, phrase: null })
+  const { position: currentPosition, phrase, cycleLength } = announcementAtTurn(a, rotation.turn, rotation.phrase)
   const image = a.messages[currentPosition]?.image
   const [failedImages, setFailedImages] = useState<string[]>([])
   const [fitting, setFitting] = useState({ settings, width: viewport.width, height: viewport.height, scale: 1 })
@@ -82,9 +82,16 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying 
   useEffect(() => {
     if (!announce || !isPlaying || cycleLength < 2) return
     const seconds = Number.isFinite(a.intervalSeconds) ? Math.max(5, a.intervalSeconds) : 15
-    const timer = setInterval(() => setIndex(value => value + 1), seconds * 1000)
-    return () => clearInterval(timer)
-  }, [announce, isPlaying, cycleLength, a.messages, a.intervalSeconds])
+    const timer = setTimeout(() => {
+      const turn = rotation.turn + 1
+      const next = announcementAtTurn(a, turn, rotation.phrase)
+      const phrase = next.position === a.messages.length
+        ? pickAnnouncementPhrase(a.phrases, rotation.phrase)
+        : rotation.phrase
+      setRotation({ turn, phrase })
+    }, seconds * 1000)
+    return () => clearTimeout(timer)
+  }, [announce, isPlaying, cycleLength, a, rotation])
 
   return (
     <div className={styles.container} data-testid='player-display-overlay'>
