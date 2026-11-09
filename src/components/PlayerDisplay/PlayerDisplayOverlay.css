@@ -12,5 +12,6 @@
 .current { opacity: 1; visibility: visible; }
 .message strong { display: block; font-size: var(--title-size); font-weight: 600; line-height: 1.3; }
 .message p { margin: .25em 0 0; font-size: var(--text-size); line-height: 1.4; }
+.message .phrase { margin: 0; font-size: var(--title-size); font-weight: 600; line-height: 1.25; }
 @keyframes appear { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .announcement { animation: none; } .message { transition: none; } }

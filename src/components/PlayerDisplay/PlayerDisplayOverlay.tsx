@@ -117,7 +117,7 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying 
             ))}
             {phrase !== null && (
               <div className={clsx(styles.message, currentPosition === a.messages.length && styles.current)} aria-hidden={currentPosition !== a.messages.length}>
-                <p>{phrase}</p>
+                <p className={styles.phrase}>{phrase}</p>
               </div>
             )}
           </div>
