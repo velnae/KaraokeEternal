@@ -1,5 +1,12 @@
 .toolbar { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
-.toolbar p { color: var(--secondary); font-size: 14px; margin: 0 0 12px; }
+.summary { color: var(--secondary); font-size: 14px; margin: 0 0 16px; }
+.groups { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+.groups button { width: auto; min-height: 44px; padding: 10px 16px; border: 1px solid var(--edge); border-radius: 8px; background: var(--stage); color: var(--secondary); }
+.groups button[aria-pressed='true'] { color: var(--cyan); background: var(--equipment); border-color: var(--cyan); }
+.groups button:focus-visible { outline: var(--focus-outline); outline-offset: 3px; }
+.search { display: grid; gap: 8px; flex: 1; min-width: min(200px, 100%); max-width: 440px; color: var(--secondary); font-size: 13px; }
+.search input { width: 100%; min-width: 0; min-height: 44px; }
+.toolbar .createButton { width: auto; min-height: 44px; padding-inline: 20px; }
 .usersFilter { display: grid; gap: 8px; min-width: 0; max-width: 100%; font-size: 13px; color: var(--secondary); }
 .usersFilter select { width: 100%; }
 .table {
@@ -26,14 +33,14 @@
 .rowAction:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 .mobileAccess { display: none; }
 .empty { padding: 24px 12px; text-align: center; color: var(--secondary); border-block: 1px solid var(--edge); }
-.actions { display: flex; justify-content: flex-start; margin-top: 20px; }
-.actions .createButton { width: auto; min-height: 44px; padding-inline: 20px; }
 @media (max-width: 600px) {
-  .toolbar { align-items: stretch; flex-direction: column; }
-  .toolbar p { margin: 0; }
+  .toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 12px; }
+  .search { max-width: none; }
+  .search, .toolbar .createButton { grid-column: 1 / -1; }
+  .toolbar > .rowAction { align-self: end; width: 44px; padding: 10px; }
   .table .registeredColumn, .table .accessColumn { display: none; }
   .table td:first-child { width: auto; }
   .table th, .table td { padding-inline: 6px; }
   .mobileAccess { display: block; margin-top: 10px; }
-  .actions .createButton { width: 100%; }
+  .toolbar .createButton { width: 100%; }
 }

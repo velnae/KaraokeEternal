@@ -1,6 +1,9 @@
 .modal {
-  min-width: 360px;
+  width: min(440px, calc(100vw - 32px));
+  min-width: 0;
 }
+
+.fields { border: 0; padding: 0; margin: 0; min-width: 0; }
 
 .btnContainer {
   display: flex;

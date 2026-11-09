@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { roleLabels } from 'shared/permissions'
+import { roleLabels, type UserRole } from 'shared/permissions'
 import InputImage from 'components/InputImage/InputImage'
 import { UserWithRole } from 'shared/types'
 import styles from './AccountForm.css'
@@ -14,6 +14,9 @@ interface AccountFormProps {
   showRole?: boolean
   showUsername?: boolean
   showPassword?: boolean
+  showImage?: boolean
+  roleOptions?: readonly UserRole[]
+  defaultRole?: UserRole
   user?: UserWithRole
 }
 
@@ -25,6 +28,9 @@ const AccountForm = ({
   showRole,
   showUsername = true,
   showPassword = true,
+  showImage = true,
+  roleOptions = ['standard', 'operator', 'manager', 'admin'],
+  defaultRole,
   user,
 }: AccountFormProps) => {
   const terms = useAppSelector(state => state.prefs.moderation.terms)
@@ -39,7 +45,7 @@ const AccountForm = ({
   const [prevDateUpdated, setPrevDateUpdated] = useState(user?.dateUpdated)
   const [state, setState] = useState({
     isDirty: false,
-    isChangingPassword: !user || user.userId === null,
+    isChangingPassword: showPassword && (!user || user.userId === null),
     userImage: undefined as Blob | undefined,
   })
 
@@ -98,7 +104,7 @@ const AccountForm = ({
       data.append('username', username.current.value.trim())
     }
 
-    if (state.isChangingPassword) {
+    if (showPassword && state.isChangingPassword) {
       data.append('newPassword', newPassword.current?.value || '')
       data.append('newPasswordConfirm', newPasswordConfirm.current?.value || '')
     }
@@ -124,6 +130,7 @@ const AccountForm = ({
       {showUsername && (
         <input
           type='email'
+          aria-label='Usuario o correo electrónico'
           autoComplete='off'
           autoFocus={autoFocus}
           onChange={updateDirty}
@@ -139,6 +146,7 @@ const AccountForm = ({
       {showPassword && (
         <input
           type='password'
+          aria-label={user ? 'Nueva contraseña' : 'Contraseña'}
           autoComplete='new-password'
           onChange={updateDirty}
           placeholder={user && user.userId !== null ? 'cambiar contraseña (opcional)' : 'contraseña'}
@@ -146,9 +154,10 @@ const AccountForm = ({
         />
       )}
 
-      {state.isChangingPassword && (
+      {showPassword && state.isChangingPassword && (
         <input
           type='password'
+          aria-label='Confirmar contraseña'
           autoComplete='new-password'
           placeholder={user && user.userId !== null ? 'confirmar nueva contraseña' : 'confirmar contraseña'}
           ref={newPasswordConfirm}
@@ -156,12 +165,15 @@ const AccountForm = ({
       )}
 
       <div className={styles.userDisplayContainer}>
-        <InputImage
-          user={user}
-          onSelect={handleUserImageChange}
-        />
+        {showImage && (
+          <InputImage
+            user={user}
+            onSelect={handleUserImageChange}
+          />
+        )}
         <input
           type='text'
+          autoFocus={autoFocus && !showUsername}
           defaultValue={user?.name ?? ''}
           onChange={() => {
             updateDirty()
@@ -179,16 +191,14 @@ const AccountForm = ({
 
       {showRole && (
         <select
-          defaultValue={user?.role}
+          aria-label='Rol'
+          defaultValue={user?.role || defaultRole}
           onChange={updateDirty}
           ref={role}
         >
           <option key='choose' value='' disabled>seleccione un rol...</option>
           {user?.role === 'guest' && <option key='guest' value='guest'>Invitado</option>}
-          <option key='standard' value='standard'>Usuario</option>
-          <option value='operator'>{roleLabels.operator}</option>
-          <option value='manager'>{roleLabels.manager}</option>
-          <option key='admin' value='admin'>Administrador</option>
+          {roleOptions.map(value => <option key={value} value={value}>{roleLabels[value]}</option>)}
         </select>
       )}
 

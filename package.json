@@ -28,6 +28,7 @@
     "lint:fix": "npm run lint -- --fix",
     "test": "vitest run --config config/vitest.config.ts",
     "test:staff:e2e": "node config/staff-access.e2e.mjs",
+    "test:users:e2e": "node config/users.e2e.mjs",
     "test:tables:e2e": "node config/table-qr.e2e.mjs",
     "test:library:e2e": "node config/library.e2e.mjs",
     "test:playlists:e2e": "node config/playlists.e2e.mjs",

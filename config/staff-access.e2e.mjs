@@ -394,8 +394,8 @@ try {
 
   const adminPage = await pageFor(admin, adminIdentity)
   await adminPage.goto(`${uiBase}admin/users`)
-  await adminPage.getByRole('button', { name: 'Crear usuario', exact: true }).click()
-  const dialog = adminPage.getByRole('dialog', { name: 'Crear usuario', exact: true })
+  await adminPage.getByRole('button', { name: 'Crear personal', exact: true }).click()
+  const dialog = adminPage.getByRole('dialog', { name: 'Crear personal', exact: true })
   await expect(dialog.getByRole('combobox').locator('option[value="operator"]')).toHaveText('Operador')
   await expect(dialog.getByRole('combobox').locator('option[value="manager"]')).toHaveText('Encargado del local')
   await expect(dialog.getByRole('combobox').locator('option[value="player"]')).toHaveCount(0)

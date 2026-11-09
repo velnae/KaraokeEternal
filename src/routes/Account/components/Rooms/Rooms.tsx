@@ -5,7 +5,7 @@ import Panel from 'components/Panel/Panel'
 import Button from 'components/Button/Button'
 import EditRoom from './EditRoom/EditRoom'
 import { closeRoomEditor, fetchRooms, filterByStatus, openRoomEditor } from 'store/modules/rooms'
-import { filterByRoom } from '../../modules/users'
+import { filterByGroup, filterByRoom } from '../../modules/users'
 import getRoomList from '../../selectors/getRoomList'
 import styles from './Rooms.css'
 import Tables from './Tables/Tables'
@@ -26,6 +26,7 @@ const Rooms = () => {
     else dispatch(filterByStatus(e.currentTarget.value))
   }
   const handleFilterUsers = (e: React.MouseEvent<HTMLElement>) => {
+    dispatch(filterByGroup('guests'))
     dispatch(filterByRoom(parseInt(e.currentTarget.dataset.roomId)))
     navigate('/admin/users')
   }

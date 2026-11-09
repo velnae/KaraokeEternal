@@ -1,6 +1,7 @@
 import { createAction, createAsyncThunk, createReducer } from '@reduxjs/toolkit'
 import HttpApi from 'lib/HttpApi'
 import { User } from 'shared/types'
+import type { UserGroup } from '../userGroups'
 import {
   USERS_CREATE,
   USERS_EDITOR_CLOSE,
@@ -69,6 +70,9 @@ export const openUserEditor = createAction(USERS_EDITOR_OPEN)
 export const closeUserEditor = createAction(USERS_EDITOR_CLOSE)
 export const filterByOnline = createAction<boolean>(USERS_FILTER_ONLINE)
 export const filterByRoom = createAction<number>(USERS_FILTER_ROOM_ID)
+export const filterByGroup = createAction<UserGroup>('users/FILTER_GROUP')
+export const searchUsers = createAction<string>('users/SEARCH')
+export const clearUserFilters = createAction('users/CLEAR_FILTERS')
 
 // ------------------------------------
 // Reducer
@@ -78,14 +82,18 @@ export interface UsersState {
   entities: Record<number, UserWithRoomsAndRole>
   filterOnline: boolean
   filterRoomId: number | null
+  filterGroup: UserGroup
+  query: string
   isEditorOpen: boolean
 }
 
 const initialState: UsersState = {
   result: [],
   entities: {},
-  filterOnline: true,
+  filterOnline: false,
   filterRoomId: null,
+  filterGroup: 'staff',
+  query: '',
   isEditorOpen: false,
 }
 
@@ -109,6 +117,21 @@ const usersReducer = createReducer(initialState, (builder) => {
     })
     .addCase(closeUserEditor, (state) => {
       state.isEditorOpen = false
+    })
+    .addCase(filterByGroup, (state, { payload }) => {
+      state.filterGroup = payload
+      state.filterOnline = payload === 'guests'
+      state.filterRoomId = null
+      state.query = ''
+      state.isEditorOpen = false
+    })
+    .addCase(searchUsers, (state, { payload }) => {
+      state.query = payload
+    })
+    .addCase(clearUserFilters, (state) => {
+      state.query = ''
+      state.filterOnline = false
+      state.filterRoomId = null
     })
     .addCase(filterByOnline, (state, { payload }) => ({
       ...state,
