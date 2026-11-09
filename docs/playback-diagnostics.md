@@ -98,6 +98,10 @@ fingerprints, service state, up to 500 journal lines and up to 100 intersecting
 interventions through SQLite `mode=ro` and `query_only`. No remote files are
 created. There is no sudo fallback, arbitrary remote command or SQL argument.
 Lack of journal access or missing schema fields is reported under `gaps`.
+The collector also projects audio enablement/volumes, persisted animation fences,
+the three latest sessions and ten latest queue statuses for the selected room.
+It excludes room names, queue titles and full settings. Journal lines are stored
+as an array; UTC ISO input is normalized for older systemd timestamp parsers.
 The flag is an execution guard; it does not replace user authorization.
 
 The active release path and hashes are evidence. The collector does not assume

@@ -103,9 +103,9 @@ export function main (argv) {
       if (result.status !== 0) throw new Error('SSH collection failed; verify access as karaoke (no sudo fallback)')
       const evidence = JSON.parse(result.stdout)
       // Journals are private evidence, not guaranteed anonymous. Mask common credentials.
-      if (evidence.journal) evidence.journal = evidence.journal
-        .replace(/(Bearer\s+)\S+/gi, '$1[REDACTED]')
-        .replace(/((?:password|token|secret|api[_-]?key|cookie)\s*[=:]\s*)\S+/gi, '$1[REDACTED]')
+      if (evidence.journal) evidence.journal = (Array.isArray(evidence.journal) ? evidence.journal : evidence.journal.split('\n'))
+        .map(line => line.replace(/(Bearer\s+)\S+/gi, '$1[REDACTED]')
+          .replace(/((?:password|token|secret|api[_-]?key|cookie)\s*[=:]\s*)\S+/gi, '$1[REDACTED]'))
       console.log(addEvidence(directory, 'server', evidence))
       break
     }
