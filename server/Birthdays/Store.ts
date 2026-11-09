@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { db } from '../lib/Database.js'
 import {
-  celebrationYear, defaultBirthdaySettings, publicBirthday, selectBirthdayVoice, validateBirthdayInput, validateBirthdaySettings,
+  celebrationYear, defaultBirthdaySettings, publicBirthday, validateBirthdayInput, validateBirthdaySettings,
   type BirthdayAsset, type BirthdayEvent, type BirthdayInput, type BirthdaySettings, type PublicBirthday,
 } from '../../shared/birthdays.js'
+import { contextInput, historicalReferences, inputIdentity, readPersonalization, selectPersonalization, speechProfile } from './personalization.js'
 
 export interface AssetRow extends Omit<BirthdayAsset, 'url'> { roomId: number, filename: string }
 export interface BirthdayRow extends Omit<BirthdayEvent, 'assets'> {
@@ -17,13 +18,15 @@ export interface BirthdayRow extends Omit<BirthdayEvent, 'assets'> {
   ownerSocketId: string | null
   token: string | null
   leaseUntil: number | null
+  personalizationJSON: string | null
 }
 export function assertRoom (roomId: number) {
   if (!db.get('SELECT 1 FROM rooms WHERE roomId=? AND status=?', [roomId, 'open'])) throw new Error('Abra la sala para gestionar cumpleaños.')
 }
 export const settings = (roomId: number): BirthdaySettings => {
   const row = db.get<{ data: string }>('SELECT data FROM birthdaySettings WHERE roomId=?', [roomId])
-  return row ? { ...defaultBirthdaySettings, ...JSON.parse(row.data) } : { ...defaultBirthdaySettings, rules: [] }
+  // Old IDs belong to ElevenLabs, even when new installations default to Gemini.
+  return row ? { ...defaultBirthdaySettings, speechProvider: 'elevenlabs', speechModel: 'eleven_v4', ...JSON.parse(row.data) } : { ...defaultBirthdaySettings, rules: [] }
 }
 export const asset = (roomId: number, id: string) => db.get<AssetRow>('SELECT * FROM birthdayAssets WHERE roomId=? AND id=?', [roomId, id])
 export const assetDTO = (row: AssetRow): BirthdayAsset => ({ id: row.id, kind: row.kind, title: row.title, checksum: row.checksum, durationMs: row.durationMs, url: `api/birthdays/assets/${row.id}` })
@@ -44,7 +47,8 @@ export function eventAssets (row: BirthdayRow): AssetRow[] {
 }
 export function eventDTO (row: BirthdayRow): BirthdayEvent {
   return { ...publicBirthday(row), sex: row.sex, birthYear: row.birthYear, celebrationYear: row.celebrationYear,
-    revision: row.revision, script: row.script, voiceId: row.voiceId, error: row.error, assets: eventAssets(row).map(assetDTO) }
+    revision: row.revision, script: row.script, voiceId: row.voiceId, error: row.error, assets: eventAssets(row).map(assetDTO),
+    personalization: readPersonalization(row) }
 }
 export function saveSettings (roomId: number, value: unknown) {
   assertRoom(roomId)
@@ -64,15 +68,16 @@ export function createBirthday (roomId: number, requestId: string, value: unknow
   const input = validateBirthdayInput(value, year)
   const existing = db.get<BirthdayRow>('SELECT * FROM birthdays WHERE roomId=? AND requestId=?', [roomId, requestId])
   if (existing) {
-    if (existing.name !== input.name || existing.sex !== input.sex || existing.birthYear !== input.birthYear) throw new Error('Esta solicitud ya contiene otros datos.')
+    if (inputIdentity(contextInput(existing, readPersonalization(existing))) !== inputIdentity(input)) throw new Error('Esta solicitud ya contiene otros datos.')
     return existing
   }
   const config = validateBirthdaySettings(settings(roomId))
   if (!config.introId || !config.musicId || !config.videoId) throw new Error('Configure la introducción, la música y el video en Ajustes → Cumpleaños.')
   const id = randomUUID()
   const duration = [config.introId, config.musicId].reduce((sum, assetId) => sum + (asset(roomId, assetId)?.durationMs ?? 0), config.targetSeconds * 1000)
-  db.run(`INSERT INTO birthdays(id,roomId,requestId,name,sex,birthYear,celebrationYear,voiceId,settingsJSON,createdAt,durationMs) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-    [id, roomId, requestId, input.name, input.sex, input.birthYear, year, selectBirthdayVoice(config, input, year), JSON.stringify(config), Date.now(), duration])
+  const personalization = resolvePersonalization(roomId, config, input, year)
+  db.run(`INSERT INTO birthdays(id,roomId,requestId,name,sex,birthYear,celebrationYear,voiceId,settingsJSON,createdAt,durationMs,personalizationJSON) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, roomId, requestId, input.name, input.sex, input.birthYear, year, personalization.speech.voice, JSON.stringify(config), Date.now(), duration, JSON.stringify(personalization)])
   return getBirthday(roomId, id)
 }
 export function changeBirthday (roomId: number, id: string, revision: number, operation: string, input?: BirthdayInput) {
@@ -89,14 +94,53 @@ export function changeBirthday (roomId: number, id: string, revision: number, op
     db.run('UPDATE birthdays SET playback=\'held\',error=NULL,revision=revision+1 WHERE id=?', [id])
   } else if (operation === 'cancel' && row.playback !== 'playing' && row.playback !== 'completed') {
     db.run('UPDATE birthdays SET playback=\'cancelled\',revision=revision+1 WHERE id=?', [id])
-  } else if (['retry', 'regenerate', 'edit'].includes(operation) && ['held', 'interrupted'].includes(row.playback)) {
+  } else if (['retry', 'regenerate', 'edit', 'revoice', 'lite'].includes(operation) && ['held', 'interrupted'].includes(row.playback)) {
     if (!['ready', 'failed'].includes(row.preparation)) throw new Error('Espere a que termine la preparación.')
-    const next = input ? validateBirthdayInput(input, row.celebrationYear) : row
-    const config = settings(roomId)
-    const regenerate = operation !== 'retry'
-    const voiceId = selectBirthdayVoice(config, next, row.celebrationYear)
-    db.run(`UPDATE birthdays SET name=?,sex=?,birthYear=?,voiceId=?,settingsJSON=?,script=?,greetingId=?,preparation='queued',playback='held',error=NULL,revision=revision+1,generationRevision=generationRevision+1 WHERE id=?`,
-      [next.name, next.sex, next.birthYear, voiceId, JSON.stringify(config), regenerate ? null : row.script, regenerate || voiceId !== row.voiceId ? null : row.greetingId, id])
+    const previous = readPersonalization(row)
+    const next = input ? validateBirthdayInput(input, row.celebrationYear) : contextInput(row, previous)
+    const retry = operation === 'retry'
+    const config: BirthdaySettings = retry ? JSON.parse(row.settingsJSON) : settings(roomId)
+    const oldInput = contextInput(row, previous)
+    // Selecting another voice profile does not itself rewrite the approved text.
+    const sameContent = inputIdentity({ ...oldInput, profileId: '' }) === inputIdentity({ ...next, profileId: '' })
+    const regenerate = operation === 'regenerate' || (operation === 'edit' && !sameContent)
+    let personalization = previous
+    if (regenerate || !previous) personalization = resolvePersonalization(roomId, config, next, row.celebrationYear)
+    else if (!retry) {
+      const selected = selectPersonalization(config, next, row.celebrationYear, 0, [])
+      personalization = { ...previous, profile: selected.profile, profileOverride: next.profileId ?? '', speech: selected.speech }
+    }
+    // A legacy retry keeps its original identity and media. A new speech action
+    // intentionally upgrades it; Lite is never a silent provider fallback.
+    if (retry && !previous) personalization = null
+    else if (!regenerate && !previous && personalization) {
+      // Upgrading a legacy voice never retroactively adds a historical sentence
+      // to an already prepared transcript.
+      personalization.reference = null
+    }
+    if (operation === 'lite') {
+      if (personalization?.speech.provider !== 'gemini') throw new Error('Seleccione Gemini en los ajustes para utilizar Flash-Lite.')
+      personalization.speech = { ...personalization.speech, model: 'gemini-3.8-flash-lite-tts' }
+    }
+    const oldSpeech = previous?.speech ?? speechProfile({ ...JSON.parse(row.settingsJSON), speechProvider: 'elevenlabs' }, row.voiceId)
+    const newSpeech = personalization?.speech ?? oldSpeech
+    const changedSpeech = JSON.stringify(oldSpeech) !== JSON.stringify(newSpeech)
+    const clearAudio = regenerate || changedSpeech || operation === 'revoice' || operation === 'lite'
+    db.run(`UPDATE birthdays SET name=?,sex=?,birthYear=?,voiceId=?,settingsJSON=?,personalizationJSON=?,script=?,greetingId=?,preparation='queued',playback='held',error=NULL,revision=revision+1,generationRevision=generationRevision+1 WHERE id=?`,
+      [next.name, next.sex, next.birthYear, newSpeech.voice, JSON.stringify(config), personalization ? JSON.stringify(personalization) : null, regenerate ? null : row.script, clearAudio ? null : row.greetingId, id])
   } else throw new Error('Esta acción no está disponible para el cumpleaños.')
   return getBirthday(roomId, id)
+}
+
+function resolvePersonalization (roomId: number, config: BirthdaySettings, input: BirthdayInput, year: number) {
+  const recent = rows(roomId)
+  const sequence = recent.reduce((sum, row) => sum + 1 + row.generationRevision, 0)
+  const context = selectPersonalization(config, input, year, sequence, recent.map((row) => {
+    const previous = readPersonalization(row)
+    const suffix = [previous?.reference?.phrase, previous?.dedication].filter(Boolean).join(' ')
+    return { name: row.name, script: suffix && row.script?.endsWith(suffix) ? row.script.slice(0, -(suffix.length + 1)) : row.script }
+  }))
+  const eligible = recent.filter(row => historicalReferences.some(ref => row.birthYear >= ref.fromYear && row.birthYear <= ref.toYear)).length
+  context.reference = selectPersonalization(config, input, year, eligible, []).reference
+  return context
 }

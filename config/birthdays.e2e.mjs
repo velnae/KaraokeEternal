@@ -22,7 +22,8 @@ await new Promise(resolve => reservation.close(resolve))
 const origin = `http://127.0.0.1:${port}`
 const base = `${origin}/karaoke/`
 const httpsUi = process.env.KARAOKE_E2E_HTTPS_UI === '1'
-const uiBase = httpsUi ? 'https://karaoke.puyu.pe/' : base
+const uiBase = httpsUi ? 'https://dev-karaoke.puyu.pe/' : base
+const personalized = process.env.KARAOKE_E2E_LEGACY_BIRTHDAY !== '1'
 const api = await request.newContext()
 const calls = []
 let server, browser, socket, db, player
@@ -35,14 +36,20 @@ execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i
 const provider = createServer(async (req, res) => {
   if (req.url === '/v1/models') return res.end(JSON.stringify([{ model_id: 'eleven_v4' }]))
   if (req.url === '/v1/voices') return res.end(JSON.stringify({ voices: [{ voice_id: 'testvoice', name: 'Voz especial' }] }))
+  if (req.url.startsWith('/v1beta/voices')) return res.end(JSON.stringify({ voices: [{ id: 'Sulafat', display_name: 'Voz cálida' }, { id: 'Achird', display_name: 'Voz cercana' }] }))
+  if (req.method === 'GET' && req.url.startsWith('/v1beta/models/')) return res.end(JSON.stringify({ name: `models/${req.url.split('/').at(-1)}`, supportedGenerationMethods: ['generateContent'] }))
   const chunks = []
   for await (const chunk of req) chunks.push(chunk)
   const body = JSON.parse(Buffer.concat(chunks).toString())
   calls.push({ url: req.url, body })
   if (req.url.includes('generateContent')) {
+    if (body.generationConfig?.responseModalities?.includes('AUDIO')) {
+      return res.end(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { data: fs.readFileSync(path.join(data, 'greeting.wav')).toString('base64') } }] } }] }))
+    }
     const input = JSON.parse(body.contents[0].parts[0].text)
     res.setHeader('Content-Type', 'application/json')
-    return res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ script: `${input.name}, hoy la música nos reúne para celebrar contigo. Que esta noche esté llena de sonrisas y canciones memorables. Gracias por elegirnos para compartir este momento tan especial. ¡Feliz cumpleaños!` }) }] } }] }))
+    const opening = calls.filter(call => call.body?.generationConfig?.responseSchema).length % 2 ? 'hoy la música nos reúne para celebrar contigo' : 'que cada melodía te regale una sonrisa'
+    return res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ script: `${input.name}, ${opening}. Que esta noche esté llena de sonrisas y canciones memorables. Gracias por elegirnos para compartir este momento tan especial. ¡Feliz cumpleaños!` }) }] } }] }))
   }
   res.setHeader('Content-Type', 'audio/wav')
   res.end(fs.readFileSync(path.join(data, 'greeting.wav')))
@@ -98,7 +105,10 @@ try {
   const background = await upload.json()
   await expect.poll(async () => (await call(`animation/background/videos/${background.id}`)).state).toBe('ready')
   resources.video = await call('birthdays/video', { id: background.id })
-  await call('birthdays/settings', { revision: 0, textModel: 'test-text-model', defaultVoiceId: 'testvoice', rules: [], introId: resources.intro.id, musicId: resources.music.id, videoId: resources.video.id }, 'PUT')
+  await call('birthdays/settings', { revision: 0, textModel: 'test-text-model', defaultVoiceId: personalized ? 'Sulafat' : 'testvoice',
+    ...(personalized ? { speechProvider: 'gemini', speechModel: 'gemini-3.8-flash-tts', targetSeconds: 25, historyEvery: 1 } : {}),
+    rules: personalized ? [{ id: 'warm', title: 'Reconocimiento cálido', sex: 'any', minAge: 0, maxAge: 120, voiceId: 'Sulafat', writing: 'Cercano y celebratorio.', style: 'Cálida y alegre.' }] : [],
+    introId: resources.intro.id, musicId: resources.music.id, videoId: resources.video.id }, 'PUT')
   const unauthenticated = await request.newContext()
   assert.equal((await unauthenticated.get(`${base}api/birthdays/`)).status(), 403)
   assert.equal((await unauthenticated.get(`${base}api/birthdays/assets/${resources.intro.id}`)).status(), 403)
@@ -116,8 +126,21 @@ try {
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || '/usr/bin/chromium', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] })
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   if (httpsUi) {
-    // Exercise the tunnel's real frontend while keeping fixtures and playback
-    // authority on the isolated server, never on the shared venue database.
+    const tunnel = await api.get(uiBase)
+    assert.equal(tunnel.status(), 200, 'The development HTTPS tunnel must be reachable')
+    // A worktree is deliberately not deployed to the user's running service.
+    // Serve its isolated HTML/assets under the development HTTPS origin, while
+    // proving tunnel reachability separately and never touching shared data.
+    await context.route(`${uiBase}**`, async (route) => {
+      const incoming = route.request()
+      const url = new URL(incoming.url())
+      if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/')) return route.fallback()
+      const response = await api.get(`${base}${url.pathname.replace(/^\//, '')}${url.search}`)
+      if (response.headers()['content-type']?.includes('text/html')) {
+        await route.fulfill({ status: response.status(), contentType: 'text/html', body: (await response.text()).replace('<base href="/karaoke/">', '<base href="/">') })
+      } else await route.fulfill({ response })
+    })
+    // Keep API calls and playback authority on the isolated server too.
     const forward = async (route, socketTraffic = false) => {
       const incoming = route.request()
       const url = new URL(incoming.url())
@@ -151,7 +174,13 @@ try {
   const dialog = admin.getByRole('dialog')
   await dialog.getByLabel('Nombre', { exact: true }).fill('María')
   await dialog.getByRole('combobox', { name: 'Sexo', exact: true }).selectOption('female')
-  await dialog.getByLabel('Año de nacimiento', { exact: true }).fill('2000')
+  await dialog.getByLabel('Año de nacimiento', { exact: true }).fill(personalized ? '1969' : '2000')
+  if (personalized) {
+    await dialog.getByLabel('Dedicatoria (opcional)', { exact: true }).fill('Con cariño, de tus amigos de la mesa 05')
+    await dialog.getByText('Opciones del saludo', { exact: true }).click()
+    await dialog.getByRole('combobox', { name: 'Enfoque creativo', exact: true }).selectOption('humor')
+    await dialog.getByRole('combobox', { name: 'Perfil de voz', exact: true }).selectOption('warm')
+  }
   await dialog.getByRole('button', { name: 'Preparar saludo', exact: true }).focus()
   await admin.keyboard.press('Enter')
   await expect(dialog).toHaveCount(0)
@@ -159,10 +188,20 @@ try {
   const birthday = (await call('birthdays/')).events[0]
   assert.equal(birthday.playback, 'held')
   assert.ok(birthday.durationMs > 25000)
-  assert.equal(calls.filter(item => item.url.includes('generateContent')).length, 1)
+  assert.equal(calls.filter(item => item.body?.generationConfig?.responseSchema).length, 1)
   const prompt = JSON.parse(calls.find(item => item.url.includes('generateContent')).body.contents[0].parts[0].text)
-  assert.equal(prompt.age, new Date().getFullYear() - 2000)
+  assert.equal(prompt.age, new Date().getFullYear() - (personalized ? 1969 : 2000))
   assert.equal(prompt.birthYear, undefined)
+  assert.equal(prompt.sex, undefined)
+  if (personalized) {
+    assert.equal(birthday.personalization.reference.id, 'apollo-1969')
+    assert.equal(birthday.personalization.approach, 'humor')
+    assert.ok(birthday.script.includes('mesa 05'))
+    assert.ok(birthday.script.includes('El año en que naciste'))
+    const speech = calls.find(item => item.body?.generationConfig?.responseModalities?.includes('AUDIO'))
+    assert.equal(speech.body.contents[0].parts[0].text, birthday.script)
+    assert.equal(speech.body.contents[0].parts[0].speech_metadata.style, 'Cálida y alegre.')
+  }
   await admin.reload()
   await expect(admin.getByRole('article', { name: 'Cumpleaños de María', exact: true })).toBeVisible()
   await admin.getByRole('button', { name: 'Escuchar prueba', exact: true }).click()
@@ -177,12 +216,35 @@ try {
   await admin.goto(`${uiBase}admin/settings/birthdays`)
   await expect(admin.getByRole('textbox', { name: 'Modelo de texto Gemini', exact: true })).toHaveValue('test-text-model')
   await expect(admin.getByRole('button', { name: 'Escuchar introducción', exact: true })).toBeVisible()
+  if (personalized) {
+    await admin.getByRole('button', { name: 'Consultar voces disponibles', exact: true }).click()
+    await expect(admin.getByRole('combobox', { name: 'Voz predeterminada', exact: true }).getByRole('option', { name: 'Voz cálida' })).toHaveCount(1)
+    await admin.getByRole('button', { name: 'Escuchar este perfil', exact: true }).click()
+    await expect(admin.getByText('Prueba en este dispositivo', { exact: true })).toBeVisible()
+    await admin.getByRole('button', { name: 'Cerrar prueba', exact: true }).click()
+    await admin.getByRole('textbox', { name: 'Interpretación predeterminada', exact: true }).fill('Celebración clara y natural.')
+    await admin.getByRole('button', { name: 'Guardar ajustes', exact: true }).focus()
+    await admin.keyboard.press('Enter')
+    await expect(admin.getByText('Ajustes guardados.', { exact: true })).toBeVisible()
+  }
   for (const width of [390, 1440]) {
     await admin.setViewportSize({ width, height: 900 })
+    await admin.getByRole('textbox', { name: 'Modelo de texto Gemini', exact: true }).scrollIntoViewIfNeeded()
     assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
     await admin.screenshot({ path: path.join(data, `settings-${width}.png`), fullPage: true })
   }
   await admin.goto(`${uiBase}queue`)
+  if (personalized) {
+    const card = admin.getByRole('article', { name: 'Cumpleaños de María', exact: true })
+    await card.getByText('Más acciones', { exact: true }).click()
+    await card.getByRole('button', { name: 'Actualizar solo la voz', exact: true }).click()
+    await expect.poll(async () => (await event(birthday.id)).assets.find(asset => asset.kind === 'greeting')?.id, { timeout: 20000 }).not.toBe(birthday.assets.find(asset => asset.kind === 'greeting').id)
+    await expect.poll(async () => (await event(birthday.id)).preparation, { timeout: 20000 }).toBe('ready')
+    assert.equal((await event(birthday.id)).script, birthday.script)
+    assert.equal(calls.filter(item => item.body?.generationConfig?.responseSchema).length, 1)
+    // Use the current revision after an explicit regeneration.
+    birthday.revision = (await event(birthday.id)).revision
+  }
   await context.addInitScript(() => {
     window.birthdayTrace = []
     const create = AudioContext.prototype.createBufferSource

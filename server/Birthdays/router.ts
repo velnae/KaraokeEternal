@@ -4,7 +4,9 @@ import { createReadStream } from 'node:fs'
 import path from 'node:path'
 import { db } from '../lib/Database.js'
 import { getProduction } from '../Animation/Production.js'
-import type { BirthdayInput } from '../../shared/birthdays.js'
+import { validateBirthdaySettings, type BirthdayInput, type BirthdaySettings } from '../../shared/birthdays.js'
+import { listBirthdayVoices } from './gemini.js'
+import { speechProfile } from './personalization.js'
 import { birthdayService } from './Service.js'
 import { assertRoom, asset, assetDTO, changeBirthday, createBirthday, eventDTO, rows, saveSettings, settings, type AssetRow } from './Store.js'
 
@@ -21,13 +23,27 @@ router.use(async (ctx, next) => {
 router.get('/', (ctx) => {
   ctx.body = { settings: settings(ctx.user.roomId), events: rows(ctx.user.roomId).map(eventDTO),
     assets: db.all<AssetRow>('SELECT * FROM birthdayAssets WHERE roomId=? AND kind!=\'greeting\'', [ctx.user.roomId]).map(assetDTO),
-    configured: { text: !!process.env.KES_GEMINI_API_KEY, voice: !!process.env.KES_ELEVENLABS_API_KEY } }
+    configured: { text: !!process.env.KES_GEMINI_API_KEY, voice: settings(ctx.user.roomId).speechProvider === 'gemini' ? !!process.env.KES_GEMINI_API_KEY : !!process.env.KES_ELEVENLABS_API_KEY } }
 })
 router.put('/settings', (ctx) => {
   ctx.body = saveSettings(ctx.user.roomId, ctx.request.body)
 })
 router.post('/voices', async (ctx) => {
-  ctx.body = await getProduction().check('elevenlabs', 'voice')
+  const input = ctx.request.body as { provider?: string, model?: string, language?: string }
+  const config = settings(ctx.user.roomId)
+  const provider = input?.provider ?? config.speechProvider
+  if (provider !== 'gemini' && provider !== 'elevenlabs') ctx.throw(422, 'Seleccione un proveedor de voz válido.')
+  const model = input?.model ?? config.speechModel ?? 'gemini-3.8-flash-tts'
+  if (!/^[\w.-]{1,100}$/.test(model)) ctx.throw(422, 'Modelo inválido.')
+  ctx.body = provider === 'gemini' ? await listBirthdayVoices(model, input?.language) : await getProduction().check('elevenlabs', 'voice')
+})
+router.post('/audition', async (ctx) => {
+  assertRoom(ctx.user.roomId)
+  const input = ctx.request.body as unknown as { config: BirthdaySettings, voiceId?: string, style?: string }
+  const config = validateBirthdaySettings(input?.config)
+  const selected = { ...config, defaultVoiceId: input.voiceId ?? config.defaultVoiceId, speechStyle: input.style ?? config.speechStyle }
+  validateBirthdaySettings(selected)
+  ctx.body = assetDTO(await birthdayService().audition(ctx.user.roomId, speechProfile(selected)))
 })
 router.post('/events', (ctx) => {
   const input = ctx.request.body as unknown as BirthdayInput & { requestId: string }

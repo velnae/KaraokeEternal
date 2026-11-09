@@ -167,6 +167,76 @@ it('recovers started events as interrupted on restart without replaying them', a
 })
 it('generates the fixed generic-present introduction and respects the voice duration limit', async () => {
   await service.intro(1, 'saved-voice')
-  expect(speak).toHaveBeenCalledWith(birthdayIntroText, 'saved-voice', expect.any(AbortSignal))
+  expect(speak).toHaveBeenCalledWith(birthdayIntroText, 'saved-voice', expect.any(AbortSignal), expect.objectContaining({ provider: 'elevenlabs', voice: 'saved-voice' }))
   await expect(service.upload(1, 'greeting', 'Too long', wave(61))).rejects.toThrow('máximo')
+})
+
+it('revoices without rewriting content and freezes retry speech identity across settings changes', async () => {
+  const row = await prepared()
+  const first = eventDTO(row).personalization!
+  saveSettings(1, { ...settings(1), speechProvider: 'gemini', speechModel: 'gemini-3.8-flash-tts', defaultVoiceId: 'Sulafat', speechStyle: 'Cálida y alegre.' })
+  const updated = changeBirthday(1, row.id, row.revision, 'revoice')
+  expect(updated.script).toBe(row.script)
+  expect(updated.greetingId).toBeNull()
+  expect(eventDTO(updated).personalization!.speech).toMatchObject({ provider: 'gemini', voice: 'Sulafat' })
+  await service.drain()
+  expect(write).toHaveBeenCalledOnce()
+  expect(speak).toHaveBeenCalledTimes(2)
+  const ready = getBirthday(1, row.id)
+  const lite = changeBirthday(1, row.id, ready.revision, 'lite')
+  expect(eventDTO(lite).personalization!.speech.model).toBe('gemini-3.8-flash-lite-tts')
+  expect(first.speech.provider).toBe('elevenlabs')
+})
+
+it('preserves legacy settings, ready assets and null context on an explicit retry', async () => {
+  const row = await prepared()
+  db.run('UPDATE birthdays SET personalizationJSON=NULL WHERE id=?', [row.id])
+  const next = changeBirthday(1, row.id, row.revision, 'retry')
+  expect(next.personalizationJSON).toBeNull()
+  expect(next.greetingId).toBe(row.greetingId)
+  expect(next.settingsJSON).toBe(row.settingsJSON)
+  await service.drain()
+  expect(write).toHaveBeenCalledOnce()
+  expect(speak).toHaveBeenCalledOnce()
+})
+
+it('only changes audio when the interpretation changes, and retries keep their original profile', async () => {
+  const row = await prepared()
+  const original = row.script
+  saveSettings(1, { ...settings(1), speechStyle: 'Suave y afectuosa.' })
+  const changed = changeBirthday(1, row.id, row.revision, 'edit', input as Parameters<typeof changeBirthday>[4])
+  expect(changed.script).toBe(original)
+  expect(changed.greetingId).toBeNull()
+  speak.mockRejectedValueOnce(new Error('Provider not confirmed'))
+  await service.drain()
+  const failed = getBirthday(1, row.id)
+  const identity = eventDTO(failed).personalization!.speech
+  saveSettings(1, { ...settings(1), speechStyle: 'Otra interpretación.' })
+  const retry = changeBirthday(1, row.id, failed.revision, 'retry')
+  expect(eventDTO(retry).personalization!.speech).toEqual(identity)
+  await service.drain()
+  expect(write).toHaveBeenCalledOnce()
+})
+
+it('never synthesizes a repeated opening or lets another person identity leak in public state', async () => {
+  await prepared()
+  const second = create('birthday-duplicate-opening')
+  await service.drain()
+  expect(getBirthday(1, second.id).preparation).toBe('failed')
+  expect(getBirthday(1, second.id).error).toContain('repite')
+  expect(speak).toHaveBeenCalledOnce()
+})
+
+it('upgrades legacy speech without attaching a new historical clause to its existing transcript', async () => {
+  const row = createBirthday(1, 'legacy-history', { ...input, birthYear: 1969 })
+  db.run('UPDATE birthdays SET personalizationJSON=NULL WHERE id=?', [row.id])
+  await service.drain()
+  const legacy = getBirthday(1, row.id)
+  saveSettings(1, { ...settings(1), speechProvider: 'gemini', defaultVoiceId: 'Sulafat', speechModel: 'gemini-3.8-flash-tts', historyEvery: 1 })
+  const revoice = changeBirthday(1, row.id, legacy.revision, 'revoice')
+  expect(eventDTO(revoice).personalization!.reference).toBeNull()
+  expect(revoice.script).toBe(legacy.script)
+  await service.drain()
+  expect(getBirthday(1, row.id).preparation).toBe('ready')
+  expect(write).toHaveBeenCalledOnce()
 })

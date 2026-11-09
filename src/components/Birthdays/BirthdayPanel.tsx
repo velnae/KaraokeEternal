@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Link } from 'react-router'
 import Button from 'components/Button/Button'
-import { birthdayLabels, type BirthdayEvent, type BirthdayAsset } from 'shared/birthdays'
+import { approachLabels, birthdayLabels, type BirthdayEvent, type BirthdayAsset } from 'shared/birthdays'
 import { useAppSelector } from 'store/hooks'
 import { birthdayApi, birthdayUrl } from './api'
 import useBirthdayOverview from './useBirthdayOverview'
@@ -61,6 +61,8 @@ export default function BirthdayPanel () {
                   <div className={styles.actions}>
                     {editable && <Button onClick={() => setForm(event)}>Editar datos</Button>}
                     {editable && <Button disabled={busy === event.id} onClick={() => void execute(event, 'regenerate')}>Generar otro saludo</Button>}
+                    {editable && <Button disabled={busy === event.id} onClick={() => void execute(event, 'revoice')}>Actualizar solo la voz</Button>}
+                    {editable && event.personalization?.speech.provider === 'gemini' && <Button disabled={busy === event.id} onClick={() => void execute(event, 'lite')}>Probar voz Flash-Lite</Button>}
                     <Button disabled={busy === event.id} onClick={() => void execute(event, 'cancel')}>Cancelar cumpleaños</Button>
                   </div>
                 </details>
@@ -70,6 +72,8 @@ export default function BirthdayPanel () {
               <details className={styles.script}>
                 <summary>Ver saludo</summary>
                 <p>{event.script}</p>
+                {event.personalization && <p>{`${event.personalization.profile.title || 'Perfil predeterminado'} · ${approachLabels[event.personalization.approach]} · ${event.personalization.speech.voice}`}</p>}
+                {event.personalization?.reference && <a href={event.personalization.reference.source} target='_blank' rel='noreferrer'>Fuente de la referencia histórica</a>}
               </details>
             )}
           </article>
@@ -99,6 +103,7 @@ export default function BirthdayPanel () {
       {form && (
         <BirthdayForm
           event={form === 'new' ? undefined : form}
+          profiles={overview?.settings.rules}
           onClose={() => setForm(null)}
           onSaved={() => {
             setForm(null)
