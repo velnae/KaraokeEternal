@@ -433,7 +433,7 @@ export default class Animation {
     const id = randomUUID()
     db.run(`INSERT INTO animationInterventions(interventionId,roomId,requestId,requestedByUserId,clipId,clipChecksum,displayText,durationMs,status,requestedAt,expiresAt,origin,sessionId,sourceEventKey,family,sequenceJSON)
       VALUES(?,?,?,?,?,?,?,?,'PENDING',?,?,'AUTO',?,?,?,?)`, [id, roomId, key, identity.userId, clip.id, clip.checksum, clip.displayText,
-      sequence.reduce((sum, asset) => sum + asset.durationMs, 0), now, Math.min(now + 1000, clip.validUntil ?? Infinity), session.sessionId, key, family, JSON.stringify(sequence)])
+      sequence.reduce((sum, asset) => sum + asset.durationMs, 0), now, Math.min(now + ANIMATION_LIMITS.startMs, clip.validUntil ?? Infinity), session.sessionId, key, family, JSON.stringify(sequence)])
     if (signal) db.run('UPDATE animationRoomState SET pendingEventJSON=NULL WHERE roomId=?', [roomId])
     db.run('UPDATE animationRoomState SET lastOmission=NULL WHERE roomId=?', [roomId])
     try {

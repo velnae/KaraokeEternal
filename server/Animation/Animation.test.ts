@@ -444,6 +444,15 @@ describe('automatic sessions and ambient authority', () => {
     expect(Animation.automatic(identity, { ...input(), replay: true }, { queueId: 1 })).toBeNull()
   })
 
+  it('keeps automatic reservations usable after a remote startup handshake', async () => {
+    await automaticCatalog()
+    const grant = Animation.automatic(identity, autoInput(), { queueId: -1 })!
+    vi.advanceTimersByTime(1800)
+    Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')
+    expect(Animation.active(1)?.status).toBe('PLAYING')
+    expect(Animation.active(1)?.leaseUntil).toBe(grant.leaseUntil)
+  })
+
   it('prioritizes a manual request and rejects a stale automatic context', async () => {
     await automaticCatalog()
     const manual = Animation.request(identity, 'manual', catalogClips(1).find(clip => clip.kind === 'voice')!)
@@ -550,7 +559,7 @@ describe('manual animation lifecycle', () => {
     Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')
     vi.advanceTimersByTime(200)
     Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')
-    expect(Animation.active(1)?.startedAt).toBe(grant.startBefore! - 1000)
+    expect(Animation.active(1)?.startedAt).toBe(grant.requestedAt)
     Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'ENDED')
     Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'ENDED')
     Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')
@@ -589,7 +598,7 @@ describe('manual animation lifecycle', () => {
     vi.advanceTimersByTime(600001)
     expect(Animation.history(1)[0].status).toBe('EXPIRED')
     const grant = reserve()
-    vi.advanceTimersByTime(6000)
+    vi.advanceTimersByTime(grant.leaseUntil! - Date.now() + 250)
     expect(Animation.history(1)[0].status).toBe('UNCERTAIN')
     Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')
     expect(Animation.active(1)).toBeNull()
@@ -661,9 +670,17 @@ describe('manual animation lifecycle', () => {
 
   it('rejects an expired start window while retaining the uncertainty fence', () => {
     const grant = reserve()
-    vi.advanceTimersByTime(1001)
+    vi.advanceTimersByTime(grant.startBefore! - Date.now() + 1)
     expect(() => Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')).toThrow('venció')
     expect(Animation.state(1).blockedUntil).toBe(grant.leaseUntil)
+  })
+
+  it('accepts a start after a realistic round trip without extending the finite permit', () => {
+    const grant = reserve()
+    vi.advanceTimersByTime(1800)
+    Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')
+    expect(Animation.active(1)?.status).toBe('PLAYING')
+    expect(Animation.active(1)?.leaseUntil).toBe(grant.leaseUntil)
   })
 
   it('does not crash when a player disconnects after its room was deleted', () => {

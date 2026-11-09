@@ -58,6 +58,7 @@ it('cannot inherit shared HTTPS mode, external fixtures or provider secrets into
   expect(env).not.toHaveProperty('KES_DATA')
   expect(env.KES_ELEVENLABS_API_KEY).toBe('')
   expect(reproductionEnvironment('development', 'late-playback-receipt', '/tmp/trace.json').KARAOKE_E2E_LATE_PLAYBACK_RECEIPTS).toBe('1')
+  expect(reproductionEnvironment('development', 'slow-link', '/tmp/trace.json').KARAOKE_E2E_SLOW_LINK).toBe('1')
   expect(() => reproductionEnvironment('development', '../../script', '')).toThrow()
   expect(() => reproductionEnvironment('live', 'transitions', '')).toThrow()
 })

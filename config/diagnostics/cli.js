@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process'
 
 const root = path.resolve(import.meta.dirname, '../..')
 const scenarios = { 'transitions': 'config/transition-player.e2e.mjs', 'delayed-ack': 'config/youtube-preparation.e2e.mjs',
-  'late-playback-receipt': 'config/youtube-preparation.e2e.mjs' }
+  'late-playback-receipt': 'config/youtube-preparation.e2e.mjs', 'slow-link': 'config/youtube-preparation.e2e.mjs' }
 const maxBytes = 2 * 1024 * 1024
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const readJSON = (file) => {
@@ -49,6 +49,7 @@ export function reproductionEnvironment (mode, scenario, traceFile) {
     KARAOKE_E2E_TRANSITION_ONLY: '1',
     KARAOKE_E2E_DELAYED_ACKS: scenario === 'delayed-ack' ? '1' : '0', KARAOKE_DIAGNOSTIC_TRACE: traceFile,
     KARAOKE_E2E_LATE_PLAYBACK_RECEIPTS: scenario === 'late-playback-receipt' ? '1' : '0',
+    KARAOKE_E2E_SLOW_LINK: scenario === 'slow-link' ? '1' : '0',
     KES_HOST: '127.0.0.1', KES_ELEVENLABS_API_KEY: '', KES_YOUTUBE_API_KEY: '', KES_GEMINI_API_KEY: '' }
 }
 
@@ -66,7 +67,7 @@ export function main (argv) {
   inspect-release <bundle>
   collect-server <bundle> <since UTC ISO> <until UTC ISO> <roomId> --production-read
   import-player <bundle> <trace.json>
-  assemble <bundle> <transitions|delayed-ack|late-playback-receipt>
+  assemble <bundle> <transitions|delayed-ack|late-playback-receipt|slow-link>
   run <bundle> <development|production>
   report <bundle>`)
     return
@@ -113,7 +114,7 @@ export function main (argv) {
       console.log(addEvidence(directory, 'player', sanitizePlayer(readJSON(args[0]))))
       break
     case 'assemble': {
-      if (!Object.hasOwn(scenarios, args[0])) throw new Error('Choose transitions, delayed-ack or late-playback-receipt')
+      if (!Object.hasOwn(scenarios, args[0])) throw new Error('Choose transitions, delayed-ack, late-playback-receipt or slow-link')
       writeJSON(path.join(directory, 'reproduction.json'), { schemaVersion: 1, scenario: args[0], fidelity: 'synthetic-scenario',
         limitation: 'Exercises the selected contract; does not automatically replay the incident, production data or network timings.' })
       break

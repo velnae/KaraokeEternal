@@ -16,10 +16,12 @@ const realYouTube = process.env.KARAOKE_E2E_REAL_YOUTUBE === '1'
 const reducedMotion = process.env.KARAOKE_E2E_REDUCED_MOTION === '1'
 const delayedAcknowledgments = process.env.KARAOKE_E2E_DELAYED_ACKS === '1'
 const latePlaybackReceipts = process.env.KARAOKE_E2E_LATE_PLAYBACK_RECEIPTS === '1'
+const slowLink = process.env.KARAOKE_E2E_SLOW_LINK === '1'
 const diagnostics = process.env.KARAOKE_E2E_DIAGNOSTICS === '1'
 const soundPermission = diagnostics || process.env.KARAOKE_E2E_SOUND_PERMISSION === '1'
 assert.ok(!diagnostics || !httpsUi, 'Diagnostic fault injection requires the isolated WebSocket frontend')
 assert.ok(!latePlaybackReceipts || !httpsUi, 'Late-receipt injection requires the isolated WebSocket frontend')
+assert.ok(!slowLink || !httpsUi, 'Link latency requires the isolated WebSocket frontend')
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'youtube-preparation-'))
 const log = fs.openSync(path.join(data, 'server.log'), 'a')
 const reservation = createServer()
@@ -130,7 +132,7 @@ try {
     headless: true, args: ['--autoplay-policy=no-user-gesture-required'] })
   context = await browser.newContext({ viewport: { width: 1440, height: 900 }, storageState: await api.storageState(),
     reducedMotion: reducedMotion ? 'reduce' : 'no-preference' })
-  if ((delayedAcknowledgments || latePlaybackReceipts || diagnostics) && !httpsUi) await context.routeWebSocket('**/socket.io/**', (client) => {
+  if ((delayedAcknowledgments || latePlaybackReceipts || slowLink || diagnostics) && !httpsUi) await context.routeWebSocket('**/socket.io/**', (client) => {
     diagnosticConnection = client
     const upstream = client.connectToServer()
     const delayed = new Set()
@@ -154,12 +156,14 @@ try {
         const [, action] = JSON.parse(String(message).slice(String(message).indexOf('[')))
         if (action.type === 'server/ANIMATION_EVENT' && ['STARTED', 'ASSET_STARTED'].includes(action.payload.event)) lateReceipts.add(match[1])
       }
-      upstream.send(message)
+      if (slowLink) setTimeout(() => upstream.send(message), 600)
+      else upstream.send(message)
     })
     upstream.onMessage((message) => {
       const match = String(message).match(/^43(\d+)\[/)
       if (match && lateReceipts.delete(match[1])) setTimeout(() => client.send(message), 1800)
       else if (match && delayed.delete(match[1])) setTimeout(() => client.send(message), 650)
+      else if (slowLink) setTimeout(() => client.send(message), 600)
       else client.send(message)
     })
   })
@@ -550,7 +554,7 @@ try {
   assert.equal(status(2), 'APPROVED', 'pause during preparation must prevent promotion')
   const resumedBoundary = await page.evaluate(() => performance.now())
   await keyboard('Reproducir')
-  await expect.poll(() => status(2), { timeout: 15000 }).toBe('PLAYING')
+  await expect.poll(() => status(2), { timeout: slowLink ? 30000 : 15000 }).toBe('PLAYING')
   await expect.poll(position, { timeout: 45000 }).toBeGreaterThan(0.2)
   await assertFullTransition(resumedBoundary, 'Resumed between-song transition')
   const frames = await page.evaluate(() => window.youtubePreparation.frames)
@@ -584,12 +588,12 @@ try {
   await expect.poll(position).toBeLessThan(1)
   const nextBoundary = await page.evaluate(() => performance.now())
   await emit('server/PLAYER_REQ_NEXT')
-  await expect.poll(() => status(3), { timeout: 15000 }).toBe('PLAYING')
+  await expect.poll(() => status(3), { timeout: slowLink ? 30000 : 15000 }).toBe('PLAYING')
   await expect.poll(position, { timeout: 45000 }).toBeGreaterThan(0.2)
   await assertFullTransition(nextBoundary, 'Play next after replay')
   const naturalBoundary = await page.evaluate(() => performance.now())
   await finishNaturally()
-  await expect.poll(() => status(4), { timeout: 20000 }).toBe('PLAYING')
+  await expect.poll(() => status(4), { timeout: slowLink ? 35000 : 20000 }).toBe('PLAYING')
   await expect.poll(position, { timeout: 45000 }).toBeGreaterThan(0.2)
   await assertFullTransition(naturalBoundary, 'Natural song-to-song boundary', false)
   assert.ok(await page.evaluate(() => window.firstPreparedPlayer === window.youtubePreparation.players.at(-1)))
@@ -601,7 +605,9 @@ try {
   assert.ok(finalPlay.position < 0.1)
   console.log(`YouTube preparation began ${Math.round(finalPlay.at - finalCue.at)} ms before playback; same player, start position ${finalPlay.position}`)
   // Cancel the final overlap. Its old completion must not affect later playback.
-  if (!reducedMotion) await expect(page.getByTestId('transition-scene')).toHaveAttribute('data-exiting', 'true')
+  // With a delayed link, the server's PLAYING observation can arrive after the
+  // one-second fade. Earlier frame probes still verify the full visual handoff.
+  if (!reducedMotion && !slowLink) await expect(page.getByTestId('transition-scene')).toHaveAttribute('data-exiting', 'true')
   await emit('server/PLAYER_REQ_PAUSE')
   await expect.poll(playbackState).toBe(2)
   await expect(page.getByTestId('transition-scene')).toHaveCount(0)

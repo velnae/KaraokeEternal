@@ -26,7 +26,7 @@ import getRoomPrefs from '../../selectors/getRoomPrefs'
 import type { QueueItem } from 'shared/types'
 import { TRANSITION_VIDEO_SCENE, type TransitionVideoBackground } from 'shared/transitionVideo'
 import { animationRequest } from 'lib/animationApi'
-import { TRANSITION_INTRO_MS } from 'shared/animation'
+import { ANIMATION_LIMITS, TRANSITION_INTRO_MS } from 'shared/animation'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
 import styles from './PlayerController.css'
 import {
@@ -236,7 +236,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (scene) {
         // A scene owns one choice across intro, speech and loading. Preview and
         // audio-permit renewals must not consume another position in the rotation.
-        const visual = await animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: false }, 1000).catch((): null => null)
+        const visual = await animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: false }, ANIMATION_LIMITS.startMs).catch((): null => null)
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         scene.background = visual?.background ?? null
         updateTransition({ ...scene })

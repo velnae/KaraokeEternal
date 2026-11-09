@@ -5,7 +5,7 @@ import { useAppSelector } from 'store/hooks'
 import socket from 'lib/socket'
 import { animationPlaybackEvent, animationRequest, animationTime, fetchPreparedAnimationClips, syncAnimation } from 'lib/animationApi'
 import {
-  ANIMATION_CANCEL, ANIMATION_EVENT, ANIMATION_READY, ANIMATION_RESERVE,
+  ANIMATION_CANCEL, ANIMATION_EVENT, ANIMATION_READY, ANIMATION_RESERVE, ANIMATION_LIMITS,
   ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED,
   animationContext, ambienceBedVolume, interventionPlayback, type Intervention, type AmbienceGrant, type AnimationSnapshot,
 } from 'shared/animation'
@@ -308,9 +308,9 @@ export default function useAnimationPlayer () {
       await stopTransition(30)
       store.dispatch(playerStatusCancel())
       const status = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
-      await animationRequest(PLAYER_EMIT_STATUS, { ...status, visualizer: state.playerVisualizer }, 1000)
+      await animationRequest(PLAYER_EMIT_STATUS, { ...status, visualizer: state.playerVisualizer }, ANIMATION_LIMITS.startMs)
       if (generation !== version.current || !mounted.current) return null
-      const reply = await animationRequest(ANIMATION_AMBIENCE, { playerEpoch: current.playerEpoch, transition: { sourceQueueId, expectedNextQueueId } }, 1000)
+      const reply = await animationRequest(ANIMATION_AMBIENCE, { playerEpoch: current.playerEpoch, transition: { sourceQueueId, expectedNextQueueId } }, ANIMATION_LIMITS.startMs)
       grant = reply.ambience
       if (!grant) return null
       const fresh = store.getState()
@@ -326,7 +326,7 @@ export default function useAnimationPlayer () {
         if (transitionGrant.current?.id === id) transitionGrant.current = null
         return undefined
       })
-      void animationRequest(ANIMATION_AMBIENCE_STARTED, { id, runId: id }, 1000).catch(() => {
+      void animationRequest(ANIMATION_AMBIENCE_STARTED, { id, runId: id }, ANIMATION_LIMITS.startMs).catch(() => {
         if (transitionGrant.current?.id === id) void audio.current.stopBed(30)
       })
       return grant
@@ -361,10 +361,10 @@ export default function useAnimationPlayer () {
       // than waiting for the throttled media heartbeat and a second idle retry.
       store.dispatch(playerStatusCancel())
       const playerStatus = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
-      await animationRequest(PLAYER_EMIT_STATUS, { ...playerStatus, visualizer: state.playerVisualizer }, 1000)
+      await animationRequest(PLAYER_EMIT_STATUS, { ...playerStatus, visualizer: state.playerVisualizer }, ANIMATION_LIMITS.startMs)
       if (!mounted.current || ambientVersion.current !== generation || !socket.connected || running.current || audio.current.waitingForMusic) return
       const cursor = ambientUse.current ? ambientCursor.current : { clipId: '', offsetMs: 0 }
-      const reply = await animationRequest(ANIMATION_AMBIENCE, { playerEpoch: current.playerEpoch, ...cursor }, 1000)
+      const reply = await animationRequest(ANIMATION_AMBIENCE, { playerEpoch: current.playerEpoch, ...cursor }, ANIMATION_LIMITS.startMs)
       grant = reply.ambience
       const fresh = store.getState()
       const prefs = fresh.animation.snapshot?.prefs
@@ -381,7 +381,7 @@ export default function useAnimationPlayer () {
       setAmbientPlaying(true)
       if (ambientUse.current?.clipId !== grant.clip.id) ambientUse.current = { clipId: grant.clip.id, id: crypto.randomUUID() }
       try {
-        await animationRequest(ANIMATION_AMBIENCE_STARTED, { id: grant.id, runId: ambientUse.current.id }, 1000)
+        await animationRequest(ANIMATION_AMBIENCE_STARTED, { id: grant.id, runId: ambientUse.current.id }, ANIMATION_LIMITS.startMs)
       } catch { audio.current.stop() }
       const outcome = await completion
       // An idle announcement probe can briefly stop ambience without emitting
@@ -409,7 +409,7 @@ export default function useAnimationPlayer () {
     const run = ambientRun.current
     if (!run || ambientRenewing.current || run.grant.until - animationTime() > 3000) return
     ambientRenewing.current = true
-    void animationRequest(ANIMATION_AMBIENCE, { playerEpoch: run.grant.playerEpoch, renewId: run.grant.id }, 1000).then((reply): void => {
+    void animationRequest(ANIMATION_AMBIENCE, { playerEpoch: run.grant.playerEpoch, renewId: run.grant.id }, ANIMATION_LIMITS.startMs).then((reply): void => {
       if (ambientRun.current !== run) return undefined
       if (!reply.ambience || !audio.current.renewAmbience(reply.ambience.until - animationTime() - 500, reply.ambience.clip.loop !== false && !reply.ambience.rotate)) audio.current.stop()
       else run.grant = reply.ambience
@@ -447,7 +447,7 @@ export default function useAnimationPlayer () {
           probeOnly: true, playerEpoch: current.playerEpoch, controlVersion: current.controlVersion,
           contextKey: animationContext(ensureState(state.queue), room?.prefs?.queue), transitionId: crypto.randomUUID(),
           boundary, sourceQueueId, expectedNextQueueId, replay: state.player._isReplayPlayback,
-        }, 1000)
+        }, ANIMATION_LIMITS.startMs)
         if (!probe.eligible) return
       }
       await stopAmbience()
@@ -455,7 +455,7 @@ export default function useAnimationPlayer () {
       // may still describe the preceding (now ended) song as occupying the room.
       store.dispatch(playerStatusCancel())
       const playerStatus = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
-      await animationRequest(PLAYER_EMIT_STATUS, { ...playerStatus, visualizer: state.playerVisualizer }, 1000)
+      await animationRequest(PLAYER_EMIT_STATUS, { ...playerStatus, visualizer: state.playerVisualizer }, ANIMATION_LIMITS.startMs)
       const refreshed = store.getState()
       const room = refreshed.rooms.entities[refreshed.user.roomId]
       const contextKey = animationContext(ensureState(refreshed.queue), room?.prefs?.queue)
@@ -466,7 +466,7 @@ export default function useAnimationPlayer () {
       const reply = await animationRequest(automatic ? ANIMATION_AUTO : ANIMATION_RESERVE, {
         interventionId: active?.interventionId, playerEpoch: current.playerEpoch, controlVersion: current.controlVersion,
         contextKey, transitionId: crypto.randomUUID(), boundary, sourceQueueId, expectedNextQueueId, replay: state.player._isReplayPlayback,
-      }, 1000)
+      }, ANIMATION_LIMITS.startMs)
       grant = reply.grant
       if (!grant) return
       grantRef.current = grant
@@ -476,7 +476,7 @@ export default function useAnimationPlayer () {
       const latestSnapshot = latest.animation.snapshot
       const latestContext = animationContext(ensureState(latest.queue), latest.rooms.entities[latest.user.roomId]?.prefs?.queue)
       const storageKey = `animation-started:${grant.interventionId}`
-      if (!mounted.current || generation !== version.current || performance.now() - began >= 1000
+      if (!mounted.current || generation !== version.current || performance.now() - began >= ANIMATION_LIMITS.startMs
         || !socket.connected || latest.player._authority !== 'GRANTED' || !latestSnapshot?.prefs.enabled
         || latestSnapshot.prefs.volume <= 0 || latestSnapshot.active?.stopRequestedAt
         || latestSnapshot.playerEpoch !== grant.playerEpoch || latestSnapshot.active?.interventionId !== grant.interventionId

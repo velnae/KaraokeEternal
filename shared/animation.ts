@@ -16,7 +16,7 @@ export const ANIMATION_AMBIENCE_STOP = 'server/ANIMATION_AMBIENCE_STOP'
 export const ANIMATION_AMBIENCE_STARTED = 'server/ANIMATION_AMBIENCE_STARTED'
 export const ANIMATION_STATE = 'animation/STATE'
 export const ANIMATION_DISCONNECTED = 'animation/DISCONNECTED'
-export const ANIMATION_LIMITS = { clipMs: 10000, requestMs: 600000, startMs: 1000, marginMs: 500 }
+export const ANIMATION_LIMITS = { clipMs: 10000, requestMs: 600000, startMs: 3000, marginMs: 500 }
 
 export const VOICE_FAMILIES = ['welcome', 'turn', 'closing', 'invitation', 'celebration', 'goodbye', 'booth', 'promotion'] as const
 export type VoiceFamily = typeof VOICE_FAMILIES[number]

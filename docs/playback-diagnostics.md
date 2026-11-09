@@ -23,7 +23,8 @@ The manifest contains the symptom and expected behavior; avoid personal data the
 | --- | --- |
 | `transitions` | Voice/bed sequencing, music handoff, explicit pause, background failure and cleanup (excludes the unrelated queue-presentation checks) |
 | `delayed-ack` | Full audio sequence and YouTube preparation with delayed acknowledgments |
-| `late-playback-receipt` | Six-second voice with STARTED/ASSET_STARTED receipts delayed 1.8 seconds; confirmed playback must finish, not cut at the one-second receipt timeout |
+| `late-playback-receipt` | Six-second voice with STARTED/ASSET_STARTED receipts delayed 1.8 seconds; confirmed playback must finish despite a late asset receipt |
+| `slow-link` | 600 ms each way on the browser WebSocket; voice, ambience and effects must survive the full startup handshake, natural boundaries and explicit controls |
 
 All scenarios create temporary databases, synthetic resources and local servers on reserved
 ports. The runner removes inherited `KARAOKE_*`, `KES_*`, `DEV_PLAYER_*` and
