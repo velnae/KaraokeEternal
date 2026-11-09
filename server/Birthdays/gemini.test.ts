@@ -5,6 +5,26 @@ afterEach(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
 })
+
+it('validates a regional voice without depending on the first worldwide catalogue pages', async () => {
+  vi.stubEnv('KES_GEMINI_API_KEY', 'fixture-key')
+  const requests: string[] = []
+  const bytes = Buffer.alloc(100)
+  bytes.write('RIFF', 0)
+  bytes.write('WAVE', 8)
+  vi.stubGlobal('fetch', vi.fn(async (url) => {
+    requests.push(String(url))
+    if (String(url).includes('/voices?')) {
+      const scoped = new URL(String(url)).searchParams.get('language_code') === 'es-419'
+      return Response.json({ voices: scoped ? [{ id: 'es-419-commercial-1', display_name: 'Latinoamericana' }] : [{ id: 'achird', display_name: 'Achird' }], ...(scoped ? {} : { next_page_token: 'more' }) })
+    }
+    if (String(url).endsWith('generateContent')) return Response.json({ candidates: [{ content: { parts: [{ inlineData: { data: bytes.toString('base64') } }] } }] })
+    return Response.json({ name: 'models/gemini-3.8-flash-tts', supportedGenerationMethods: ['generateContent'] })
+  }))
+  await expect(speakGeminiBirthday('¡Feliz cumpleaños!', { provider: 'gemini', model: 'gemini-3.8-flash-tts', voice: 'es-419-commercial-1', style: 'Cálida.', processingRevision: 1 }, new AbortController().signal)).resolves.toEqual(bytes)
+  expect(requests.filter(url => url.includes('/voices?'))).toHaveLength(1)
+  expect(requests.find(url => url.includes('/voices?'))).toContain('language_code=es-419')
+})
 it('checks model and voice then sends the literal transcript separately from interpretation', async () => {
   vi.stubEnv('KES_GEMINI_API_KEY', 'fixture-key')
   vi.stubEnv('KES_GEMINI_BASE_URL', 'https://fixture.test')

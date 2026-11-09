@@ -24,6 +24,20 @@ The greeting targets 25 seconds; measured audio must satisfy the saved maximum
 
 ## Content and identity
 
+The configuration screen groups the default greeting, compact age profiles and
+the birthday scene. Profile dialogs use **Aplicar perfil** to update the local
+draft; **Guardar cambios** persists the whole configuration. **Descartar** restores
+the saved draft. Resource selection/upload stays behind **Cambiar**; original
+settings and media IDs remain compatible. Introductions use the saved default
+voice, so unsaved default-voice changes must be saved before generating a variant.
+
+Voice tests explicitly distinguish **Generar prueba** from **Escuchar prueba**.
+Samples are reused for the current page session by provider, speech model, voice,
+delivery and processing revision. Changing writing settings or duration alone does
+not invalidate the fixed-text sample; changing the speech identity does. **Generar
+otra prueba** intentionally synthesizes a replacement. Closing a preview stops its
+local audio/video. Reloading the page clears this client-side sample cache.
+
 - `personalizationJSON` freezes profile, approach, speech provider/model/voice/style,
   recent anonymized openings and the source/version of the selected reference.
 - The historical catalogue in `server/Birthdays/personalization.ts` starts with
@@ -50,6 +64,57 @@ saved TTS model. Speech uses the existing `GeminiGreetingTts` transport with cle
 transcript and separate `speech_metadata.style`. Model and catalogue voice access
 are checked before synthesis. The birthday worker reports failures explicitly.
 
+## Select and preview the celebration
+
+1. In **Escena del cumpleaños → Introducción → Cambiar**, activate the saved
+   variants to include in rotation. Upload audio or explicitly generate a named
+   variant with birthday congratulations and a generic present from the house.
+   Generated variants retain their approved text. Save the configuration.
+2. Set the general background and optionally select **Video del cumpleaños** in
+   each profile. A profile without a video uses the general background. Music
+   remains one shared birthday song.
+3. Preparing an event freezes its proposed introduction and profile background.
+   **Configurar celebración** changes either resource for that event;
+   **Volver a la propuesta automática** restores its saved proposal. Neither
+   action rewrites the greeting or synthesizes speech. Withdraw scheduling before
+   changing resources.
+4. **Previsualizar celebración** plays the saved introduction, greeting and full
+   song on this device, with the same muted background and name presentation as
+   the player. Stop, restart or close it locally. A changed event stops its preview.
+   Preview never schedules playback or records public introduction usage.
+5. **Reproducir** schedules the celebration after the current song, or starts it
+   when the player is genuinely idle. A paused song still occupies the player.
+
+Rotation uses the current jornada, otherwise the Lima commercial day with the
+room's configured cutoff (default 04:00). Selection balances actual public starts
+and held/scheduled reservations, avoiding the previous introduction when another
+variant exists. Cancelled reservations no longer count. Identical audio checksums
+cannot appear twice in the active bank. Existing single-introduction settings
+remain compatible. Reloads and retries keep their selections; settings changes
+apply to new events. Public audio-start receipts count each playback run once,
+including interrupted runs, and retain the jornada at its authorized start.
+
+## Review past birthdays
+
+Open **Administración → Cumpleaños → Historial** (or **Ver historial** from the
+queue). Search by name, creation dates in Lima or result. Results
+include every retained event in the selected room, with 20 items per page.
+
+Open a person's detail to read the saved script, play the stored audio locally,
+inspect the selected profile/voice/history source and expand technical settings.
+**Configuración** retains the original preset editor. Existing configuration
+links can use `?view=settings`; history is the default birthday administration view.
+
+History is read-only: it provides recorded event data, scripts, audio, settings
+and errors without ratings or operator opinion forms.
+Listening or browsing does not schedule playback, generate audio or consume
+provider tokens. Historical provider usage and overwritten scripts cannot be
+reconstructed by this view.
+
+The history API (`GET /api/birthdays/history`, `GET /history/:id`
+under the same birthday prefix) is administrator-only
+and room-scoped. It returns explicit detail fields, not player authority tokens.
+
 ## Verification
 
 ```sh
@@ -65,6 +130,10 @@ real media preparation/playback, and fixture text/TTS providers. The HTTPS optio
 targets **dev-karaoke.puyu.pe**, checks tunnel availability, then routes worktree
 HTML/assets/API/socket to the isolated server. It validates browser HTTPS behavior,
 not deployment of this branch to the shared development service.
+The isolated development fixture retains React development/StrictMode behavior
+but freezes its initial webpack build, avoiding hashed-CSS replacement during a
+scenario when other checkouts or editors change unrelated source files. Normal
+development HMR and cache headers are unchanged.
 
 | Criteria | Evidence |
 | --- | --- |

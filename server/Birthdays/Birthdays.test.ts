@@ -6,6 +6,7 @@ import { open, close, db } from '../lib/Database.js'
 import { BirthdayService } from './Service.js'
 import { createBirthday, changeBirthday, eventDTO, getBirthday, publicEvents, saveSettings, settings } from './Store.js'
 import { birthdayIntroText } from '../../shared/birthdays.js'
+import { changeScene } from './scenes.js'
 import Animation, { type Reservation } from '../Animation/Animation.js'
 
 function wave (seconds = 12) {
@@ -67,6 +68,13 @@ it('persists a held event with no public exposure and deduplicates creation', ()
   expect(() => getBirthday(2, row.id)).toThrow('sala')
   expect(() => createBirthday(1, 'birthday-test', { ...input, name: 'Otro' })).toThrow('otros datos')
 })
+
+it('reports stale settings as an HTTP conflict without overwriting the newer configuration', () => {
+  const original = settings(1)
+  const updated = saveSettings(1, { ...original, targetSeconds: 30 })
+  expect(() => saveSettings(1, original)).toThrow(expect.objectContaining({ status: 409 }))
+  expect(settings(1)).toEqual(updated)
+})
 it('accepts approval during generation without cancelling preparation or duplicating the slot', async () => {
   let complete!: (text: string) => void
   write.mockImplementationOnce(() => new Promise((resolve) => {
@@ -84,6 +92,36 @@ it('accepts approval during generation without cancelling preparation or duplica
   expect(getBirthday(1, first.id).playback).toBe('scheduled')
   expect(publicEvents(1)[0]).not.toHaveProperty('birthYear')
   expect(publicEvents(1)[0]).not.toHaveProperty('sex')
+})
+it('keeps scene adjustments made while text is being generated without restarting providers', async () => {
+  let complete!: (text: string) => void
+  write.mockImplementationOnce(() => new Promise((resolve) => {
+    complete = resolve
+  }))
+  await fs.writeFile(path.join(directory, 'alternate'), 'fixture')
+  db.run('INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES(\'alternate\',1,\'intro\',\'Alternative\',\'alternate\',2500,\'alternate\')')
+  const row = create()
+  const work = service.drain()
+  changeScene(getBirthday(1, row.id), { revision: row.revision, introId: 'alternate' })
+  complete(script)
+  await work
+  const ready = getBirthday(1, row.id)
+  expect(ready.preparation).toBe('ready')
+  expect(ready.generationRevision).toBe(row.generationRevision)
+  expect(eventDTO(ready).assets.find(asset => asset.kind === 'intro')!.id).toBe('alternate')
+  expect(ready.durationMs).toBe(3500 + eventDTO(ready).assets.find(asset => asset.kind === 'greeting')!.durationMs)
+  expect(write).toHaveBeenCalledOnce()
+  expect(speak).toHaveBeenCalledOnce()
+})
+it('stores custom introduction scripts and rejects incomplete variants before speech generation', async () => {
+  const text = '¡Feliz cumpleaños! Hoy la casa celebra contigo y tiene un presente para ti. Recibe este saludo con mucho cariño.'
+  const resource = await service.intro(1, 'voice', text, 'Celebración cálida')
+  expect(resource.script).toBe(text)
+  expect(resource.title).toBe('Celebración cálida')
+  expect(speak).toHaveBeenCalledOnce()
+  await expect(service.intro(1, 'voice', 'La casa tiene un presente especial para ti.')).rejects.toThrow('cumpleaños')
+  await expect(service.intro(1, 'voice', '¡Feliz cumpleaños! Que disfrutes mucho esta noche.')).rejects.toThrow('presente')
+  expect(speak).toHaveBeenCalledOnce()
 })
 it('prepares real audio longer than ten seconds without registering it in the animator catalog', async () => {
   const row = await prepared()
@@ -124,7 +162,7 @@ it('requires complete resources, preserves snapshot choices, and supports withdr
   expect(eventDTO(getBirthday(1, row.id)).assets.some(item => item.id === 'music')).toBe(true)
   const scheduled = changeBirthday(1, row.id, row.revision, 'schedule')
   expect(changeBirthday(1, row.id, scheduled.revision, 'unschedule').playback).toBe('held')
-  expect(() => create('missing-media')).toThrow('Configure')
+  expect(() => create('missing-media')).toThrow('Seleccione la música')
 })
 it('grants exclusive playback, enforces the full phase order and settles only once', async () => {
   const row = await prepared()

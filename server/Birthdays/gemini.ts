@@ -6,13 +6,13 @@ const base = () => process.env.KES_GEMINI_BASE_URL || 'https://generativelanguag
 const request: typeof fetch = (url, options) => fetch(String(url).replace('https://generativelanguage.googleapis.com', base()), options)
 export const geminiBirthdayTts = () => new GeminiGreetingTts(process.env.KES_GEMINI_API_KEY || '', request)
 
-export async function listBirthdayVoices (model: string, language = 'es-419') {
+export async function listBirthdayVoices (model: string, language = 'es-419', search?: string) {
   if (!['es-PE', 'es-419', 'es', ''].includes(language)) throw new Error('Seleccione español de Perú o latinoamericano.')
   await geminiBirthdayTts().check(model)
   const voices: { voiceId: string, name: string }[] = []
   let page = ''
   for (let i = 0; i < 5; i++) {
-    const query = new URLSearchParams({ ...(language ? { language_code: language } : {}), page_size: '100', ...(page ? { page_token: page } : {}) })
+    const query = new URLSearchParams({ ...(language ? { language_code: language } : {}), ...(search ? { search } : {}), page_size: '100', ...(page ? { page_token: page } : {}) })
     const response = await fetch(`${base()}/v1beta/voices?${query}`, { headers: { 'x-goog-api-key': process.env.KES_GEMINI_API_KEY || '' }, signal: AbortSignal.timeout(10000) })
     if (!response.ok) throw new Error('No se pudieron consultar las voces Gemini. Revise permisos e idioma.')
     const reader = response.body?.getReader()
@@ -38,9 +38,14 @@ export async function listBirthdayVoices (model: string, language = 'es-419') {
 export async function speakGeminiBirthday (text: string, profile: BirthdaySpeech, signal: AbortSignal) {
   const provider = geminiBirthdayTts()
   try {
-    const voices = await listBirthdayVoices(profile.model, '')
-    if (!voices.some(voice => voice.voiceId === profile.voice)) throw new Error('La voz seleccionada no está disponible en el catálogo Gemini. Consulte las voces antes de generar.')
-    return await provider.generate(text, { ...profile, provider: 'gemini' }, signal)
+    // A bounded world-wide listing can omit valid Spanish voices. Scope by the
+    // regional ID or search a named voice instead of scanning the whole library.
+    const region = /^es-(419|PE)-/i.exec(profile.voice)
+    const language = region ? `es-${region[1].toUpperCase()}` : ''
+    const voices = await listBirthdayVoices(profile.model, language, region ? undefined : profile.voice)
+    const selected = voices.find(voice => voice.voiceId.toLowerCase() === profile.voice.toLowerCase())
+    if (!selected) throw new Error('La voz seleccionada no está disponible en el catálogo Gemini. Consulte las voces antes de generar.')
+    return await provider.generate(text, { ...profile, voice: selected.voiceId, provider: 'gemini' }, signal)
   } catch (error) {
     if (error instanceof GreetingVoiceError) throw new Error(`No se pudo preparar la voz del cumpleaños (${error.kind}). Revise Gemini y reintente explícitamente.`)
     throw error

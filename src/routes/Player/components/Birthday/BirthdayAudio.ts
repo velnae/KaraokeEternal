@@ -32,7 +32,7 @@ export class BirthdayAudio {
     }
   }
 
-  async play (asset: BirthdayAsset, volume: number, signal: AbortSignal) {
+  async play (asset: BirthdayAsset, volume: number, signal: AbortSignal, onStarted?: () => void) {
     signal.throwIfAborted()
     const bytes = this.bytes.get(asset.id)
     if (!bytes) throw new Error('El audio no está preparado.')
@@ -78,6 +78,7 @@ export class BirthdayAudio {
       this.context.addEventListener('statechange', state)
       source.start()
       source.stop(this.permitUntil)
+      onStarted?.()
     })
   }
 }

@@ -1,0 +1,10 @@
+.previewDialog { width: min(62rem, calc(100vw - 24px)); }
+.stage { position: relative; aspect-ratio: 16 / 9; width: 100%; overflow: hidden; border-radius: var(--border-radius); }
+.stage h1 { font-size: clamp(2rem, 6vw, 5rem); }
+.stage p { font-size: clamp(1.2rem, 3vw, 2.5rem); }
+.actions { display: flex; gap: var(--space-s); flex-wrap: wrap; margin-top: var(--space-m); }
+.actions button { width: auto; }
+.status { margin-block: var(--space-m); }
+.editor { width: min(36rem, calc(100vw - 24px)); }
+.form, .form label { display: grid; gap: var(--space-m); min-width: 0; }
+.form select { width: 100%; min-width: 0; }

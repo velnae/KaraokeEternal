@@ -5,11 +5,13 @@ import { createReadStream } from 'node:fs'
 import path from 'node:path'
 import { db } from '../lib/Database.js'
 import { getProduction } from '../Animation/Production.js'
-import { validateBirthdaySettings, type BirthdayInput, type BirthdaySettings } from '../../shared/birthdays.js'
+import { validateBirthdaySettings, type BirthdayInput, type BirthdaySettings, type BirthdaySceneInput } from '../../shared/birthdays.js'
+import { changeScene } from './scenes.js'
 import { listBirthdayVoices } from './gemini.js'
 import { speechProfile } from './personalization.js'
+import { birthdayHistory, birthdayHistoryDetail } from './history.js'
 import { birthdayService } from './Service.js'
-import { assertRoom, asset, assetDTO, changeBirthday, createBirthday, eventDTO, rows, saveSettings, settings, type AssetRow } from './Store.js'
+import { assertRoom, asset, assetDTO, changeBirthday, createBirthday, eventDTO, getBirthday, rows, saveSettings, settings, type AssetRow } from './Store.js'
 
 const router = new Router({ prefix: '/api/birthdays' })
 router.use(async (ctx, next) => {
@@ -29,6 +31,12 @@ router.get('/', (ctx) => {
 })
 router.put('/settings', (ctx) => {
   ctx.body = saveSettings(ctx.user.roomId, ctx.request.body)
+})
+router.get('/history', (ctx) => {
+  ctx.body = birthdayHistory(ctx.user.roomId, ctx.query)
+})
+router.get('/history/:id', (ctx) => {
+  ctx.body = birthdayHistoryDetail(ctx.user.roomId, ctx.params.id)
 })
 router.post('/voices', async (ctx) => {
   const input = ctx.request.body as { provider?: string, model?: string, language?: string }
@@ -58,11 +66,18 @@ router.post('/events/:id', (ctx) => {
   birthdayService().publish(ctx.user.roomId)
   void birthdayService().drain()
 })
+router.put('/events/:id/scene', (ctx) => {
+  assertRoom(ctx.user.roomId)
+  changeScene(getBirthday(ctx.user.roomId, ctx.params.id), ctx.request.body as unknown as BirthdaySceneInput)
+  ctx.body = eventDTO(getBirthday(ctx.user.roomId, ctx.params.id))
+  birthdayService().publish(ctx.user.roomId)
+})
 router.post('/intro', async (ctx) => {
   assertRoom(ctx.user.roomId)
   const voiceId = settings(ctx.user.roomId).defaultVoiceId
   if (!voiceId) ctx.throw(422, 'Guarde primero la voz predeterminada.')
-  ctx.body = assetDTO(await birthdayService().intro(ctx.user.roomId, voiceId))
+  const input = ctx.request.body as { text?: string, title?: string } | undefined
+  ctx.body = assetDTO(await birthdayService().intro(ctx.user.roomId, voiceId, input?.text, input?.title))
 })
 router.post('/video', async (ctx) => {
   assertRoom(ctx.user.roomId)

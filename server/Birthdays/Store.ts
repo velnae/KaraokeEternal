@@ -5,6 +5,7 @@ import {
   type BirthdayAsset, type BirthdayEvent, type BirthdayInput, type BirthdaySettings, type PublicBirthday,
 } from '../../shared/birthdays.js'
 import { contextInput, historicalReferences, inputIdentity, readPersonalization, selectPersonalization, speechProfile } from './personalization.js'
+import { introBank, readScene, sceneAsset, selectBirthdayScene } from './scenes.js'
 
 export interface AssetRow extends Omit<BirthdayAsset, 'url'> { roomId: number, filename: string }
 export interface BirthdayRow extends Omit<BirthdayEvent, 'assets'> {
@@ -19,6 +20,7 @@ export interface BirthdayRow extends Omit<BirthdayEvent, 'assets'> {
   token: string | null
   leaseUntil: number | null
   personalizationJSON: string | null
+  sceneJSON: string | null
 }
 export function assertRoom (roomId: number) {
   if (!db.get('SELECT 1 FROM rooms WHERE roomId=? AND status=?', [roomId, 'open'])) throw new Error('Abra la sala para gestionar cumpleaños.')
@@ -29,7 +31,7 @@ export const settings = (roomId: number): BirthdaySettings => {
   return row ? { ...defaultBirthdaySettings, speechProvider: 'elevenlabs', speechModel: 'eleven_v4', ...JSON.parse(row.data) } : { ...defaultBirthdaySettings, rules: [] }
 }
 export const asset = (roomId: number, id: string) => db.get<AssetRow>('SELECT * FROM birthdayAssets WHERE roomId=? AND id=?', [roomId, id])
-export const assetDTO = (row: AssetRow): BirthdayAsset => ({ id: row.id, kind: row.kind, title: row.title, checksum: row.checksum, durationMs: row.durationMs, url: `api/birthdays/assets/${row.id}` })
+export const assetDTO = (row: AssetRow): BirthdayAsset => ({ id: row.id, kind: row.kind, title: row.title, checksum: row.checksum, durationMs: row.durationMs, url: `api/birthdays/assets/${row.id}`, ...(row.script ? { script: row.script } : {}) })
 export const getBirthday = (roomId: number, id: string) => {
   const row = db.get<BirthdayRow>('SELECT * FROM birthdays WHERE roomId=? AND id=?', [roomId, id])
   if (!row) throw new Error('No se encontró el cumpleaños de esta sala.')
@@ -48,15 +50,18 @@ export function eventAssets (row: BirthdayRow): AssetRow[] {
 export function eventDTO (row: BirthdayRow): BirthdayEvent {
   return { ...publicBirthday(row), sex: row.sex, birthYear: row.birthYear, celebrationYear: row.celebrationYear,
     revision: row.revision, script: row.script, voiceId: row.voiceId, error: row.error, assets: eventAssets(row).map(assetDTO),
-    personalization: readPersonalization(row) }
+    personalization: readPersonalization(row), scene: readScene(row) }
 }
 export function saveSettings (roomId: number, value: unknown) {
   assertRoom(roomId)
   const next = validateBirthdaySettings(value)
-  if (next.revision !== settings(roomId).revision) throw new Error('Los ajustes cambiaron. Recargue antes de guardar.')
+  if (next.revision !== settings(roomId).revision) throw Object.assign(new Error('Los ajustes cambiaron. Recargue antes de guardar.'), { status: 409 })
   for (const [kind, id] of [['intro', next.introId], ['music', next.musicId], ['video', next.videoId]]) {
     if (id && asset(roomId, id)?.kind !== kind) throw new Error('Seleccione recursos de cumpleaños de esta sala.')
   }
+  const introductions = introBank(next).map(id => sceneAsset(roomId, id, 'intro'))
+  if (new Set(introductions.map(row => row.checksum)).size !== introductions.length) throw new Error('El banco contiene copias del mismo audio de introducción.')
+  for (const profile of next.rules) if (profile.videoId) sceneAsset(roomId, profile.videoId, 'video')
   next.revision++
   db.run('INSERT INTO birthdaySettings(roomId,data) VALUES(?,?) ON CONFLICT(roomId) DO UPDATE SET data=excluded.data', [roomId, JSON.stringify(next)])
   return next
@@ -71,13 +76,12 @@ export function createBirthday (roomId: number, requestId: string, value: unknow
     if (inputIdentity(contextInput(existing, readPersonalization(existing))) !== inputIdentity(input)) throw new Error('Esta solicitud ya contiene otros datos.')
     return existing
   }
-  const config = validateBirthdaySettings(settings(roomId))
-  if (!config.introId || !config.musicId || !config.videoId) throw new Error('Configure la introducción, la música y el video en Ajustes → Cumpleaños.')
+  const { config, scene } = selectBirthdayScene(roomId, validateBirthdaySettings(settings(roomId)), input, year)
   const id = randomUUID()
   const duration = [config.introId, config.musicId].reduce((sum, assetId) => sum + (asset(roomId, assetId)?.durationMs ?? 0), config.targetSeconds * 1000)
   const personalization = resolvePersonalization(roomId, config, input, year)
-  db.run(`INSERT INTO birthdays(id,roomId,requestId,name,sex,birthYear,celebrationYear,voiceId,settingsJSON,createdAt,durationMs,personalizationJSON) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [id, roomId, requestId, input.name, input.sex, input.birthYear, year, personalization.speech.voice, JSON.stringify(config), Date.now(), duration, JSON.stringify(personalization)])
+  db.run(`INSERT INTO birthdays(id,roomId,requestId,name,sex,birthYear,celebrationYear,voiceId,settingsJSON,createdAt,durationMs,personalizationJSON,sceneJSON) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, roomId, requestId, input.name, input.sex, input.birthYear, year, personalization.speech.voice, JSON.stringify(config), Date.now(), duration, JSON.stringify(personalization), JSON.stringify(scene)])
   return getBirthday(roomId, id)
 }
 export function changeBirthday (roomId: number, id: string, revision: number, operation: string, input?: BirthdayInput) {
@@ -99,7 +103,9 @@ export function changeBirthday (roomId: number, id: string, revision: number, op
     const previous = readPersonalization(row)
     const next = input ? validateBirthdayInput(input, row.celebrationYear) : contextInput(row, previous)
     const retry = operation === 'retry'
-    const config: BirthdaySettings = retry ? JSON.parse(row.settingsJSON) : settings(roomId)
+    const frozen: BirthdaySettings = JSON.parse(row.settingsJSON)
+    const scene = readScene(row)
+    const config: BirthdaySettings = retry ? frozen : { ...settings(roomId), introId: frozen.introId, musicId: frozen.musicId, videoId: frozen.videoId }
     const oldInput = contextInput(row, previous)
     // Selecting another voice profile does not itself rewrite the approved text.
     const sameContent = inputIdentity({ ...oldInput, profileId: '' }) === inputIdentity({ ...next, profileId: '' })
@@ -126,8 +132,15 @@ export function changeBirthday (roomId: number, id: string, revision: number, op
     const newSpeech = personalization?.speech ?? oldSpeech
     const changedSpeech = JSON.stringify(oldSpeech) !== JSON.stringify(newSpeech)
     const clearAudio = regenerate || changedSpeech || operation === 'revoice' || operation === 'lite'
+    const profileKey = (profile: typeof previous) => profile && JSON.stringify([profile.profile.id, profile.profile.sex, profile.profile.minAge, profile.profile.maxAge])
+    if (operation === 'edit' && profileKey(personalization) !== profileKey(previous) && scene?.videoMode === 'auto') {
+      const fallbackVideoId = scene.defaultVideoId === undefined ? frozen.videoId : scene.defaultVideoId
+      scene.automaticVideoId = sceneAsset(roomId, personalization?.profile.videoId || fallbackVideoId, 'video').id
+      config.videoId = scene.automaticVideoId
+    }
     db.run(`UPDATE birthdays SET name=?,sex=?,birthYear=?,voiceId=?,settingsJSON=?,personalizationJSON=?,script=?,greetingId=?,preparation='queued',playback='held',error=NULL,revision=revision+1,generationRevision=generationRevision+1 WHERE id=?`,
       [next.name, next.sex, next.birthYear, newSpeech.voice, JSON.stringify(config), personalization ? JSON.stringify(personalization) : null, regenerate ? null : row.script, clearAudio ? null : row.greetingId, id])
+    if (scene) db.run('UPDATE birthdays SET sceneJSON=? WHERE id=?', [JSON.stringify(scene), id])
   } else throw new Error('Esta acción no está disponible para el cumpleaños.')
   return getBirthday(roomId, id)
 }

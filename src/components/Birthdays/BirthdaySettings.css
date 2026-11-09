@@ -1,0 +1,47 @@
+.settings { display: grid; gap: var(--space-l); max-width: 90rem; padding-bottom: var(--space-l); }
+.settings > .section { min-width: 0; margin: 0; padding: var(--space-m) 0 var(--space-l); border: 0; border-bottom: 1px solid var(--color-gray-3); border-radius: 0; }
+.settings > .section legend { padding: 0; font-size: var(--font-size-m); font-weight: var(--font-weight-bold); }
+.settings label, .editorForm label, .resourceEditor label { display: grid; gap: var(--space-xs); min-width: 0; }
+.settings input, .settings select, .settings textarea, .editorForm input, .editorForm select, .editorForm textarea, .resourceEditor select { max-width: 100%; min-width: 0; font: inherit; }
+.settings input[type='number'], .settings textarea, .editorForm input[type='number'], .editorForm textarea { padding: var(--space-s); border: 1px solid var(--color-gray-3); border-radius: var(--border-radius); background: var(--panel-bg-color); color: var(--text-color); }
+.settings textarea, .editorForm textarea { width: 100%; resize: vertical; }
+.defaults { display: grid; grid-template-columns: minmax(12rem, 2fr) 1fr 1.5fr auto; gap: var(--space-m); align-items: end; }
+.actions { display: flex; align-items: center; gap: var(--space-s); flex-wrap: wrap; }
+.settings button, .editorForm button { width: auto; }
+.actions button, .defaults > button, .editorActions button { padding: .5rem .75rem; border: 1px solid var(--color-gray-3); border-radius: var(--border-radius); }
+.advanced { margin-top: var(--space-m); }
+.advanced summary { cursor: pointer; width: fit-content; padding-block: var(--space-s); }
+.advancedFields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-m); margin-block: var(--space-m); }
+.advanced > .actions { margin-top: var(--space-m); }
+.profile { display: grid; grid-template-columns: minmax(12rem, 2fr) minmax(10rem, 1.5fr) auto; gap: var(--space-m); align-items: center; padding-block: var(--space-m); border-bottom: 1px solid var(--color-gray-3); }
+.profile:last-child { border-bottom: 0; }
+.profile h3, .resource h3 { font-size: var(--font-size-s); margin: 0 0 var(--space-xs); }
+.profile p, .resource p { margin: 0; color: var(--color-gray-7); }
+.voiceName { color: var(--color-gray-7); overflow-wrap: anywhere; }
+.resource { display: flex; gap: var(--space-m); align-items: center; justify-content: space-between; padding-block: var(--space-m); }
+.resource > div:first-child { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.saveBar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-m); padding: var(--space-m); border: 1px solid var(--color-gray-3); border-radius: var(--border-radius); background: var(--panel-bg-color); box-shadow: var(--box-shadow); }
+.saveBar > span { flex-basis: 100%; }
+.editor { width: min(44rem, calc(100vw - 24px)); }
+.editorForm, .resourceEditor, .preview { display: grid; gap: var(--space-m); min-width: 0; }
+.resourceEditor { border: 0; padding: 0; margin: 0 0 var(--space-m); }
+.resourceEditor input[type='file'] { max-width: 100%; }
+.fields { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: var(--space-m); }
+.approaches { display: flex; gap: var(--space-m); flex-wrap: wrap; border: 0; padding: 0; margin: 0; }
+.editorForm .approaches label, .editorForm .check { display: flex; align-items: center; gap: var(--space-s); }
+.editorActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-s); }
+.preview audio, .preview video { width: 100%; max-height: 55vh; }
+.preview video { background: #000; aspect-ratio: 16 / 9; }
+.muted { color: var(--color-gray-6); }
+.catalogue { display: flex; align-items: center; gap: var(--space-m); flex-wrap: wrap; }
+.catalogue p { margin: var(--space-s) 0; }
+.error { border-left: 3px solid var(--btn-danger-bg-color); padding-left: var(--space-m); }
+@media (max-width: 900px) { .defaults { grid-template-columns: 1fr 1fr; } .defaults > label:first-child { grid-column: 1 / -1; } .profile { grid-template-columns: 1fr auto; } .voiceName { grid-column: 1; } .profile > .actions { grid-column: 2; grid-row: 1 / span 2; } }
+@media (max-width: 640px) {
+  .defaults, .advancedFields, .fields { grid-template-columns: 1fr; }
+  .defaults > label:first-child { grid-column: auto; }
+  .profile { grid-template-columns: 1fr; gap: var(--space-s); }
+  .profile > .actions { grid-column: auto; grid-row: auto; }
+  .resource { align-items: start; flex-direction: column; }
+  .saveBar .actions { width: 100%; justify-content: flex-end; }
+}

@@ -11,8 +11,9 @@ import { getTransitionVideoService } from '../TransitionVideo/Service.js'
 import Prefs from '../Prefs/Prefs.js'
 import { birthdayPrompt, completeBirthdayScript, readPersonalization, speechProfile, validateCompleteScript } from './personalization.js'
 import { speakGeminiBirthday } from './gemini.js'
+import { recordBirthdayIntro } from './scenes.js'
 import {
-  BIRTHDAY_STATE, birthdayIntroText, birthdayLimits, publicBirthday,
+  BIRTHDAY_STATE, birthdayIntroText, birthdayLimits, birthdayPhases, publicBirthday,
   type BirthdayGrant, type BirthdaySettings, type BirthdayPhase, type BirthdaySpeech,
 } from '../../shared/birthdays.js'
 import { asset, assetDTO, eventAssets, getBirthday, publicEvents, settings, type BirthdayRow } from './Store.js'
@@ -172,8 +173,12 @@ export class BirthdayService {
     return asset(roomId, id)!
   }
 
-  async intro (roomId: number, voiceId: string) {
-    return this.upload(roomId, 'intro', 'Presentación y presente de la casa', await this.providers.speak(birthdayIntroText, voiceId, this.abort.signal, speechProfile(settings(roomId), voiceId)))
+  async intro (roomId: number, voiceId: string, text = birthdayIntroText, title = 'Presentación y presente de la casa') {
+    if (typeof text !== 'string' || text.trim().length < 20 || text.length > 1000 || /[<>[\]]/.test(text) || !/\b(presente|obsequio)\b/i.test(text) || !/\bcasa\b/i.test(text) || !/cumpleaños/i.test(text)) throw new Error('Use una introducción de 20 a 1000 caracteres que celebre el cumpleaños e incluya un presente de la casa, sin etiquetas.')
+    if (typeof title !== 'string' || !title.trim() || title.length > 100) throw new Error('Indique un nombre de hasta 100 caracteres.')
+    const resource = await this.upload(roomId, 'intro', title.trim(), await this.providers.speak(text.trim(), voiceId, this.abort.signal, speechProfile(settings(roomId), voiceId)))
+    db.run('UPDATE birthdayAssets SET script=? WHERE id=?', [text.trim(), resource.id])
+    return asset(roomId, resource.id)!
   }
 
   async audition (roomId: number, profile: BirthdaySpeech) {
@@ -220,9 +225,14 @@ export class BirthdayService {
     return { event: publicBirthday(getBirthday(roomId, row.id)), assets: assets.map(assetDTO), token, remainingMs: Math.max(0, now + 15000 - Date.now()) }
   }
 
-  progress (roomId: number, owner: string, id: string, token: string, operation: 'heartbeat' | 'phase' | 'finish' | 'interrupt', phase?: BirthdayPhase) {
+  progress (roomId: number, owner: string, id: string, token: string, operation: 'heartbeat' | 'phase' | 'finish' | 'interrupt' | 'introStarted', phase?: BirthdayPhase) {
     const row = getBirthday(roomId, id)
     if (row.token !== token || row.ownerSocketId !== owner) throw new Error('La reserva del cumpleaños ya no es válida.')
+    if (operation === 'introStarted') {
+      if (!row.startedAt || !['playing', 'completed', 'interrupted'].includes(row.playback)) throw new Error('La introducción no tiene una reproducción autorizada.')
+      recordBirthdayIntro(row)
+      return
+    }
     if (['completed', 'interrupted'].includes(row.playback)) return
     if (row.playback !== 'playing' || (row.leaseUntil ?? 0) <= Date.now()) throw new Error('La reserva del cumpleaños venció.')
     if (operation === 'interrupt') return this.interrupt(roomId, 'La celebración se interrumpió. Puede volver a programarla.', owner)
@@ -231,7 +241,7 @@ export class BirthdayService {
       return
     }
     if (operation === 'phase' && phase === row.phase) return
-    const order: BirthdayPhase[] = ['intro', 'greeting', 'music']
+    const order = birthdayPhases
     const duration = eventAssets(row).find(item => item.kind === row.phase)?.durationMs ?? 0
     if (Date.now() - row.phaseStartedAt! < duration - 500) throw new Error('El audio de esta etapa todavía no terminó.')
     if (operation === 'finish' && row.phase === 'music') db.run('UPDATE birthdays SET playback=\'completed\',phase=NULL,leaseUntil=NULL,revision=revision+1 WHERE id=?', [id])

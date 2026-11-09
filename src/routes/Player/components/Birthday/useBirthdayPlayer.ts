@@ -4,7 +4,7 @@ import store from 'store/store'
 import socket from 'lib/socket'
 import { selectBirthdays } from 'store/modules/birthdays'
 import { nextBirthday } from 'shared/playbackSequence'
-import type { BirthdayGrant, BirthdayPhase } from 'shared/birthdays'
+import { birthdaySequence, type BirthdayGrant, type BirthdayPhase } from 'shared/birthdays'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
 import useBirthdaySync from 'components/Birthdays/useBirthdaySync'
 import { birthdayPlayerRequest } from 'components/Birthdays/api'
@@ -96,14 +96,17 @@ export default function useBirthdayPlayer (channel: AnnouncementAudio) {
         setScene({ grant, phase: 'intro' })
       }
       await audio.prepare(grant.assets, controller.signal)
-      for (const phase of ['intro', 'greeting', 'music'] as const) {
+      for (const asset of birthdaySequence(grant.assets)) {
+        const phase = asset.kind as BirthdayPhase
         controller.signal.throwIfAborted()
         if (phase !== 'intro') await progress('phase', phase)
         if (live.current) setScene({ grant, phase })
-        const asset = grant.assets.find(item => item.kind === phase)
-        if (!asset) throw new Error('Falta un audio de la celebración.')
         const volume = store.getState().player.volume
-        await audio.play(asset, volume, controller.signal)
+        await audio.play(asset, volume, controller.signal, phase === 'intro'
+          ? () => {
+              void progress('introStarted').catch(() => controller.abort())
+            }
+          : undefined)
       }
       await progress('finish')
       return 'finished'

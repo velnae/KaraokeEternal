@@ -6,6 +6,8 @@ import { useAppSelector } from 'store/hooks'
 import { birthdayApi, birthdayUrl } from './api'
 import useBirthdayOverview from './useBirthdayOverview'
 import BirthdayForm from './BirthdayForm'
+import BirthdayEventSceneEditor from './BirthdayEventSceneEditor'
+import BirthdayCelebrationPreview from './BirthdayCelebrationPreview'
 import styles from './Birthdays.css'
 
 export default function BirthdayPanel () {
@@ -13,6 +15,8 @@ export default function BirthdayPanel () {
   const status = useAppSelector(state => state.status)
   const [form, setForm] = useState<BirthdayEvent | 'new' | null>(null)
   const [preview, setPreview] = useState<BirthdayAsset | null>(null)
+  const [sceneEditor, setSceneEditor] = useState<BirthdayEvent | null>(null)
+  const [celebrationPreview, setCelebrationPreview] = useState<BirthdayEvent | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
   const execute = async (event: BirthdayEvent, operation: string) => {
@@ -28,13 +32,13 @@ export default function BirthdayPanel () {
     } finally { setBusy(null) }
   }
   const events = overview?.events.filter(event => !['completed', 'cancelled'].includes(event.playback)) ?? []
-  const history = overview?.events.filter(event => ['completed', 'cancelled'].includes(event.playback)).slice(0, 10) ?? []
   return (
     <section className={styles.panel} aria-label='Cumpleaños preparados'>
       <div className={styles.heading}>
         <h2>Cumpleaños</h2>
         <Button onClick={() => setForm('new')}>Preparar cumpleaños</Button>
-        <Link to='/admin/settings/birthdays'>Ajustes</Link>
+        <Link to='/admin/settings/birthdays?view=history'>Ver historial</Link>
+        <Link to='/admin/settings/birthdays?view=settings'>Ajustes</Link>
       </div>
       {(error || loadError) && <p role='alert'>{error || loadError}</p>}
       {events.map((event) => {
@@ -48,9 +52,29 @@ export default function BirthdayPanel () {
               {event.error && <p role='alert'>{event.error}</p>}
               {event.playback === 'held' && <p>{status.queueId >= 0 && !status.isAtQueueEnd ? 'Al finalizar el tema actual.' : 'Al aprobar, comenzará cuando el reproductor esté disponible.'}</p>}
               {event.playback === 'scheduled' && event.preparation !== 'ready' && <p>Preparando el saludo antes de iniciar.</p>}
+              <p>{`Introducción: ${event.assets.find(asset => asset.kind === 'intro')?.title || 'No disponible'} · ${event.scene?.introMode === 'manual' ? 'Manual' : 'Automática'}`}</p>
+              <p>{`Video: ${event.assets.find(asset => asset.kind === 'video')?.title || 'No disponible'} · ${event.scene?.videoMode === 'manual' ? 'Manual' : 'Automático'}`}</p>
             </div>
             <div className={styles.actions}>
               {greeting && <Button onClick={() => setPreview(greeting)}>Escuchar prueba</Button>}
+              {event.preparation === 'ready' && ['held', 'interrupted'].includes(event.playback) && (
+                <Button onClick={() => {
+                  setPreview(null)
+                  setCelebrationPreview(event)
+                }}
+                >
+                  Previsualizar celebración
+                </Button>
+              )}
+              {['held', 'interrupted'].includes(event.playback) && event.assets.some(asset => asset.kind === 'intro') && event.assets.some(asset => asset.kind === 'video') && (
+                <Button onClick={() => {
+                  setPreview(null)
+                  setSceneEditor(event)
+                }}
+                >
+                  Configurar celebración
+                </Button>
+              )}
               {['held', 'interrupted'].includes(event.playback) && event.preparation !== 'failed' && <Button variant='primary' disabled={busy === event.id} onClick={() => void execute(event, 'schedule')}>Reproducir</Button>}
               {event.playback === 'scheduled' && <Button disabled={busy === event.id} onClick={() => void execute(event, 'unschedule')}>Retirar programación</Button>}
               {event.preparation === 'failed' && editable && <Button disabled={busy === event.id} onClick={() => void execute(event, 'retry')}>Reintentar preparación</Button>}
@@ -79,20 +103,6 @@ export default function BirthdayPanel () {
           </article>
         )
       })}
-      {history.length > 0 && (
-        <details>
-          <summary>Celebraciones anteriores</summary>
-          {history.map(event => (
-            <p key={event.id}>
-              {event.name}
-              {' '}
-              —
-              {' '}
-              {birthdayLabels[event.playback]}
-            </p>
-          ))}
-        </details>
-      )}
       {preview && (
         <div className={styles.preview}>
           <strong>Prueba en este dispositivo</strong>
@@ -111,6 +121,8 @@ export default function BirthdayPanel () {
           }}
         />
       )}
+      {sceneEditor && <BirthdayEventSceneEditor event={sceneEditor} assets={overview?.assets ?? []} onClose={() => setSceneEditor(null)} onSaved={refresh} />}
+      {celebrationPreview && <BirthdayCelebrationPreview event={celebrationPreview} currentRevision={overview?.events.find(event => event.id === celebrationPreview.id)?.revision} currentPlayback={overview?.events.find(event => event.id === celebrationPreview.id)?.playback} onClose={() => setCelebrationPreview(null)} />}
     </section>
   )
 }

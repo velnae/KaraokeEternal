@@ -21,6 +21,7 @@ export interface BirthdayVoiceRule {
   style?: string
   approaches?: BirthdayApproach[]
   history?: boolean
+  videoId?: string | null
 }
 export interface BirthdaySpeech { provider: 'gemini' | 'elevenlabs', model: string, voice: string, style: string, processingRevision: number }
 export interface BirthdayReference { id: string, fromYear: number, toYear: number, phrase: string, source: string, version: number }
@@ -49,6 +50,7 @@ export interface BirthdaySettings {
   speechModel?: string
   speechStyle?: string
   historyEvery?: number
+  introIds?: string[]
 }
 export const defaultBirthdaySettings: BirthdaySettings = {
   revision: 0, textModel: 'gemini-3.8-flash', targetSeconds: 25, maxVoiceSeconds: 60, defaultVoiceId: '', rules: [], introId: null, musicId: null, videoId: null,
@@ -57,7 +59,24 @@ export const defaultBirthdaySettings: BirthdaySettings = {
 export type BirthdayPreparation = 'queued' | 'writing' | 'voicing' | 'preparing' | 'ready' | 'failed'
 export type BirthdayPlayback = 'held' | 'scheduled' | 'playing' | 'completed' | 'cancelled' | 'interrupted'
 export type BirthdayPhase = 'intro' | 'greeting' | 'music'
-export interface BirthdayAsset { id: string, kind: 'intro' | 'music' | 'greeting' | 'video', title: string, durationMs: number, url: string, checksum: string }
+export interface BirthdayAsset { id: string, kind: 'intro' | 'music' | 'greeting' | 'video', title: string, durationMs: number, url: string, checksum: string, script?: string | null }
+export interface BirthdaySceneSelection {
+  dayKey: string
+  automaticIntroId: string
+  automaticVideoId: string
+  defaultVideoId?: string | null
+  introMode: 'auto' | 'manual'
+  videoMode: 'auto' | 'manual'
+}
+export interface BirthdaySceneInput { revision: number, introId?: string, videoId?: string, automatic?: boolean }
+export const birthdayPhases: BirthdayPhase[] = ['intro', 'greeting', 'music']
+export function birthdaySequence (assets: BirthdayAsset[]): BirthdayAsset[] {
+  return birthdayPhases.map((phase) => {
+    const asset = assets.find(item => item.kind === phase)
+    if (!asset) throw new Error('Falta un audio de la celebración.')
+    return asset
+  })
+}
 export interface PublicBirthday {
   id: string
   name: string
@@ -75,6 +94,7 @@ export interface BirthdayEvent extends PublicBirthday, BirthdayInput {
   error: string | null
   assets: BirthdayAsset[]
   personalization?: BirthdayPersonalization | null
+  scene?: BirthdaySceneSelection | null
 }
 export interface BirthdaySnapshot { roomId: number, events: PublicBirthday[] }
 export interface BirthdayOverview { settings: BirthdaySettings, events: BirthdayEvent[], assets: BirthdayAsset[], configured: { text: boolean, voice: boolean } }
@@ -109,6 +129,7 @@ export function validateBirthdaySettings (value: unknown): BirthdaySettings {
       || (rule.style !== undefined && (typeof rule.style !== 'string' || rule.style.length > 400))
       || (rule.approaches !== undefined && (!Array.isArray(rule.approaches) || !rule.approaches.length || rule.approaches.some(value => !birthdayApproaches.includes(value))))
       || (rule.history !== undefined && typeof rule.history !== 'boolean')) throw new Error('Revise el nombre, las instrucciones y los enfoques del perfil.')
+    if (rule.videoId !== undefined && rule.videoId !== null && !voice(rule.videoId)) throw new Error('Seleccione un video válido para el perfil.')
   }
   const ids = input.rules.flatMap(rule => rule.id ? [rule.id] : [])
   if (new Set(ids).size !== ids.length) throw new Error('Los identificadores de perfil deben ser únicos.')
@@ -123,9 +144,11 @@ export function validateBirthdaySettings (value: unknown): BirthdaySettings {
   const maxVoiceSeconds = input.maxVoiceSeconds ?? 60
   if (!Number.isInteger(targetSeconds) || !Number.isInteger(maxVoiceSeconds) || targetSeconds < 15 || targetSeconds > maxVoiceSeconds || maxVoiceSeconds > 60) throw new Error('Use una duración objetivo de al menos 15 segundos y un máximo de hasta 60 segundos.')
   for (const id of [input.introId, input.musicId, input.videoId]) if (id !== null && !voice(id)) throw new Error('Seleccione recursos válidos.')
+  if (input.introIds !== undefined && (!Array.isArray(input.introIds) || input.introIds.length > 30 || input.introIds.some(id => !voice(id)) || new Set(input.introIds).size !== input.introIds.length)) throw new Error('Seleccione hasta 30 introducciones diferentes.')
   return { revision: input.revision, textModel: input.textModel, targetSeconds, maxVoiceSeconds, defaultVoiceId: input.defaultVoiceId,
     speechProvider, speechModel, speechStyle, historyEvery,
-    rules: input.rules.map(({ sex, minAge, maxAge, voiceId, id, title, writing, style, approaches, history }) => ({ sex, minAge, maxAge, voiceId, id, title, writing, style, approaches, history })), introId: input.introId, musicId: input.musicId, videoId: input.videoId }
+    ...(input.introIds !== undefined ? { introIds: [...input.introIds] } : {}),
+    rules: input.rules.map(({ sex, minAge, maxAge, voiceId, id, title, writing, style, approaches, history, videoId }) => ({ sex, minAge, maxAge, voiceId, id, title, writing, style, approaches, history, videoId })), introId: input.introId, musicId: input.musicId, videoId: input.videoId }
 }
 export function selectBirthdayProfile (settings: BirthdaySettings, input: BirthdayInput, year: number): BirthdayVoiceRule {
   if (input.profileId) {

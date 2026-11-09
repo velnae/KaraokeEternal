@@ -7,6 +7,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
+import { checkBirthdayHistory } from './birthday-history-checks.e2e.mjs'
+import { checkBirthdaySettings } from './birthday-settings-checks.e2e.mjs'
+import { checkBirthdayScene } from './birthday-scene-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -61,8 +64,8 @@ const call = async (suffix, body, method = body === undefined ? 'GET' : 'POST') 
   return response.json()
 }
 const start = async () => {
-  server = spawn(process.execPath, [...(development ? ['--import', 'tsx', 'server/main.ts'] : ['build/server/main.js']), '--data', data, '--port', String(port), '--urlPath', '/karaoke/', '--serverLogLevel', '0'], {
-    cwd: root, stdio: ['ignore', log, log], env: { ...process.env, NODE_ENV: development ? 'development' : 'production', KES_SCAN: '', KES_YOUTUBE_API_KEY: '', KES_ROTATE_KEY: 'false',
+  server = spawn(process.execPath, [...(development ? ['--import', 'tsx', '--import', './config/birthday-dev-fixture.mjs', 'server/main.ts'] : ['build/server/main.js']), '--data', data, '--port', String(port), '--urlPath', '/karaoke/', '--serverLogLevel', '0'], {
+    cwd: root, stdio: ['ignore', log, log], env: { ...process.env, NODE_ENV: development ? 'development' : 'production', KARAOKE_BIRTHDAY_FIXTURE: '1', KES_SCAN: '', KES_YOUTUBE_API_KEY: '', KES_ROTATE_KEY: 'false',
       KES_GEMINI_API_KEY: 'fixture-only', KES_GEMINI_BASE_URL: `http://127.0.0.1:${providerPort}`, KES_ELEVENLABS_API_KEY: 'fixture-only', KES_ELEVENLABS_BASE_URL: `http://127.0.0.1:${providerPort}` },
   })
   await expect.poll(async () => {
@@ -165,6 +168,7 @@ try {
     await context.route(`${uiBase}socket.io/**`, route => forward(route, true))
   }
   const admin = await context.newPage()
+  admin.on('pageerror', error => errors.push(error.message))
   await admin.goto(`${uiBase}account?roomId=1&redirect=${encodeURIComponent('/queue')}`)
   await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).click()
   await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('admin')
@@ -208,28 +212,17 @@ try {
   await expect(admin.getByText('Prueba en este dispositivo', { exact: true })).toBeVisible()
   assert.equal((await event(birthday.id)).playback, 'held')
   await admin.getByRole('button', { name: 'Cerrar prueba', exact: true }).click()
+  await checkBirthdayScene({ admin, api, base, calls, birthday, data, event, call })
   for (const width of [390, 1440]) {
     await admin.setViewportSize({ width, height: 900 })
     assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
     await admin.screenshot({ path: path.join(data, `queue-${width}.png`), fullPage: true })
   }
-  await admin.goto(`${uiBase}admin/settings/birthdays`)
-  await expect(admin.getByRole('textbox', { name: 'Modelo de texto Gemini', exact: true })).toHaveValue('test-text-model')
-  await expect(admin.getByRole('button', { name: 'Escuchar introducción', exact: true })).toBeVisible()
-  if (personalized) {
-    await admin.getByRole('button', { name: 'Consultar voces disponibles', exact: true }).click()
-    await expect(admin.getByRole('combobox', { name: 'Voz predeterminada', exact: true }).getByRole('option', { name: 'Voz cálida' })).toHaveCount(1)
-    await admin.getByRole('button', { name: 'Escuchar este perfil', exact: true }).click()
-    await expect(admin.getByText('Prueba en este dispositivo', { exact: true })).toBeVisible()
-    await admin.getByRole('button', { name: 'Cerrar prueba', exact: true }).click()
-    await admin.getByRole('textbox', { name: 'Interpretación predeterminada', exact: true }).fill('Celebración clara y natural.')
-    await admin.getByRole('button', { name: 'Guardar ajustes', exact: true }).focus()
-    await admin.keyboard.press('Enter')
-    await expect(admin.getByText('Ajustes guardados.', { exact: true })).toBeVisible()
-  }
+  await admin.goto(`${uiBase}admin/settings/birthdays?view=settings`)
+  await checkBirthdaySettings({ admin, api, base, calls, personalized, data })
   for (const width of [390, 1440]) {
     await admin.setViewportSize({ width, height: 900 })
-    await admin.getByRole('textbox', { name: 'Modelo de texto Gemini', exact: true }).scrollIntoViewIfNeeded()
+    await admin.getByRole('heading', { name: 'Cumpleaños', exact: true }).scrollIntoViewIfNeeded()
     assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
     await admin.screenshot({ path: path.join(data, `settings-${width}.png`), fullPage: true })
   }
@@ -306,6 +299,7 @@ try {
   await expect(eventVideo).toHaveCount(0)
   await expect(player.getByRole('heading', { name: 'María', exact: true })).toBeVisible()
   await expect.poll(async () => (await event(birthday.id)).playback, { timeout: 45000 }).toBe('completed')
+  assert.equal(db.prepare('SELECT count(*) n FROM birthdayIntroUses WHERE birthdayId=?').get(birthday.id).n, 1)
   const trace = await player.evaluate(() => window.birthdayTrace)
   assert.equal(trace.length, 3, JSON.stringify(trace))
   assert.ok(trace[0].duration >= 1 && trace[0].duration < 1.2)
@@ -322,6 +316,7 @@ try {
   await expect.poll(async () => (await event(idle.id)).playback).toBe('interrupted')
   await player.reload()
   assert.equal((await event(idle.id)).playback, 'interrupted')
+  await checkBirthdayHistory({ admin, api, base, uiBase, db, birthday, data, calls })
   assert.deepEqual(errors, [])
   console.log(JSON.stringify({ mode: development ? 'development' : 'production', httpsUi, assertions: 'private context; real generation pipeline with fixture providers; >25s event; held/reload/preview; keyboard/mobile; paused song and withdrawal; queued next without interruption; exclusive intro/greeting/full music; video failure keeps name and audio; resumes next song; idle start; interrupted no replay', artifacts: data }, null, 2))
 } catch (error) {

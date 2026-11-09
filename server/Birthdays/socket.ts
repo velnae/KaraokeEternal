@@ -36,7 +36,7 @@ export default {
       }
       acknowledge({ payload: grant })
     } else {
-      if (!['heartbeat', 'phase', 'finish', 'interrupt'].includes(payload?.operation)) throw new Error('Acción inválida.')
+      if (!['heartbeat', 'phase', 'finish', 'interrupt', 'introStarted'].includes(payload?.operation)) throw new Error('Acción inválida.')
       service.progress(roomId, sock.id, payload.id, payload.token, payload.operation, payload.phase)
       acknowledge({ payload: { accepted: true, remainingMs: Math.max(0, (getBirthday(roomId, payload.id).leaseUntil ?? 0) - Date.now()) } })
     }
