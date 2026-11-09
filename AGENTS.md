@@ -16,12 +16,18 @@ affected code, implement the smallest complete change, verify it, and summarize.
   Reinstall, rebuild or restart only when the change or a diagnosed failure
   requires it. Do not repeat passing checks without new changes or evidence.
 
-## Local development and HTTPS validation
+## Environments and HTTPS validation
 
-- The shared development URL is **https://karaoke.puyu.pe/**, exposed through
-  Cloudflare Tunnel to **http://127.0.0.1:3000**. Use HTTPS for browser validation
-  and administrator, player, guest and QR flows. A public hostname does not make
-  this a production deployment.
+- **Production:** **https://karaoke.puyu.pe/** points to the VPS at
+  **74.208.127.50**, served by Plesk/Nginx and `karaoke.service` on
+  **http://127.0.0.1:3010**. It is not the local development tunnel. Do not use
+  this hostname for development tests or fixtures; production operations require
+  an explicit production request.
+- **Temporary development:** **https://dev-karaoke.puyu.pe/** uses Cloudflare
+  Tunnel to **http://127.0.0.1:3000** on the local machine. Use this HTTPS URL for
+  development browser validation and administrator, player, guest and QR flows.
+  The local application and tunnel are managed by the user services
+  `karaoke-eternal.service` and `karaoke-eternal-tunnel.service`.
 - Check whether the local server is already running before starting `npm run dev`.
   It uses backend watch mode and frontend HMR; normal edits do not need a full
   build or a tunnel restart. Preserve the existing `.env` and configured data
@@ -35,7 +41,11 @@ affected code, implement the smallest complete change, verify it, and summarize.
 - Existing `config/*.e2e.mjs` suites launch isolated local servers with temporary
   databases; use them for repeatable regression checks, alongside the relevant
   HTTPS smoke test. Keep automated fixtures and destructive tests off shared data.
+- Before enabling an E2E suite's HTTPS mode, check its target hostname. Older
+  suites may still hardcode `karaoke.puyu.pe`; point them at the development
+  hostname before use. Keep local and VPS data independent after the migration.
 - Tunnel setup and diagnostics: `odd/tasks/cloudflare-development-tunnel.md`.
+- Production provisioning, deployment and recovery: `docs/production-deployment.md`.
 
 ## Minimum quality — choose checks by impact
 

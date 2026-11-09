@@ -36,6 +36,8 @@ Microphones are *not* required since the player itself only outputs music - this
 
 There are several [installation methods](https://www.karaoke-eternal.com/docs/karaoke-eternal-server/#installation) available for Karaoke Eternal Server.
 
+For this project's VPS setup, see [Production deployment with Plesk and systemd](docs/production-deployment.md), including first installation, data migration, deployment actions and recovery.
+
 ## Client branding
 
 Each installation can display one client's identity on the login and guest entry

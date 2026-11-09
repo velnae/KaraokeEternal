@@ -1,0 +1,1 @@
+karaoke ALL=(root) NOPASSWD: /usr/bin/systemctl restart karaoke.service, /usr/bin/systemctl stop karaoke.service
