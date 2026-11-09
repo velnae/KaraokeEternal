@@ -81,6 +81,7 @@ export async function checkPlayerDisplay ({ browser, editor, player, secondApi, 
   await expect(form.getByLabel('Título del comunicado 2')).toBeFocused()
   await form.getByLabel('Título del comunicado 2').fill('Disfruta la noche con nosotros')
   await form.getByLabel('Texto del comunicado 2 (opcional)').fill('Tu próxima canción empieza en tu mesa.')
+  await form.getByRole('group', { name: 'Comunicado 1', exact: true }).getByRole('button', { name: 'Quitar imagen', exact: true }).click()
   await group('Apariencia')
   const alignment = form.getByLabel('Alineación del contenido')
   await alignment.focus()
@@ -98,7 +99,6 @@ export async function checkPlayerDisplay ({ browser, editor, player, secondApi, 
   await form.getByLabel('Color del borde', { exact: true }).fill('#8a7163')
   await number('Redondeado de esquinas (FHD)', 20)
   await form.getByRole('checkbox', { name: 'Mostrar sombra' }).uncheck()
-  await form.getByRole('checkbox', { name: 'Mostrar icono QR' }).uncheck()
   await form.getByRole('checkbox', { name: 'Color de texto automático' }).uncheck()
   await form.getByLabel('Color del texto', { exact: true }).fill('#fff1df')
   const scene = preview.getByLabel('Contenido de la vista previa')
@@ -186,8 +186,8 @@ export async function checkPlayerDisplay ({ browser, editor, player, secondApi, 
   assert.ok(Math.abs(dimensions[2].banner / dimensions[1].banner - 2) < 0.01)
   await player.setViewportSize({ width: 1280, height: 720 })
   await expect.poll(() => player.locator('#player-fs-container').evaluate(element => element.style.width)).toBe('1280px')
-  await call('prefs/player-display', { ...saved, announcement: { ...saved.announcement, width: 20, textScale: 180, padding: 60, marginY: 20, showIcon: true,
-    messages: [{ title: 'W'.repeat(60), text: 'W'.repeat(100) }] } }, 'PUT')
+  await call('prefs/player-display', { ...saved, announcement: { ...saved.announcement, width: 20, textScale: 180, padding: 60, marginY: 20,
+    messages: [{ title: 'W'.repeat(60), text: 'W'.repeat(100), image: 'qr' }] } }, 'PUT')
   await expect(banner).toContainText('W'.repeat(60))
   await expect.poll(() => banner.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true)
   await expect(banner.locator('[aria-hidden="false"] > strong').locator('..')).toHaveCSS('opacity', '1')

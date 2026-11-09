@@ -20,8 +20,9 @@ export function getLogoImage (id: string): PlayerLogoImage | undefined {
 
 function references () {
   const row = db.get<{ data: string }>('SELECT data FROM prefs WHERE key=?', ['playerDisplay'])
-  const logo = row ? JSON.parse(row.data).logo : null
-  return [logo?.staticImageId, logo?.animatedImageId].filter(isPlayerLogoId)
+  const settings = row ? JSON.parse(row.data) as PlayerDisplaySettings : null
+  return [settings?.logo?.staticImageId, settings?.logo?.animatedImageId,
+    ...(settings?.announcement?.messages ?? []).map(message => message.image)].filter(isPlayerLogoId)
 }
 
 // Resource references and preferences change together; cleanup cannot remove a newly selected image.
@@ -31,7 +32,11 @@ export function saveDisplayWithImages (settings: PlayerDisplaySettings): boolean
     for (const [id, kind] of [[settings.logo.staticImageId, 'png'], [settings.logo.animatedImageId, 'gif']] as const) {
       if (id && getLogoImage(id)?.kind !== kind) throw logoResourceError(422, `La imagen ${kind.toUpperCase()} ya no está disponible. Vuelva a subirla.`)
     }
-    const ids = new Set([...references(), settings.logo.staticImageId, settings.logo.animatedImageId].filter(isPlayerLogoId))
+    const messageImages = settings.announcement.messages.map(message => message.image).filter(isPlayerLogoId)
+    for (const id of messageImages) {
+      if (getLogoImage(id)?.kind !== 'png') throw logoResourceError(422, 'La imagen del comunicado ya no está disponible. Vuelva a subir el PNG.')
+    }
+    const ids = new Set([...references(), settings.logo.staticImageId, settings.logo.animatedImageId, ...messageImages].filter(isPlayerLogoId))
     for (const id of ids) db.run('UPDATE playerLogoImages SET updatedAt=? WHERE id=?', [Date.now(), id])
     const result = db.run('REPLACE INTO prefs(key,data) VALUES(?,?)', ['playerDisplay', JSON.stringify(settings)])
     db.exec('COMMIT')

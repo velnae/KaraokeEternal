@@ -5,13 +5,14 @@
 .tabs button { flex: 1; min-height: 48px; padding: 10px 8px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--secondary); cursor: pointer; }
 .tabs button[aria-pressed='true'] { color: var(--cyan); border-bottom-color: var(--cyan); }
 .field { display: grid; gap: 8px; min-width: 0; color: var(--lyrics); font-size: 14px; }
-.field input:not([type='range']), .field select, .preview select { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--edge); border-radius: 8px; color: var(--lyrics); background: var(--stage); font-size: 16px; }
+.field input:not([type='range']), .field textarea, .field select, .preview select { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--edge); border-radius: 8px; color: var(--lyrics); background: var(--stage); font-size: 16px; }
+.field textarea { resize: vertical; line-height: 1.6; }
 .field input[aria-invalid='true'] { border-color: #f29dad; }
 .numberControls, .colorControls { display: flex; align-items: center; gap: 12px; }
 .numberControls input[type='range'] { flex: 1; min-width: 0; min-height: 44px; accent-color: var(--cyan); }
 .numberControls input[type='number'] { flex: 0 0 84px; width: 84px; }
 .colorControls input[type='color'] { flex: 0 0 48px; width: 48px; height: 48px; padding: 4px; cursor: pointer; }
-.form :is(input, select, button, a, summary):focus-visible { outline: var(--focus-outline); outline-offset: 3px; }
+.form :is(input, textarea, select, button, a, summary):focus-visible { outline: var(--focus-outline); outline-offset: 3px; }
 .link { display: inline-flex; align-items: center; min-height: 44px; color: var(--cyan); font-size: 14px; text-decoration: underline; text-underline-offset: 3px; justify-self: start; }
 .notice { margin: 0; color: var(--amber); font-size: 14px; }
 .messageFields { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 16px; border: 1px solid var(--edge); border-radius: 8px; }

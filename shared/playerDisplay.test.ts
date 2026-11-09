@@ -1,8 +1,81 @@
 import { describe, expect, it } from 'vitest'
-import { defaultPlayerDisplay, displayLimits, resetDisplayAppearance, validatePlayerDisplay } from './playerDisplay.js'
+import { announcementAtTurn, defaultPlayerDisplay, displayLimits, resetDisplayAppearance, validatePlayerDisplay } from './playerDisplay.js'
 import { resolvePlayerLogo } from './playerLogo.js'
 
 describe('player display contract', () => {
+  it('defaults image size and preserves independent sizes when saving and resetting appearance', () => {
+    const settings = validatePlayerDisplay({ announcement: { messages: [
+      { title: 'First', text: '', image: 'qr', imageScale: 200 },
+      { title: 'Second', text: '', imageScale: 75 },
+      { title: 'Legacy', text: '' },
+    ] } })
+    expect(settings.announcement.messages.map(message => message.imageScale)).toEqual([200, 75, 100])
+    expect(validatePlayerDisplay(settings).announcement.messages).toEqual(settings.announcement.messages)
+    expect(resetDisplayAppearance(settings).announcement.messages).toEqual(settings.announcement.messages)
+  })
+
+  it.each([24, 2001, NaN, Infinity, null, '100'])('rejects invalid per-message image scale %s', (imageScale) => {
+    expect(() => validatePlayerDisplay({ announcement: { messages: [{ title: 'Message', text: '', imageScale }] } })).toThrow('Tamaño de imagen del comunicado 1')
+  })
+
+  it.each([500, 1000, 2000])('preserves oversized image scale %s through validation', (imageScale) => {
+    const settings = validatePlayerDisplay({ announcement: { messages: [{ title: 'Message', text: '', image: 'qr', imageScale }] } })
+    expect(validatePlayerDisplay(settings).announcement.messages[0].imageScale).toBe(imageScale)
+  })
+
+  it('migrates the legacy image to the first announcement without inspecting its text', () => {
+    const messages = [{ title: 'Primer comunicado', text: '' }, { title: 'Escanea el QR', text: '' }]
+    const migrated = validatePlayerDisplay({ announcement: { messages, showIcon: true } })
+    expect(migrated.announcement.messages.map(message => message.image)).toEqual(['qr', null])
+    expect(validatePlayerDisplay({ announcement: { messages, showIcon: false } }).announcement.messages.map(message => message.image)).toEqual([null, null])
+    expect(validatePlayerDisplay({ announcement: { messages } }).announcement.messages.map(message => message.image)).toEqual([null, null])
+    expect(validatePlayerDisplay({ announcement: { messages: [{ ...messages[0], image: null }] } }).announcement.messages[0].image).toBeNull()
+    expect(validatePlayerDisplay({}).announcement.messages[0].image).toBe('qr')
+    expect(resetDisplayAppearance(migrated).announcement.messages).toEqual(migrated.announcement.messages)
+    migrated.announcement.messages[0].title = 'Título editado'
+    expect(validatePlayerDisplay(migrated).announcement.messages[0].image).toBe('qr')
+    migrated.announcement.messages[0].image = null
+    expect(validatePlayerDisplay(migrated).announcement.messages[0].image).toBeNull()
+  })
+
+  it.each(['https://example.com/image.png', '../../image.png', 'custom', 123])('rejects invalid announcement image %s', (image) => {
+    expect(() => validatePlayerDisplay({ announcement: { messages: [{ title: 'Message', text: '', image }] } })).toThrow()
+  })
+
+  it('defaults the phrase bank off for existing settings and preserves it when resetting appearance', () => {
+    expect(validatePlayerDisplay({}).announcement).toMatchObject({ phrases: [], showPhraseAfterMessages: false })
+    const settings = validatePlayerDisplay({ announcement: { phrases: [' Primera ', '', '  ', 'Segunda'], showPhraseAfterMessages: true } })
+    expect(settings.announcement.phrases).toEqual(['Primera', 'Segunda'])
+    const reset = resetDisplayAppearance(settings)
+    expect(reset.announcement).toMatchObject({ phrases: ['Primera', 'Segunda'], showPhraseAfterMessages: true })
+    reset.announcement.phrases[0] = 'Edited'
+    expect(settings.announcement.phrases[0]).toBe('Primera')
+  })
+
+  it.each([null, 'text', [42], ['x'.repeat(101)], ['first\nsecond'], Array(501).fill('Phrase')])('rejects invalid phrase banks', (phrases) => {
+    expect(() => validatePlayerDisplay({ announcement: { phrases } })).toThrow()
+  })
+
+  it('identifies the original line of an overlong phrase', () => {
+    expect(() => validatePlayerDisplay({ announcement: { phrases: ['', 'Valid', 'x'.repeat(101)] } })).toThrow('Línea 3')
+  })
+
+  it('shows every announcement before one phrase and traverses the bank before repeating', () => {
+    const { announcement } = validatePlayerDisplay({ announcement: {
+      messages: [{ title: 'A', text: '' }, { title: 'B', text: '' }],
+      phrases: ['First', 'Second'], showPhraseAfterMessages: true,
+    } })
+    const displayed = Array.from({ length: 9 }, (_, turn) => {
+      const { position, phrase } = announcementAtTurn(announcement, turn)
+      return announcement.messages[position]?.title ?? phrase
+    })
+    expect(displayed).toEqual(['A', 'B', 'First', 'A', 'B', 'Second', 'A', 'B', 'First'])
+    for (const settings of [{ ...announcement, phrases: [] }, { ...announcement, showPhraseAfterMessages: false }]) {
+      expect(Array.from({ length: 4 }, (_, turn) => announcementAtTurn(settings, turn).position)).toEqual([0, 1, 0, 1])
+      expect(announcementAtTurn(settings, 2).phrase).toBeNull()
+    }
+  })
+
   it.each([1.01, 3.25, 6.75, 29.99])('preserves fractional animated duration %s', (animatedSeconds) => {
     const settings = validatePlayerDisplay({ logo: { animatedSeconds } })
     expect(settings.logo.animatedSeconds).toBe(animatedSeconds)
@@ -34,7 +107,7 @@ describe('player display contract', () => {
     const display = validatePlayerDisplay({ logo: { enabled: true, junk: 1 }, announcement: { backgroundColor: '#6B5143', messages: [{ title: ' Hola ', text: ' Mesa ', html: '<b/>' }] } })
     expect(display.logo).toEqual({ ...defaultPlayerDisplay.logo, enabled: true })
     expect(display.announcement.backgroundColor).toBe('#6b5143')
-    expect(display.announcement.messages).toEqual([{ title: 'Hola', text: 'Mesa' }])
+    expect(display.announcement.messages).toEqual([{ title: 'Hola', text: 'Mesa', image: null, imageScale: 100 }])
   })
 
   for (const group of ['logo', 'announcement'] as const) {

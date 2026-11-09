@@ -1,8 +1,9 @@
 .container { position: absolute; inset: 0; pointer-events: none; color: var(--lyrics); }
 .logo { position: absolute; object-fit: contain; filter: drop-shadow(0 2px 6px #0008); }
-.announcement { position: absolute; display: flex; align-items: center; box-sizing: border-box; border-style: solid; overflow: hidden; animation: appear 200ms ease-out; }
+.announcement { position: absolute; display: flex; align-items: center; box-sizing: border-box; border-style: solid; overflow: visible; animation: appear 200ms ease-out; }
 .shadow { box-shadow: 0 8px 28px #0005; }
-.icon { flex-shrink: 0; width: var(--icon-size); height: auto; color: var(--icon-color); }
+.imageSlot { position: relative; flex: 0 0 var(--image-slot-size); height: 0; }
+.messageImage { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: var(--icon-size); height: var(--icon-size); max-width: none; object-fit: contain; }
 .messages { display: grid; min-width: 0; flex: 1; }
 .centered { justify-content: center; }
 .centered .messages { flex: 0 1 auto; }

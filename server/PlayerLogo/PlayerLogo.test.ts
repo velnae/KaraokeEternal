@@ -131,6 +131,32 @@ describe('screen image resources', () => {
     expect((await fetch(`${base}/api/player-logo-images/${draft.id}/image`)).status).toBe(404)
   }, 20000)
 
+  it('persists announcement images, protects their references and rejects unavailable or animated images atomically', async () => {
+    const image = await (await upload('png', png)).json()
+    const animated = await (await upload('gif', gif)).json()
+    const settings = validatePlayerDisplay({ announcement: { messages: [
+      { title: 'Escanea el QR', text: '', image: 'qr' },
+      { title: 'Promoción', text: '', image: image.id },
+    ] } })
+    expect((await save(settings)).status).toBe(200)
+    for (const id of [animated.id, '00000000-0000-0000-0000-000000000000']) {
+      pushes.mockClear()
+      expect((await save({ ...settings, announcement: { ...settings.announcement, messages: [{ title: 'Missing', text: '', image: id }] } })).status).toBe(422)
+      expect(pushes).not.toHaveBeenCalled()
+      expect(JSON.parse(db.get<{ data: string }>('SELECT data FROM prefs WHERE key=?', ['playerDisplay'])!.data)).toEqual(settings)
+    }
+    await expect(store.remove(image.id)).rejects.toMatchObject({ status: 409 })
+    db.run('UPDATE playerLogoImages SET updatedAt=?', [Date.now() - 48 * 60 * 60 * 1000])
+    await store.cleanup()
+    expect(getLogoImage(image.id)).toBeDefined()
+    expect((await save(validatePlayerDisplay({}))).status).toBe(200)
+    await store.cleanup()
+    expect(getLogoImage(image.id)).toBeDefined()
+    db.run('UPDATE playerLogoImages SET updatedAt=? WHERE id=?', [Date.now() - 48 * 60 * 60 * 1000, image.id])
+    await store.cleanup()
+    expect(getLogoImage(image.id)).toBeUndefined()
+  }, 20000)
+
   it('bounds decoded GIF complexity before invoking a decoder', () => {
     const huge = Buffer.from(gif)
     huge.writeUInt16LE(5000, 6)

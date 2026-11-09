@@ -10,6 +10,7 @@ import {
 import { ColorControl, NumberControl } from './DisplayControls'
 import DisplayPreview from './DisplayPreview'
 import LogoImageFields from './LogoImageFields'
+import AnnouncementImageField from './AnnouncementImageField'
 import { discardPlayerLogo } from 'lib/playerLogoApi'
 import styles from './PlayerDisplaySettings.css'
 
@@ -63,6 +64,11 @@ export default function PlayerDisplaySettings () {
     } catch (cause) {
       setError((cause as Error).message)
       if ((cause as { field?: string }).field === 'logo') setTab('logo')
+      if ((cause as { field?: string }).field === 'phrases') {
+        setTab('phrases')
+        requestAnimationFrame(() => document.getElementById(`${id}-phrase-bank`)?.focus())
+        return
+      }
       const invalid = event.currentTarget.querySelector<HTMLInputElement>('input:invalid')
         ?? Array.from(event.currentTarget.querySelectorAll<HTMLInputElement>('[data-message-title]')).find(input => !input.value.trim())
       if (invalid) {
@@ -77,7 +83,7 @@ export default function PlayerDisplaySettings () {
     setError('')
     try {
       await dispatch(savePlayerDisplay(value))
-      discardUploads([value.logo.staticImageId, value.logo.animatedImageId])
+      discardUploads([value.logo.staticImageId, value.logo.animatedImageId, ...value.announcement.messages.map(item => item.image ?? null)])
       setDraft(null)
       setStatus('Cambios guardados.')
     } catch (cause) {
@@ -91,7 +97,7 @@ export default function PlayerDisplaySettings () {
       <fieldset disabled={busy || uploading} className={styles.controls}>
         <legend className={styles.srOnly}>Elementos de pantalla</legend>
         <div className={styles.tabs} role='group' aria-label='Ajustes de pantalla'>
-          {([['logo', 'Logo'], ['announcement', 'Comunicados'], ['appearance', 'Apariencia']] as const).map(([key, label]) => (
+          {([['logo', 'Logo'], ['announcement', 'Comunicados'], ['phrases', 'Frases'], ['appearance', 'Apariencia']] as const).map(([key, label]) => (
             <button key={key} type='button' aria-pressed={tab === key} aria-controls={`${id}-${key}`} onClick={() => setTab(key)}>{label}</button>
           ))}
         </div>
@@ -111,6 +117,8 @@ export default function PlayerDisplaySettings () {
         </section>
         <section id={`${id}-announcement`} data-section='announcement' hidden={tab !== 'announcement'}>
           <InputCheckbox label='Mostrar comunicados durante música para escuchar' checked={a.enabled} onChange={event => changeAnnouncement({ enabled: event.currentTarget.checked })} />
+          <InputCheckbox label='Mostrar una frase al finalizar los comunicados' checked={a.showPhraseAfterMessages} onChange={event => changeAnnouncement({ showPhraseAfterMessages: event.currentTarget.checked })} />
+          {a.showPhraseAfterMessages && !a.phrases.some(phrase => phrase.trim()) && <p className={styles.notice}>Agregue frases en la pestaña Frases para mostrarlas.</p>}
           <NumberControl label='Ancho del comunicado (%)' value={a.width} limit={displayLimits.announcement.width} onChange={width => changeAnnouncement({ width })} />
           <label className={styles.field}>
             Posición del comunicado
@@ -133,10 +141,18 @@ export default function PlayerDisplaySettings () {
                 {`Texto del comunicado ${index + 1} (opcional)`}
                 <input type='text' maxLength={MAX_DISPLAY_TEXT} value={item.text} onChange={event => message(index, { text: event.currentTarget.value })} />
               </label>
+              <AnnouncementImageField image={item.image} imageScale={item.imageScale} onScaleChange={imageScale => message(index, { imageScale })} number={index + 1} onChange={image => message(index, { image })} onUploaded={id => staged.current.add(id)} onBusy={setUploading} />
               {a.messages.length > 1 && <Button type='button' className={styles.link} aria-label={`Quitar comunicado ${index + 1}`} onClick={() => changeAnnouncement({ messages: a.messages.filter((_, position) => position !== index) })}>Quitar comunicado</Button>}
             </fieldset>
           ))}
-          {a.messages.length < MAX_DISPLAY_MESSAGES && <Button type='button' className={styles.secondary} onClick={() => changeAnnouncement({ messages: [...a.messages, { title: '', text: '' }] })}>Agregar comunicado</Button>}
+          {a.messages.length < MAX_DISPLAY_MESSAGES && <Button type='button' className={styles.secondary} onClick={() => changeAnnouncement({ messages: [...a.messages, { title: '', text: '', image: null }] })}>Agregar comunicado</Button>}
+        </section>
+        <section id={`${id}-phrases`} data-section='phrases' hidden={tab !== 'phrases'}>
+          <label className={styles.field}>
+            Frases (una por línea, hasta 100 caracteres cada una)
+            <textarea id={`${id}-phrase-bank`} rows={12} value={a.phrases.join('\n')} onChange={event => changeAnnouncement({ phrases: event.currentTarget.value.split('\n') })} />
+          </label>
+          <span>{`${a.phrases.filter(phrase => phrase.trim()).length} frases`}</span>
         </section>
         <section id={`${id}-appearance`} data-section='appearance' hidden={tab !== 'appearance'}>
           <label className={styles.field}>
@@ -149,7 +165,6 @@ export default function PlayerDisplaySettings () {
           <NumberControl label='Tamaño del texto (%)' value={a.textScale} limit={displayLimits.announcement.textScale} onChange={textScale => changeAnnouncement({ textScale })} />
           <InputCheckbox label='Color de texto automático' checked={a.textColor === null} onChange={event => changeAnnouncement({ textColor: event.currentTarget.checked ? null : '#f4f7ff' })} />
           {a.textColor !== null && <ColorControl label='Color del texto' value={a.textColor} onChange={textColor => changeAnnouncement({ textColor })} />}
-          <InputCheckbox label='Mostrar icono QR' checked={a.showIcon} onChange={event => changeAnnouncement({ showIcon: event.currentTarget.checked })} />
           <ColorControl label='Color de fondo del comunicado' value={a.backgroundColor} onChange={backgroundColor => changeAnnouncement({ backgroundColor })} />
           <Button type='button' className={styles.link} onClick={() => changeAnnouncement({ backgroundColor: SOFT_BROWN_DISPLAY_COLOR })}>Usar marrón suave</Button>
           <NumberControl label='Opacidad del fondo (%)' value={a.backgroundOpacity} limit={displayLimits.announcement.backgroundOpacity} onChange={backgroundOpacity => changeAnnouncement({ backgroundOpacity })} />

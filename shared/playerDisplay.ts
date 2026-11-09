@@ -8,6 +8,8 @@ export type DisplayAnchor = typeof DISPLAY_ANCHORS[number]
 export const MAX_DISPLAY_MESSAGES = 5
 export const MAX_DISPLAY_TITLE = 60
 export const MAX_DISPLAY_TEXT = 100
+export const MAX_DISPLAY_PHRASES = 500
+export const ANNOUNCEMENT_IMAGE_SCALE_LIMIT = [25, 2000, 5] as const
 export const SOFT_BROWN_DISPLAY_COLOR = '#6b5143'
 export const isDisplayColor = (value: unknown): value is string => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value)
 
@@ -36,7 +38,6 @@ export interface PlayerDisplaySettings {
     textScale: number
     alignment: 'left' | 'center'
     textColor: string | null
-    showIcon: boolean
     backgroundColor: string
     backgroundOpacity: number
     borderWidth: number
@@ -44,7 +45,9 @@ export interface PlayerDisplaySettings {
     borderRadius: number
     shadow: boolean
     intervalSeconds: number
-    messages: { title: string, text: string }[]
+    messages: { title: string, text: string, image?: string | null, imageScale?: number }[]
+    phrases: string[]
+    showPhraseAfterMessages: boolean
   }
 }
 
@@ -63,9 +66,10 @@ export const defaultPlayerDisplay: PlayerDisplaySettings = {
     source: 'brand', mode: 'static', staticImageId: null, animatedImageId: null, staticSeconds: 60, animatedSeconds: 6 },
   announcement: {
     enabled: false, width: 39.6, position: 'bottom-center', offsetX: 0, marginY: 4, padding: 20,
-    textScale: 100, alignment: 'left', textColor: null, showIcon: true, backgroundColor: '#030509',
+    textScale: 100, alignment: 'left', textColor: null, backgroundColor: '#030509',
     backgroundOpacity: 88, borderWidth: 1, borderColor: '#283447', borderRadius: 14, shadow: true,
-    intervalSeconds: 15, messages: [{ title: 'Escanea el QR de tu mesa', text: 'Pide tu música o anímate a cantar.' }],
+    intervalSeconds: 15, messages: [{ title: 'Escanea el QR de tu mesa', text: 'Pide tu música o anímate a cantar.', image: 'qr', imageScale: 100 }],
+    phrases: [], showPhraseAfterMessages: false,
   },
 }
 
@@ -108,6 +112,17 @@ export function validatePlayerDisplay (input: unknown): PlayerDisplaySettings {
   const l = defaultPlayerDisplay.logo
   const a = defaultPlayerDisplay.announcement
   const messages = announcement.messages === undefined ? a.messages : announcement.messages
+  const legacyShowIcon = boolean(announcement.showIcon, false)
+  const rawPhrases = announcement.phrases === undefined ? [] : announcement.phrases
+  const phraseError = (message: string) => Object.assign(new Error(message), { field: 'phrases' })
+  if (!Array.isArray(rawPhrases)) throw phraseError('Ingrese una frase por línea.')
+  const phrases = rawPhrases.map((phrase, index) => {
+    if (typeof phrase !== 'string' || phrase.trim().length > MAX_DISPLAY_TEXT || /[\r\n]/.test(phrase)) {
+      throw phraseError(`Línea ${index + 1}: use una frase de hasta ${MAX_DISPLAY_TEXT} caracteres.`)
+    }
+    return phrase.trim()
+  }).filter(Boolean)
+  if (phrases.length > MAX_DISPLAY_PHRASES) throw phraseError(`Guarde hasta ${MAX_DISPLAY_PHRASES} frases.`)
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > MAX_DISPLAY_MESSAGES) throw new Error('Agregue entre 1 y 5 comunicados.')
   const result: PlayerDisplaySettings = {
     logo: {
@@ -131,7 +146,6 @@ export function validatePlayerDisplay (input: unknown): PlayerDisplaySettings {
       textScale: number(announcement.textScale, a.textScale, displayLimits.announcement.textScale, 'Tamaño del texto'),
       alignment: choice(announcement.alignment, a.alignment, ['left', 'center']),
       textColor: announcement.textColor === undefined || announcement.textColor === null ? null : color(announcement.textColor, '#f4f7ff'),
-      showIcon: boolean(announcement.showIcon, a.showIcon),
       backgroundColor: color(announcement.backgroundColor, a.backgroundColor),
       backgroundOpacity: number(announcement.backgroundOpacity, a.backgroundOpacity, displayLimits.announcement.backgroundOpacity, 'Opacidad del fondo'),
       borderWidth: number(announcement.borderWidth, a.borderWidth, displayLimits.announcement.borderWidth, 'Grosor del borde'),
@@ -139,11 +153,18 @@ export function validatePlayerDisplay (input: unknown): PlayerDisplaySettings {
       borderRadius: number(announcement.borderRadius, a.borderRadius, displayLimits.announcement.borderRadius, 'Redondeado'),
       shadow: boolean(announcement.shadow, a.shadow),
       intervalSeconds: number(announcement.intervalSeconds, a.intervalSeconds, displayLimits.announcement.intervalSeconds, 'Intervalo'),
-      messages: messages.map((message) => {
+      phrases,
+      showPhraseAfterMessages: boolean(announcement.showPhraseAfterMessages, false),
+      messages: messages.map((message, index) => {
         const item = object(message)
         if (typeof item.title !== 'string' || !item.title.trim() || item.title.trim().length > MAX_DISPLAY_TITLE
           || typeof item.text !== 'string' || item.text.trim().length > MAX_DISPLAY_TEXT) throw new Error('Cada comunicado necesita un título de hasta 60 caracteres y un texto de hasta 100.')
-        return { title: item.title.trim(), text: item.text.trim() }
+        const image = item.image === undefined
+          ? legacyShowIcon && index === 0 ? 'qr' : null
+          : item.image
+        if (image !== null && image !== 'qr' && !isPlayerLogoId(image)) throw new Error('Suba una imagen PNG válida para el comunicado.')
+        return { title: item.title.trim(), text: item.text.trim(), image: typeof image === 'string' ? image : null,
+          imageScale: number(item.imageScale, 100, ANNOUNCEMENT_IMAGE_SCALE_LIMIT, `Tamaño de imagen del comunicado ${index + 1}`) }
       }),
     },
   }
@@ -160,6 +181,16 @@ export function resetDisplayAppearance (settings: PlayerDisplaySettings): Player
       source: settings.logo.source, mode: settings.logo.mode, staticImageId: settings.logo.staticImageId,
       animatedImageId: settings.logo.animatedImageId, staticSeconds: settings.logo.staticSeconds, animatedSeconds: settings.logo.animatedSeconds },
     announcement: { ...defaultPlayerDisplay.announcement, enabled: settings.announcement.enabled,
-      messages: settings.announcement.messages.map(message => ({ ...message })), intervalSeconds: settings.announcement.intervalSeconds },
+      messages: settings.announcement.messages.map(message => ({ ...message })), intervalSeconds: settings.announcement.intervalSeconds,
+      phrases: [...settings.announcement.phrases], showPhraseAfterMessages: settings.announcement.showPhraseAfterMessages },
   }
+}
+
+export function announcementAtTurn (announcement: PlayerDisplaySettings['announcement'], turn: number) {
+  const phrases = announcement.phrases.filter(phrase => phrase.trim())
+  const hasPhrase = announcement.showPhraseAfterMessages && phrases.length > 0
+  const cycleLength = announcement.messages.length + (hasPhrase ? 1 : 0)
+  const position = turn % cycleLength
+  const phrase = hasPhrase ? phrases[Math.floor(turn / cycleLength) % phrases.length] : null
+  return { position, phrase, cycleLength }
 }

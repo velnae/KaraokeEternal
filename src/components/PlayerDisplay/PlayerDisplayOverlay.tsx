@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
-import Icon from 'components/Icon/Icon'
 import type { ClientBranding } from 'shared/branding'
-import { defaultPlayerDisplay, isDisplayColor, type PlayerDisplaySettings } from 'shared/playerDisplay'
+import { ANNOUNCEMENT_IMAGE_SCALE_LIMIT, announcementAtTurn, defaultPlayerDisplay, isDisplayColor, type PlayerDisplaySettings } from 'shared/playerDisplay'
 import type { RequestIntent } from 'shared/requestIntent'
 import { displayForeground, displayLayout, type DisplayViewport } from './layout'
 import styles from './PlayerDisplayOverlay.css'
 import PlayerLogo from './PlayerLogo'
+import { announcementImageSource } from './announcementImage'
 
 interface Props {
   branding: ClientBranding
@@ -19,6 +19,9 @@ interface Props {
 const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying }: Props) => {
   const { logo, announcement: a } = settings
   const [index, setIndex] = useState(0)
+  const { position: currentPosition, phrase, cycleLength } = announcementAtTurn(a, index)
+  const image = a.messages[currentPosition]?.image
+  const [failedImages, setFailedImages] = useState<string[]>([])
   const [fitting, setFitting] = useState({ settings, width: viewport.width, height: viewport.height, scale: 1 })
   const fit = fitting.settings === settings && fitting.width === viewport.width && fitting.height === viewport.height ? fitting.scale : 1
   const panel = useRef<HTMLElement>(null)
@@ -26,6 +29,8 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying 
   const announce = a.enabled && intent === 'LISTEN' && a.messages.length > 0
   const layout = displayLayout(settings, viewport)
   const geometry = layout.announcement
+  const imageScale = a.messages[currentPosition]?.imageScale ?? 100
+  const imageSize = geometry.iconSize * (Number.isFinite(imageScale) ? Math.max(ANNOUNCEMENT_IMAGE_SCALE_LIMIT[0], Math.min(ANNOUNCEMENT_IMAGE_SCALE_LIMIT[1], imageScale)) : 100) / 100
   const color = isDisplayColor(a.backgroundColor) ? a.backgroundColor : defaultPlayerDisplay.announcement.backgroundColor
   const foreground = isDisplayColor(a.textColor) ? a.textColor : displayForeground(color)
   const rgb = [1, 3, 5].map(offset => parseInt(color.slice(offset, offset + 2), 16)).join(',')
@@ -39,8 +44,8 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying 
     borderRadius: (Number.isFinite(a.borderRadius) ? a.borderRadius : 14) * layout.scale,
     backgroundColor: `rgba(${rgb},${(Number.isFinite(a.backgroundOpacity) ? a.backgroundOpacity : 88) / 100})`, color: foreground,
     ...{
-      '--title-size': `${Math.max(14, geometry.titleSize * fit)}px`, '--text-size': `${Math.max(12, geometry.textSize * fit)}px`, '--icon-size': `${geometry.iconSize}px`,
-      '--icon-color': foreground === '#030509' ? '#164c52' : 'var(--cyan)',
+      '--title-size': `${Math.max(14, geometry.titleSize * fit)}px`, '--text-size': `${Math.max(12, geometry.textSize * fit)}px`, '--icon-size': `${imageSize}px`,
+      '--image-slot-size': `${geometry.iconSize}px`,
     },
   } as React.CSSProperties
 
@@ -52,8 +57,13 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying 
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         const element = panel.current
-        if (element && element.scrollHeight > element.clientHeight + 1) {
-          const ratio = element.clientHeight / element.scrollHeight * 0.97
+        const text = content.current
+        if (!element || !text) return
+        const style = getComputedStyle(element)
+        // Decorative image overflow must never shrink the text or grow its panel.
+        const textHeight = text.scrollHeight + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+        if (textHeight > element.clientHeight + 1) {
+          const ratio = element.clientHeight / textHeight * 0.97
           setFitting(previous => ({
             settings, width: viewport.width, height: viewport.height,
             scale: Math.max(0.05, (previous.settings === settings && previous.width === viewport.width && previous.height === viewport.height ? previous.scale : 1) * ratio),
@@ -67,14 +77,14 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying 
       observer.disconnect()
       cancelAnimationFrame(frame)
     }
-  }, [announce, settings, viewport.width, viewport.height])
+  }, [announce, settings, phrase, viewport.width, viewport.height])
 
   useEffect(() => {
-    if (!announce || !isPlaying || a.messages.length < 2) return
+    if (!announce || !isPlaying || cycleLength < 2) return
     const seconds = Number.isFinite(a.intervalSeconds) ? Math.max(5, a.intervalSeconds) : 15
-    const timer = setInterval(() => setIndex(value => (value + 1) % a.messages.length), seconds * 1000)
+    const timer = setInterval(() => setIndex(value => value + 1), seconds * 1000)
     return () => clearInterval(timer)
-  }, [announce, isPlaying, a.messages, a.intervalSeconds])
+  }, [announce, isPlaying, cycleLength, a.messages, a.intervalSeconds])
 
   return (
     <div className={styles.container} data-testid='player-display-overlay'>
@@ -93,14 +103,23 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying 
           style={panelStyle}
           aria-label='Comunicados del local'
         >
-          {a.showIcon && <Icon icon='QR_CODE' className={styles.icon} />}
+          {image && !failedImages.includes(image) && (
+            <span className={styles.imageSlot}>
+              <img className={styles.messageImage} src={announcementImageSource(image)} alt='' onError={() => setFailedImages(values => [...values, image])} />
+            </span>
+          )}
           <div ref={content} className={styles.messages}>
             {a.messages.map((message, position) => (
-              <div key={position} className={clsx(styles.message, position === index % a.messages.length && styles.current)} aria-hidden={position !== index % a.messages.length}>
+              <div key={position} className={clsx(styles.message, position === currentPosition && styles.current)} aria-hidden={position !== currentPosition}>
                 <strong>{message.title}</strong>
                 {message.text && <p>{message.text}</p>}
               </div>
             ))}
+            {phrase !== null && (
+              <div className={clsx(styles.message, currentPosition === a.messages.length && styles.current)} aria-hidden={currentPosition !== a.messages.length}>
+                <p>{phrase}</p>
+              </div>
+            )}
           </div>
         </section>
       )}

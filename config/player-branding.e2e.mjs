@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import { installYouTubeTransitionFixture } from './transition-ambience-checks.e2e.mjs'
 import { checkPlayerDisplay } from './player-display-checks.e2e.mjs'
 import { checkPlayerLogo } from './player-logo-checks.e2e.mjs'
+import { checkPhraseBank } from './phrase-bank-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -23,7 +24,7 @@ const port = reservation.address().port
 await new Promise(resolve => reservation.close(resolve))
 const origin = `http://127.0.0.1:${port}`
 const base = `${origin}/karaoke/`
-const uiBase = httpsUi ? 'https://karaoke.puyu.pe/' : base
+const uiBase = httpsUi ? 'https://dev-karaoke.puyu.pe/' : base
 const api = await request.newContext()
 const secondApi = await request.newContext()
 let server, browser, player, editor, socket, db
@@ -91,10 +92,10 @@ try {
     args: ['--autoplay-policy=no-user-gesture-required'] })
   const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, storageState: await api.storageState() })
   if (httpsUi) {
-    assert.equal((await api.get('https://karaoke.puyu.pe/')).status(), 200, 'the real HTTPS tunnel must be reachable')
+    assert.equal((await api.get('https://dev-karaoke.puyu.pe/')).status(), 200, 'the development HTTPS tunnel must be reachable')
     if (worktreeUi) {
       // Exercise unmerged assets in the actual secure origin without replacing the shared server.
-      await context.route('https://karaoke.puyu.pe/**', async (route) => {
+      await context.route('https://dev-karaoke.puyu.pe/**', async (route) => {
         const url = new URL(route.request().url())
         if (url.pathname === '/__webpack_hmr') return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' })
         const response = await api.get(base + url.pathname.replace(/^\/(?:karaoke\/)?/, '') + url.search)
@@ -136,8 +137,8 @@ try {
         await route.abort('failed').catch(() => {})
       }
     }
-    await context.route('https://karaoke.puyu.pe/api/**', route => forward(route))
-    await context.route('https://karaoke.puyu.pe/socket.io/**', route => forward(route, true))
+    await context.route('https://dev-karaoke.puyu.pe/api/**', route => forward(route))
+    await context.route('https://dev-karaoke.puyu.pe/socket.io/**', route => forward(route, true))
     await context.routeWebSocket('**/socket.io/**', socket => socket.close())
   }
   if (!realYouTube) {
@@ -164,10 +165,12 @@ try {
   player = await context.newPage()
   for (const page of [editor, player]) page.on('pageerror', error => errors.push(error.message))
   const logoOnly = process.env.KARAOKE_E2E_LOGO_ONLY === '1'
-  if (!logoOnly) await checkPlayerDisplay({ browser, context, editor, player, api, secondApi, call, emit, db, base, uiBase, data, realYouTube, errors })
+  const phrasesOnly = process.env.KARAOKE_E2E_PHRASES_ONLY === '1'
+  if (phrasesOnly) await checkPhraseBank({ editor, call, uiBase, data })
+  if (!logoOnly && !phrasesOnly) await checkPlayerDisplay({ browser, context, editor, player, api, secondApi, call, emit, db, base, uiBase, data, realYouTube, errors })
   if (logoOnly || process.env.KARAOKE_E2E_LOGO === '1') await checkPlayerLogo({ editor, player, call, emit, uiBase, data, realYouTube, initialize: logoOnly })
   assert.deepEqual(errors, [])
-  console.log(`PASS ${logoOnly ? 'custom-logo regression' : 'display checklist'} (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS origin + isolated API/socket' : ''}${worktreeUi ? ', worktree assets' : ''}${realYouTube ? ', real YouTube' : ', media fixture'}). Artifacts: ${data}`)
+  console.log(`PASS ${phrasesOnly ? 'phrase-bank regression' : logoOnly ? 'custom-logo regression' : 'display checklist'} (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS origin + isolated API/socket' : ''}${worktreeUi ? ', worktree assets' : ''}${realYouTube ? ', real YouTube' : ', media fixture'}). Artifacts: ${data}`)
 } catch (error) {
   for (const [name, page] of [['player', player], ['editor', editor]]) if (page && !page.isClosed()) await page.screenshot({ path: path.join(data, `${name}-failure.png`) }).catch(() => {})
   console.error({ artifacts: data, errors })
