@@ -9,6 +9,7 @@ import path from 'node:path'
 import assert from 'node:assert/strict'
 import { installYouTubeTransitionFixture, checkAmbienceHandoff, checkCurtainSilence } from './transition-ambience-checks.e2e.mjs'
 import { checkTransitionPresentation } from './transition-presentation-checks.e2e.mjs'
+import { capturePlaybackTrace } from './diagnostics/capture.js'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -21,7 +22,7 @@ await new Promise(resolve => reservation.close(resolve))
 const origin = `http://127.0.0.1:${port}`
 const base = `${origin}/karaoke/`
 const httpsUi = process.env.KARAOKE_E2E_HTTPS_UI === '1'
-const uiBase = httpsUi ? 'https://karaoke.puyu.pe/' : base
+const uiBase = httpsUi ? 'https://dev-karaoke.puyu.pe/' : base
 const api = await request.newContext()
 let server, browser, player, socket, db
 const errors = []
@@ -139,8 +140,8 @@ try {
         await route.abort('failed').catch(() => {})
       }
     }
-    await context.route('https://karaoke.puyu.pe/api/**', route => forward(route))
-    await context.route('https://karaoke.puyu.pe/socket.io/**', route => forward(route, true))
+    await context.route('https://dev-karaoke.puyu.pe/api/**', route => forward(route))
+    await context.route('https://dev-karaoke.puyu.pe/socket.io/**', route => forward(route, true))
     await context.routeWebSocket('**/socket.io/**', socket => socket.close())
   }
   await installYouTubeTransitionFixture(context, path.join(data, 'song.mp4'))
@@ -354,6 +355,16 @@ try {
   await emit('server/PLAYER_REQ_PAUSE')
   await expect.poll(() => db.prepare('SELECT status FROM animationInterventions WHERE interventionId=?').get(interruptedId).status).toBe('INTERRUPTED')
   await expect.poll(() => player.evaluate(() => window.transitionTrace.active.length)).toBe(0)
+  if (process.env.KARAOKE_DIAGNOSTIC_TRACE) {
+    const trace = await player.evaluate(() => window.karaokePlaybackTrace.snapshot())
+    assert.ok(trace.events.some(event => event.event === 'audio-finish' && event.reason === 'natural-end'), 'trace records natural audio completion')
+    const grant = trace.events.find(event => event.event === 'intervention-granted' && event.interventionId === interruptedId)
+    assert.ok(grant, 'trace correlates the server intervention')
+    const interrupted = trace.events.filter(event => event.sequence > grant.sequence)
+    assert.ok(interrupted.some(event => event.event === 'player-command' && event.reason.includes('PAUSE')), 'trace records the pause command')
+    assert.ok(interrupted.some(event => event.event === 'audio-finish' && event.state === 'STOPPED'
+      && (event.reason === 'stop-requested' || event.reason.includes('PAUSE'))), 'trace records the first effective stop reason')
+  }
   await expect.poll(() => decoration.evaluate(video => video.paused).catch(() => true)).toBe(true)
   const abandoned = await decoration.elementHandle()
   await player.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
@@ -370,6 +381,7 @@ try {
   }
   throw error
 } finally {
+  await capturePlaybackTrace(player)
   socket?.close()
   await browser?.close()
   await stop()

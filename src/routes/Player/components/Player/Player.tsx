@@ -8,6 +8,7 @@ import { type PlayerState } from '../../modules/player'
 import { type PlayerVisualizerState } from '../../modules/playerVisualizer'
 import type { MediaType } from 'shared/types'
 import type { SongSource } from 'shared/queueLifecycle'
+import { tracePlayback } from '../../../../lib/playbackTrace'
 
 const PlayerVisualizer = React.lazy(() => import('./PlayerVisualizer/PlayerVisualizer'))
 
@@ -167,6 +168,7 @@ class Player extends React.PureComponent<PlayerProps> {
   }
 
   handlePlay = () => {
+    tracePlayback('music-playing', { queueId: this.props.mediaKey })
     this.isFetching = false
     this.updateVolume()
     this.props.onPlay()

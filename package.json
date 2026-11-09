@@ -21,6 +21,7 @@
     "npm": ">=11"
   },
   "scripts": {
+    "diagnostics": "node config/diagnostics/cli.js",
     "docs:serve": "hugo serve --source docs -b http://localhost:1313 --bind 0.0.0.0",
     "dev": "NODE_ENV=development tsx watch --env-file-if-exists=.env server/main.ts -p 3000",
     "lint": "eslint .",

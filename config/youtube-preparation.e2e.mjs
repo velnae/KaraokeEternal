@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
+import { capturePlaybackTrace } from './diagnostics/capture.js'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -14,9 +15,11 @@ const httpsUi = process.env.KARAOKE_E2E_HTTPS_UI === '1'
 const realYouTube = process.env.KARAOKE_E2E_REAL_YOUTUBE === '1'
 const reducedMotion = process.env.KARAOKE_E2E_REDUCED_MOTION === '1'
 const delayedAcknowledgments = process.env.KARAOKE_E2E_DELAYED_ACKS === '1'
+const latePlaybackReceipts = process.env.KARAOKE_E2E_LATE_PLAYBACK_RECEIPTS === '1'
 const diagnostics = process.env.KARAOKE_E2E_DIAGNOSTICS === '1'
 const soundPermission = diagnostics || process.env.KARAOKE_E2E_SOUND_PERMISSION === '1'
 assert.ok(!diagnostics || !httpsUi, 'Diagnostic fault injection requires the isolated WebSocket frontend')
+assert.ok(!latePlaybackReceipts || !httpsUi, 'Late-receipt injection requires the isolated WebSocket frontend')
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'youtube-preparation-'))
 const log = fs.openSync(path.join(data, 'server.log'), 'a')
 const reservation = createServer()
@@ -24,7 +27,7 @@ await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
 const port = reservation.address().port
 await new Promise(resolve => reservation.close(resolve))
 const origin = `http://127.0.0.1:${port}`
-const uiBase = httpsUi ? 'https://karaoke.puyu.pe/' : `${origin}/`
+const uiBase = httpsUi ? 'https://dev-karaoke.puyu.pe/' : `${origin}/`
 const api = await request.newContext()
 let server, browser, context, page, socket, db
 let diagnosticConnection
@@ -85,7 +88,7 @@ try {
   await call('setup', { username: 'admin', name: 'Operator', newPassword: 'youtube-preparation-test', newPasswordConfirm: 'youtube-preparation-test' })
   await call('login', { username: 'admin', password: 'youtube-preparation-test', roomId: 1 })
   const bed = await uploadAudio('pause-bed', 'ambience', 'manual', 7, 110)
-  await uploadAudio('turn', 'voice', 'turn', 2, 330)
+  await uploadAudio('turn', 'voice', 'turn', latePlaybackReceipts ? 6 : 2, 330)
   await uploadAudio('closing-one', 'voice', 'closing', 2, 440)
   await uploadAudio('closing-two', 'voice', 'closing', 2, 550)
   await uploadAudio('closing-three', 'voice', 'closing', 2, 660)
@@ -127,10 +130,11 @@ try {
     headless: true, args: ['--autoplay-policy=no-user-gesture-required'] })
   context = await browser.newContext({ viewport: { width: 1440, height: 900 }, storageState: await api.storageState(),
     reducedMotion: reducedMotion ? 'reduce' : 'no-preference' })
-  if ((delayedAcknowledgments || diagnostics) && !httpsUi) await context.routeWebSocket('**/socket.io/**', (client) => {
+  if ((delayedAcknowledgments || latePlaybackReceipts || diagnostics) && !httpsUi) await context.routeWebSocket('**/socket.io/**', (client) => {
     diagnosticConnection = client
     const upstream = client.connectToServer()
     const delayed = new Set()
+    const lateReceipts = new Set()
     client.onMessage((message) => {
       const match = String(message).match(/^42(\d+)\[/)
       if (diagnostics && match) {
@@ -146,18 +150,23 @@ try {
         }
       }
       if (delayedAcknowledgments && match && /server\/(PLAYER_EMIT_STATUS|ANIMATION_AUTO|ANIMATION_RESERVE)/.test(String(message))) delayed.add(match[1])
+      if (latePlaybackReceipts && match) {
+        const [, action] = JSON.parse(String(message).slice(String(message).indexOf('[')))
+        if (action.type === 'server/ANIMATION_EVENT' && ['STARTED', 'ASSET_STARTED'].includes(action.payload.event)) lateReceipts.add(match[1])
+      }
       upstream.send(message)
     })
     upstream.onMessage((message) => {
       const match = String(message).match(/^43(\d+)\[/)
-      if (match && delayed.delete(match[1])) setTimeout(() => client.send(message), 650)
+      if (match && lateReceipts.delete(match[1])) setTimeout(() => client.send(message), 1800)
+      else if (match && delayed.delete(match[1])) setTimeout(() => client.send(message), 650)
       else client.send(message)
     })
   })
   if (diagnostics) await context.route('**/api/animation/preparation', route => route.fulfill({ status: 503, contentType: 'text/plain', body: audioFailure }))
   if (httpsUi) {
     // Only HTML/JS/CSS use the tunnel. All room mutations go to isolated data.
-    await context.route(/https:\/\/karaoke\.puyu\.pe\/(api|socket\.io)\//, async (route) => {
+    await context.route(/https:\/\/dev-karaoke\.puyu\.pe\/(api|socket\.io)\//, async (route) => {
       const incoming = route.request()
       const url = new URL(incoming.url())
       try {
@@ -385,6 +394,11 @@ try {
       `${label}: voice must have a sustained non-silent signal after gain: ${JSON.stringify(voice)}`)
     assert.equal(db.prepare('SELECT status FROM animationInterventions ORDER BY requestedAt DESC LIMIT 1').get().status, 'PLAYED',
       `${label}: the server must acknowledge the complete intervention`)
+    if (latePlaybackReceipts) {
+      const trace = await page.evaluate(() => window.karaokePlaybackTrace.snapshot())
+      assert.ok(trace.events.some(event => event.event === 'playback-receipt-reconciled' && event.monotonicMs > since),
+        `${label}: late receipt must be reconciled against a confirmed live grant`)
+    }
     assert.ok(parts.every(run => run.scene), `${label}: the background must cover the entire sequence`)
     assert.ok(voice.at >= ambience.at + 1900, `${label}: ambience introduces the voice`)
     assert.ok(voice.endedAt >= voice.at + voice.durationMs - 100 && voice.endedAt <= curtain.at, `${label}: voice finishes before the curtain`)
@@ -612,6 +626,7 @@ try {
   }
   throw error
 } finally {
+  await capturePlaybackTrace(page)
   socket?.close()
   await context?.close()
   await browser?.close()

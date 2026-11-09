@@ -1,5 +1,14 @@
 # Project instructions
 
+## Playback diagnosis and local reproduction
+
+For playback incidents, production log investigation or reproducible playback
+improvements, load `.opencode/skills/karaoke-diagnostics/SKILL.md` and follow
+`docs/playback-diagnostics.md`. Use `npm run diagnostics -- help` for the bounded
+tools. Production collection requires an explicit production-read request;
+local scenarios use temporary data. Never equate a passing synthetic scenario
+with reproduction of a production incident.
+
 ## Development mode — fast, proportional delivery
 
 This project is in active development. Default to a short loop: inspect the

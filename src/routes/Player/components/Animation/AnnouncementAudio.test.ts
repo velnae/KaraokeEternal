@@ -3,6 +3,7 @@ import AnnouncementAudio from './AnnouncementAudio'
 import type { AnimationClip } from '../../../../../shared/animation.js'
 import { createHash } from 'node:crypto'
 import type { GreetingAsset } from '../../../../../shared/greetings.js'
+import { playbackTraceSnapshot } from '../../../../lib/playbackTrace'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -66,9 +67,12 @@ it('mixes a separate quiet bed and stops both sources without extending the hard
   expect(sources).toHaveLength(2)
   expect(sources[1].stop).toHaveBeenLastCalledWith(25)
   expect(gains[1].gain.linearRampToValueAtTime).toHaveBeenCalledWith(0.1, 0.2)
-  audio.stopForeground()
+  context.currentTime = 1.25
+  audio.stopForeground('socket-disconnected')
   sources[0].onended!()
   await expect(voice).resolves.toBe('STOPPED')
+  const ended = playbackTraceSnapshot().events.reverse().find(event => event.event === 'audio-finish' && event.channelId === audio.traceChannelId)
+  expect(ended).toMatchObject({ reason: 'socket-disconnected', state: 'STOPPED', audioElapsedMs: 1250 })
   expect(audio.hasBed).toBe(true)
   expect(sources[1].stop).toHaveBeenCalledTimes(1)
   context.currentTime = 24.9

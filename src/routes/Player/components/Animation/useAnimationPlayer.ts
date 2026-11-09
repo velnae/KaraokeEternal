@@ -3,7 +3,7 @@ import { ensureState } from 'redux-optimistic-ui'
 import store from 'store/store'
 import { useAppSelector } from 'store/hooks'
 import socket from 'lib/socket'
-import { animationRequest, animationTime, fetchPreparedAnimationClips, syncAnimation } from 'lib/animationApi'
+import { animationPlaybackEvent, animationRequest, animationTime, fetchPreparedAnimationClips, syncAnimation } from 'lib/animationApi'
 import {
   ANIMATION_CANCEL, ANIMATION_EVENT, ANIMATION_READY, ANIMATION_RESERVE,
   ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED,
@@ -15,6 +15,7 @@ import { playerStatusCancel, playerUpdate } from '../../modules/player'
 import AnnouncementAudio from './AnnouncementAudio'
 import { hasLocalPlaybackProof } from './playbackFence'
 import { needsAnimationClock, ReadinessPublication } from './playerEfficiency'
+import { tracePlayback } from '../../../../lib/playbackTrace'
 
 const voiceRequested = (snapshot?: AnimationSnapshot | null) => !!snapshot && (snapshot.prefs.enabled || snapshot.greetingVoiceEnabled === true)
 
@@ -102,12 +103,12 @@ export default function useAnimationPlayer () {
     })
   }, [publishReadiness])
 
-  const abort = useCallback(() => {
+  const abort = useCallback((reason = 'player-abort') => {
     readiness.invalidate()
     ambientUse.current = null
     version.current++
     ambientVersion.current++
-    audio.current.stop()
+    audio.current.stop(reason)
   }, [readiness])
 
   useEffect(() => {
@@ -127,11 +128,13 @@ export default function useAnimationPlayer () {
       void publishReadiness()
     }
     const disconnect = () => {
-      abort()
+      tracePlayback('connection', { state: 'disconnected' })
+      abort('socket-disconnected')
       setUnlocked(false)
       preparedOwner.current = null
     }
     const reconnect = () => {
+      tracePlayback('connection', { state: 'connected' })
       // Rejoin the existing authority election even if playback is idle and
       // no periodic media event would otherwise publish a fresh status.
       store.dispatch(playerUpdate({ _authority: 'PENDING' }))
@@ -139,7 +142,8 @@ export default function useAnimationPlayer () {
     const commands = (action: { type: string }) => {
       if ([PLAYER_CMD_NEXT, PLAYER_CMD_REPLAY, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY].includes(action.type)) {
         ambientPaused.current = action.type === PLAYER_CMD_PAUSE || action.type === PLAYER_CMD_STOP
-        abort()
+        tracePlayback('player-command', { reason: action.type })
+        abort(action.type)
         ambientCursor.current = { clipId: '', offsetMs: 0 }
       }
     }
@@ -157,7 +161,18 @@ export default function useAnimationPlayer () {
         || player._authority !== 'GRANTED')) void audio.current.stopBed(30)
       if (grant && !current?.prefs.ambienceEnabled) void audio.current.stopBed(30)
       if (grant && (!current?.prefs.enabled || current.prefs.volume === 0
-        || current.playerEpoch !== grant.playerEpoch || current.active?.interventionId !== grant.interventionId || current.active?.stopRequestedAt)) audio.current.stopForeground()
+        || current.playerEpoch !== grant.playerEpoch || current.active?.interventionId !== grant.interventionId || current.active?.stopRequestedAt)) {
+        const reason = !current?.prefs.enabled
+          ? 'animator-disabled'
+          : current.prefs.volume === 0
+            ? 'volume-zero'
+            : current.playerEpoch !== grant.playerEpoch
+              ? 'epoch-changed'
+              : current.active?.interventionId !== grant.interventionId
+                ? 'intervention-changed'
+                : 'stop-requested'
+        audio.current.stopForeground(reason)
+      }
       const ambient = ambientRun.current?.grant
       if (ambient && (!current?.prefs.enabled || !current.prefs.automation || !current.prefs.ambienceEnabled || current.prefs.ambienceVolume === 0
         || (current.prefs.ambienceClipId && current.prefs.ambienceClipId !== ambient.clip.id)
@@ -168,19 +183,20 @@ export default function useAnimationPlayer () {
     socket.on('disconnect', disconnect)
     socket.on('connect', reconnect)
     socket.on('action', commands)
-    window.addEventListener('pagehide', abort)
+    const pageHidden = () => abort('page-hidden')
+    window.addEventListener('pagehide', pageHidden)
     void syncAnimation().catch(() => {})
     return () => {
       mounted.current = false
       channel.onUnavailable = null
       channel.onAvailable = null
-      abort()
+      abort('unmounted')
       channel.close()
       watch()
       socket.off('disconnect', disconnect)
       socket.off('connect', reconnect)
       socket.off('action', commands)
-      window.removeEventListener('pagehide', abort)
+      window.removeEventListener('pagehide', pageHidden)
     }
   }, [abort, publishReadiness, readiness])
 
@@ -195,7 +211,8 @@ export default function useAnimationPlayer () {
 
   useEffect(() => {
     if (authority !== 'GRANTED') {
-      abort()
+      tracePlayback('authority', { state: authority })
+      abort('authority-lost')
       setUnlocked(false)
       preparedOwner.current = null
     }
@@ -453,6 +470,8 @@ export default function useAnimationPlayer () {
       grant = reply.grant
       if (!grant) return
       grantRef.current = grant
+      tracePlayback('intervention-granted', { channelId: audio.current.traceChannelId, interventionId: grant.interventionId,
+        roomId: state.user.roomId, queueId: expectedNextQueueId, playerEpoch: grant.playerEpoch, durationMs: grant.durationMs })
       const latest = store.getState()
       const latestSnapshot = latest.animation.snapshot
       const latestContext = animationContext(ensureState(latest.queue), latest.rooms.entities[latest.user.roomId]?.prefs?.queue)
@@ -494,9 +513,9 @@ export default function useAnimationPlayer () {
       }
       // The audio has actually been scheduled on a running context, not merely reserved.
       try {
-        await animationRequest(ANIMATION_EVENT, { interventionId: grant.interventionId, playerEpoch: grant.playerEpoch, event: 'STARTED' }, 1000)
-        if (bedStarted) await animationRequest(ANIMATION_EVENT, { interventionId: grant.interventionId, playerEpoch: grant.playerEpoch, event: 'ASSET_STARTED', clipId: bed!.id }, 1000)
-      } catch { audio.current.stopForeground() }
+        await animationPlaybackEvent(grant, 'STARTED')
+        if (bedStarted) await animationPlaybackEvent(grant, 'ASSET_STARTED', bed!.id)
+      } catch { audio.current.stopForeground('start-ack-failed') }
       let outcome = await completion
       for (const asset of assets.slice(1)) {
         const latest = store.getState().animation.snapshot
@@ -511,15 +530,16 @@ export default function useAnimationPlayer () {
         const effectCompletion = audio.current.play(asset.checksum, latest.prefs.volume)
         if (asset.kind === 'voice') setText(grant.displayText)
         try {
-          await animationRequest(ANIMATION_EVENT, { interventionId: grant.interventionId, playerEpoch: grant.playerEpoch, event: 'ASSET_STARTED', clipId: asset.id }, 1000)
-        } catch { audio.current.stopForeground() }
+          await animationPlaybackEvent(grant, 'ASSET_STARTED', asset.id)
+        } catch { audio.current.stopForeground('asset-ack-failed') }
         outcome = await effectCompletion
       }
       if (ownsBed) await audio.current.stopBed(outcome === 'ENDED' ? 250 : 30)
       setText('')
+      tracePlayback('intervention-finished', { channelId: audio.current.traceChannelId, interventionId: grant.interventionId, state: outcome })
       await animationRequest(ANIMATION_EVENT, { interventionId: grant.interventionId, playerEpoch: grant.playerEpoch, event: outcome })
     } catch (error) {
-      audio.current.stopForeground()
+      audio.current.stopForeground('intervention-error')
       if (mounted.current) setError((error as Error).message)
       if (grant && !started && socket.connected) {
         void animationRequest(ANIMATION_EVENT, { interventionId: grant.interventionId, playerEpoch: grant.playerEpoch, event: 'NOT_STARTED' }).catch(() => {})

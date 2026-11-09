@@ -1,13 +1,15 @@
 import { clipDurationLimit, TRANSITION_BED_MS, type AnimationClip } from '../../../../../shared/animation.js'
 import type { GreetingAsset } from '../../../../../shared/greetings.js'
+import { nextTraceIdentity, tracePlayback } from '../../../../lib/playbackTrace'
 
 /** A finite, isolated voice channel. It never changes music gain or playback. */
 export default class AnnouncementAudio {
+  readonly traceChannelId = nextTraceIdentity()
   context: AudioContext | null = null
   buffers = new Map<string, AudioBuffer>()
   onUnavailable: (() => void) | null = null
   onAvailable: (() => void) | null = null
-  private stopSource: (() => void) | null = null
+  private stopSource: ((reason?: string) => void) | null = null
   private finishSource: (() => void) | null = null
   private renewSource: ((milliseconds: number, loop?: boolean) => boolean) | null = null
   private gain: GainNode | null = null
@@ -46,6 +48,7 @@ export default class AnnouncementAudio {
     const context = this.context
     context.onstatechange = () => {
       if (this.context !== context) return
+      tracePlayback('audio-context', { channelId: this.traceChannelId, state: context.state })
       if (this.ready) this.onAvailable?.()
       else this.onUnavailable?.()
     }
@@ -267,6 +270,10 @@ export default class AnnouncementAudio {
     const duration = segment?.renewable ? buffer.duration - offset : Math.min(buffer.duration - offset, (segment?.durationMs ?? buffer.duration * 1000) / 1000)
     if (duration <= 0 || (segment?.renewable && (!Number.isFinite(segment.durationMs) || segment.durationMs <= 0))) throw new Error('Tramo de audio no válido')
     this.playingChecksum = checksum
+    const runId = nextTraceIdentity()
+    const began = performance.now()
+    const audioBegan = context.currentTime
+    tracePlayback('audio-start', { channelId: this.traceChannelId, runId, checksum, durationMs: duration * 1000, volume })
     return new Promise((resolve) => {
       const source = context.createBufferSource()
       const gain = context.createGain()
@@ -279,6 +286,7 @@ export default class AnnouncementAudio {
       let settled = false
       let watchdog: ReturnType<typeof setTimeout>
       let leaseEnd = 0
+      let stopReason = 'natural-end'
       const finish = () => {
         if (settled) return
         settled = true
@@ -292,11 +300,16 @@ export default class AnnouncementAudio {
         this.renewSource = null
         this.gain = null
         this.playingChecksum = null
+        tracePlayback('audio-finish', { channelId: this.traceChannelId, runId, checksum, reason: stopReason,
+          state: stopped ? 'STOPPED' : 'ENDED', elapsedMs: performance.now() - began,
+          audioElapsedMs: (context.currentTime - audioBegan) * 1000 })
         resolve(stopped ? 'STOPPED' : 'ENDED')
       }
-      const stop = () => {
+      const stop = (reason = 'explicit-stop') => {
         if (settled || stopped) return
         stopped = true
+        stopReason = reason
+        tracePlayback('audio-stop-request', { channelId: this.traceChannelId, runId, reason })
         gain.gain.cancelScheduledValues(context.currentTime)
         gain.gain.setValueAtTime(gain.gain.value, context.currentTime)
         gain.gain.linearRampToValueAtTime(0, context.currentTime + 0.03)
@@ -308,7 +321,7 @@ export default class AnnouncementAudio {
         }
       }
       const stateChanged = () => {
-        if (context.state !== 'running') stop()
+        if (context.state !== 'running') stop('context-unavailable')
       }
       const renew = (milliseconds: number, loop?: boolean) => {
         if (stopped || settled || !Number.isFinite(milliseconds) || milliseconds <= 0 || (leaseEnd && context.currentTime >= leaseEnd)) return false
@@ -316,11 +329,14 @@ export default class AnnouncementAudio {
         clearTimeout(watchdog)
         leaseEnd = context.currentTime + milliseconds / 1000
         source.stop(leaseEnd)
-        watchdog = setTimeout(stop, milliseconds + 100)
+        watchdog = setTimeout(() => stop('lease-watchdog'), milliseconds + 100)
         return true
       }
       source.onended = () => {
-        if (segment?.renewable && context.currentTime >= leaseEnd - 0.001) stopped = true
+        if (segment?.renewable && context.currentTime >= leaseEnd - 0.001) {
+          stopped = true
+          stopReason = 'lease-ended'
+        }
         finish()
       }
       context.addEventListener('statechange', stateChanged)
@@ -331,28 +347,29 @@ export default class AnnouncementAudio {
         this.renewSource = renew
         if (!renew(segment.durationMs)) stop()
       } else {
-        watchdog = setTimeout(stop, duration * 1000 + 100)
+        watchdog = setTimeout(() => stop('duration-watchdog'), duration * 1000 + 100)
         source.start(0, offset, duration)
         source.stop(context.currentTime + duration)
       }
     })
   }
 
-  stop () {
-    this.stopForeground()
+  stop (reason = 'explicit-stop') {
+    this.stopForeground(reason)
     this.bedStop?.(30)
   }
 
-  stopForeground () { this.stopSource?.() }
+  stopForeground (reason = 'explicit-stop') { this.stopSource?.(reason) }
 
   renewAmbience (milliseconds: number, loop?: boolean) { return this.renewSource?.(milliseconds, loop) ?? false }
 
   volume (value: number) {
+    if (this.gain && value === 0 && this.gain.gain.value !== 0) tracePlayback('audio-muted', { channelId: this.traceChannelId, volume: value })
     if (this.context && this.gain) this.gain.gain.setTargetAtTime(value, this.context.currentTime, 0.02)
   }
 
   close () {
-    this.stop()
+    this.stop('channel-closed')
     // Closing the context may prevent a scheduled `ended` event altogether.
     // Resolve the owned playback before disposing its audio clock.
     this.finishSource?.()
