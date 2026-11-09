@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react'
+import { useAppSelector } from 'store/hooks'
 import { Link, useSearchParams } from 'react-router'
 import Button from 'components/Button/Button'
 import SongArtwork from 'components/SongArtwork/SongArtwork'
@@ -9,6 +10,7 @@ import styles from './Playlists.css'
 import { shuffleOrder } from './shuffleOrder'
 
 export default function PlaylistsView () {
+  const isAdmin = useAppSelector(state => state.user.isAdmin)
   const { roomId, data, busy, error, run, load, accept } = usePlaylists()
   const [params, setParams] = useSearchParams()
   const [dialog, setDialog] = useState<'create' | 'rename' | 'import' | null>(null)
@@ -37,17 +39,19 @@ export default function PlaylistsView () {
           </label>
         )}
         <div className={styles.actions}>
-          <Button variant='primary' disabled={busy} onClick={() => setDialog('create')}>Nueva lista</Button>
-          <Button
-            variant='default'
-            disabled={busy}
-            onClick={(event) => {
-              importTrigger.current = event.currentTarget
-              setDialog('import')
-            }}
-          >
-            Importar desde YouTube
-          </Button>
+          {isAdmin && <Button variant='primary' disabled={busy} onClick={() => setDialog('create')}>Nueva lista</Button>}
+          {isAdmin && (
+            <Button
+              variant='default'
+              disabled={busy}
+              onClick={(event) => {
+                importTrigger.current = event.currentTarget
+                setDialog('import')
+              }}
+            >
+              Importar desde YouTube
+            </Button>
+          )}
           <Button className={styles.refresh} icon='REFRESH' size={20} aria-label='Actualizar listas' title='Actualizar listas' disabled={busy} onClick={() => void load()} />
         </div>
       </div>
@@ -57,54 +61,58 @@ export default function PlaylistsView () {
       {data?.playlists.length === 0 && (
         <div className={styles.empty}>
           <h2>Tu repertorio empieza aquí</h2>
-          <p>Crea una lista y agrega canciones desde Biblioteca, o importa una lista de YouTube.</p>
+          <p>{isAdmin ? 'Crea una lista y agrega canciones desde Biblioteca, o importa una lista de YouTube.' : 'Solicite al administrador que prepare una lista para el local.'}</p>
         </div>
       )}
       {selected && (
         <section className={styles.editor} aria-label='Editar lista guardada'>
           <div className={styles.editorHeading}>
             <h2>{`${selected.items.length} ${selected.items.length === 1 ? 'canción' : 'canciones'}`}</h2>
-            <div className={styles.actions}>
-              <Link className={styles.primaryLink} to={`/library?saveTo=${selected.playlistId}`}>Agregar canciones</Link>
-              <Button
-                variant='default'
-                disabled={busy || selectedIsActive || selected.items.length < 2}
-                aria-describedby='shuffle-help'
-                onClick={async () => {
-                  setNotice('')
-                  const order = shuffleOrder(selected.items.map(item => item.itemId))
-                  if (await run('PUT', `/${selected.playlistId}/order`, { order, requireInactive: true })) {
-                    setNotice('Orden mezclado y guardado. Al activar la lista, comenzará en este orden y lo conservará al repetir.')
-                  }
-                }}
-              >
-                Mezclar y guardar
-              </Button>
-              <details className={styles.options} key={selected.playlistId}>
-                <summary>Opciones de la lista</summary>
-                <div className={styles.optionActions}>
-                  <Button variant='default' disabled={busy} onClick={() => setDialog('rename')}>Cambiar nombre</Button>
-                  <Button
-                    variant='danger'
-                    disabled={busy}
-                    onClick={async () => {
-                      if (!confirm(`¿Eliminar la lista «${selected.name}»? La canción actual continuará.`)) return
-                      if (await run('DELETE', `/${selected.playlistId}`)) setNotice('Lista eliminada.')
-                    }}
-                  >
-                    Eliminar lista
-                  </Button>
-                </div>
-              </details>
-            </div>
+            {isAdmin && (
+              <div className={styles.actions}>
+                <Link className={styles.primaryLink} to={`/library?saveTo=${selected.playlistId}`}>Agregar canciones</Link>
+                <Button
+                  variant='default'
+                  disabled={busy || selectedIsActive || selected.items.length < 2}
+                  aria-describedby='shuffle-help'
+                  onClick={async () => {
+                    setNotice('')
+                    const order = shuffleOrder(selected.items.map(item => item.itemId))
+                    if (await run('PUT', `/${selected.playlistId}/order`, { order, requireInactive: true })) {
+                      setNotice('Orden mezclado y guardado. Al activar la lista, comenzará en este orden y lo conservará al repetir.')
+                    }
+                  }}
+                >
+                  Mezclar y guardar
+                </Button>
+                <details className={styles.options} key={selected.playlistId}>
+                  <summary>Opciones de la lista</summary>
+                  <div className={styles.optionActions}>
+                    <Button variant='default' disabled={busy} onClick={() => setDialog('rename')}>Cambiar nombre</Button>
+                    <Button
+                      variant='danger'
+                      disabled={busy}
+                      onClick={async () => {
+                        if (!confirm(`¿Eliminar la lista «${selected.name}»? La canción actual continuará.`)) return
+                        if (await run('DELETE', `/${selected.playlistId}`)) setNotice('Lista eliminada.')
+                      }}
+                    >
+                      Eliminar lista
+                    </Button>
+                  </div>
+                </details>
+              </div>
+            )}
           </div>
-          <p id='shuffle-help' className={styles.help}>
-            {selectedIsActive
-              ? 'Desactiva la lista en De la casa antes de mezclarla. La canción actual continuará.'
-              : selected.items.length < 2
-                ? 'Agrega al menos dos canciones para mezclar el orden.'
-                : 'Guarda un orden aleatorio antes de activar la lista. Las repeticiones conservarán ese orden.'}
-          </p>
+          {isAdmin && (
+            <p id='shuffle-help' className={styles.help}>
+              {selectedIsActive
+                ? 'Desactiva la lista en De la casa antes de mezclarla. La canción actual continuará.'
+                : selected.items.length < 2
+                  ? 'Agrega al menos dos canciones para mezclar el orden.'
+                  : 'Guarda un orden aleatorio antes de activar la lista. Las repeticiones conservarán ese orden.'}
+            </p>
+          )}
           <ol className={styles.songs} aria-label='Canciones de la lista'>
             {selected.items.map((item, index) => (
               <li key={item.itemId}>
@@ -114,26 +122,28 @@ export default function PlaylistsView () {
                   <p translate='no'>{item.song.artistOrChannel}</p>
                   <small>{item.song.source === 'YOUTUBE' ? 'YouTube' : 'Archivo local'}</small>
                 </div>
-                <div className={styles.actions}>
-                  {([-1, 1] as const).map(direction => (
-                    <Button
-                      key={direction}
-                      variant='default'
-                      aria-label={`${direction < 0 ? 'Subir' : 'Bajar'} ${item.song.title}`}
-                      disabled={busy || index + direction < 0 || index + direction >= selected.items.length}
-                      onClick={() => {
-                        const order = selected.items.map(entry => entry.itemId)
-                        const previous = order[index]
-                        order[index] = order[index + direction]
-                        order[index + direction] = previous
-                        void run('PUT', `/${selected.playlistId}/order`, { order })
-                      }}
-                      icon={direction < 0 ? 'CHEVRON_UP' : 'CHEVRON_DOWN'}
-                      size={20}
-                    />
-                  ))}
-                  <Button variant='default' disabled={busy} aria-label={`Quitar ${item.song.title} de la lista`} onClick={() => void run('DELETE', `/${selected.playlistId}/items/${item.itemId}`)}>Quitar</Button>
-                </div>
+                {isAdmin && (
+                  <div className={styles.actions}>
+                    {([-1, 1] as const).map(direction => (
+                      <Button
+                        key={direction}
+                        variant='default'
+                        aria-label={`${direction < 0 ? 'Subir' : 'Bajar'} ${item.song.title}`}
+                        disabled={busy || index + direction < 0 || index + direction >= selected.items.length}
+                        onClick={() => {
+                          const order = selected.items.map(entry => entry.itemId)
+                          const previous = order[index]
+                          order[index] = order[index + direction]
+                          order[index + direction] = previous
+                          void run('PUT', `/${selected.playlistId}/order`, { order })
+                        }}
+                        icon={direction < 0 ? 'CHEVRON_UP' : 'CHEVRON_DOWN'}
+                        size={20}
+                      />
+                    ))}
+                    <Button variant='default' disabled={busy} aria-label={`Quitar ${item.song.title} de la lista`} onClick={() => void run('DELETE', `/${selected.playlistId}/items/${item.itemId}`)}>Quitar</Button>
+                  </div>
+                )}
               </li>
             ))}
           </ol>

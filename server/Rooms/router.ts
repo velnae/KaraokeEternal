@@ -4,7 +4,7 @@ import { db } from '../lib/Database.js'
 import getLogger from '../lib/Log.js'
 import Rooms, { STATUSES } from '../Rooms/Rooms.js'
 import { ValidationError } from '../lib/Errors.js'
-import { participantPrefs } from './participantPrefs.js'
+import { visibleRoomPrefs } from './participantPrefs.js'
 import { enforceConnectedParticipants } from '../Tables/admission.js'
 import Animation from '../Animation/Animation.js'
 
@@ -28,7 +28,7 @@ router.get(['/', '/:roomId'], (ctx) => {
       const room = ctx.io.sockets.adapter.rooms.get(Rooms.prefix(roomId))
       res.entities[roomId].numUsers = room ? room.size : 0
     } else {
-      res.entities[roomId].prefs = participantPrefs(res.entities[roomId].prefs)
+      res.entities[roomId].prefs = visibleRoomPrefs(ctx.user.roomId === roomId ? ctx.user : {}, res.entities[roomId].prefs)
     }
   })
 
@@ -84,7 +84,7 @@ router.put('/:roomId', async (ctx) => {
         type: ROOM_PREFS_PUSH,
         payload: {
           roomId,
-          prefs: s.user.isAdmin ? room.prefs : participantPrefs(room.prefs),
+          prefs: visibleRoomPrefs(s.user, room.prefs),
           status: room.status,
         },
       })

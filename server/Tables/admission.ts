@@ -1,4 +1,5 @@
 import { db } from '../lib/Database.js'
+import { canOperate } from '../../shared/permissions.js'
 import Tables, { newToken, tableLabel } from './Tables.js'
 import { TABLE_ACCESS_REQUIRED, tableMode, type TableContext } from '../../shared/tableAccess.js'
 import type { IRoomPrefs } from '../../shared/types.js'
@@ -7,7 +8,7 @@ import type { Server, Socket } from 'socket.io'
 export const PARTICIPATION_TTL_SECONDS = 12 * 60 * 60
 const now = () => Math.floor(Date.now() / 1000)
 export const emptyTableContext = (): TableContext => ({ participantSessionId: null, tableId: null, tableLabel: null, expiresAt: null })
-type Identity = { userId: number, roomId: number, isAdmin?: boolean, participantSessionId?: string | null }
+type Identity = { userId: number, roomId: number, role?: string, isAdmin?: boolean, participantSessionId?: string | null }
 
 export function validateInvitation (roomId: number, invitation?: unknown, isAdmin = false) {
   if (isAdmin) return null
@@ -23,7 +24,7 @@ export function validateInvitation (roomId: number, invitation?: unknown, isAdmi
 }
 
 export function participation (user: Identity, savedRoom?: { status: string, prefs: IRoomPrefs }): TableContext {
-  if (user.isAdmin) return emptyTableContext()
+  if (canOperate(user)) return emptyTableContext()
   const room = savedRoom ?? Tables.room(user.roomId)
   if (room.status !== 'open') throw new Error('La sala está cerrada')
   if (user.participantSessionId) {
@@ -45,7 +46,7 @@ export function revokeParticipation (sessionId?: string | null) {
 
 // Call after all asynchronous credential checks. This operation never yields.
 export function joinTable (user: Identity, invitation?: unknown): TableContext {
-  const target = validateInvitation(user.roomId, invitation, user.isAdmin)
+  const target = validateInvitation(user.roomId, invitation, canOperate(user))
   if (!target) {
     revokeParticipation(user.participantSessionId)
     return emptyTableContext()
@@ -73,7 +74,7 @@ export function enforceConnectedParticipants (io: Server) {
   if (!io) return
   for (const connection of io.of('/').sockets.values()) {
     const socket = connection as Socket & { user?: Identity }
-    if (!socket.user || socket.user.isAdmin) continue
+    if (!socket.user || canOperate(socket.user)) continue
     try {
       participation(socket.user)
     } catch (error) {

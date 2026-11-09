@@ -1,4 +1,5 @@
 import Rooms from '../Rooms/Rooms.js'
+import { canOperate } from '../../shared/permissions.js'
 import Queue from '../Queue/Queue.js'
 import Animation from '../Animation/Animation.js'
 import Playlists from '../Playlists/Playlists.js'
@@ -45,18 +46,18 @@ const youtubeMessages: Record<number, string> = {
   150: 'YouTube video owner does not allow embedded playback',
 }
 
-const adminOnly = (sock, actionType, acknowledge): boolean => {
-  if (sock.user.isAdmin) return true
+const operatorOnly = (sock, actionType, acknowledge): boolean => {
+  if (canOperate(sock.user)) return true
 
   acknowledge?.({
     type: actionType + '_ERROR',
-    error: 'Solo los administradores pueden controlar la reproducción',
+    error: 'Solo el personal del local puede controlar la reproducción',
   })
   return false
 }
 
 const authoritativeOnly = (sock, actionType, acknowledge): boolean => {
-  if (!adminOnly(sock, actionType, acknowledge)) return false
+  if (!operatorOnly(sock, actionType, acknowledge)) return false
   if (Rooms.isAuthoritativePlayer(sock)) return true
 
   acknowledge?.({
@@ -67,7 +68,7 @@ const authoritativeOnly = (sock, actionType, acknowledge): boolean => {
 }
 
 const sendCommand = (sock, requestType, commandType, payload, acknowledge) => {
-  if (!adminOnly(sock, requestType, acknowledge)) return
+  if (!operatorOnly(sock, requestType, acknowledge)) return
 
   if ([PLAYER_REQ_NEXT, PLAYER_REQ_REPLAY, PLAYER_REQ_PAUSE, PLAYER_REQ_PLAY].includes(requestType)) {
     Animation.cancel(sock.user.roomId, 'Orden musical del operador')
@@ -130,7 +131,7 @@ function closePlayerWindow (player, command: PlayerWindowCommand): Promise<Playe
 
 async function sendWindowCommand (sock, { payload }, acknowledge, close = false) {
   const requestType = close ? PLAYER_REQ_CLOSE : PLAYER_REQ_FULLSCREEN
-  if (!adminOnly(sock, requestType, acknowledge)) return
+  if (!operatorOnly(sock, requestType, acknowledge)) return
   const roomId = sock.user.roomId
   const reply = (result: PlayerWindowResult) => acknowledge?.({ type: requestType + '_RESULT', payload: result })
   const now = Date.now()
@@ -139,7 +140,7 @@ async function sendWindowCommand (sock, { payload }, acknowledge, close = false)
     return reply({ status: 'changed' })
   }
   const player = [...sock.server.of('/').sockets.values()].find(candidate => candidate.connected !== false
-    && candidate.user?.isAdmin && candidate.user.roomId === roomId && Rooms.isAuthoritativePlayer(candidate))
+    && canOperate(candidate.user) && candidate.user.roomId === roomId && Rooms.isAuthoritativePlayer(candidate))
   if (!player) return reply({ status: 'no-player' })
   const expiresAt = Math.min(payload.expiresAt, now + PLAYER_WINDOW_REQUEST_MS)
   const command = { roomId, playerSocketId: player.id, expiresAt }
@@ -152,8 +153,8 @@ async function sendWindowCommand (sock, { payload }, acknowledge, close = false)
           type: PLAYER_CMD_FULLSCREEN,
           payload: command,
         })
-    if (sock.connected === false || !sock.user?.isAdmin || sock.user.roomId !== roomId
-      || player.user?.roomId !== roomId || !player.user?.isAdmin
+    if (sock.connected === false || !canOperate(sock.user) || sock.user.roomId !== roomId
+      || player.user?.roomId !== roomId || !canOperate(player.user)
       || (Date.now() > expiresAt && response?.status !== 'timeout')
       || (close && response?.status === 'closed' && Rooms.isAuthoritativePlayer(player))
       || (!close && (player.connected === false || !Rooms.isAuthoritativePlayer(player)))) return reply({ status: 'changed' })
@@ -242,7 +243,7 @@ const ACTION_HANDLERS = {
     sendCommand(sock, PLAYER_REQ_VOLUME, PLAYER_CMD_VOLUME, payload, acknowledge)
   },
   [PLAYER_EMIT_STATUS]: (sock, { payload }, acknowledge) => {
-    if (!adminOnly(sock, PLAYER_EMIT_STATUS, acknowledge)) return
+    if (!operatorOnly(sock, PLAYER_EMIT_STATUS, acknowledge)) return
 
     const wasAuthoritative = Rooms.isAuthoritativePlayer(sock)
     if (!Rooms.claimPlayer(sock.server, sock, sock.user.roomId)) {

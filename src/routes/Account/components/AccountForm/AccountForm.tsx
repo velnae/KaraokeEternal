@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { roleLabels } from 'shared/permissions'
 import InputImage from 'components/InputImage/InputImage'
 import { UserWithRole } from 'shared/types'
 import styles from './AccountForm.css'
@@ -64,7 +65,7 @@ const AccountForm = ({
       ...prev,
       isDirty: !!username.current?.value || !!newPassword.current?.value
         || (name.current?.value !== user.name)
-        || (role.current && role.current.value !== (user.isAdmin ? '1' : '0')),
+        || (role.current && role.current.value !== user.role),
       isChangingPassword: !!newPassword.current?.value,
     }))
   }
@@ -185,6 +186,8 @@ const AccountForm = ({
           <option key='choose' value='' disabled>seleccione un rol...</option>
           {user?.role === 'guest' && <option key='guest' value='guest'>Invitado</option>}
           <option key='standard' value='standard'>Usuario</option>
+          <option value='operator'>{roleLabels.operator}</option>
+          <option value='manager'>{roleLabels.manager}</option>
           <option key='admin' value='admin'>Administrador</option>
         </select>
       )}

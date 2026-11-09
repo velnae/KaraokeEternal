@@ -1,4 +1,5 @@
 import Router from '@koa/router'
+import { canOperate } from '../../../shared/permissions.js'
 import { getGreetingVoice } from '../../Greetings/GreetingVoice.js'
 import Tables from '../../Tables/Tables.js'
 import { job, jobDTO, tableVoice } from './Store.js'
@@ -26,7 +27,7 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
     // This router shares the rooms prefix with existing table routes.
     const suffix = ctx.path.slice(ctx.path.indexOf(`/rooms/${ctx.params.roomId}`) + `/rooms/${ctx.params.roomId}`.length)
     if (!callPaths.test(suffix)) return next()
-    if (!ctx.user?.isAdmin) ctx.throw(403)
+    if (!ctx.user?.isAdmin && !(canOperate(ctx.user) && ctx.method === 'GET' && Number(ctx.params.roomId) === ctx.user.roomId && /\/audio\/[\w-]+$/.test(ctx.path))) ctx.throw(403)
     ctx.set('Cache-Control', 'private, no-store')
     try {
       if (!Number.isSafeInteger(Number(ctx.params.roomId)) || Number(ctx.params.roomId) < 1) throw new CallError('Sala no válida.')

@@ -60,6 +60,7 @@ function ProviderSettings () {
 }
 
 export default function AnimatorSettings () {
+  const isAdmin = useAppSelector(state => state.user.isAdmin)
   const [params, setParams] = useSearchParams()
   const view = params.get('view') === 'calls' ? 'calls' : params.get('view') === 'background' ? 'background' : params.get('view') === 'greeting-voice' ? 'greeting-voice' : params.get('view') === 'audio' ? 'audio' : 'control'
   const liveView = view === 'control' || view === 'audio'
@@ -85,6 +86,14 @@ export default function AnimatorSettings () {
     if (next.get('view') === 'connection') next.set('view', 'control')
     setParams(next, { replace: true })
   }
+  if (!isAdmin) return (
+    <>
+      <Button variant='default' disabled={!current || !connected || busy} onClick={() => void toggle()}>{current?.prefs.enabled ? 'Desactivar animador' : 'Activar animador'}</Button>
+      {(!connected || !current) && <p role='status'>Conectando con la sala…</p>}
+      {error && <p role='alert'>{error}</p>}
+      <AnimationPanel />
+    </>
+  )
   return (
     <>
       {liveView && (

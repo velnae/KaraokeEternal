@@ -4,6 +4,9 @@
   color: var(--lyrics);
 }
 
+.form [hidden] { display: none; }
+.form[data-limited='true'] .workspace { grid-template-columns: minmax(0, 480px); }
+
 .header {
   display: flex;
   flex-wrap: wrap;

@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useAppSelector } from 'store/hooks'
 import { useSearchParams } from 'react-router'
 import Button from 'components/Button/Button'
 import Icon from 'components/Icon/Icon'
@@ -77,6 +78,8 @@ function SaveDialog ({ source, sourceId, title, onClose }: { source: SongSource,
 
 export default function SaveToPlaylist ({ source, sourceId, title, compact = false }: { source: SongSource, sourceId: string, title: string, compact?: boolean }) {
   const [open, setOpen] = useState(false)
+  const isAdmin = useAppSelector(state => state.user.isAdmin)
+  if (!isAdmin) return null
   return (
     <>
       <Button className={compact ? styles.saveCompact : styles.save} aria-label={`Guardar ${title} en una lista`} title='Guardar en lista' onClick={() => setOpen(true)} icon={compact ? 'NAV_LIBRARY' : undefined} size={22}>{compact ? null : 'Guardar en lista'}</Button>

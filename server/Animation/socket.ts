@@ -1,4 +1,5 @@
 import Animation from './Animation.js'
+import { canOperate } from '../../shared/permissions.js'
 import { catalogAsset, catalogClips } from './catalog.js'
 import Rooms from '../Rooms/Rooms.js'
 import Queue from '../Queue/Queue.js'
@@ -18,7 +19,7 @@ const isId = (value: unknown): value is string => typeof value === 'string' && /
 export default Object.fromEntries(actions.map(type => [type, (sock, action, acknowledge) => {
   const roomId = sock.user?.roomId
   try {
-    if (!sock.user?.isAdmin || !Number.isInteger(roomId)) throw new Error('No tiene autorización para esta sala')
+    if (!canOperate(sock.user) || !Number.isInteger(roomId)) throw new Error('No tiene autorización para esta sala')
     const input = action.payload ?? {}
     if (typeof input !== 'object' || Array.isArray(input)) throw new Error('Solicitud no válida')
     if (type !== ANIMATION_SYNC && (!Number.isFinite(input.expiresAt) || input.expiresAt < Date.now() || input.expiresAt > Date.now() + 10000)) throw new Error('La orden venció. Actualice el estado.')
@@ -40,6 +41,7 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       if (!isId(input.interventionId)) throw new Error('Solicitud no válida')
       Animation.cancel(roomId, 'Cancelado por el operador', input.interventionId)
     } else if (type === ANIMATION_CONTROL) {
+      if (!sock.user.isAdmin && Object.keys(input).some(key => !['expiresAt', 'controlVersion', 'enabled', 'automation', 'profile', 'volume', 'ambienceVolume'].includes(key))) throw new Error('Este ajuste requiere un administrador')
       if (!Number.isInteger(input.controlVersion)) throw new Error('Versión de controles no válida')
       for (const key of ['enabled', 'microphoneOccupied', 'automation', 'ambienceEnabled']) if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error('Control no válido')
       for (const key of ['volume', 'ambienceVolume']) if (input[key] !== undefined && (!Number.isFinite(input[key]) || input[key] < 0 || input[key] > 1)) throw new Error('Volumen no válido')

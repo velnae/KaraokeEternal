@@ -1,11 +1,17 @@
 import Router from '@koa/router'
+import { canOperate } from '../../shared/permissions.js'
 import Playlists, { publishHouseQueue } from './Playlists.js'
 import youtubeImport from './YouTubeImport.js'
 
 const router = new Router({ prefix: '/api' })
 const body = (ctx): Record<string, unknown> => ctx.request.body || {}
 router.use('/rooms/:roomId/playlists', async (ctx, next) => {
-  if (!ctx.user?.isAdmin) ctx.throw(403)
+  if (!canOperate(ctx.user)) ctx.throw(403)
+  if (!ctx.user.isAdmin) {
+    if (Number(ctx.params.roomId) !== ctx.user.roomId) ctx.throw(403)
+    const playback = ctx.method === 'PUT' && ctx.path.endsWith('/playlists/playback')
+    if (ctx.method !== 'GET' && !playback) ctx.throw(403)
+  }
   ctx.set('Cache-Control', 'no-store')
   try {
     Playlists.room(Number(ctx.params.roomId))

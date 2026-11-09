@@ -69,7 +69,7 @@ interface QueueItemProps {
   // actions
   onMoveClick(queueId: number): void
   onRemoveUpcoming: (userId: number) => void
-  onBlock: (rule: MusicBlockRule, title: string, opener: HTMLButtonElement) => void
+  onBlock?: (rule: MusicBlockRule, title: string, opener: HTMLButtonElement) => void
 }
 
 const QueueItem = ({
@@ -200,7 +200,7 @@ const QueueItem = ({
       const rule: MusicBlockRule = action === 'resource'
         ? { kind: 'resource', source, sourceId: source === 'YOUTUBE' ? externalId! : String(songId) }
         : action === 'song' ? { kind: 'song', artist, title } : { kind: 'artist', artist, aliases: [] }
-      onBlock(rule, title, menuOpener.current!)
+      onBlock?.(rule, title, menuOpener.current!)
     }
   }
 
@@ -478,7 +478,7 @@ const QueueItem = ({
         </Buttons>
         {greeting && <QueueGreeting operator greeting={greeting} descriptionId={`queue-title-${queueId}`} paused={greetingsPaused} busy={greetingBusy} onRemove={onRemoveGreeting} />}
       </div>
-      {isAdmin && menuAnchor && <QueueItemMenu id={menuId} anchor={menuAnchor} title={title} local={isLocal} removable={isRemovable} movable={isMovable} replayable={isReplayable} requeueable={isPlayed} skippable={isSkippable} infoable={isInfoable} starred={isStarred} focusLast={focusLast} onClose={closeMenu} onSelect={selectMenuAction} />}
+      {isAdmin && menuAnchor && <QueueItemMenu id={menuId} anchor={menuAnchor} title={title} local={isLocal} removable={isRemovable} movable={isMovable} replayable={isReplayable} requeueable={isPlayed} skippable={isSkippable} infoable={isInfoable} blockable={!!onBlock} starred={isStarred} focusLast={focusLast} onClose={closeMenu} onSelect={selectMenuAction} />}
     </div>
   )
 }

@@ -7,6 +7,8 @@ import fs from 'fs'
 import { promisify } from 'util'
 import parseCookie from './lib/parseCookie.js'
 import jsonWebToken from 'jsonwebtoken'
+import { refreshIdentity } from './User/identity.js'
+import { canOperate } from '../shared/permissions.js'
 import Koa from 'koa'
 import koaRouter from '@koa/router'
 import { koaBody } from 'koa-body'
@@ -185,7 +187,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     // verify JWT
     try {
       const { keToken } = parseCookie(ctx.request.header.cookie)
-      ctx.user = jwtVerify(keToken, jwtKey)
+      ctx.user = refreshIdentity(jwtVerify(keToken, jwtKey) as typeof ctx.user)
     } catch {
       ctx.user = {
         dateUpdated: null,
@@ -213,7 +215,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     // This router authenticates before its own bounded parsers touch the body.
     if (isTransitionVideoPath(ctx.path, urlPath) || isPlayerLogoPath(ctx.path, urlPath)) return next()
     if (ctx.path.startsWith(`${urlPath}api/birthdays/`)) {
-      if (!ctx.user?.isAdmin || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
+      if (!canOperate(ctx.user) || !Number.isInteger(ctx.user.roomId) || (!ctx.user.isAdmin && !['GET', 'HEAD'].includes(ctx.method))) ctx.throw(403)
       return ctx.path.replace(/\/+$/, '') === `${urlPath}api/birthdays/upload` ? parseAudio(ctx, next) : parseBody(ctx, next)
     }
     const audioPath = ctx.path.slice(`${urlPath}api/animation/resources/`.length)

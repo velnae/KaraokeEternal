@@ -1,4 +1,5 @@
 import Router from '@koa/router'
+import { canOperate } from '../../shared/permissions.js'
 import fs from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import path from 'node:path'
@@ -12,7 +13,8 @@ import { assertRoom, asset, assetDTO, changeBirthday, createBirthday, eventDTO, 
 
 const router = new Router({ prefix: '/api/birthdays' })
 router.use(async (ctx, next) => {
-  if (!ctx.user?.isAdmin || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
+  if (!canOperate(ctx.user) || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
+  if (!ctx.user.isAdmin && (!['GET', 'HEAD'].includes(ctx.method) || !/\/assets\/[\w-]+\/?$/.test(ctx.path))) ctx.throw(403)
   ctx.set('Cache-Control', 'private, no-store')
   try {
     await next()

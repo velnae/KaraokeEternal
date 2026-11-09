@@ -1,5 +1,8 @@
 import getLogger from './lib/Log.js'
 import jsonWebToken from 'jsonwebtoken'
+import { refreshIdentity } from './User/identity.js'
+import { canOperate } from '../shared/permissions.js'
+import { visiblePrefs } from './Prefs/visiblePrefs.js'
 import parseCookie from './lib/parseCookie.js'
 import Library from './Library/Library.js'
 import LibrarySocket from './Library/socket.js'
@@ -14,7 +17,7 @@ import Prefs from './Prefs/Prefs.js'
 import PrefsSocket from './Prefs/socket.js'
 import Rooms from './Rooms/Rooms.js'
 import RoomsSocket from './Rooms/socket.js'
-import { participantPrefs } from './Rooms/participantPrefs.js'
+import { visibleRoomPrefs } from './Rooms/participantPrefs.js'
 import Queue from './Queue/Queue.js'
 import QueueSocket from './Queue/socket.js'
 import SongSourcesSocket from './SongSources/socket.js'
@@ -58,7 +61,7 @@ export default function (io, jwtKey) {
 
     // authenticate the JWT sent via cookie in http handshake
     try {
-      sock.user = jwtVerify(keToken, jwtKey)
+      sock.user = refreshIdentity(jwtVerify(keToken, jwtKey) as { userId: number })
 
       // success
       log.verbose('%s (%s) connected from %s', sock.user.name, sock.id, sock.handshake.address)
@@ -77,6 +80,15 @@ export default function (io, jwtKey) {
     let expiryTimer: ReturnType<typeof setTimeout> | undefined
     const checkAdmission = () => {
       try {
+        try {
+          const previousRole = sock.user.role
+          sock.user = refreshIdentity(sock.user)
+          if (previousRole !== sock.user.role) throw new Error('Los permisos cambiaron. Vuelve a ingresar.')
+        } catch {
+          sock.emit('action', { type: SOCKET_AUTH_ERROR })
+          sock.disconnect(true)
+          return null
+        }
         return participation(sock.user)
       } catch (error) {
         sock.emit('action', { type: TABLE_ACCESS_REQUIRED, payload: (error as Error).message })
@@ -146,7 +158,7 @@ export default function (io, jwtKey) {
 
       try {
         if (!checkAdmission()) return acknowledge?.({ type: type + _ERROR, error: 'Escanee el QR de su mesa para continuar' })
-        if (sock.user.isAdmin && ['server/PLAYER_REQ_NEXT', 'server/PLAYER_REQ_REPLAY', 'server/PLAYER_REQ_PAUSE', 'server/PLAYER_REQ_PLAY', 'server/PLAYER_EMIT_LEAVE'].includes(type)
+        if (canOperate(sock.user) && ['server/PLAYER_REQ_NEXT', 'server/PLAYER_REQ_REPLAY', 'server/PLAYER_REQ_PAUSE', 'server/PLAYER_REQ_PLAY', 'server/PLAYER_EMIT_LEAVE'].includes(type)
           && (type !== 'server/PLAYER_EMIT_LEAVE' || Rooms.isAuthoritativePlayer(sock))) {
           Greetings.interrupt(sock.user.roomId, 'Orden musical del operador')
         }
@@ -162,11 +174,11 @@ export default function (io, jwtKey) {
     })
 
     // Full settings remain admin-only; moderation also refreshes on participant reconnect.
-    if (sock.user.isAdmin) {
+    if (canOperate(sock.user)) {
       log.verbose('pushing prefs to %s (%s)', sock.user.name, sock.id)
       io.to(sock.id).emit('action', {
         type: PREFS_PUSH,
-        payload: Prefs.get(),
+        payload: visiblePrefs(sock.user),
       })
     } else {
       const { moderation, musicBlocking } = Prefs.get()
@@ -213,7 +225,7 @@ export default function (io, jwtKey) {
     const room = Rooms.get(sock.user.roomId, { status: ['open', 'closed'] }).entities[sock.user.roomId]
     if (room) io.to(sock.id).emit('action', {
       type: ROOM_PREFS_PUSH,
-      payload: { roomId: room.roomId, name: room.name, status: room.status, prefs: sock.user.isAdmin ? room.prefs : participantPrefs(room.prefs) },
+      payload: { roomId: room.roomId, name: room.name, status: room.status, prefs: visibleRoomPrefs(sock.user, room.prefs) },
     })
 
     // If there is an authoritative player, relay its last known status.

@@ -359,7 +359,7 @@ describe('request moderation', () => {
     expect(moderate).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: actionType + '_ERROR',
-      error: 'Solo los administradores pueden aprobar o rechazar solicitudes',
+      error: 'Solo el personal del local puede aprobar o rechazar solicitudes',
     })
   })
 
@@ -399,7 +399,7 @@ describe('queue ordering permissions', () => {
     expect(move).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: QUEUE_MOVE + '_ERROR',
-      error: 'Solo los administradores pueden mover canciones en la cola de reproducción',
+      error: 'Solo el personal del local puede mover canciones en la cola de reproducción',
     })
   })
 

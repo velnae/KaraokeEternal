@@ -1,4 +1,5 @@
 import { db } from '../lib/Database.js'
+import { canOperate } from '../../shared/permissions.js'
 import Queue from '../Queue/Queue.js'
 import Rooms from '../Rooms/Rooms.js'
 import { buildRoundRobinQueue } from '../../shared/roundRobin.js'
@@ -14,7 +15,7 @@ import { isGreetingAllowed } from '../../shared/greetings.js'
 import { publicGuestName } from '../../shared/guestName.js'
 
 export interface GreetingPlayerStatus { queueId?: number, historyJSON?: string, nextUserId?: number | null, isAtQueueEnd?: boolean, queueDecisionAt?: number }
-interface Identity { roomId: number, userId: number, isAdmin?: boolean }
+interface Identity { roomId: number, userId: number, role?: string, isAdmin?: boolean }
 interface Delivery { ownerSocketId: string, untilAt: number, finished: number, displayMs: number | null, interventionId: string | null, voiceStatus: GreetingVoiceStatus | null }
 
 export default class Greetings {
@@ -107,14 +108,14 @@ export default class Greetings {
       audioEnabled: Greetings.audioEnabled(identity.roomId),
       playback: playback.prefs,
       playbackVersion: playback.version,
-      items: Greetings.items(identity.roomId).filter(item => identity.isAdmin || item.userId === identity.userId),
+      items: Greetings.items(identity.roomId).filter(item => canOperate(identity) || item.userId === identity.userId),
       opportunities: Object.fromEntries(Object.values(order.entities)
         .filter(item => item.origin === 'PARTICIPANT' && item.userId === identity.userId && ['PENDING_APPROVAL', 'APPROVED'].includes(item.status))
         .map((item) => {
           const { canAdd, reason } = Greetings.opportunity(identity, item.queueId, status)
           return [item.queueId, { canAdd, reason, maxMessageLength: greetingMessageLimit(item.userDisplayName) }]
         })),
-      turns: order.turns.filter(turn => identity.isAdmin || order.entities[turn.ids[0]].userId === identity.userId)
+      turns: order.turns.filter(turn => canOperate(identity) || order.entities[turn.ids[0]].userId === identity.userId)
         .map(turn => ({ key: turn.ids[0], queueIds: turn.ids, userId: order.entities[turn.ids[0]].userId })),
     }
   }
@@ -152,9 +153,9 @@ export default class Greetings {
 
   static remove (identity: Identity, greetingId: number) {
     const item = Greetings.items(identity.roomId).find(item => item.greetingId === greetingId)
-    if (!item || (!identity.isAdmin && (item.userId !== identity.userId || item.status !== 'QUEUED'))) throw new Error('No puedes retirar este saludo')
+    if (!item || (!canOperate(identity) && (item.userId !== identity.userId || item.status !== 'QUEUED'))) throw new Error('No puedes retirar este saludo')
     db.run(`UPDATE greetings SET status=?,reason=? WHERE greetingId=? AND status IN ('QUEUED','RESERVED','DISPLAYING')`,
-      [identity.isAdmin ? 'REMOVED' : 'CANCELLED', identity.isAdmin ? 'Retirado por el operador' : 'Cancelado por el remitente', greetingId])
+      [canOperate(identity) ? 'REMOVED' : 'CANCELLED', canOperate(identity) ? 'Retirado por el operador' : 'Cancelado por el remitente', greetingId])
     if (item.turnKey) {
       const delivery = db.get<Delivery>('SELECT * FROM greetingTurns WHERE turnKey=?', [item.turnKey])
       if (delivery?.interventionId) Animation.cancel(identity.roomId, 'Saludo retirado', delivery.interventionId)

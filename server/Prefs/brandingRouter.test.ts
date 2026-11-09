@@ -26,7 +26,7 @@ import router from './router.js'
 const emit = vi.fn()
 const app = new Koa()
 app.use(async (ctx, next) => {
-  ctx.user = { isAdmin: ctx.get('test-admin') === 'true' } as typeof ctx.user
+  ctx.user = { isAdmin: ctx.get('test-admin') === 'true', role: ctx.get('test-role') || undefined } as typeof ctx.user
   ctx.io = { emit } as unknown as typeof ctx.io
   await next()
 })
@@ -81,7 +81,7 @@ describe('branding HTTP and persistence contract', () => {
   })
 
   it('denies non-admin writes without persisting or broadcasting', async () => {
-    expect((await save({ ...defaultClientBranding, name: 'Unauthorized' }, false)).status).toBe(401)
+    expect((await save({ ...defaultClientBranding, name: 'Unauthorized' }, false)).status).toBe(403)
     expect(Prefs.get().branding).toEqual(defaultClientBranding)
     expect(emit).not.toHaveBeenCalled()
   })
@@ -111,6 +111,32 @@ const saveDisplay = (body: unknown, admin = true) => fetch(`${base}/player-displ
 })
 
 describe('global player display HTTP contract', () => {
+  it('allows a manager to personalize only approved fields while preserving technical settings', async () => {
+    await save({ ...defaultClientBranding, name: 'Original', supportUrl: 'https://example.com/support' })
+    const headers = { 'Content-Type': 'application/json', 'test-role': 'manager' }
+    expect((await fetch(`${base}/branding`, { method: 'PUT', headers, body: JSON.stringify({ name: 'Client venue' }) })).status).toBe(200)
+    expect(Prefs.get().branding).toMatchObject({ name: 'Client venue', supportUrl: 'https://example.com/support' })
+    expect((await fetch(`${base}/branding`, { method: 'PUT', headers, body: JSON.stringify({ supportUrl: '' }) })).status).toBe(403)
+    const display = { ...defaultPlayerDisplay, announcement: { ...defaultPlayerDisplay.announcement, backgroundColor: '#123456' } }
+    await saveDisplay(display)
+    expect((await fetch(`${base}/player-display`, { method: 'PUT', headers, body: JSON.stringify({ logo: { enabled: true, opacity: 60 } }) })).status).toBe(200)
+    expect(Prefs.get().playerDisplay).toEqual({ ...display, logo: { ...display.logo, enabled: true, opacity: 60 } })
+    for (const body of [{ announcement: { enabled: false } }, { logo: { marginX: 20 } }, { logo: { source: 'brand' } }]) {
+      expect((await fetch(`${base}/player-display`, { method: 'PUT', headers, body: JSON.stringify(body) })).status).toBe(403)
+    }
+    expect((await fetch(`${base}/player-display`, { method: 'PUT', headers, body: JSON.stringify({ logo: { scale: 301 } }) })).status).toBe(422)
+    const prefs = await (await fetch(base, { headers })).json()
+    expect(prefs).not.toHaveProperty('privateSetting')
+    expect(prefs).not.toHaveProperty('paths')
+  })
+
+  it.each(['operator', 'standard', 'guest', 'player'])('rejects personalization writes by %s', async (role) => {
+    const headers = { 'Content-Type': 'application/json', 'test-role': role }
+    expect((await fetch(`${base}/branding`, { method: 'PUT', headers, body: JSON.stringify({ name: 'Forbidden' }) })).status).toBe(403)
+    expect((await fetch(`${base}/player-display`, { method: 'PUT', headers, body: JSON.stringify({ logo: { enabled: true } }) })).status).toBe(403)
+    expect(emit).not.toHaveBeenCalled()
+  })
+
   it('persists and broadcasts a global configuration independently from brand identity', async () => {
     const playerDisplay = { ...defaultPlayerDisplay, logo: { ...defaultPlayerDisplay.logo, enabled: true },
       announcement: { ...defaultPlayerDisplay.announcement, enabled: true, alignment: 'center', backgroundColor: '#6b5143' } }

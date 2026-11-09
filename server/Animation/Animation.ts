@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Server } from 'socket.io'
 import { db } from '../lib/Database.js'
+import { canOperate } from '../../shared/permissions.js'
 import Queue from '../Queue/Queue.js'
 import {
   ANIMATION_STATE, ANIMATION_LIMITS, TRANSITION_BED_MS, animationContext, animationPrefs, eligibleAmbience,
@@ -130,8 +131,8 @@ export default class Animation {
     if (!io || !db.get('SELECT roomId FROM rooms WHERE roomId = ?', [roomId])) return
     const payload = Animation.snapshot(roomId)
     for (const sock of io.of('/').sockets.values()) {
-      const user = (sock as typeof sock & { user?: { isAdmin: boolean, roomId: number } }).user
-      if (user?.isAdmin && user.roomId === roomId) sock.emit('action', { type: ANIMATION_STATE, payload })
+      const user = (sock as typeof sock & { user?: { role?: string, isAdmin: boolean, roomId: number } }).user
+      if (canOperate(user) && user?.roomId === roomId) sock.emit('action', { type: ANIMATION_STATE, payload })
     }
   }
 

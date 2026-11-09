@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { canOperate } from 'shared/permissions'
 import socket from 'lib/socket'
 import store from 'store/store'
 import { animationTime } from 'lib/animationApi'
@@ -26,7 +27,7 @@ export default function useRemotePlayerControls () {
         return alive && !closing.current && socket.connected && !!command && command.playerSocketId === socket.id
           && Number.isFinite(command.expiresAt) && command.expiresAt > animationTime()
           && command.expiresAt <= animationTime() + PLAYER_WINDOW_REQUEST_MS * 2
-          && state.user.isAdmin && state.user.roomId === command.roomId && state.player?._authority === 'GRANTED'
+          && canOperate(state.user) && state.user.roomId === command.roomId && state.player?._authority === 'GRANTED'
       }
       if (action.type === PLAYER_CMD_CLOSE) {
         if (!current()) return acknowledge({ status: 'changed' })

@@ -195,6 +195,7 @@ export const connectSocket = createAsyncThunk<void, void, { state: RootState }>(
 // Reducer
 // ------------------------------------
 export interface UserState {
+  role: string | null
   participantSessionId: string | null
   tableId: number | null
   tableLabel: string | null
@@ -211,6 +212,7 @@ export interface UserState {
 }
 
 const initialState: UserState = {
+  role: null,
   participantSessionId: null,
   tableId: null,
   tableLabel: null,

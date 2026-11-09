@@ -1,4 +1,5 @@
 import Queue from './Queue.js'
+import { canOperate } from '../../shared/permissions.js'
 import Rooms from '../Rooms/Rooms.js'
 import { participation } from '../Tables/admission.js'
 import {
@@ -31,7 +32,7 @@ import { clearedQueuePlayback } from '../../shared/queueCleanup.js'
 // ------------------------------------
 const ACTION_HANDLERS = {
   [QUEUE_CLEANUP]: (sock, { payload }, acknowledge) => {
-    if (!sock.user?.isAdmin) return acknowledge({ type: QUEUE_CLEANUP + '_ERROR', error: 'Solo los administradores pueden limpiar la cola' })
+    if (!canOperate(sock.user)) return acknowledge({ type: QUEUE_CLEANUP + '_ERROR', error: 'Solo el personal del local puede limpiar la cola' })
     if (!payload || !['pending', 'history'].includes(payload.operation) || typeof payload.requestId !== 'string'
       || !/^[a-zA-Z0-9-]{16,64}$/.test(payload.requestId) || !Number.isSafeInteger(payload.throughQueueId) || payload.throughQueueId < 0
       || (payload.checkOnly !== true && payload.confirmed !== true)) {
@@ -72,7 +73,7 @@ const ACTION_HANDLERS = {
       return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'Seleccione un pedido fallido válido para reemplazar' })
     }
     const original = replacesQueueId === undefined ? undefined : Queue.get(roomId).entities[replacesQueueId]
-    if (replacesQueueId !== undefined && (!original || (!sock.user.isAdmin && original.userId !== sock.user.userId))) {
+    if (replacesQueueId !== undefined && (!original || (!canOperate(sock.user) && original.userId !== sock.user.userId))) {
       return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'No puedes reemplazar este pedido' })
     }
     const requestUserId = original?.userId ?? sock.user.userId
@@ -101,7 +102,7 @@ const ACTION_HANDLERS = {
       })
     }
 
-    if (origin !== 'PARTICIPANT' && !sock.user.isAdmin) {
+    if (origin !== 'PARTICIPANT' && !canOperate(sock.user)) {
       return acknowledge({
         type: QUEUE_ADD + '_ERROR',
         error: 'Solo los administradores pueden agregar canciones de la casa o del operador',
@@ -140,7 +141,7 @@ const ACTION_HANDLERS = {
     let queuePrefs = normalizeQueuePrefs(room?.prefs?.queue)
     const maxPending = queuePrefs.maxPendingPerParticipant
 
-    if (!sock.user.isAdmin) {
+    if (!canOperate(sock.user)) {
       const pendingCount = Queue.countPending(roomId, sock.user.userId)
 
       if (pendingCount >= maxPending) {
@@ -164,6 +165,7 @@ const ACTION_HANDLERS = {
 
     // Resolution is asynchronous: another request may have filled the last slot.
     // Receipt lookup, final validation and insert below run without an await.
+    if (sock.connected === false) return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'La sesión terminó mientras se preparaba el pedido. Vuelve a ingresar.' })
     if (acknowledgeExisting()) return
     if (generation !== Queue.cleanupGeneration(roomId)) {
       return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'La cola se vació mientras se preparaba el pedido. Vuelve a solicitar la canción si aún la quieres.' })
@@ -171,7 +173,7 @@ const ACTION_HANDLERS = {
     room = Rooms.get(roomId).entities[roomId]
     if (!room) return acknowledge({ type: QUEUE_ADD + '_ERROR', error: 'La sala ya no está abierta' })
     queuePrefs = normalizeQueuePrefs(room.prefs?.queue)
-    if (!sock.user.isAdmin && Queue.countPending(roomId, sock.user.userId) >= queuePrefs.maxPendingPerParticipant) {
+    if (!canOperate(sock.user) && Queue.countPending(roomId, sock.user.userId) >= queuePrefs.maxPendingPerParticipant) {
       return acknowledge({ type: QUEUE_ADD + '_ERROR', error: `Se alcanzó el máximo de solicitudes de canciones pendientes (${queuePrefs.maxPendingPerParticipant})` })
     }
 
@@ -188,7 +190,7 @@ const ACTION_HANDLERS = {
         ...(payload.requestIntent !== undefined ? { requestIntent: requestIntent(payload.requestIntent) } : {}),
         ...(requestId ? { requestId } : {}),
         ...(replacesQueueId !== undefined ? { replacesQueueId } : {}),
-        status: origin === 'PARTICIPANT' && !sock.user.isAdmin && queuePrefs.approvalMode === 'MANUAL'
+        status: origin === 'PARTICIPANT' && !canOperate(sock.user) && queuePrefs.approvalMode === 'MANUAL'
           ? 'PENDING_APPROVAL'
           : 'APPROVED',
       })
@@ -230,10 +232,10 @@ const ACTION_HANDLERS = {
       })
     }
 
-    if (!sock.user.isAdmin) {
+    if (!canOperate(sock.user)) {
       return acknowledge({
         type: QUEUE_MOVE + '_ERROR',
-        error: 'Solo los administradores pueden mover canciones en la cola de reproducción',
+        error: 'Solo el personal del local puede mover canciones en la cola de reproducción',
       })
     }
 
@@ -256,7 +258,7 @@ const ACTION_HANDLERS = {
     const { queueId } = payload
     const ids = Array.isArray(queueId) ? queueId : [queueId]
 
-    if (!sock.user.isAdmin && !(Queue.isOwner(sock.user.userId, ids))) {
+    if (!canOperate(sock.user) && !(Queue.isOwner(sock.user.userId, ids))) {
       return acknowledge({
         type: QUEUE_REMOVE + '_ERROR',
         error: 'No puede quitar la canción de otro usuario',
@@ -293,10 +295,10 @@ const moderateRequest = (
 ) => {
   const actionType = status === 'APPROVED' ? QUEUE_APPROVE : QUEUE_REJECT
 
-  if (!sock.user.isAdmin) {
+  if (!canOperate(sock.user)) {
     return acknowledge({
       type: actionType + '_ERROR',
-      error: 'Solo los administradores pueden aprobar o rechazar solicitudes',
+      error: 'Solo el personal del local puede aprobar o rechazar solicitudes',
     })
   }
 

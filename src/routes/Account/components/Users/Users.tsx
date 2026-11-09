@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
+import { roleLabels, type UserRole } from 'shared/permissions'
 import { Link } from 'react-router'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { closeUserEditor, fetchUsers, filterByOnline, filterByRoom, openUserEditor, type UserWithRoomsAndRole } from '../../modules/users'
@@ -10,7 +11,7 @@ import getUsers from '../../selectors/getUsers'
 import styles from './Users.css'
 
 function UserAccess ({ user }: { user: UserWithRoomsAndRole }) {
-  const role = { guest: 'Invitado', standard: 'Usuario estándar', admin: 'Administrador' }[user.role] || user.role
+  const role = roleLabels[user.role as UserRole] || user.role
   return (
     <div className={styles.access}>
       <span className={styles.role} data-role={user.role}>{role}</span>

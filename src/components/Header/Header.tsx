@@ -1,4 +1,5 @@
 import React from 'react'
+import { canOperate } from 'shared/permissions'
 import clsx from 'clsx'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { RootState } from 'store/store'
@@ -50,6 +51,7 @@ const getStatusProps = createSelector(
 // component
 const Header = React.forwardRef<HTMLDivElement>((_, ref) => {
   const isAdmin = useAppSelector(state => state.user.isAdmin)
+  const isOperator = useAppSelector(state => canOperate(state.user))
   const isPlayerPresent = useAppSelector(state => state.status.isPlayerPresent)
   const isScanning = useAppSelector(state => state.prefs.isScanning)
   const scannerText = useAppSelector(state => state.prefs.scannerText)
@@ -66,10 +68,10 @@ const Header = React.forwardRef<HTMLDivElement>((_, ref) => {
 
   return (
     <div className={clsx(styles.container)} ref={ref}>
-      {isAdmin && !isPlayer && !isQueue && isPlayerPresent
+      {isOperator && !isPlayer && !isQueue && isPlayerPresent
         && <UpNext isUpNext={isUpNext} isUpNow={isUpNow} wait={wait} />}
 
-      {isAdmin
+      {isOperator
         && <PlaybackCtrl />}
 
       {isAdmin && !isPlayer

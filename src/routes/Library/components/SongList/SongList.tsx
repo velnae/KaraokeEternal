@@ -1,4 +1,5 @@
 import React from 'react'
+import { canOperate } from 'shared/permissions'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { ensureState } from 'redux-optimistic-ui'
 import SongItem from '../SongItem/SongItem'
@@ -21,7 +22,7 @@ const SongList = (props: SongListProps) => {
   const songs = useAppSelector(state => state.songs.entities)
   const starredSongs = useAppSelector(state => ensureState(state.userStars).starredSongs)
   const starredSongCounts = useAppSelector(state => state.starCounts.songs)
-  const isAdmin = useAppSelector(state => state.user.isAdmin)
+  const isAdmin = useAppSelector(state => canOperate(state.user))
   const { played, upcoming, current } = useAppSelector(getSongsStatus)
 
   const handleSongQueue = (songId: number, origin: QueueItemOrigin = 'PARTICIPANT', intent: RequestIntent = 'UNKNOWN') => {

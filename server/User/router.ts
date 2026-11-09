@@ -1,4 +1,5 @@
 import { promisify } from 'util'
+import { canOperate, userRoles } from '../../shared/permissions.js'
 import fs from 'fs'
 import { db } from '../lib/Database.js'
 import sql from 'sqlate'
@@ -11,7 +12,8 @@ import Rooms from '../Rooms/Rooms.js'
 import User from '../User/User.js'
 import { validateGuestName } from '../../shared/guestName.js'
 import { emptyTableContext, enforceConnectedParticipants, joinTable, participation, revokeParticipation, validateInvitation } from '../Tables/admission.js'
-import { QUEUE_PUSH } from '../../shared/actionTypes.js'
+import { QUEUE_PUSH, SOCKET_AUTH_ERROR } from '../../shared/actionTypes.js'
+import type { Prefs as PrefsType } from '../../shared/types.js'
 import {
   USERNAME_MIN_LENGTH,
   USERNAME_MAX_LENGTH,
@@ -27,7 +29,7 @@ interface File {
 }
 
 interface RequestWithBody {
-  body: Record<string, any>
+  body: Record<string, string>
   files?: Record<string, File | File[]>
 }
 
@@ -40,10 +42,10 @@ const { sign: jwtSign } = jsonWebToken
 // into the shape used by the client (state.user) and in server-side
 // routers. Should be used to generate the JWT.
 const createUserCtx = (user, roomId, sessionId?: string | null) => {
-  const identity = { userId: user.userId, roomId: parseInt(roomId, 10) || null, isAdmin: user.role === 'admin', participantSessionId: sessionId }
+  const identity = { userId: user.userId, roomId: parseInt(roomId, 10) || null, role: user.role, isAdmin: user.role === 'admin', participantSessionId: sessionId }
   let tableContext = emptyTableContext()
   let tableAccessError: string | null = null
-  if (!identity.isAdmin && identity.roomId) {
+  if (!canOperate(identity) && identity.roomId) {
     try {
       tableContext = participation(identity)
     } catch (error) {
@@ -58,6 +60,7 @@ const createUserCtx = (user, roomId, sessionId?: string | null) => {
     dateUpdated: user.dateUpdated,
     isAdmin: user.role === 'admin',
     isGuest: user.role === 'guest',
+    role: user.role,
     name: user.name,
     roomId: parseInt(roomId, 10) || null,
     userId: user.userId,
@@ -72,11 +75,11 @@ router.post('/login', async (ctx) => {
   let user
 
   try {
-    user = await User.validate(req.body as any)
+    user = await User.validate({ username: req.body.username, password: req.body.password })
 
     if (roomId) {
       await Rooms.validate(roomId, req.body.roomPassword, {
-        isOpen: user.role !== 'admin', // admins can sign in to closed rooms
+        isOpen: !canOperate(user),
         validatePassword: true,
       })
     } else if (user.role !== 'admin') {
@@ -101,6 +104,7 @@ router.post('/login', async (ctx) => {
     tableContext = joinTable({
       userId: user.userId,
       roomId,
+      role: user.role,
       isAdmin: user.role === 'admin',
       participantSessionId: ctx.user?.userId === user.userId ? ctx.user.participantSessionId : undefined,
     }, req.body.invitation)
@@ -152,7 +156,7 @@ router.get('/user', (ctx) => {
 // Reuse account identity when a guest scans another table or renews participation.
 router.post('/table-join', async (ctx) => {
   const user = typeof ctx.user.userId === 'number' ? User.getById(ctx.user.userId, true) : false
-  if (!user || user.role === 'admin') return ctx.throw(403, 'Ingrese como cantante para vincular una mesa')
+  if (!user || canOperate(user)) return ctx.throw(403, 'Ingrese como cantante para vincular una mesa')
   const req = ctx.request as unknown as RequestWithBody
   const roomId = Number(req.body.roomId)
   try {
@@ -209,7 +213,8 @@ router.delete('/user/:userId', async (ctx) => {
 
   for (const s of sockets) {
     if (s?.user.userId === targetId) {
-      s.disconnect()
+      s.emit('action', { type: SOCKET_AUTH_ERROR })
+      s.disconnect(true)
     }
   }
 
@@ -331,6 +336,7 @@ router.put('/user/:userId', async (ctx) => {
       ctx.throw(403)
     }
 
+    if (!userRoles.includes(req.body.role as typeof userRoles[number]) || req.body.role === 'player') ctx.throw(422, 'El rol no es válido')
     fields.set('roleId', sql`(SELECT roleId FROM roles WHERE name = ${req.body.role})`)
   }
 
@@ -358,6 +364,14 @@ router.put('/user/:userId', async (ctx) => {
 
   // updating another account? we're done
   if (targetId !== user.userId) {
+    if (req.body.role) {
+      for (const socket of await ctx.io.fetchSockets()) {
+        if (socket.user?.userId === targetId) {
+          socket.emit('action', { type: SOCKET_AUTH_ERROR })
+          socket.disconnect(true)
+        }
+      }
+    }
     ctx.status = 200
     ctx.body = {}
     return
@@ -402,6 +416,9 @@ router.post('/user', async (ctx) => {
   const req = ctx.request as unknown as RequestWithBody
   let image
 
+  if (ctx.user.isAdmin && req.body.role === undefined) req.body.role = 'standard'
+  if (ctx.user.isAdmin && (!userRoles.includes(req.body.role as typeof userRoles[number]) || req.body.role === 'player')) ctx.throw(422, 'El rol no es válido')
+
   if (!ctx.user.isAdmin) {
     // already signed in?
     if (ctx.user.userId !== null) {
@@ -416,7 +433,7 @@ router.post('/user', async (ctx) => {
     // new users must choose a room at the same time
     try {
       await Rooms.validate(
-        req.body.roomId,
+        Number(req.body.roomId),
         req.body.roomPassword,
         { role: req.body.role },
       )
@@ -441,7 +458,7 @@ router.post('/user', async (ctx) => {
   // Revalidate after asynchronous account creation; clean up a failed admission.
   let createdUserId: number | undefined
   try {
-    const userId = await User.create({ ...req.body, image } as any, req.body.role)
+    const userId = await User.create({ ...req.body, image } as Parameters<typeof User.create>[0], req.body.role)
     createdUserId = userId
 
     // if admin creating another user, we're done
@@ -479,7 +496,7 @@ router.post('/user', async (ctx) => {
 
 // first-time setup
 router.post('/setup', async (ctx) => {
-  const prefs: any = Prefs.get()
+  const prefs = Prefs.get() as unknown as PrefsType
   let image
 
   // must be first run
@@ -490,7 +507,7 @@ router.post('/setup', async (ctx) => {
   try {
     // create admin user
     const req = ctx.request as unknown as RequestWithBody
-    const userId = await User.create({ ...req.body, image } as any, 'admin')
+    const userId = await User.create({ ...req.body, image } as Parameters<typeof User.create>[0], 'admin')
     const user = User.getById(userId, true)
 
     if (!user) {

@@ -10,6 +10,7 @@ import prepareBrandingLogo from 'lib/prepareBrandingLogo'
 import styles from './BrandingPrefs.css'
 
 const BrandingPrefs = () => {
+  const isAdmin = useAppSelector(state => state.user.isAdmin)
   const branding = useAppSelector(state => state.prefs.branding)
   const dispatch = useAppDispatch()
   const [draft, setDraft] = useState(branding)
@@ -79,7 +80,7 @@ const BrandingPrefs = () => {
     setError('')
     setStatus('')
     try {
-      const saved = await dispatch(saveBranding(draft))
+      const saved = await dispatch(saveBranding(isAdmin ? draft : { name: draft.name, logoSrc: draft.logoSrc }))
       setDraft(saved)
       setDirty(false)
       setStatus('Cambios guardados.')
@@ -91,12 +92,12 @@ const BrandingPrefs = () => {
   }
 
   return (
-    <form onSubmit={save} className={styles.form} aria-labelledby={`${id}-title`} noValidate>
+    <form onSubmit={save} className={styles.form} data-limited={!isAdmin} aria-labelledby={`${id}-title`} noValidate>
       <header className={styles.header}>
         <div>
           <h3 id={`${id}-title`}>Marca del cliente</h3>
         </div>
-        <span className={styles.currentBrand}>
+        <span className={styles.currentBrand} hidden={!isAdmin}>
           {branding.name.trim() ? 'En uso: marca del cliente' : 'En uso: marca del software'}
         </span>
       </header>
@@ -113,10 +114,10 @@ const BrandingPrefs = () => {
                 maxLength={100}
                 placeholder='Nombre de su local o empresa'
                 value={draft.name}
-                aria-describedby={`${id}-name-help`}
+                aria-describedby={isAdmin ? `${id}-name-help` : undefined}
                 onChange={event => change({ name: event.currentTarget.value })}
               />
-              <p id={`${id}-name-help`} className={styles.hint}>
+              <p id={`${id}-name-help`} className={styles.hint} hidden={!isAdmin}>
                 Aparecerá debajo de “Karaoke”, con estilo neón. Déjelo vacío para mostrar “Eternal”.
               </p>
             </div>
@@ -158,7 +159,7 @@ const BrandingPrefs = () => {
                 accept='image/png,image/jpeg'
                 onChange={chooseLogo}
               />
-              <p id={`${id}-logo-help`} className={styles.hint}>PNG o JPG · Hasta 5 MB. Este mismo logo se usa en el acceso y, si lo activa, en el reproductor.</p>
+              <p id={`${id}-logo-help`} className={styles.hint}>{isAdmin ? 'PNG o JPG · Hasta 5 MB. Este mismo logo se usa en el acceso y, si lo activa, en el reproductor.' : 'PNG o JPG · Hasta 5 MB.'}</p>
               {!hasName && draft.logoSrc && (
                 <p className={styles.notice}>
                   Agregue el nombre del cliente para mostrar este logo en el acceso.
@@ -166,30 +167,32 @@ const BrandingPrefs = () => {
               )}
             </div>
 
-            <div className={styles.field}>
-              <label htmlFor={`${id}-support`} className={styles.label}>
-                Enlace de soporte
-                <span aria-hidden='true'>Opcional</span>
-              </label>
-              <input
-                id={`${id}-support`}
-                ref={supportRef}
-                type='url'
-                maxLength={2048}
-                placeholder='https://su-sitio.com/soporte'
-                value={draft.supportUrl}
-                aria-invalid={supportTouched && Boolean(supportError)}
-                aria-describedby={`${id}-support-help`}
-                onBlur={() => setSupportTouched(true)}
-                onChange={event => change({ supportUrl: event.currentTarget.value })}
-              />
-              <p id={`${id}-support-help`} className={supportTouched && supportError ? styles.fieldError : styles.hint}>
-                {supportTouched && supportError ? supportError : 'Sus usuarios verán un enlace para contactar a su equipo.'}
-              </p>
-            </div>
+            {isAdmin && (
+              <div className={styles.field}>
+                <label htmlFor={`${id}-support`} className={styles.label}>
+                  Enlace de soporte
+                  <span aria-hidden='true'>Opcional</span>
+                </label>
+                <input
+                  id={`${id}-support`}
+                  ref={supportRef}
+                  type='url'
+                  maxLength={2048}
+                  placeholder='https://su-sitio.com/soporte'
+                  value={draft.supportUrl}
+                  aria-invalid={supportTouched && Boolean(supportError)}
+                  aria-describedby={`${id}-support-help`}
+                  onBlur={() => setSupportTouched(true)}
+                  onChange={event => change({ supportUrl: event.currentTarget.value })}
+                />
+                <p id={`${id}-support-help`} className={supportTouched && supportError ? styles.fieldError : styles.hint}>
+                  {supportTouched && supportError ? supportError : 'Sus usuarios verán un enlace para contactar a su equipo.'}
+                </p>
+              </div>
+            )}
           </div>
 
-          <figure className={styles.preview}>
+          <figure className={styles.preview} hidden={!isAdmin}>
             <figcaption>
               <Icon icon='VISIBILITY' size={18} />
               <span>Vista previa del acceso</span>
@@ -211,9 +214,9 @@ const BrandingPrefs = () => {
           </figure>
         </div>
 
-        <Link to='/admin/settings/display' className={styles.textButton}>Configurar pantalla del reproductor</Link>
+        {isAdmin && <Link to='/admin/settings/display' className={styles.textButton}>Configurar pantalla del reproductor</Link>}
 
-        <div className={styles.resetRow}>
+        <div className={styles.resetRow} hidden={!isAdmin}>
           <Icon icon='INFO_OUTLINE' size={18} />
           <p>La sección Acerca de mantiene los datos y créditos del software.</p>
           <Button
@@ -221,7 +224,7 @@ const BrandingPrefs = () => {
             className={styles.textButton}
             disabled={!draft.name && !draft.logoSrc && !draft.supportUrl}
             onClick={() => {
-              change({ ...defaultClientBranding })
+              change(isAdmin ? { ...defaultClientBranding } : { name: '', logoSrc: '' })
               setSupportTouched(false)
             }}
           >

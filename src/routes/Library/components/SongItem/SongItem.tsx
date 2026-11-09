@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useAppSelector } from 'store/hooks'
 import clsx from 'clsx'
 import Highlighter from 'react-highlight-words'
 import { useSwipeable } from 'react-swipeable'
@@ -49,6 +50,7 @@ const SongItem = ({
   filterKeywords,
 }: SongItemProps) => {
   const [isExpanded, setExpanded] = useState(false)
+  const canInspectMedia = useAppSelector(state => state.user.isAdmin)
   const [intent, setIntent] = useState<RequestIntent>('LISTEN')
 
   const handleClick = () => {
@@ -158,9 +160,11 @@ const SongItem = ({
           isStarred={isStarred}
           count={numStars}
         />
-        <Button onClick={handleInfoClick} className={clsx(styles.btn, styles.info)} aria-label='Información de la canción' data-hide>
-          <Icon icon='INFO_OUTLINE' />
-        </Button>
+        {canInspectMedia && (
+          <Button onClick={handleInfoClick} className={clsx(styles.btn, styles.info)} aria-label='Información de la canción' data-hide>
+            <Icon icon='INFO_OUTLINE' />
+          </Button>
+        )}
       </Buttons>
     </div>
   )

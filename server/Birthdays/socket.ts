@@ -1,5 +1,6 @@
 import { BIRTHDAY_PLAYER, BIRTHDAY_SYNC } from '../../shared/birthdays.js'
 import Rooms from '../Rooms/Rooms.js'
+import { canOperate } from '../../shared/permissions.js'
 import Animation from '../Animation/Animation.js'
 import Queue from '../Queue/Queue.js'
 import { birthdayService } from './Service.js'
@@ -11,7 +12,7 @@ export default {
     acknowledge({ payload: { roomId: sock.user.roomId, events: publicEvents(sock.user.roomId) } })
   },
   [BIRTHDAY_PLAYER]: async (sock, { payload }, acknowledge) => {
-    if (!sock.user.isAdmin || !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad.')
+    if (!canOperate(sock.user) || !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad.')
     const roomId = sock.user.roomId
     assertRoom(roomId)
     const service = birthdayService()

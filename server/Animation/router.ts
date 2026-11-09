@@ -1,4 +1,5 @@
 import Router from '@koa/router'
+import { canOperate } from '../../shared/permissions.js'
 import fs from 'node:fs/promises'
 import Animation from './Animation.js'
 import { catalogAsset, catalogClips, catalogChanged, resourceFile, setCatalogActive } from './catalog.js'
@@ -12,7 +13,8 @@ import { deleteResource } from './deletion.js'
 
 const router = new Router({ prefix: '/api/animation' })
 router.use(async (ctx, next) => {
-  if (!ctx.user?.isAdmin || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
+  if (!canOperate(ctx.user) || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
+  if (!ctx.user.isAdmin && (!['GET', 'HEAD'].includes(ctx.method) || !/\/api\/animation\/(catalog|preparation|history|assets\/[\w-]+)\/?$/.test(ctx.path))) ctx.throw(403)
   Animation.room(ctx.user.roomId)
   ctx.set('Cache-Control', 'private, no-store')
   await next()

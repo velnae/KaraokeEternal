@@ -1,4 +1,5 @@
 import Router from '@koa/router'
+import { canOperate } from '../../shared/permissions.js'
 import GreetingAudioJobs from './AudioJobs.js'
 import { getGreetingVoice } from './GreetingVoice.js'
 import getLogger from '../lib/Log.js'
@@ -28,7 +29,7 @@ export function startGreetingAudio (directory: string) {
 
 const router = new Router({ prefix: '/api/greetings' })
 router.get('/:greetingId/audio', async (ctx) => {
-  if (!ctx.user?.isAdmin || !Number.isSafeInteger(ctx.user.roomId)) ctx.throw(403)
+  if (!canOperate(ctx.user) || !Number.isSafeInteger(ctx.user.roomId)) ctx.throw(403)
   ctx.set('Cache-Control', 'private, no-store')
   const id = Number(ctx.params.greetingId)
   if (!Number.isSafeInteger(id) || id < 1) ctx.throw(404)

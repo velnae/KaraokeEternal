@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
+import { canOperate } from 'shared/permissions'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { Link, useLocation } from 'react-router'
 import clsx from 'clsx'
@@ -27,7 +28,7 @@ const PlaybackCtrl = () => {
   const location = useLocation()
   const isPlayer = location.pathname.replace(/\/$/, '').endsWith('/player')
 
-  const isAdmin = useAppSelector(state => state.user.isAdmin)
+  const isAdmin = useAppSelector(state => canOperate(state.user))
   const isInRoom = useAppSelector(state => state.user.roomId !== null)
   const roomName = useAppSelector(state => state.rooms.entities[state.user.roomId]?.name)
   const status = useAppSelector(state => state.status)

@@ -99,6 +99,7 @@ export interface Path {
 }
 
 export interface User {
+  role?: string
   userId: number
   username: string
   name: string

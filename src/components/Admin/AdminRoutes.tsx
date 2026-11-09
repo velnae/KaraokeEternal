@@ -1,4 +1,6 @@
 import React from 'react'
+import { canOperate, canPersonalize } from 'shared/permissions'
+import Personalization from './Personalization'
 import { Navigate, Route, Routes, useLocation } from 'react-router'
 import { useAppSelector } from 'store/hooks'
 import AdminPage from './AdminPage'
@@ -17,9 +19,19 @@ import PlayerDisplaySettings from 'components/PlayerDisplay/PlayerDisplaySetting
 import BirthdaySettings from 'components/Birthdays/BirthdaySettings'
 
 export default function AdminRoutes () {
-  const { isAdmin, userId, roomId } = useAppSelector(state => state.user)
+  const user = useAppSelector(state => state.user)
+  const { isAdmin, userId, roomId } = user
   const location = useLocation()
-  if (!isAdmin) return <Navigate to={userId === null ? `/account?redirect=${encodeURIComponent(location.pathname + location.search)}` : '/queue'} replace />
+  if (!canOperate(user)) return <Navigate to={userId === null ? `/account?redirect=${encodeURIComponent(location.pathname + location.search)}` : '/queue'} replace />
+  if (!isAdmin) return (
+    <Routes>
+      <Route path='account' element={<AdminPage title='Mi cuenta' description=''><Account /></AdminPage>} />
+      <Route path='playlists' element={<AdminPage title='Listas de reproducción' description=''><PlaylistsView /></AdminPage>} />
+      <Route path='settings/animator' element={<AdminPage title='Animador' description=''><AnimatorSettings /></AdminPage>} />
+      {canPersonalize(user) && <Route path='personalization' element={<AdminPage title='Personalización' description=''><Personalization key={roomId} /></AdminPage>} />}
+      <Route path='*' element={<Navigate to='/queue' replace />} />
+    </Routes>
+  )
   return (
     <Routes>
       <Route index element={<Navigate to='rooms' replace />} />

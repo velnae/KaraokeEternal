@@ -6,7 +6,7 @@ import styles from './QueueItemMenu.css'
 
 export type QueueMenuAction = 'remove' | 'resource' | 'song' | 'artist' | 'upcoming' | 'move' | 'requeue' | 'replay' | 'skip' | 'skip-upcoming' | 'info' | 'star'
 
-export default function QueueItemMenu ({ id, anchor, title, local, removable, movable, replayable, requeueable, skippable, infoable, starred, focusLast, onClose, onSelect }: {
+export default function QueueItemMenu ({ id, anchor, title, local, removable, movable, replayable, requeueable, skippable, infoable, blockable, starred, focusLast, onClose, onSelect }: {
   id: string
   anchor: HTMLButtonElement
   title: string
@@ -17,6 +17,7 @@ export default function QueueItemMenu ({ id, anchor, title, local, removable, mo
   requeueable: boolean
   skippable: boolean
   infoable: boolean
+  blockable: boolean
   starred: boolean
   focusLast: boolean
   onClose: (restoreFocus?: boolean) => void
@@ -114,10 +115,10 @@ export default function QueueItemMenu ({ id, anchor, title, local, removable, mo
       {(movable || skippable || replayable || requeueable || local || infoable) && <div role='separator' className={styles.separator} />}
       {removable && item('remove', 'Quitar de la cola', 'Solo retira este pedido', 'DELETE')}
       {removable && <div role='separator' className={styles.separator} />}
-      {item('resource', local ? 'Bloquear este archivo' : 'Bloquear este video', local ? 'Solo esta canción local' : 'Solo esta versión de YouTube', 'CLEAR')}
-      {item('song', 'Bloquear canción…', 'Por artista y título', 'MICROPHONE')}
-      {item('artist', 'Bloquear artista…', 'Todo su repertorio', 'PERSON')}
-      {removable && <div role='separator' className={styles.separator} />}
+      {blockable && item('resource', local ? 'Bloquear este archivo' : 'Bloquear este video', local ? 'Solo esta canción local' : 'Solo esta versión de YouTube', 'CLEAR')}
+      {blockable && item('song', 'Bloquear canción…', 'Por artista y título', 'MICROPHONE')}
+      {blockable && item('artist', 'Bloquear artista…', 'Todo su repertorio', 'PERSON')}
+      {blockable && removable && <div role='separator' className={styles.separator} />}
       {removable && item('upcoming', 'Quitar próximos pedidos', 'De este participante, sin bloquear su música', 'DELETE')}
       {skippable && item('skip-upcoming', 'Saltar y quitar próximos pedidos', 'De este participante, sin bloquear su música', 'PLAY_NEXT')}
     </div>,

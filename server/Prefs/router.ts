@@ -1,4 +1,7 @@
 import path from 'path'
+import { canPersonalize } from '../../shared/permissions.js'
+import { visiblePrefs } from './visiblePrefs.js'
+import { personalizeBranding, personalizeDisplay } from './personalization.js'
 import getLogger from '../lib/Log.js'
 import KoaRouter from '@koa/router'
 import getFolders from '../lib/getFolders.js'
@@ -28,26 +31,18 @@ const router = new KoaRouter({ prefix: '/api/prefs' })
 // get all prefs (including media paths)
 router.get('/', (ctx) => {
   ctx.set('Cache-Control', 'no-store')
-  const prefs = Prefs.get() as unknown as PrefsType
-
-  // must be admin or firstrun
-  if (prefs.isFirstRun || ctx.user.isAdmin) {
-    ctx.body = prefs
-    return
-  }
-
-  // Only explicitly public preferences are exposed before login.
-  ctx.body = { roles: prefs.roles, branding: prefs.branding, playerDisplay: prefs.playerDisplay, moderation: prefs.moderation, musicBlocking: prefs.musicBlocking }
+  ctx.body = visiblePrefs(ctx.user)
 })
 
 router.put('/branding', (ctx) => {
-  if (!ctx.user.isAdmin) ctx.throw(401, 'No tiene autorización')
+  if (!canPersonalize(ctx.user)) ctx.throw(403, 'No tiene autorización')
 
   let branding: ClientBranding
   try {
-    branding = validateBranding((ctx.request as unknown as RequestWithBody).body)
+    const body = (ctx.request as unknown as RequestWithBody).body
+    branding = ctx.user.isAdmin ? validateBranding(body) : personalizeBranding(Prefs.get().branding, body)
   } catch (error) {
-    ctx.throw(422, (error as Error).message)
+    ctx.throw((error as { status?: number }).status ?? 422, (error as Error).message)
   }
   if (!Prefs.set('branding', branding)) ctx.throw(500, 'No se pudo guardar la marca del cliente.')
 
@@ -57,14 +52,14 @@ router.put('/branding', (ctx) => {
 })
 
 router.put('/player-display', (ctx) => {
-  if (!ctx.user.isAdmin) ctx.throw(403, 'No tiene autorización')
+  if (!canPersonalize(ctx.user)) ctx.throw(403, 'No tiene autorización')
   let playerDisplay: PlayerDisplaySettings
   try {
     const body = (ctx.request as unknown as RequestWithBody).body
     if (!body || typeof body !== 'object' || Array.isArray(body)) ctx.throw(422, 'Revise la configuración de pantalla.')
-    playerDisplay = validatePlayerDisplay(body)
+    playerDisplay = ctx.user.isAdmin ? validatePlayerDisplay(body) : personalizeDisplay(Prefs.get().playerDisplay, body)
   } catch (error) {
-    ctx.throw(422, (error as Error).message)
+    ctx.throw((error as { status?: number }).status ?? 422, (error as Error).message)
   }
   try {
     if (!Prefs.set('playerDisplay', playerDisplay)) ctx.throw(500, 'No se pudo guardar la configuración de pantalla.')

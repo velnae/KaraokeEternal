@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react'
+import { canOperate } from 'shared/permissions'
 import { useMatch } from 'react-router'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import useResizeObserver from 'use-resize-observer'
@@ -19,7 +20,7 @@ import usePlayerDiagnostic from 'lib/usePlayerDiagnostic'
 
 const CoreLayout = () => {
   const isPlayerRoute = useMatch('/player')
-  const isAdmin = useAppSelector(state => state.user.isAdmin)
+  const isAdmin = useAppSelector(state => canOperate(state.user))
   const adminShell = isAdmin && !isPlayerRoute
   const dispatch = useAppDispatch()
   const headerRef = useRef<HTMLDivElement>(null)

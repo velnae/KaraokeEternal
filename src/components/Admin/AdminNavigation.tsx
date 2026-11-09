@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { canPersonalize } from 'shared/permissions'
 import { NavLink, useLocation } from 'react-router'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { fetchRooms } from 'store/modules/rooms'
@@ -17,6 +18,15 @@ const settings = [
 ] as const
 
 export default function AdminNavigation () {
+  const user = useAppSelector(state => state.user)
+  const destinations = sections.filter(([to]) => user.isAdmin || !['/admin/rooms', '/admin/users'].includes(to))
+  const settingsLinks = user.isAdmin
+    ? settings
+    : [
+        ['/admin/settings/animator', 'Animador'],
+        ...(canPersonalize(user) ? [['/admin/personalization', 'Personalización']] : []),
+      ]
+  const title = user.isAdmin ? 'Administración' : 'Operación'
   const [openPath, setOpenPath] = useState<string | null>(null)
   const toggle = useRef<HTMLButtonElement>(null)
   const location = useLocation()
@@ -42,7 +52,7 @@ export default function AdminNavigation () {
       <button ref={toggle} className={styles.menu} aria-expanded={open} aria-controls='admin-navigation' onClick={() => setOpenPath(open ? null : location.pathname)}>
         {open ? 'Cerrar menú' : 'Abrir menú'}
         {' '}
-        <span>Administración</span>
+        <span>{title}</span>
       </button>
       {open && (
         <button
@@ -68,12 +78,12 @@ export default function AdminNavigation () {
         }}
       >
         <div className={styles.identity}>
-          <strong>Administración</strong>
+          <strong>{title}</strong>
           <span>{room?.name || 'Karaoke'}</span>
         </div>
-        {sections.map(([to, label]) => <NavLink key={to} to={to}>{label}</NavLink>)}
+        {destinations.map(([to, label]) => <NavLink key={to} to={to}>{label}</NavLink>)}
         <h2>Ajustes</h2>
-        {settings.map(([to, label]) => <NavLink key={to} to={to}>{label}</NavLink>)}
+        {settingsLinks.map(([to, label]) => <NavLink key={to} to={to}>{label}</NavLink>)}
         <NavLink className={styles.account} to='/admin/account'>Mi cuenta</NavLink>
       </nav>
     </>

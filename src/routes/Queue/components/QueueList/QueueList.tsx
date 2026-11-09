@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react'
+import { canOperate } from 'shared/permissions'
 import clsx from 'clsx'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { ensureState } from 'redux-optimistic-ui'
@@ -54,6 +55,7 @@ const QueueList = () => {
   const starredSongs = useAppSelector(state => ensureState(state.userStars).starredSongs)
   const starCounts = useAppSelector(state => state.starCounts)
   const user = useAppSelector(state => state.user)
+  const isOperator = canOperate(user)
   const greetings = useGreetings(!!user.roomId)
   const waits = useAppSelector(getWaits)
   const [params, setParams] = useSearchParams()
@@ -86,11 +88,11 @@ const QueueList = () => {
     return item.isOptimistic !== true && item.origin === 'HOUSE' && item.status === 'APPROVED'
   })
   const displayOrder = operatorQueue(queue.result, rawQueue.entities, playerHistory, queueId, isAtQueueEnd)
-  const selectedResult = user.isAdmin && filter === 'pending'
+  const selectedResult = isOperator && filter === 'pending'
     ? pendingIds
-    : user.isAdmin && filter === 'house'
+    : isOperator && filter === 'house'
       ? houseIds
-      : user.isAdmin ? displayOrder : [...ownerFeedbackIds, ...queue.result.filter(queueId => !ownerFeedbackIds.includes(queueId))]
+      : isOperator ? displayOrder : [...ownerFeedbackIds, ...queue.result.filter(queueId => !ownerFeedbackIds.includes(queueId))]
   const result = selectedResult.filter((id) => {
     const item = rawQueue.entities[id]
     return item.isOptimistic === true || !isQueueHistoryHidden(item) || (id === queueId && !isAtQueueEnd)
@@ -124,9 +126,9 @@ const QueueList = () => {
   const visibleResult = result.filter((id) => {
     const item = rawQueue.entities[id]
     return item.isOptimistic !== true
-      && (!user.isAdmin || activeTableFilter === 'all' || String(item.tableId ?? 'none') === activeTableFilter)
+      && (!isOperator || activeTableFilter === 'all' || String(item.tableId ?? 'none') === activeTableFilter)
   })
-  const historyStart = user.isAdmin && filter === 'queue'
+  const historyStart = isOperator && filter === 'queue'
     ? visibleResult.find(id => (isAtQueueEnd || id !== queueId) && playerHistory.includes(id))
     : undefined
   const items = visibleResult.map((qId) => {
@@ -144,8 +146,8 @@ const QueueList = () => {
     const isTerminal = item.status === 'PLAYED' || item.status === 'FAILED'
     const canRemoveByStatus = item.status === 'PENDING_APPROVAL'
       || isUpcoming
-      || (user.isAdmin && filter === 'house' && item.status === 'APPROVED')
-    const isRemovable = canRemoveByStatus && (isOwner || user.isAdmin)
+      || (isOperator && filter === 'house' && item.status === 'APPROVED')
+    const isRemovable = canRemoveByStatus && (isOwner || isOperator)
 
     return (
       <QueueItem
@@ -155,17 +157,17 @@ const QueueList = () => {
         errorMessage={isCurrent && errorMessage ? errorMessage : ''}
         isCurrent={isCurrent}
         key={qId}
-        isAdmin={user.isAdmin}
-        canRecover={user.isAdmin && item.origin === 'PARTICIPANT' && item.status === 'FAILED' && !replacedIds.has(qId)}
+        isAdmin={isOperator}
+        canRecover={isOperator && item.origin === 'PARTICIPANT' && item.status === 'FAILED' && !replacedIds.has(qId)}
         isErrored={isCurrent && isErrored}
         isInfoable={user.isAdmin && item.source === 'LOCAL' && typeof item.songId === 'number'}
-        isMovable={isUpcoming && user.isAdmin}
+        isMovable={isUpcoming && isOperator}
         isOwner={isOwner}
         isPlayed={isTerminal && !isCurrent}
         isPlaying={isCurrent && isPlaying}
         isRemovable={isRemovable}
-        isReplayable={(item.status === 'PLAYED' || isCurrent) && user.isAdmin}
-        isSkippable={isCurrent && user.isAdmin}
+        isReplayable={(item.status === 'PLAYED' || isCurrent) && isOperator}
+        isSkippable={isCurrent && isOperator}
         isStarred={typeof item.songId === 'number' && starredSongs.includes(item.songId)}
         isUpcoming={isUpcoming}
         pctPlayed={isCurrent && duration > 0 ? position / duration * 100 : 0}
@@ -175,17 +177,19 @@ const QueueList = () => {
         greeting={greetings.byQueue[qId]}
         greetingsPaused={greetings.snapshot?.paused}
         greetingBusy={greetings.busy}
-        onRemoveGreeting={greetings.byQueue[qId] && (user.isAdmin || (isOwner && greetings.byQueue[qId].status === 'QUEUED'))
+        onRemoveGreeting={greetings.byQueue[qId] && (isOperator || (isOwner && greetings.byQueue[qId].status === 'QUEUED'))
           ? () => void greetings.execute('remove', { greetingId: greetings.byQueue[qId].greetingId })
           : undefined}
         wait={typeof waits[qId] === 'number' ? formatSeconds(waits[qId], true) : undefined} // fuzzy
         // actions
         onMoveClick={handleMoveClick}
         onRemoveUpcoming={handleRemoveUpcoming}
-        onBlock={(rule, title, opener) => {
-          setBlockMessage('')
-          setBlock({ rule, title, opener })
-        }}
+        onBlock={user.isAdmin
+          ? (rule, title, opener) => {
+              setBlockMessage('')
+              setBlock({ rule, title, opener })
+            }
+          : undefined}
       />
     )
   })
@@ -193,7 +197,7 @@ const QueueList = () => {
   return (
     <>
       {user.isAdmin && <BirthdayPanel key={user.roomId} />}
-      {user.isAdmin && (
+      {isOperator && (
         <div className={styles.filters}>
           {tableOptions.size > 0 && (
             <select aria-label='Filtrar por mesa' value={activeTableFilter} onChange={e => setTableFilter(e.target.value)}>
@@ -225,7 +229,7 @@ const QueueList = () => {
           </Button>
         </div>
       )}
-      {user.isAdmin && (
+      {isOperator && (
         <div className={styles.queueActions}>
           <QueueMaintenance key={`${user.roomId}:${user.userId}`} />
           {(greetings.snapshot?.paused || greetings.snapshot?.items.some(item => ['QUEUED', 'RESERVED', 'DISPLAYING'].includes(item.status))) && (
@@ -237,25 +241,25 @@ const QueueList = () => {
       )}
       {greetings.error && <p role='alert'>{greetings.error}</p>}
       {user.isAdmin && <p ref={feedback} tabIndex={-1} role='status' className={styles.blockFeedback}>{blockMessage}</p>}
-      {user.isAdmin && houseIds.length > 0 && queue.housePolicy.reason && (
+      {isOperator && houseIds.length > 0 && queue.housePolicy.reason && (
         <p className={styles.houseNotice} role='status'>
           {`De la casa en espera: ${queue.housePolicy.reason === 'backlog' ? 'hay 3 o más pedidos pendientes.' : 'un pedido lleva 10 minutos o más esperando.'}`}
         </p>
       )}
-      {user.isAdmin && filter === 'house' && <HousePlaylistControl key={user.roomId} />}
-      {user.isAdmin && filter === 'queue' && result.length === 0 && !birthdays.length && (
+      {isOperator && filter === 'house' && <HousePlaylistControl key={user.roomId} />}
+      {isOperator && filter === 'queue' && result.length === 0 && !birthdays.length && (
         <div className={styles.empty}>
           <h1>La cola de reproducción está vacía</h1>
           <Link to='/library'>Buscar una canción</Link>
         </div>
       )}
-      {user.isAdmin && filter === 'pending' && pendingIds.length === 0 && (
+      {isOperator && filter === 'pending' && pendingIds.length === 0 && (
         <div className={styles.empty}>No hay solicitudes pendientes de aprobación.</div>
       )}
-      {user.isAdmin && filter === 'house' && houseIds.length === 0 && (
+      {isOperator && filter === 'house' && houseIds.length === 0 && (
         <div className={styles.empty}>No hay canciones de la casa aprobadas.</div>
       )}
-      {user.isAdmin
+      {isOperator
         ? playbackSequence(visibleResult, filter === 'queue' ? birthdays : [], isAtQueueEnd ? -1 : queueId).flatMap((entry) => {
             if (entry.kind === 'birthday') return [<BirthdayQueueItem key={entry.event.id} event={entry.event} />]
             const item = items[visibleResult.indexOf(entry.queueId)]

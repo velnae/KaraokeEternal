@@ -1,10 +1,12 @@
 import React, { useState } from 'react'
+import { useAppSelector } from 'store/hooks'
 import { Link, useSearchParams } from 'react-router'
 import Button from 'components/Button/Button'
 import { usePlaylists } from './usePlaylists'
 import styles from './Playlists.css'
 
 function HouseForm ({ state, suggested }: { state: ReturnType<typeof usePlaylists>, suggested: string | null }) {
+  const isAdmin = useAppSelector(state => state.user.isAdmin)
   const { data, busy, run } = state
   const playback = data!.playback
   const [, setParams] = useSearchParams()
@@ -69,7 +71,7 @@ function HouseForm ({ state, suggested }: { state: ReturnType<typeof usePlaylist
                 {playback.enabled && playback.playlistId && <Button variant='default' disabled={busy} onClick={() => void run('PUT', '/playback', { playlistId: playback.playlistId, enabled: true, repeat: playback.repeat, restart: true })}>Reiniciar lista</Button>}
               </>
             )}
-        <Link to={selected ? `/admin/playlists?list=${selected}` : '/admin/playlists'}>{selected ? 'Editar lista' : 'Crear lista'}</Link>
+        <Link to={selected ? `/admin/playlists?list=${selected}` : '/admin/playlists'}>{isAdmin ? selected ? 'Editar lista' : 'Crear lista' : 'Ver listas'}</Link>
       </div>
     </form>
   )

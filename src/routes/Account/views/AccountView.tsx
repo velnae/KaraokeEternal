@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react'
+import { canOperate } from 'shared/permissions'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { fetchPrefs } from 'store/modules/prefs'
 import FirstRun from './FirstRun/FirstRun'
@@ -9,7 +10,7 @@ import { Navigate, useLocation } from 'react-router'
 import { legacyAdminPaths } from 'components/Admin/legacyAdminPaths'
 
 const AccountView = () => {
-  const isAdmin = useAppSelector(state => state.user.isAdmin)
+  const isAdmin = useAppSelector(state => canOperate(state.user))
   const location = useLocation()
   const isSignedIn = useAppSelector(state => state.user.userId !== null)
   const isFirstRun = useAppSelector(state => state.prefs.isFirstRun === true)

@@ -169,7 +169,7 @@ it('check-only requests never execute a missing operation, and non-admin or expi
   handlers[QUEUE_CLEANUP](socket(), { payload: { ...input, checkOnly: true } }, ack)
   expect(ack.mock.calls[0][0].payload.found).toBe(false)
   handlers[QUEUE_CLEANUP](socket(1, false), { payload: { ...input, confirmed: true } }, ack)
-  expect(ack.mock.calls.at(-1)?.[0].error).toContain('administradores')
+  expect(ack.mock.calls.at(-1)?.[0].error).toContain('personal del local')
   handlers[QUEUE_CLEANUP](socket(), { payload: { ...input, confirmed: true, expiresAt: Date.now() - 1 } }, ack)
   expect(ack.mock.calls.at(-1)?.[0].error).toContain('venció')
   handlers[QUEUE_CLEANUP](socket(), { payload: { ...input, confirmed: false } }, ack)

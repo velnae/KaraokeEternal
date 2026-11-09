@@ -90,7 +90,7 @@ describe('player queue lifecycle', () => {
 
     expect(acknowledge).toHaveBeenCalledWith({
       type: PLAYER_EMIT_STATUS + '_ERROR',
-      error: 'Solo los administradores pueden controlar la reproducción',
+      error: 'Solo el personal del local puede controlar la reproducción',
     })
     expect(socket._lastPlayerStatus).toBeNull()
   })
@@ -208,7 +208,7 @@ describe('player queue lifecycle', () => {
     expect(emit).not.toHaveBeenCalled()
     expect(acknowledge).toHaveBeenCalledWith({
       type: actionType + '_ERROR',
-      error: 'Solo los administradores pueden controlar la reproducción',
+      error: 'Solo el personal del local puede controlar la reproducción',
     })
   })
 
@@ -354,7 +354,7 @@ describe('player queue lifecycle', () => {
 
     expect(acknowledge).toHaveBeenCalledWith({
       type: PLAYER_EMIT_FAILURE + '_ERROR',
-      error: 'Solo los administradores pueden controlar la reproducción',
+      error: 'Solo el personal del local puede controlar la reproducción',
     })
     expect(failureInfo).not.toHaveBeenCalled()
   })

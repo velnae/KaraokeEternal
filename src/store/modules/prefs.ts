@@ -63,7 +63,7 @@ export const fetchPrefs = createAsyncThunk<object, void, { state: RootState }>(
 )
 
 // The editor owns loading/errors; avoid a rejected action opening the global error dialog as well.
-export const saveBranding = (branding: ClientBranding): AppThunk<Promise<ClientBranding>> => async (dispatch) => {
+export const saveBranding = (branding: ClientBranding | Omit<ClientBranding, 'supportUrl'>): AppThunk<Promise<ClientBranding>> => async (dispatch) => {
   const response = await api.put<{ branding: ClientBranding }>('/branding', { body: branding })
   dispatch(receivePrefs(response))
   return response.branding

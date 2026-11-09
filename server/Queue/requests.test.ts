@@ -62,6 +62,18 @@ describe('durable participant request receipts', () => {
     expect(Queue.get(1).result).toHaveLength(0)
   })
 
+  it('does not publish an operator request after its socket is revoked during resolution', async () => {
+    const staff = { ...socket, connected: true, user: { ...socket.user, role: 'operator' } }
+    vi.mocked(youtubeSongSource.resolve).mockImplementation(async () => {
+      staff.connected = false
+      return song
+    })
+    const ack = vi.fn()
+    await handlers[QUEUE_ADD](staff, { payload: { ...request('revoked-request-01').payload, origin: 'OPERATOR' } }, ack)
+    expect(ack.mock.calls[0][0].error).toContain('sesión terminó')
+    expect(Queue.get(1).result).toHaveLength(0)
+  })
+
   it('atomically stores one attributed greeting and returns it on duplicate delivery', async () => {
     const action = { payload: { ...request('request-greeting-01').payload, greeting: { message: 'Feliz cumpleaños' } } }
     const ack = vi.fn()

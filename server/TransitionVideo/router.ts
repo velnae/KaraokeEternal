@@ -1,4 +1,6 @@
 import Router from '@koa/router'
+import { canOperate, canPersonalize } from '../../shared/permissions.js'
+import { visibleRoomPrefs } from '../Rooms/participantPrefs.js'
 import { koaBody } from 'koa-body'
 import type { Middleware } from 'koa'
 import Rooms, { STATUSES } from '../Rooms/Rooms.js'
@@ -24,7 +26,8 @@ export function createTransitionVideoRouter (getService: () => TransitionVideoSe
   // differ from the router's case-insensitive endpoint matching.
   const authorize: Middleware = async (ctx, next) => {
     ctx.set('Cache-Control', 'private, no-store')
-    if (!ctx.user?.isAdmin || !Number.isSafeInteger(ctx.user.roomId) || ctx.user.roomId <= 0) ctx.throw(403)
+    if (!canOperate(ctx.user) || !Number.isSafeInteger(ctx.user.roomId) || ctx.user.roomId <= 0) ctx.throw(403)
+    if (!ctx.user.isAdmin && !['GET', 'HEAD'].includes(ctx.method) && !(ctx.method === 'PUT' && canPersonalize(ctx.user))) ctx.throw(403)
     if (!Rooms.get(ctx.user.roomId, { status: STATUSES }).entities[ctx.user.roomId]) ctx.throw(403)
     try {
       await next()
@@ -62,13 +65,23 @@ export function createTransitionVideoRouter (getService: () => TransitionVideoSe
     await streamTransitionVideo(ctx, getService(), true)
   })
   router.put('/', authorize, koaBody({ multipart: false, jsonLimit: '16kb', urlencoded: false, text: false }), async (ctx) => {
-    const settings = saveTransitionVideoSettings(ctx.user.roomId, ctx.request.body)
+    let input = ctx.request.body
+    if (!ctx.user.isAdmin) {
+      const body = input as Record<string, unknown>
+      if (!body || Object.keys(body).some(key => !['videoId', 'revision'].includes(key))) ctx.throw(403, 'Este ajuste requiere un administrador.')
+      if (body.videoId !== null) {
+        const video = getTransitionVideo(ctx.user.roomId, String(body.videoId))
+        if (!video || !video.active || video.state !== 'ready') ctx.throw(422, 'Seleccione un fondo habilitado.')
+      }
+      input = { ...getTransitionVideoSettings(ctx.user.roomId), mode: 'single', ...body }
+    }
+    const settings = saveTransitionVideoSettings(ctx.user.roomId, input)
     // Only administrators consume this field. Existing participant filtering is
     // retained by not broadcasting private settings to participant sockets.
     const sockets = await ctx.io?.in(Rooms.prefix(ctx.user.roomId)).fetchSockets() ?? []
     const prefs = Rooms.get(ctx.user.roomId, { status: STATUSES }).entities[ctx.user.roomId]?.prefs
     for (const socket of sockets) {
-      if (socket.user?.isAdmin) ctx.io.to(socket.id).emit('action', { type: ROOM_PREFS_PUSH, payload: { roomId: ctx.user.roomId, prefs } })
+      if (canOperate(socket.user)) ctx.io.to(socket.id).emit('action', { type: ROOM_PREFS_PUSH, payload: { roomId: ctx.user.roomId, prefs: visibleRoomPrefs(socket.user, prefs) } })
     }
     void getService().cleanup()
     ctx.body = { ...getService().overview(ctx.user.roomId), settings: getTransitionVideoSettings(ctx.user.roomId), savedRevision: settings.revision }

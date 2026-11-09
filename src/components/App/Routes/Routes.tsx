@@ -1,4 +1,5 @@
 import React from 'react'
+import { canOperate } from 'shared/permissions'
 import { Routes, Route, Navigate, useLocation } from 'react-router'
 import { useAppSelector } from 'store/hooks'
 
@@ -12,7 +13,7 @@ import AdminRoutes from 'components/Admin/AdminRoutes'
 const PlayerView = React.lazy(() => import('routes/Player/views/PlayerView'))
 
 const AppRoutes = () => {
-  const isAdmin = useAppSelector(state => state.user.isAdmin)
+  const isAdmin = useAppSelector(state => canOperate(state.user))
   return (
     <Routes>
       <Route path='/join' element={<JoinView />} />
@@ -84,12 +85,14 @@ const RequireAuth = ({
   path,
   redirectTo,
 }: RequireAuthProps) => {
-  const { isAdmin, userId, tableAccessError } = useAppSelector(state => state.user)
+  const user = useAppSelector(state => state.user)
+  const { userId, tableAccessError } = user
+  const isOperator = canOperate(user)
   const location = useLocation()
 
-  if (!isAdmin && tableAccessError) return <Navigate to='/join' replace />
+  if (!isOperator && tableAccessError) return <Navigate to='/join' replace />
 
-  if (path === '/player' && !isAdmin) {
+  if (path === '/player' && !isOperator) {
     return <Navigate to='/' replace />
   }
 

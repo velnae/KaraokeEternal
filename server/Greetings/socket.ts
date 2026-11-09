@@ -1,4 +1,5 @@
 import Greetings from './Greetings.js'
+import { canOperate } from '../../shared/permissions.js'
 import Rooms from '../Rooms/Rooms.js'
 import Animation from '../Animation/Animation.js'
 import { participation } from '../Tables/admission.js'
@@ -38,12 +39,12 @@ export default {
         if (!identity.isAdmin) throw new Error('Solo el operador puede configurar la lectura de saludos')
         Greetings.configurePlayback(roomId, payload.settings, payload.version)
       } else if (operation === 'pause') {
-        if (!identity.isAdmin || typeof payload.paused !== 'boolean') throw new Error('Solo el operador puede pausar los saludos')
+        if (!canOperate(identity) || typeof payload.paused !== 'boolean') throw new Error('Solo el operador puede pausar los saludos')
         Greetings.pause(roomId, payload.paused)
       } else if (['prepare', 'reserve', 'start', 'end', 'finish', 'audioStarted', 'audioEnded', 'audioFailed'].includes(operation)) {
-        if (!identity.isAdmin || !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad')
+        if (!canOperate(identity) || !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad')
         const revalidate = () => {
-          if (sock.connected === false || sock.user?.roomId !== roomId || !sock.user?.isAdmin || !Rooms.isAuthoritativePlayer(sock) || payload.expiresAt < Date.now()) throw new Error('El permiso de reproducción venció')
+          if (sock.connected === false || sock.user?.roomId !== roomId || !canOperate(sock.user) || !Rooms.isAuthoritativePlayer(sock) || payload.expiresAt < Date.now()) throw new Error('El permiso de reproducción venció')
         }
         if (operation === 'prepare') {
           getCallAutomation()?.prioritize(roomId, number('queueId'))

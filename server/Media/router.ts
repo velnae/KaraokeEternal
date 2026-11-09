@@ -1,4 +1,5 @@
 import fs from 'fs'
+import { canOperate } from '../../shared/permissions.js'
 import fsPromises from 'node:fs/promises'
 import { Readable } from 'stream'
 import path from 'path'
@@ -23,7 +24,7 @@ const audioExts = Object.keys(fileTypes).filter(ext => fileTypes[ext].mimeType.s
 router.get('/:mediaId', async (ctx) => {
   const { type } = ctx.query
 
-  if (!ctx.user.isAdmin) {
+  if (!canOperate(ctx.user)) {
     ctx.throw(401)
   }
 

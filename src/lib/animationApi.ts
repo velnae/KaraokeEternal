@@ -1,4 +1,5 @@
 import socket from './socket'
+import { canOperate } from 'shared/permissions'
 import store from 'store/store'
 import { ANIMATION_SYNC, ANIMATION_STATE, ANIMATION_DISCONNECTED, ANIMATION_EVENT, ANIMATION_LIMITS, type AnimationReply, type AnimationClip, type Intervention } from 'shared/animation'
 import HttpApi from './HttpApi'
@@ -41,5 +42,5 @@ export const syncAnimation = () => animationRequest(ANIMATION_SYNC)
 
 socket.on('disconnect', () => store.dispatch({ type: ANIMATION_DISCONNECTED }))
 socket.on('connect', () => {
-  if (store.getState().user.isAdmin) void syncAnimation().catch(() => {})
+  if (canOperate(store.getState().user)) void syncAnimation().catch(() => {})
 })
