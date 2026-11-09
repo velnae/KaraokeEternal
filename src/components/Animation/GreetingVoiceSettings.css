@@ -15,10 +15,12 @@
 .field textarea { resize: vertical; font: inherit; line-height: 1.5; padding: 10px; color: var(--lyrics); background: var(--stage); border: 1px solid var(--edge); border-radius: 6px; }
 .field textarea:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .limits { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.preview { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--edge); }
+.preview { margin-top: 24px; padding-block: 20px; border-block: 1px solid var(--edge); }
 .preview h3 { margin: 0; font-size: 16px; }
 .preview p { line-height: 1.6; }
 .preview audio { display: block; width: 100%; margin-top: 16px; }
+.previewResult { margin-top: 20px; }
+.previewResult p { margin: 0; }
 .hint { color: var(--secondary); font-size: 13px; line-height: 1.6; margin: 10px 0 0; }
 .check { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-top: 20px; font-size: 14px; line-height: 1.5; }
 .check input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; accent-color: var(--cyan); }
@@ -40,5 +42,6 @@
   .heading h2 { font-size: 22px; }
   .actions { display: grid; grid-template-columns: 1fr; }
   .actions button { width: 100%; }
+  .preview button { width: 100%; }
   .limits { grid-template-columns: 1fr; gap: 0; }
 }

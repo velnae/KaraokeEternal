@@ -19,7 +19,9 @@ export default function GreetingVoiceSettings () {
   const operation = useRef<AbortController | null>(null)
   const previewURL = useRef('')
   const [preview, setPreview] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [pendingAction, setPendingAction] = useState<'save' | 'check' | 'reload' | 'preview' | null>(null)
+  const busy = pendingAction !== null
+  const [previewError, setPreviewError] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const greetings = useGreetings()
@@ -62,21 +64,24 @@ export default function GreetingVoiceSettings () {
   const execute = async (action: 'save' | 'check' | 'reload' | 'preview') => {
     if (busy) return
     sequence.current++
-    setBusy(true)
+    setPendingAction(action)
     setError('')
+    setPreviewError('')
     setNotice('')
     const controller = new AbortController()
     operation.current = controller
     const timeout = setTimeout(() => controller.abort(), 120000)
     try {
       if (action === 'preview') {
+        URL.revokeObjectURL(previewURL.current)
+        previewURL.current = ''
+        setPreview('')
         const response = await api.post<Response>('/preview', { signal: controller.signal })
         const blob = await response.blob()
         if (!mounted.current) return
         URL.revokeObjectURL(previewURL.current)
         previewURL.current = URL.createObjectURL(blob)
         setPreview(previewURL.current)
-        setNotice('Prueba preparada. Pulse reproducir para escucharla solo en este navegador.')
         return
       }
       const result = action === 'save'
@@ -98,11 +103,15 @@ export default function GreetingVoiceSettings () {
       if (action === 'save') setNotice('Configuración guardada.')
       if (action === 'check') setNotice('Conexión y modelo verificados. No se generó audio.')
     } catch (error) {
-      if (mounted.current) setError(controller.signal.aborted ? 'La operación no se confirmó a tiempo. Revise el estado antes de volver a generar.' : (error as Error).message)
+      if (mounted.current) {
+        const message = controller.signal.aborted ? 'La operación no se confirmó a tiempo. Revise el estado antes de volver a generar.' : (error as Error).message
+        if (action === 'preview') setPreviewError(message)
+        else setError(message)
+      }
     } finally {
       clearTimeout(timeout)
       if (operation.current === controller) operation.current = null
-      if (mounted.current) setBusy(false)
+      if (mounted.current) setPendingAction(null)
     }
   }
 
@@ -113,10 +122,15 @@ export default function GreetingVoiceSettings () {
   else if (busy) help = 'Esperando la respuesta del servidor…'
   else if (changedElsewhere) help = 'Los ajustes cambiaron en otra sesión. Recargue antes de guardar.'
   else if (dirty) help = 'Guarde los cambios antes de comprobar la conexión o generar una prueba.'
-  let previewHelp = 'La prueba consume una solicitud del mismo límite que los saludos. Se escucha únicamente al pulsar reproducir aquí.'
-  if (!snapshot?.configured) previewHelp = 'Configure KES_GEMINI_API_KEY en el servidor para generar la prueba.'
+  let previewHelp = ''
+  if (!snapshot) previewHelp = 'Cargando ajustes. Si la conexión falla, pulse Recargar ajustes.'
+  else if (pendingAction === 'preview') previewHelp = 'Preparando el audio de prueba…'
+  else if (busy) previewHelp = 'Espere a que termine la operación actual.'
+  else if (changedElsewhere) previewHelp = 'Los ajustes cambiaron en otra sesión. Pulse Recargar ajustes.'
+  else if (dirty) previewHelp = 'Pulse Guardar ajustes para probar la voz con sus cambios.'
+  else if (!snapshot.configured) previewHelp = 'Configure KES_GEMINI_API_KEY en el servidor para generar la prueba.'
   else if (snapshot.state === 'limited' || snapshot.state === 'error') previewHelp = snapshot.message
-  else if (processing) previewHelp = 'Espere a que termine la operación actual para generar otra prueba.'
+  else if (processing) previewHelp = 'Gemini está ocupado. La prueba se habilitará al terminar la operación actual.'
 
   return (
     <section className={styles.panel} aria-labelledby={`${id}-title`}>
@@ -161,6 +175,30 @@ export default function GreetingVoiceSettings () {
           <textarea value={draft.style} maxLength={800} rows={4} required disabled={!snapshot || busy} onChange={event => change({ style: event.target.value })} />
         </label>
         <p className={styles.hint}>Estas indicaciones dirigen la voz; el texto del participante se envía por separado.</p>
+        <div className={styles.actions}>
+          <Button type='submit' variant='primary' disabled={!snapshot || busy || changedElsewhere} aria-describedby={`${id}-help`}>Guardar ajustes</Button>
+          <Button disabled={!snapshot?.configured || busy || dirty || processing} aria-describedby={`${id}-help ${id}-preview-help`} onClick={() => void execute('check')}>Comprobar conexión</Button>
+        </div>
+        <p id={`${id}-help`} className={styles.hint} role='status'>{help}</p>
+        {notice && <p className={styles.notice} role='status'>{notice}</p>}
+        {error && <p className={styles.error} role='alert'>{error}</p>}
+        {(error || changedElsewhere) && <Button disabled={busy} onClick={() => void execute('reload')}>Recargar ajustes</Button>}
+        <section className={styles.preview} aria-labelledby={`${id}-preview-title`} aria-busy={pendingAction === 'preview'}>
+          <h3 id={`${id}-preview-title`}>Probar voz</h3>
+          <p>{greetingVoiceSample}</p>
+          <Button variant='primary' disabled={!snapshot?.configured || busy || dirty || processing || ['limited', 'error'].includes(snapshot.state)} aria-describedby={`${id}-preview-help`} onClick={() => void execute('preview')}>
+            {pendingAction === 'preview' ? 'Generando…' : preview ? 'Generar otra prueba' : 'Generar audio de prueba'}
+          </Button>
+          <p className={styles.hint}>Se escucha solo en este navegador. Generar consume una solicitud.</p>
+          <p id={`${id}-preview-help`} className={styles.hint} role='status'>{previewHelp}</p>
+          {previewError && <p className={styles.error} role='alert'>{previewError}</p>}
+          {preview && (
+            <div className={styles.previewResult}>
+              <p id={`${id}-playback-title`} className={styles.notice} role='status'>Reproducir prueba</p>
+              <audio aria-labelledby={`${id}-playback-title`} controls src={preview} />
+            </div>
+          )}
+        </section>
         <div className={styles.limits}>
           <label className={styles.field}>
             Solicitudes por minuto
@@ -172,21 +210,6 @@ export default function GreetingVoiceSettings () {
           </label>
         </div>
         <p className={styles.hint}>Límites compartidos entre salas y pruebas. Los valores iniciales son 3 por minuto y 10 al día; aumentarlos aquí no amplía la cuota de Google.</p>
-        <div className={styles.actions}>
-          <Button type='submit' variant='primary' disabled={!snapshot || busy || changedElsewhere} aria-describedby={`${id}-help`}>Guardar ajustes</Button>
-          <Button disabled={!snapshot?.configured || busy || dirty || processing} aria-describedby={`${id}-help ${id}-preview-help`} onClick={() => void execute('check')}>Comprobar conexión</Button>
-        </div>
-        <p id={`${id}-help`} className={styles.hint} role='status'>{help}</p>
-        {notice && <p className={styles.notice} role='status'>{notice}</p>}
-        {error && <p className={styles.error} role='alert'>{error}</p>}
-        {(error || changedElsewhere) && <Button disabled={busy} onClick={() => void execute('reload')}>Recargar ajustes</Button>}
-        <div className={styles.preview}>
-          <h3>Prueba privada</h3>
-          <p>{greetingVoiceSample}</p>
-          <Button disabled={!snapshot?.configured || busy || dirty || processing || ['limited', 'error'].includes(snapshot.state)} aria-describedby={`${id}-preview-help ${id}-help`} onClick={() => void execute('preview')}>Generar prueba de voz</Button>
-          <p id={`${id}-preview-help`} className={styles.hint}>{previewHelp}</p>
-          {preview && <audio aria-label='Escuchar prueba privada de voz' controls src={preview} />}
-        </div>
       </form>
       <div className={styles.preparation}>
         <h3>Preparación de saludos en esta sala</h3>
