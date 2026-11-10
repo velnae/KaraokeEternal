@@ -9,6 +9,10 @@ node_modules
 .env
 .env.*
 !.env.example
+!.env.prod.example
+/.sqlit/*
+!/.sqlit/connections.template.json
+__pycache__/
 
 .DS_Store
 *.log

@@ -1,0 +1,16 @@
+[[sources]]
+id = "karaoke-prod"
+description = "Karaoke Eternal live production SQLite over SSH; read-only."
+dsn = "${KARAOKE_DBHUB_DSN}"
+lazy = true
+query_timeout = 30
+
+[[tools]]
+name = "execute_sql"
+source = "karaoke-prod"
+readonly = true
+max_rows = 200
+
+[[tools]]
+name = "search_objects"
+source = "karaoke-prod"

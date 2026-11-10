@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "connections": [
+    {
+      "name": "karaoke",
+      "db_type": "sqlite",
+      "options": {},
+      "endpoint": {"kind": "file", "path": "${DB_TOOLS_DATABASE}"},
+      "tunnel": {"enabled": false}
+    }
+  ]
+}

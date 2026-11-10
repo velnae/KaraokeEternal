@@ -1,5 +1,26 @@
 # Project instructions
 
+## Database access — DBHub MCP
+
+- Manage and inspect project databases through DBHub MCP. Load
+  `.opencode/skills/dbhub-explore/SKILL.md` before schema discovery or SQL and
+  `.opencode/skills/dbhub-setup/SKILL.md` for connection setup or diagnosis.
+- OpenCode starts `dbhub` (local `karaoke`) and `dbhub-prod` (live VPS
+  `karaoke-prod` over SSH) independently. Select the intended MCP server
+  explicitly; each exposes `search_objects` and `execute_sql` without a source
+  suffix because it has only one source. Discover schemas and use `main.table`.
+- Local writes require an authorized task. Production is technically read-only;
+  production reads require an explicit production request. If a write is needed,
+  obtain explicit authorization for its scope and configuration change first.
+  Never bypass a DBHub rejection with a different client.
+- People use `make db` for local sqlit and `make db-prod` for a read-only live
+  sqlite3 console over SSH. `make db-sync` refreshes local sqlit configuration;
+  `make db-check` verifies both MCP connections with `SELECT 1`, or use
+  `connection=karaoke` / `connection=karaoke-prod` to select one.
+- Keep `.env`, `.env.prod`, SSH keys and generated `.sqlit` state private.
+  Preserve the application's data directory and SQLite WAL files; never copy or
+  network-mount a live database for tool access. See `docs/database-tools.md`.
+
 ## Playback diagnosis and local reproduction
 
 For playback incidents, production log investigation or reproducible playback

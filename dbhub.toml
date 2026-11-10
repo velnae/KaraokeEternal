@@ -1,0 +1,16 @@
+[[sources]]
+id = "karaoke"
+description = "Karaoke Eternal local SQLite; authorized development operations."
+dsn = "${KARAOKE_DBHUB_DSN}"
+lazy = true
+query_timeout = 30
+
+[[tools]]
+name = "execute_sql"
+source = "karaoke"
+readonly = false
+max_rows = 200
+
+[[tools]]
+name = "search_objects"
+source = "karaoke"

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "dbhub": {
+      "type": "local",
+      "command": ["mise", "exec", "node@24.22.2", "--", "uv", "run", "--script", "./db-tools.py", "dbhub", "karaoke"],
+      "enabled": true,
+      "timeout": 60000
+    },
+    "dbhub-prod": {
+      "type": "local",
+      "command": ["mise", "exec", "node@24.22.2", "--", "uv", "run", "--script", "./db-tools.py", "dbhub", "karaoke-prod"],
+      "enabled": true,
+      "timeout": 60000
+    }
+  }
+}
