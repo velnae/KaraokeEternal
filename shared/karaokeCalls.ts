@@ -1,8 +1,8 @@
 import type { GreetingVoiceSnapshot } from './greetingVoice.js'
 import type { AnimationClip } from './animation.js'
 
-export type CallPurpose = 'intro' | 'table' | 'continuation' | 'reference'
-export type CallOperation = 'intro' | 'table' | 'hybrid' | 'reference' | 'fallback'
+export type CallPurpose = 'intro' | 'table' | 'continuation' | 'reference' | 'name' | 'template' | 'signature'
+export type CallOperation = 'intro' | 'table' | 'hybrid' | 'reference' | 'fallback' | 'source' | 'compose'
 export type CallJobPurpose = 'preview' | 'setup' | 'automatic'
 export type CallStatus = 'queued' | 'generating' | 'preparing' | 'ready' | 'failed' | 'uncertain' | 'cancelled'
 export interface CallPart {
@@ -53,6 +53,7 @@ export interface CallControls {
   revision: number
   preparing: boolean
   enabled: boolean
+  listeningEnabled?: boolean
   introIds: string[]
 }
 export interface CallRequestState {
@@ -67,6 +68,8 @@ export interface CallRequestState {
   startedAt: number | null
 }
 export interface CallAutomationSnapshot {
+  listeningTemplates?: ListeningTemplate[]
+  listeningRequests?: CallRequestState[]
   controls: CallControls
   tablesReady: number
   tablesTotal: number
@@ -74,14 +77,26 @@ export interface CallAutomationSnapshot {
   message: string | null
   requests: CallRequestState[]
 }
+export interface ListeningTemplate {
+  id: string
+  text: string
+  enabled: boolean
+  revision: number
+  audio: CallPart | null
+  status: 'waiting' | CallStatus
+  error: string | null
+}
 export interface CallContext {
+  kind?: 'listening' | 'signature'
   queueId: number
   inputKey: string
   revision: number
   partId: string
 }
-export interface CallAsset extends AnimationClip { role: 'call', url: string, partId: string }
+export interface CallAsset extends AnimationClip { role: 'call' | 'signature', url: string, partId: string, identifiesSender?: boolean }
 export interface CallPreparation {
+  kind?: 'listening' | 'signature'
+  signatureKey?: string
   queueId: number
   inputKey: string
   revision: number

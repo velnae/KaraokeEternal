@@ -203,7 +203,7 @@ export default class Greetings {
     db.exec('SAVEPOINT greeting_turn')
     try {
       if (candidate) {
-        const text = candidate.call ? candidate.assets.find(asset => asset.role === 'call')!.displayText : selected!.message
+        const text = candidate.call ? candidate.assets.find(asset => asset.role === 'call' || asset.role === 'signature')!.displayText : selected!.message
         const intervention = Animation.reserveGreeting({ roomId, socketId, userId }, turnKey, candidate.assets, candidate.durationMs, candidate.voiceMs, text, candidate.call)
         if (intervention) {
           transition = { ...candidate, intervention }

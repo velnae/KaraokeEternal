@@ -14,7 +14,7 @@ import { categoryEffects, heardAt, profileIntervals, selectAnnouncement, support
 import { backfillAudioUsage, leastUsedAudio, recordAudioUsage } from './usage.js'
 import { GREETING_START_MS } from '../../shared/greetings.js'
 import { captureTransitionBackground, leasedTransitionBackground } from '../TransitionVideo/Playback.js'
-import { callsEnabled, prepareCall, validCall } from './Calls/Playback.js'
+import { callsEnabled, listeningEnabled, prepareCall, validCall } from './Calls/Playback.js'
 import { callControls } from './Calls/Store.js'
 import { getCallAutomation } from './Calls/Automation.js'
 import type { CallContext } from '../../shared/karaokeCalls.js'
@@ -85,7 +85,7 @@ export default class Animation {
       history: Animation.history(roomId), playerPresent: !!owner, audioUnlocked: owner?.unlocked ?? false,
       readyClips: owner?.readyClips ?? [], serverTime: Date.now(), session: currentSession(roomId), ambience: Animation.ambience(roomId),
       catalogVersion: catalogVersion(), voiceBudgetRemainingMs: voiceBudget(Animation.selectionHistory(roomId), Date.now()), greetingVoiceEnabled: Animation.greetingEnabled(roomId),
-      karaokeCallsEnabled: callsEnabled(roomId), karaokeCallsRevision: callControls(roomId).revision }
+      karaokeCallsEnabled: callsEnabled(roomId), karaokeCallsRevision: callControls(roomId).revision, listeningPresentationsEnabled: listeningEnabled(roomId) }
   }
 
   static greetingEnabled (roomId: number) {
@@ -122,6 +122,7 @@ export default class Animation {
     [id, identity.roomId, requestKey, identity.userId, assets[0].id, assets[0].checksum, text, durationMs, voiceMs,
       owner.epoch, identity.socketId, animationContext(Queue.get(identity.roomId), room.prefs.queue), id, now, until, startBefore, until, requestKey, JSON.stringify(assets)])
     if (call) db.run('UPDATE animationInterventions SET callJSON=? WHERE interventionId=?', [JSON.stringify(call), id])
+    db.run('UPDATE animationInterventions SET sessionId=? WHERE interventionId=?', [currentSession(identity.roomId)?.sessionId ?? null, id])
     db.run('UPDATE animationRoomState SET blockedUntil=?,pendingEventJSON=NULL WHERE roomId=?', [until, identity.roomId])
     captureTransitionBackground(identity.roomId, `animation:${id}`, until)
     return Animation.active(identity.roomId)

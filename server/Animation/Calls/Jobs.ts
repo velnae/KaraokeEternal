@@ -10,6 +10,7 @@ import { AudioValidationError } from '../AudioPreparation.js'
 import { callContinuation, callText, type CallJobPurpose, type CallOperation, type CallPurpose, type CallSnapshot } from '../../../shared/karaokeCalls.js'
 import { binding, intros, job, jobDTO, jobOutdated, key, part, partDTO, tableVoice, type JobInput, type JobRow, type PartRow } from './Store.js'
 import { checksum, compose, compositionRevision, preparedPart } from './Composition.js'
+import getLogger from '../../lib/Log.js'
 
 const active = '(\'queued\',\'generating\',\'preparing\')'
 export class CallError extends Error {
@@ -56,7 +57,8 @@ export default class CallJobs {
     Tables.room(roomId)
     const profile = this.tts.profile()
     return { intros: intros(roomId).map(partDTO), profileKey: key(profile), voice: this.tts.snapshot(), error: this.startupError,
-      jobs: db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='preview' ORDER BY rowid DESC LIMIT 20`, [roomId]).map(row => jobDTO(row, profile)),
+      jobs: db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='preview'
+        AND NOT (operation='source' AND json_extract(inputJSON,'$.sourceKind')='template') ORDER BY rowid DESC LIMIT 20`, [roomId]).map(row => jobDTO(row, profile)),
       tables: Tables.list(roomId).filter(table => table.status === 'active').map(table => tableVoice(roomId, table.tableId, profile)) }
   }
 
@@ -67,7 +69,8 @@ export default class CallJobs {
     const body = value as Record<string, unknown>
     if (typeof body.requestId !== 'string' || !/^[\w-]{8,100}$/.test(body.requestId)) throw new CallError('La solicitud necesita un identificador válido.')
     const requestJSON = JSON.stringify({ operation, tableId, text: body.text, title: body.title, previousId: body.previousId,
-      revision: body.revision, introId: body.introId, table: body.tableId, performer: body.performer, song: body.song, regenerate: body.regenerate === true })
+      revision: body.revision, introId: body.introId, table: body.tableId, performer: body.performer, song: body.song,
+      sourceKind: body.sourceKind, sourceIds: body.sourceIds, regenerate: body.regenerate === true })
     const receipt = db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND requestId=?', [roomId, body.requestId])
     if (receipt) {
       if (receipt.requestJSON !== requestJSON || receipt.purpose !== purpose) throw new CallError('El identificador pertenece a otra preparación.', 409)
@@ -77,7 +80,20 @@ export default class CallJobs {
     if (db.get<{ n: number }>(`SELECT count(*) n FROM karaokeCallJobs WHERE status IN ${active}`)!.n >= (purpose === 'preview' ? 10 : 9)) throw new CallError('La cola de preparación está ocupada. Espere o cancele una.', 409)
     const profile = this.tts.profile()
     const input: JobInput = { title: '', text: '', variantId: randomUUID(), regenerate: body.regenerate === true }
-    if (operation === 'intro') {
+    if (operation === 'source') {
+      if (!['name', 'template', 'signature'].includes(String(body.sourceKind))) throw new CallError('Tipo de voz no válido.')
+      input.sourceKind = body.sourceKind as JobInput['sourceKind']
+      input.text = callText(body.text, 100)
+      input.title = input.text
+    } else if (operation === 'compose') {
+      if (body.sourceKind === 'signature') input.sourceKind = 'signature'
+      if (!Array.isArray(body.sourceIds) || body.sourceIds.length < 2 || body.sourceIds.length > 3) throw new CallError('La presentación necesita dos o tres piezas.')
+      const sources = body.sourceIds.map(id => typeof id === 'string' ? part(roomId, id) : undefined)
+      if (sources.some(source => !source || source.profileKey !== key(profile))) throw new CallError('Una pieza cambió o no está disponible.')
+      input.sourceIds = sources.map(source => source!.id)
+      input.text = callText(sources.map(source => source!.text).join(' '))
+      input.title = input.text
+    } else if (operation === 'intro') {
       input.text = callText(body.text, 100)
       input.title = callText(body.title, 80)
       if (body.previousId !== undefined) {
@@ -159,7 +175,8 @@ export default class CallJobs {
     if (this.running) return this.running
     if (this.stopped || this.startupError) return Promise.resolve()
     const row = db.get<JobRow>(`SELECT * FROM karaokeCallJobs j WHERE status='queued' AND retryAt<=? AND
-      (purpose='preview' OR (?=1 AND EXISTS(SELECT 1 FROM karaokeCallControls c JOIN rooms r USING(roomId) WHERE c.roomId=j.roomId AND c.preparing=1 AND r.status='open')))
+      (purpose='preview' OR ((?=1 OR operation='compose') AND EXISTS(SELECT 1 FROM rooms r LEFT JOIN karaokeCallControls c USING(roomId) WHERE r.roomId=j.roomId AND r.status='open'
+        AND (c.preparing=1 OR c.listeningEnabled=1 OR EXISTS(SELECT 1 FROM greetingControls g WHERE g.roomId=r.roomId AND g.audioEnabled=1 AND g.paused=0 AND json_extract(g.playbackJSON,'$.enabled')=1)))))
       ORDER BY priority DESC,rowid LIMIT 1`, [Date.now(), this.tts.snapshot().config.enabled ? 1 : 0])
     if (!row) return Promise.resolve()
     this.runningId = row.id
@@ -222,9 +239,18 @@ export default class CallJobs {
       this.assertCurrent(row)
       const input: JobInput = JSON.parse(row.inputJSON)
       let result: PartRow
-      if (row.operation === 'hybrid' || row.operation === 'fallback') {
+      if (row.operation === 'compose') {
+        const pieces = input.sourceIds!.map(id => part(row.roomId, id))
+        if (pieces.some(piece => !piece)) throw new CallError('Una pieza ya no está disponible.')
+        const cacheKey = key([pieces.map(piece => [piece!.masterChecksum, piece!.text, piece!.profileKey]), compositionRevision])
+        const cached = db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND cacheKey=? AND retired=0', [row.roomId, cacheKey])
+        result = cached ?? await this.storePart(row, input.sourceKind === 'signature' ? 'signature' : 'composition', input.text, cacheKey,
+          await compose(this.directory, await Promise.all(pieces.map(piece => this.bytes(row.roomId, piece!.id, true))), this.ffmpeg, this.controller!.signal), input.sourceIds)
+      } else if (row.operation === 'source') {
+        result = await this.generatePart(row, input.sourceKind!, input.text)
+      } else if (row.operation === 'hybrid' || row.operation === 'fallback') {
         const intro = part(row.roomId, input.introId!)
-        const table = part(row.roomId, input.tablePartId!)
+        const table = input.tablePartId ? part(row.roomId, input.tablePartId) : undefined
         if (!intro || (input.tablePartId && !table)) throw new CallError('Una pieza ya no está disponible.')
         const continuation = await this.generatePart(row, 'continuation', input.continuation!)
         this.assertCurrent(row)
@@ -262,7 +288,9 @@ export default class CallJobs {
           db.run('UPDATE karaokeCallJobs SET status=\'queued\',retryAt=?,error=?,updatedAt=? WHERE id=?', [Math.max(Date.now() + 1000, error.retryAt), error.message, Date.now(), row.id])
         } else {
           const uncertain = this.stopped || (error instanceof GreetingVoiceError && error.kind === 'uncertain')
-          const message = error instanceof CallError || error instanceof AudioValidationError || error instanceof GreetingVoiceError ? error.message : 'No se pudo procesar el audio. Revise FFmpeg y vuelva a preparar.'
+          const known = error instanceof CallError || error instanceof AudioValidationError || error instanceof GreetingVoiceError
+          if (!known) getLogger('calls').warn('Preparation %s (%s) failed: %s', row.id, row.operation, error instanceof Error ? error.stack ?? error.message : String(error))
+          const message = known ? error.message : 'No se pudo preparar el audio. Revise el registro del servidor.'
           db.run('UPDATE karaokeCallJobs SET status=?,error=?,updatedAt=? WHERE id=?', [uncertain ? 'uncertain' : 'failed', message, Date.now(), row.id])
         }
       }
@@ -310,6 +338,14 @@ export default class CallJobs {
       }
     }
     const rows = db.all<PartRow>('SELECT * FROM karaokeCallParts WHERE retired=0')
+    for (const row of rows) if (['name', 'template', 'signature'].includes(row.kind)) keep.add(row.id)
+    for (const row of db.all<{ resultId: string | null, signatureId: string | null }>(`SELECT p.resultId,p.signatureId FROM listeningPresentations p JOIN queue q USING(queueId)
+      WHERE q.status IN ('APPROVED','PLAYING')`)) {
+      if (row.resultId) keep.add(row.resultId)
+      if (row.signatureId) keep.add(row.signatureId)
+    }
+    // Keep freshly completed compositions until server reconciliation binds them.
+    for (const row of db.all<{ resultId: string }>(`SELECT resultId FROM karaokeCallJobs WHERE operation='compose' AND status='ready' AND updatedAt>?`, [Date.now() - 5000])) keep.add(row.resultId)
     // Composition dependency graphs are acyclic and only contain immutable older parts.
     for (let count = -1; count !== keep.size;) {
       count = keep.size

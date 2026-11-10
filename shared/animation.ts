@@ -156,6 +156,7 @@ export interface AmbienceGrant {
   offsetMs: number
 }
 export interface AnimationSnapshot extends AnimationRoomState {
+  listeningPresentationsEnabled?: boolean
   karaokeCallsEnabled?: boolean
   karaokeCallsRevision?: number
   prefs: AnimationPrefs

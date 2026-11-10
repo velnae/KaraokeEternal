@@ -35,7 +35,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
   const authority = useAppSelector(state => state.player._authority)
   const queue = useAppSelector(state => state.queue)
   const queueId = useAppSelector(state => state.player.queueId)
-  const enabled = useAppSelector(state => !!(state.animation.snapshot?.greetingVoiceEnabled || state.animation.snapshot?.karaokeCallsEnabled))
+  const enabled = useAppSelector(state => !!(state.animation.snapshot?.greetingVoiceEnabled || state.animation.snapshot?.karaokeCallsEnabled || state.animation.snapshot?.listeningPresentationsEnabled))
   const confirmMounted = useCallback((node: HTMLElement | null) => {
     if (node?.isConnected) commit.current.confirm(Number(node.dataset.greetingId))
   }, [])
@@ -112,7 +112,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       const state = store.getState()
       const item = ensureState(state.queue).entities[expectedQueueId]
       const sameCall = !grant?.transition?.call || (item && 'userDisplayName' in item && item.userDisplayName === grant.performer.name
-        && item.title === grant.performer.title && (item.tableLabelSnapshot ?? null) === grant.performer.tableLabel && item.requestIntent === 'SING')
+        && item.title === grant.performer.title && (item.tableLabelSnapshot ?? null) === grant.performer.tableLabel && item.requestIntent === grant.performer.requestIntent)
       return mounted.current && !interrupted && generation === version.current && socket.connected && state.player._authority === 'GRANTED'
         && (state.player.isPlaying || state.player._isPlayingNext)
         && state.rooms.entities[state.user.roomId]?.status !== 'closed' && sameCall && performance.now() < deadline && upcoming() === expectedQueueId
@@ -121,10 +121,10 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       const current = store.getState().animation.snapshot
       const intervention = grant?.transition?.intervention
       const call = grant?.transition?.call
-      const allowed = call
-        ? current?.karaokeCallsEnabled && current.karaokeCallsRevision === call.revision
-        && (!grant?.transition?.assets.some(asset => asset.role === 'greeting') || current.greetingVoiceEnabled)
-        : current?.greetingVoiceEnabled
+      let allowed = current?.greetingVoiceEnabled
+      if (call && !call.kind) allowed = current?.karaokeCallsEnabled && current.karaokeCallsRevision === call.revision
+      if (call?.kind === 'listening') allowed = current?.prefs.enabled && (scheduled || (current.listeningPresentationsEnabled && current.karaokeCallsRevision === call.revision))
+      if (grant?.transition?.assets.some(asset => asset.role === 'greeting')) allowed = allowed && current?.greetingVoiceEnabled
       return valid() && channel.ready && !!intervention && allowed && current!.prefs.volume > 0
         && current!.playerEpoch === intervention.playerEpoch && current!.active?.interventionId === intervention.interventionId && !current!.active.stopRequestedAt
     }
@@ -176,7 +176,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       const status = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
       const flush = await socket.timeout(1500).emitWithAck('action', { type: PLAYER_EMIT_STATUS, payload: { ...status, visualizer: state.playerVisualizer } })
       if (flush.error || !valid()) return false
-      if ((store.getState().animation.snapshot?.greetingVoiceEnabled || store.getState().animation.snapshot?.karaokeCallsEnabled) && !channel.ready) {
+      if (enabled && !channel.ready) {
         // The trusted Play gesture may still be resuming the already-preloaded
         // context. Bound this handshake; never wait for TTS or force a new gesture.
         await Promise.race([channel.resume().catch(() => {}), delay(400)])
@@ -223,22 +223,15 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
           const key = `greeting-started:${intervention.interventionId}`
           if (sessionStorage.getItem(key)) throw new Error('Esta lectura ya se inició')
           sessionStorage.setItem(key, '1')
-          const introAsset = grant.transition.assets.find(asset => asset.role === 'intro')
-          const callAsset = grant.transition.assets.find(asset => asset.role === 'call')
           const greeting = grant.transition.assets.find(asset => asset.role === 'greeting')
-          if (callAsset) {
-            // A visual-only dedication reads concurrently with the call.
-            await show(!!greeting)
-            await play(callAsset, true)
-          } else if (introAsset) {
-            setIntro(introAsset.displayText)
-            await play(introAsset, true)
-          }
-          if (greeting) {
-            if (!callAsset) await show(true)
-            await play(greeting, !introAsset && !callAsset, async () => {
-              await greetingRequest('audioStarted', { turnKey: grant!.turnKey, greetingId: grant!.items[0].greetingId })
-            })
+          const foreground = grant.transition.assets.filter(asset => asset.role !== 'bed')
+          for (const [index, asset] of foreground.entries()) {
+            if (asset.role === 'intro') setIntro(asset.displayText)
+            if ((asset.role === 'call' && !greeting) || asset.role === 'greeting') await show(!!greeting)
+            const onStarted = asset.role === 'greeting'
+              ? async () => { await greetingRequest('audioStarted', { turnKey: grant!.turnKey, greetingId: grant!.items[0].greetingId }) }
+              : undefined
+            await play(asset, index === 0, onStarted)
           }
           voiceCompleted = true
           if (greeting) void greetingRequest('audioEnded', { turnKey: grant.turnKey, greetingId: grant.items[0].greetingId }).catch(() => {})
@@ -281,6 +274,6 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       }
     }
     return !!grant
-  }, [channel, markStopped, refreshReadiness])
+  }, [channel, markStopped, refreshReadiness, enabled])
   return { active, intro, scene, performer, error, attempt, confirmMounted, busy: running.current }
 }

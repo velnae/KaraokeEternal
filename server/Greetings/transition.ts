@@ -7,6 +7,9 @@ import { defaultGreetingPlayback, GREETING_START_MS, type Greeting, type Greetin
 import { getGreetingAudioAsset } from './audioRouter.js'
 import { prepareCall } from '../Animation/Calls/Playback.js'
 import { isGreetingAllowed } from '../../shared/greetings.js'
+import { currentSession } from '../Animation/sessions.js'
+import { selectAnnouncement } from '../Animation/selection.js'
+import { interventionAssets, type Intervention } from '../../shared/animation.js'
 
 export function greetingPlayback (roomId: number) {
   const row = db.get<{ playbackJSON: string, playbackVersion: number, paused: number, audioEnabled: number }>('SELECT * FROM greetingControls WHERE roomId=?', [roomId])
@@ -23,13 +26,22 @@ export async function prepareGreetingTransition (roomId: number, queueId: number
   if (!item && !call) return null
   const control = greetingPlayback(roomId)
   const assets: GreetingAsset[] = [...(call?.assets ?? [])]
+  const room = db.get<{ data: string }>('SELECT data FROM rooms WHERE roomId=?', [roomId])
+  const prefs = animationPrefs(room ? JSON.parse(room.data).prefs?.animation : undefined)
+  const clips = catalogClips(roomId).filter(clip => clip.approvedForAuto && (!clip.validUntil || clip.validUntil > Date.now()))
+  if (call?.kind && prefs.enabled && prefs.automation && prefs.events.turn && currentSession(roomId)?.status === 'OPEN') {
+    const history = db.all<Intervention>('SELECT * FROM animationInterventions WHERE roomId=? ORDER BY requestedAt DESC', [roomId]).map((row) => {
+      const intro = (interventionAssets(row) as GreetingAsset[]).find(asset => asset.role === 'intro')
+      return intro ? { ...row, displayText: intro.displayText, family: 'turn' } : row
+    })
+    const intro = selectAnnouncement({ clips, family: 'turn', profile: prefs.profile, history, sessionId: currentSession(roomId)!.sessionId,
+      recentSessions: [], ready: clips.map(clip => clip.checksum), now: Date.now(), random: () => 0 }).clip
+    if (intro) assets.push({ ...intro, role: 'intro', url: `api/animation/assets/${encodeURIComponent(intro.id)}` })
+  }
   if (control.enabled && item) {
     const voice = await getGreetingAudioAsset(roomId, item.greetingId)
     if (voice) {
       assets.push(voice)
-      const room = db.get<{ data: string }>('SELECT data FROM rooms WHERE roomId=?', [roomId])
-      const prefs = animationPrefs(room ? JSON.parse(room.data).prefs?.animation : undefined)
-      const clips = catalogClips(roomId).filter(clip => clip.approvedForAuto && (!clip.validUntil || clip.validUntil > Date.now()))
       const intro = !call && clips.find(clip => clip.id === control.prefs.introClipId && (clip.kind ?? 'voice') === 'voice')
       if (intro) assets.push({ ...intro, role: 'intro', url: `api/animation/assets/${encodeURIComponent(intro.id)}` })
       const bed = control.prefs.ambienceEnabled && leastUsedAudio(roomId, eligibleAmbience(clips, prefs))
@@ -46,6 +58,8 @@ export function planGreetingTransition (item: Greeting, prepared: GreetingPrepar
   if (!prepared || prepared.greetingId !== item.greetingId || prepared.queueId !== item.queueId) return null
   const available = prepared.assets.filter(asset => ready.includes(asset.checksum))
   const greeting = available.find(asset => asset.role === 'greeting')
+  // Only legacy signed speech can stand alone without a prepared attribution.
+  if (greeting?.senderIncluded === false) return null
   if (!greeting || greeting.durationMs <= 0 || greeting.durationMs > 20000 || greeting.durationMs > budgetMs) return null
   // Spoken delivery already communicates the full message; do not append the
   // visual-only 10–15 second reading interval after a short greeting.

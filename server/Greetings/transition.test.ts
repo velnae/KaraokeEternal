@@ -41,7 +41,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 function request (intent: 'SING' | 'LISTEN' = 'SING') {
-  const queueId = Queue.add({ roomId: 1, userId: 1, requestIntent: intent, song: { source: 'YOUTUBE', sourceId: 'AAAAAAAAAAA', externalId: 'AAAAAAAAAAA', localSongId: null, mediaId: null, mediaType: 'youtube', title: 'Song', artistOrChannel: 'Artist', durationSeconds: 120, thumbnailUrl: null, isPlayable: true } })
+  const queueId = Queue.add({ roomId: 1, userId: 1, requestIntent: intent, song: { source: 'YOUTUBE', sourceId: 'AAAAAAAAAAA', externalId: 'AAAAAAAAAAA', localSongId: null, mediaId: null, mediaType: 'youtube', title: 'Song karaoke', artistOrChannel: 'Artist', durationSeconds: 120, thumbnailUrl: null, isPlayable: true } })
   const greetingId = Greetings.attach({ roomId: 1, userId: 1 }, queueId, text, {})
   const item = Greetings.items(1).find(item => item.greetingId === greetingId)!
   return { queueId, item }

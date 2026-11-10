@@ -26,6 +26,8 @@ export interface JobInput {
   tablePartId?: string
   introId?: string
   continuation?: string
+  sourceKind?: 'name' | 'template' | 'signature'
+  sourceIds?: string[]
 }
 export interface JobRow {
   purpose: CallJobPurpose
@@ -62,8 +64,8 @@ export interface RequestRow {
   updatedAt: number
 }
 export const callControls = (roomId: number): CallControls => {
-  const row = db.get<{ revision: number, preparing: number, enabled: number, introIdsJSON: string }>('SELECT * FROM karaokeCallControls WHERE roomId=?', [roomId])
-  return row ? { revision: row.revision, preparing: !!row.preparing, enabled: !!row.enabled, introIds: JSON.parse(row.introIdsJSON) } : { revision: 0, preparing: false, enabled: false, introIds: [] }
+  const row = db.get<{ revision: number, preparing: number, enabled: number, listeningEnabled: number, introIdsJSON: string }>('SELECT * FROM karaokeCallControls WHERE roomId=?', [roomId])
+  return row ? { revision: row.revision, preparing: !!row.preparing, enabled: !!row.enabled, listeningEnabled: !!row.listeningEnabled, introIds: JSON.parse(row.introIdsJSON) } : { revision: 0, preparing: false, enabled: false, listeningEnabled: false, introIds: [] }
 }
 export const requestCall = (roomId: number, queueId: number) => db.get<RequestRow>('SELECT * FROM karaokeCallRequests WHERE roomId=? AND queueId=?', [roomId, queueId])
 export const callSessionAllows = (roomId: number) => {

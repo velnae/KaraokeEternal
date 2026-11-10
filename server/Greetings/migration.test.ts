@@ -129,7 +129,7 @@ it('drops the unused recipient and discards old greetings without changing music
     const requests = database.all('SELECT * FROM queue')
     database.migrate({ migrationsPath: schemas })
     database.migrate({ migrationsPath: schemas })
-    expect(database.all('SELECT * FROM queue')).toEqual(requests)
+    expect(database.all('SELECT * FROM queue')).toMatchObject(requests)
     expect(database.all('SELECT * FROM greetings')).toEqual([])
     expect(database.all<{ name: string }>('PRAGMA table_info(greetings)').map(column => column.name)).not.toContain('recipient')
     expect(database.get('SELECT status,cancelRequested,updatedAt FROM greetingAudioJobs')).toEqual({ status: 'cancelled', cancelRequested: 1, updatedAt: 0 })

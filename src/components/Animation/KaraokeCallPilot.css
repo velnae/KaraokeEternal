@@ -36,8 +36,17 @@
 .readiness span { color: var(--secondary); }
 .requestDetails { margin-top: 18px; border-top: 1px solid var(--edge); }
 .requestDetails summary { padding-block: 16px; cursor: pointer; }
+.templateHeading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.templateHeading h3 { margin: 0; }
+.templateRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; }
+.templateRow .switch { min-width: 0; }
+.templateRow .switch input { flex: 0 0 auto; }
+.templateMenu summary { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; cursor: pointer; list-style: none; font-size: 24px; }
+.templateMenu summary::-webkit-details-marker { display: none; }
+.templateMenu[open] .actions { flex-direction: column; align-items: stretch; }
 @media (max-width: 680px) {
   .grid { grid-template-columns: 1fr; gap: 0; }
   .actions > button { flex: 1 1 auto; }
   .profile, .preview, .automatic { padding: 14px; }
+  .templateRow { grid-template-columns: 1fr; gap: 4px; }
 }

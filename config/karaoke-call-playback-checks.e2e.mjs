@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
+import { checkListeningPresentations } from './listening-presentation-checks.e2e.mjs'
 
 export async function checkAutomaticCalls ({ page, context, browser, api, base, uiBase, data, db, call, snapshot, restart, fail }) {
   const sockets = []
@@ -43,8 +44,8 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
         } else await route.fulfill({ response })
       } catch { await route.abort().catch(() => {}) }
     }
-    await client.route('https://karaoke.puyu.pe/api/**', route => forward(route))
-    await client.route('https://karaoke.puyu.pe/socket.io/**', route => forward(route, true))
+    await client.route('https://dev-karaoke.puyu.pe/api/**', route => forward(route))
+    await client.route('https://dev-karaoke.puyu.pe/socket.io/**', route => forward(route, true))
     await client.routeWebSocket('**/socket.io/**', socket => socket.close())
   }
   const join = async (name, code) => {
@@ -69,7 +70,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     const file = path.join(data, `${title}.wav`)
     execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `sine=frequency=${frequency}:sample_rate=44100`, '-t', String(seconds), file])
     const response = await api.post(base + 'api/animation/resources/upload', { multipart: { requestId: title, title, kind,
-      metadata: JSON.stringify({ text: 'La próxima canción ya está lista.', family, modes: ['mixed'], loop: kind === 'ambience' ? true : undefined }),
+      metadata: JSON.stringify({ text: title === 'listening-ordinary' ? 'Seguimos con los pedidos de esta noche.' : 'La próxima canción ya está lista.', family, modes: ['mixed'], loop: kind === 'ambience' ? true : undefined }),
       file: { name: `${title}.wav`, mimeType: 'audio/wav', buffer: fs.readFileSync(file) } } })
     assert.equal(response.status(), 200, await response.text())
     return response.json()
@@ -79,7 +80,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
       '-t', '2', '-c:v', 'libx264', '-threads', '2', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(data, 'call-song.mp4')])
     db.exec(`INSERT INTO artists(artistId,name,nameNorm) VALUES(1,'Fixture','fixture')`)
     db.prepare('INSERT INTO paths(pathId,path,priority,data) VALUES(1,?,1,?)').run(data, '{"prefs":{"isWatching":false}}')
-    for (const [index, title] of ['Rayando el sol', 'Yellow', 'Fallo de voz', 'Listen fixture', 'House fixture', 'Pause fixture'].entries()) {
+    for (const [index, title] of ['Rayando el sol', 'Yellow', 'Fallo de voz', 'Listen fixture', 'House fixture', 'Pause fixture', 'Listen one', 'Listen two', 'Listen signature', 'Listen neutral'].entries()) {
       const id = index + 1
       const filename = `song-${id}.mp4`
       fs.copyFileSync(path.join(data, 'call-song.mp4'), path.join(data, filename))
@@ -223,6 +224,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     await expect(page.getByRole('switch', { name: 'Llamados automáticos' })).not.toBeChecked()
     await emit(operator, 'server/PLAYER_REQ_PAUSE')
     console.log('Automatic calls: setup, queue preparation without admin, singing/listening/house playback, greeting coexistence, provider fallback and pause/restart passed.')
+    await checkListeningPresentations({ page, player, operator, luis, join, add, emit, db, upload, snapshot, uiBase, data, fail })
   } finally {
     fail('')
     await player?.close()

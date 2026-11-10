@@ -222,7 +222,8 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (celebration === 'finished') dispatch(playerStatus({ isPlaying: true }))
       const upcoming = selection()
       setPreparingQueueId(upcoming?.source === 'YOUTUBE' ? upcoming.queueId : null)
-      const callRequested = animationRef.current.snapshot?.karaokeCallsEnabled && upcoming?.origin !== 'HOUSE' && upcoming?.requestIntent === 'SING'
+      const callRequested = (animationRef.current.snapshot?.karaokeCallsEnabled && upcoming?.origin !== 'HOUSE' && upcoming?.requestIntent === 'SING')
+        || (animationRef.current.snapshot?.listeningPresentationsEnabled && upcoming?.origin === 'PARTICIPANT' && upcoming?.requestIntent === 'LISTEN')
       const scene: TransitionScene | null = (announce || callRequested) && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
         && (backgroundRef.current || store.getState().rooms.entities[store.getState().user.roomId]?.prefs?.transitionVideo?.mode === 'all'
           || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)

@@ -6,9 +6,10 @@ import useCallPilot from './useCallPilot'
 import PrivateCallAudio from './PrivateCallAudio'
 import styles from './KaraokeCallPilot.css'
 import AutomaticCallControls from './AutomaticCallControls'
+import ListeningTemplateManager from './ListeningTemplateManager'
 
 export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
-  const { snapshot, error, busy, notice, submit, cancel, configure, unavailable } = useCallPilot(roomId)
+  const { snapshot, error, busy, notice, submit, cancel, configure, refresh, unavailable } = useCallPilot(roomId)
   const id = useId()
   const [introTitle, setIntroTitle] = useState('Vamos con el karaoke')
   const [introText, setIntroText] = useState('¡Vamos con el karaoke!')
@@ -48,8 +49,18 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
       </div>
       {error && <p className={styles.error} role='alert'>{error}</p>}
       {notice && <p className={styles.notice} role='status'>{notice}</p>}
+      {snapshot?.automation && (
+        <ListeningTemplateManager
+          key={roomId}
+          roomId={roomId}
+          templates={snapshot.automation.listeningTemplates ?? []}
+          unavailable={unavailable}
+          refresh={refresh}
+          listen={setListening}
+        />
+      )}
       <section className={styles.section} aria-labelledby={`${id}-intros`}>
-        <h3 id={`${id}-intros`}>Introducciones</h3>
+        <h3 id={`${id}-intros`}>Introducciones para cantar</h3>
         <form
           onSubmit={(event) => {
             event.preventDefault()
@@ -146,7 +157,7 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
         <ul className={styles.list}>
           {snapshot?.jobs.map(item => (
             <li className={styles.item} key={item.id}>
-              <strong>{`${({ intro: 'Introducción', table: 'Voz de mesa', hybrid: 'Llamado híbrido', reference: 'Frase completa', fallback: 'Llamado básico' })[item.operation]} · ${callStatusLabels[item.status]}`}</strong>
+              <strong>{`${({ intro: 'Introducción', table: 'Voz de mesa', hybrid: 'Llamado híbrido', reference: 'Frase completa', fallback: 'Llamado básico', source: 'Voz reutilizable', compose: 'Presentación' })[item.operation]} · ${callStatusLabels[item.status]}`}</strong>
               <p translate='no'>{item.text}</p>
               {item.outdated && <p className={styles.warning}>Desactualizado: cambiaron los datos o el perfil. Prepare una nueva versión.</p>}
               {item.error && <p className={styles.error}>{item.error}</p>}

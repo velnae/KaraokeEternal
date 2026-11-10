@@ -367,7 +367,7 @@ it('sends only plain greeting text with fixed options, while tagged text keeps v
   await startJobs()
   await waitReady(first.greetingId)
   expect(model.state.received).toHaveLength(1)
-  expect(model.state.received[0]).toBe('--seed 999 Un saludo para todos — De Ana')
+  expect(model.state.received[0]).toBe('--seed 999 Un saludo para todos')
   expect(Greetings.items(1).find(item => item.greetingId === tagged.greetingId)).toMatchObject({ status: 'QUEUED', audio: { status: 'unavailable' } })
 })
 

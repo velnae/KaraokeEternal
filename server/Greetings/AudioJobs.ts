@@ -279,7 +279,7 @@ export default class GreetingAudioJobs {
     if (!bytes) return null
     const job = db.get<GreetingAudioJob>(`SELECT j.* FROM greetingAudioJobs j JOIN greetings g ON g.audioJobId=j.jobId WHERE g.greetingId=? AND g.roomId=?`, [greetingId, roomId])
     if (!job || job.status !== 'ready' || !job.durationMs || createHash('sha256').update(bytes).digest('hex') !== job.checksum) return null
-    return { id: `greeting-${greetingId}-${job.jobId}`, role: 'greeting', url: `api/greetings/${greetingId}/audio`, kind: 'voice',
+    return { id: `greeting-${greetingId}-${job.jobId}`, role: 'greeting', senderIncluded: false, url: `api/greetings/${greetingId}/audio`, kind: 'voice',
       checksum: job.checksum!, durationMs: job.durationMs, displayText: job.spokenText, title: 'Saludo', source: 'Gemini', license: 'Private participant greeting', roomId }
   }
 

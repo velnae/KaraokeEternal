@@ -101,6 +101,25 @@ it('deduplicates lost acknowledgments and unchanged compositions without new gen
   expect(provider.generate).toHaveBeenCalledTimes(3)
 })
 
+it('prepares the generic karaoke fallback without a table on the production runtime', async () => {
+  const saved = await finish(intro())
+  voice.configure({ ...voice.config(), enabled: true })
+  db.run('INSERT INTO karaokeCallControls(roomId,preparing) VALUES(1,1)')
+  const pending = worker.submit(1, 'fallback', { ...input(), introId: saved.id }, undefined, 'setup')
+  db.run(`INSERT INTO karaokeCallFallbacks(roomId,scope,inputKey,jobId) VALUES(1,'room','generic-regression',?)`, [pending.id])
+  await worker.tick()
+  const result = job(1, pending.id)!
+  expect(result.status, result.error ?? '').toBe('ready')
+  const fallback = db.get<{ id: string, text: string }>('SELECT id,text FROM karaokeCallParts WHERE id=? AND retired=0', [result.resultId])!
+  expect(fallback.text).toBe('¡Vamos con el karaoke! ¡Es momento de cantar!')
+  expect(db.all('SELECT * FROM tableCallVoices')).toEqual([])
+  const audio = await worker.bytes(1, fallback.id)
+  const metadata = await parseBuffer(audio, { mimeType: 'audio/mpeg' }, { duration: true })
+  expect(metadata.format.duration).toBeGreaterThan(0)
+  expect(metadata.format.duration).toBeLessThanOrEqual(10)
+  expect(provider.generate).toHaveBeenCalledTimes(2)
+})
+
 it('reuses an unchanged introduction and regenerates only an explicitly requested new take', async () => {
   const original = await finish(intro())
   const repeated = await finish(intro())

@@ -20,7 +20,7 @@ export default function AutomaticCallControls ({ snapshot, busy, configure, subm
     ? 'Guardando…'
     : !canPrepare
         ? automatic.message || snapshot.error || 'Configure y habilite la voz de Gemini antes de preparar.'
-        : 'Prepare las mesas una vez. Los pedidos para cantar usarán sus datos y los audios guardados.'
+        : ''
   return (
     <section className={styles.automatic} aria-label='Funcionamiento automático de llamados'>
       <div className={styles.automaticHeading}>
@@ -34,10 +34,20 @@ export default function AutomaticCallControls ({ snapshot, busy, configure, subm
             disabled={busy}
             onChange={event => void configure({ ...controls, enabled: event.target.checked, preparing: event.target.checked })}
           />
-          {controls.enabled ? 'Activados' : 'Desactivados'}
+          Llamados para cantar
         </label>
       </div>
-      <p>Cuando toque cantar, el llamado reemplaza al anuncio general. La música para escuchar y de la casa conserva el animador habitual.</p>
+      <label className={styles.switch}>
+        <input
+          type='checkbox'
+          role='switch'
+          aria-label='Presentar pedidos para escuchar'
+          checked={!!controls.listeningEnabled}
+          disabled={busy}
+          onChange={event => void configure({ ...controls, listeningEnabled: event.target.checked })}
+        />
+        Presentar pedidos para escuchar
+      </label>
       <label className={styles.field}>
         Introducción automática
         <select
@@ -58,7 +68,7 @@ export default function AutomaticCallControls ({ snapshot, busy, configure, subm
         <Button
           variant='primary'
           disabled={busy || !canPrepare}
-          aria-describedby='call-setup-help'
+          aria-describedby={help ? 'call-setup-help' : undefined}
           onClick={() => void submit('karaoke-calls/setup', { revision: controls.revision })}
         >
           Preparar mesas
@@ -67,7 +77,7 @@ export default function AutomaticCallControls ({ snapshot, busy, configure, subm
         <Link to='/admin/rooms'>Voces de las mesas</Link>
         <Link to='?view=greeting-voice'>Ajustes de voz</Link>
       </div>
-      <p className={styles.hint} id='call-setup-help'>{help}</p>
+      {help && <p className={styles.hint} id='call-setup-help'>{help}</p>}
       {automatic.message && canPrepare && <p className={styles.warning}>{automatic.message}</p>}
       <details className={styles.requestDetails}>
         <summary>{`Pedidos de karaoke (${automatic.requests.length})`}</summary>
@@ -87,6 +97,21 @@ export default function AutomaticCallControls ({ snapshot, busy, configure, subm
           ))}
         </ul>
       </details>
+      {!!automatic.listeningRequests?.length && (
+        <details className={styles.requestDetails}>
+          <summary>{`Pedidos para escuchar (${automatic.listeningRequests.length})`}</summary>
+          <ul className={styles.list}>
+            {automatic.listeningRequests.map(item => (
+              <li key={item.queueId} className={styles.item}>
+                <strong translate='no'>{item.title}</strong>
+                <p translate='no'>{`${item.performer}${item.tableLabel ? ` · ${item.tableLabel}` : ''}`}</p>
+                <span className={styles.notice}>{item.startedAt ? 'Anunciado' : item.result ? 'Listo para su turno' : item.reason}</span>
+                {item.result && <Button onClick={() => listen(item.result!)} aria-label={`Escuchar presentación de ${item.performer}`}>Escuchar</Button>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </section>
   )
 }

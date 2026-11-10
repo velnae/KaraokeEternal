@@ -23,7 +23,7 @@ const reservation = createServer()
 const port = await listen(reservation)
 await new Promise(resolve => reservation.close(resolve))
 const base = `http://127.0.0.1:${port}/karaoke/`
-const uiBase = httpsUi ? 'https://karaoke.puyu.pe/' : base
+const uiBase = httpsUi ? 'https://dev-karaoke.puyu.pe/' : base
 const api = await request.newContext()
 const anonymous = await request.newContext()
 const errors = []
@@ -125,8 +125,8 @@ try {
         } else await route.fulfill({ response })
       } catch { await route.abort().catch(() => {}) }
     }
-    await context.route('https://karaoke.puyu.pe/api/**', route => forward(route))
-    await context.route('https://karaoke.puyu.pe/socket.io/**', route => forward(route, true))
+    await context.route('https://dev-karaoke.puyu.pe/api/**', route => forward(route))
+    await context.route('https://dev-karaoke.puyu.pe/socket.io/**', route => forward(route, true))
     await context.routeWebSocket('**/socket.io/**', socket => socket.close())
   }
   page = await context.newPage()
@@ -153,7 +153,7 @@ try {
   await expect.poll(async () => (await snapshot()).intros.length).toBe(1)
   const intro = (await snapshot()).intros[0]
   await page.reload()
-  await expect(page.getByRole('region', { name: 'Introducciones', exact: true }).getByRole('button', { name: 'Escuchar Intro de prueba', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Introducciones para cantar', exact: true }).getByRole('button', { name: 'Escuchar Intro de prueba', exact: true })).toBeVisible()
   assert.equal(providerRequests.length, 1)
 
   await page.goto(uiBase + 'admin/rooms')

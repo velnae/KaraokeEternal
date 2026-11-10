@@ -47,7 +47,8 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
     return service
   }
   const changed = (roomId: number) => {
-    if (Animation.active(roomId)?.callJSON) Animation.cancel(roomId, 'Cambió la configuración de llamados.')
+    const active = Animation.active(roomId)
+    if (active?.callJSON && !active.startedAt) Animation.cancel(roomId, 'Cambió la configuración de llamados.')
     Animation.publish(roomId)
   }
   router.put('/karaoke-calls/automation', (ctx) => {
@@ -82,6 +83,26 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
   })
   router.post('/karaoke-calls/intros', (ctx) => {
     ctx.body = getWorker()!.submit(Number(ctx.params.roomId), 'intro', body(ctx))
+    ctx.status = 202
+  })
+  router.post('/karaoke-calls/listening-intros', (ctx) => {
+    ctx.body = automatic().listening.templates.save(Number(ctx.params.roomId), undefined, body(ctx))
+    ctx.status = 202
+  })
+  router.put('/karaoke-calls/listening-intros/:id', (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    const input = body(ctx)
+    ctx.body = input.text !== undefined
+      ? automatic().listening.templates.save(roomId, ctx.params.id, input)
+      : automatic().listening.templates.configure(roomId, ctx.params.id, input)
+    automatic().reconcile()
+    Animation.publish(roomId)
+  })
+  router.post('/karaoke-calls/listening-intros/:id/retry', (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    const current = automatic().listening.templates.list(roomId).find(row => row.id === ctx.params.id)
+    if (!current) ctx.throw(404)
+    ctx.body = automatic().listening.templates.save(roomId, current.id, { ...body(ctx), text: current.text })
     ctx.status = 202
   })
   router.get('/tables/:tableId/voice', (ctx) => {

@@ -45,3 +45,51 @@ it.each([
   expect(automatic.setup(1, setup)).toEqual(result)
   expect(generate).not.toHaveBeenCalled()
 })
+
+it('adds disabled listening controls without deleting signed greetings or existing voices', () => {
+  open({ file: ':memory:', ro: false })
+  db.exec(`ALTER TABLE listeningPresentations DROP COLUMN templatePartId;
+    ALTER TABLE listeningPresentations DROP COLUMN templateId;
+    DROP TABLE listeningTemplates;
+    DELETE FROM migrations WHERE id=43;
+    DROP TABLE listeningPresentations;
+    ALTER TABLE karaokeCallControls DROP COLUMN listeningEnabled;
+    DELETE FROM migrations WHERE id=42;
+    INSERT INTO rooms(roomId,name,status) VALUES(1,'Venue','open');
+    INSERT INTO users(userId,username,name,password,roleId) VALUES(1,'ana','Ana','test',1);
+    INSERT INTO queue(queueId,roomId,userId,source,externalId,status,title,artistOrChannel) VALUES(1,1,1,'YOUTUBE','AAAAAAAAAAA','APPROVED','Song','Fixture');
+    INSERT INTO karaokeCallControls(roomId,revision,preparing,enabled) VALUES(1,3,1,1);
+    INSERT INTO greetingAudioJobs(jobId,roomId,cacheKey,spokenText,profileJSON,status,createdAt,updatedAt)
+      VALUES('legacy',1,'old-key','Hola — De Ana','{}','ready',1,1);
+    INSERT INTO greetings(queueId,roomId,userId,sender,message,status,createdAt,audioJobId)
+      VALUES(1,1,1,'Ana','Hola','QUEUED',1,'legacy');`)
+  const migrationsPath = path.join(import.meta.dirname, '../../lib/schemas')
+  db.migrate({ migrationsPath })
+  db.migrate({ migrationsPath })
+  expect(db.get('SELECT revision,enabled,listeningEnabled FROM karaokeCallControls')).toMatchObject({ revision: 3, enabled: 1, listeningEnabled: 0 })
+  expect(db.get('SELECT message,audioJobId FROM greetings')).toMatchObject({ message: 'Hola', audioJobId: 'legacy' })
+  expect(db.get('SELECT spokenText FROM greetingAudioJobs')).toMatchObject({ spokenText: 'Hola — De Ana' })
+  expect(db.all('PRAGMA foreign_key_check')).toEqual([])
+})
+
+it('imports existing template audio and pins legacy pending assignments without regenerating it', () => {
+  open({ file: ':memory:', ro: false })
+  db.exec(`ALTER TABLE listeningPresentations DROP COLUMN templatePartId;
+    ALTER TABLE listeningPresentations DROP COLUMN templateId;
+    DROP TABLE listeningTemplates;
+    DELETE FROM migrations WHERE id=43;
+    INSERT INTO rooms(roomId,name,status) VALUES(1,'Venue','open');
+    INSERT INTO users(userId,username,name,password,roleId) VALUES(1,'ana','Ana','test',1);
+    INSERT INTO queue(queueId,roomId,userId,source,externalId,status,title,artistOrChannel) VALUES(1,1,1,'YOUTUBE','AAAAAAAAAAA','APPROVED','Song','Fixture');
+    INSERT INTO karaokeCallParts(id,roomId,kind,variantId,title,text,profileKey,cacheKey,master,filename,checksum,masterChecksum,durationMs,createdAt,dependenciesJSON)
+      VALUES('template-audio',1,'template','template','Template','Este pedido llega de parte de…','profile','source','masters/source.wav','production/source.mp3','mp3','wav',1000,1,'[]'),
+      ('presentation',1,'composition','composition','Presentation','Template Ana','profile','composition','masters/result.wav','production/result.mp3','result','wav',2000,1,'["template-audio","name-audio"]');
+    INSERT INTO listeningPresentations(roomId,queueId,inputKey,resultId) VALUES(1,1,'legacy-input','presentation');`)
+  const migrationsPath = path.join(import.meta.dirname, '../../lib/schemas')
+  db.migrate({ migrationsPath })
+  db.migrate({ migrationsPath })
+  expect(db.get('SELECT partId FROM listeningTemplates WHERE id=?', ['listening-default-1-1'])).toEqual({ partId: 'template-audio' })
+  expect(db.get('SELECT templateId,templatePartId,inputKey,resultId FROM listeningPresentations')).toEqual({ templateId: 'listening-default-1-1', templatePartId: 'template-audio', inputKey: 'legacy-input', resultId: 'presentation' })
+  expect(db.all('SELECT * FROM karaokeCallJobs')).toEqual([])
+  expect(db.all('PRAGMA foreign_key_check')).toEqual([])
+})

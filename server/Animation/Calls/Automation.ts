@@ -10,6 +10,7 @@ import { CallError } from './Jobs.js'
 import type CallJobs from './Jobs.js'
 import { binding, callControls, callSessionAllows, intros, job, jobOutdated, key, part, partDTO, requestCall, tableVoice, type JobInput, type JobRow, type PartRow, type RequestRow } from './Store.js'
 import { compositionRevision } from './Composition.js'
+import ListeningCalls from './Listening.js'
 
 const pending = new Set(['queued', 'generating', 'preparing'])
 interface FallbackRow { scope: string, inputKey: string, jobId: string | null, resultId: string | null }
@@ -21,7 +22,10 @@ export default class CallAutomation {
   private timer?: ReturnType<typeof setInterval>
   private reconciling = false
   private next = new Map<number, number>()
-  constructor (readonly worker: CallJobs, private voice: Pick<GreetingVoice, 'profile' | 'snapshot'>) {}
+  readonly listening: ListeningCalls
+  constructor (readonly worker: CallJobs, private voice: Pick<GreetingVoice, 'profile' | 'snapshot'>) {
+    this.listening = new ListeningCalls(worker, voice)
+  }
 
   start () {
     service.current = this
@@ -81,11 +85,11 @@ export default class CallAutomation {
     const value = input as CallControls | null
     const current = callControls(roomId)
     if (!value || value.revision !== current.revision) throw new CallError('Los controles cambiaron. Actualice antes de guardar.', 409)
-    if (typeof value.enabled !== 'boolean' || typeof value.preparing !== 'boolean' || !Array.isArray(value.introIds)
+    if (typeof value.enabled !== 'boolean' || (value.listeningEnabled !== undefined && typeof value.listeningEnabled !== 'boolean') || typeof value.preparing !== 'boolean' || !Array.isArray(value.introIds)
       || value.introIds.length > 20 || value.introIds.some(id => typeof id !== 'string' || !intros(roomId).some(item => item.variantId === id))) throw new CallError('Revise la configuración de llamados.')
-    db.run(`INSERT INTO karaokeCallControls(roomId,revision,preparing,enabled,introIdsJSON) VALUES(?,?,?,?,?)
-      ON CONFLICT(roomId) DO UPDATE SET revision=excluded.revision,preparing=excluded.preparing,enabled=excluded.enabled,introIdsJSON=excluded.introIdsJSON`,
-    [roomId, current.revision + 1, value.preparing || value.enabled ? 1 : 0, value.enabled ? 1 : 0, JSON.stringify([...new Set(value.introIds)])])
+    db.run(`INSERT INTO karaokeCallControls(roomId,revision,preparing,enabled,introIdsJSON,listeningEnabled) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(roomId) DO UPDATE SET revision=excluded.revision,preparing=excluded.preparing,enabled=excluded.enabled,introIdsJSON=excluded.introIdsJSON,listeningEnabled=excluded.listeningEnabled`,
+    [roomId, current.revision + 1, value.preparing || value.enabled ? 1 : 0, value.enabled ? 1 : 0, JSON.stringify([...new Set(value.introIds)]), (value.listeningEnabled ?? current.listeningEnabled) ? 1 : 0])
     this.reconcile()
     return callControls(roomId)
   }
@@ -112,8 +116,11 @@ export default class CallAutomation {
   }
 
   prioritize (roomId: number, queueId: number) {
-    if (!this.eligible(roomId, Queue.get(roomId).entities[queueId])) return
+    const item = Queue.get(roomId).entities[queueId]
+    if (!item || item.status !== 'APPROVED') return
     this.next.set(roomId, queueId)
+    this.listening.prioritize(roomId, item)
+    if (!this.eligible(roomId, item)) return
     const row = requestCall(roomId, queueId)
     if (row?.jobId) db.run(`UPDATE karaokeCallJobs SET priority=100 WHERE id=? AND status='queued'`, [row.jobId])
   }
@@ -199,9 +206,11 @@ export default class CallAutomation {
     if (this.reconciling) return
     this.reconciling = true
     try {
-      for (const { roomId } of db.all<{ roomId: number }>('SELECT roomId FROM karaokeCallControls')) {
+      for (const { roomId } of db.all<{ roomId: number }>('SELECT roomId FROM karaokeCallControls UNION SELECT roomId FROM greetingControls WHERE audioEnabled=1')) {
         const controls = callControls(roomId)
         const queue = Queue.get(roomId)
+        if (this.open(roomId)) this.listening.reconcile(roomId, queue.result.map(id => queue.entities[id])
+          .sort((a, b) => Number(b.queueId === this.next.get(roomId)) - Number(a.queueId === this.next.get(roomId))))
         for (const request of db.all<RequestRow>(`SELECT * FROM karaokeCallRequests WHERE roomId=? AND startedAt IS NULL AND status!='cancelled'`, [roomId])) {
           const item = queue.entities[request.queueId]
           if (isSingingRequest(item) && item.status === 'APPROVED') continue
@@ -252,34 +261,42 @@ export default class CallAutomation {
   preparation (roomId: number, queueId: number, allowStarted = false): CallPreparation | null {
     const controls = callControls(roomId)
     const item = Queue.get(roomId).entities[queueId]
-    if (!controls.enabled || !this.eligible(roomId, item)) return null
+    if (!item) return null
+    const listening = this.listening.preparation(roomId, item, allowStarted)
+    if (!controls.enabled || !this.eligible(roomId, item)) return listening
     const row = requestCall(roomId, queueId)
     const intro = this.compatibleIntros(roomId).find(candidate => candidate.id === row?.introId)
     const inputKey = this.inputKey(roomId, item, intro)
     const assets: CallAsset[] = []
-    const add = (audio?: PartRow) => {
+    const add = (audio?: PartRow, identifiesSender = false) => {
       if (!audio || assets.some(asset => asset.partId === audio.id)) return
-      assets.push({ id: `call-${audio.id}`, partId: audio.id, role: 'call', title: audio.title, displayText: audio.text, kind: 'voice', family: 'turn',
+      assets.push({ id: `call-${audio.id}`, partId: audio.id, role: 'call', identifiesSender, title: audio.title, displayText: audio.text, kind: 'voice', family: 'turn',
         durationMs: audio.durationMs, checksum: audio.checksum, source: 'Gemini karaoke call', license: 'Generated with the configured provider.',
         url: `api/rooms/${roomId}/karaoke-calls/requests/${queueId}/audio/${audio.id}` })
     }
     if (!row?.startedAt || allowStarted) {
       if (row?.inputKey === inputKey && row.resultId && row.jobId) {
         const source = job(roomId, row.jobId)
-        if (source && !jobOutdated(source, this.voice.profile())) add(part(roomId, row.resultId))
+        if (source && !jobOutdated(source, this.voice.profile())) add(part(roomId, row.resultId), true)
       }
       if (this.table(roomId, item)) add(this.fallbackPart(roomId, `table-${item.tableId}`))
       add(this.fallbackPart(roomId, 'room'))
     }
-    return { queueId, inputKey, revision: controls.revision, assets, reason: row?.reason ?? 'Preparando el llamado; la música continúa.' }
+    assets.push(...(listening?.assets.filter(asset => asset.role === 'signature') ?? []))
+    return { queueId, inputKey, revision: controls.revision, assets, signatureKey: listening?.signatureKey, reason: row?.reason ?? 'Preparando el llamado; la música continúa.' }
   }
 
   valid (roomId: number, context: CallContext, started = false) {
+    if (context.kind) {
+      const item = Queue.get(roomId).entities[context.queueId]
+      return !!item && this.listening.valid(roomId, item, context, started)
+    }
     const prepared = this.preparation(roomId, context.queueId, started)
     return !!prepared && prepared.inputKey === context.inputKey && prepared.revision === context.revision && prepared.assets.some(asset => asset.partId === context.partId)
   }
 
   started (roomId: number, context: CallContext) {
+    if (context.kind) return this.listening.started(roomId, context.queueId)
     db.run('UPDATE karaokeCallRequests SET startedAt=COALESCE(startedAt,?) WHERE roomId=? AND queueId=?', [Date.now(), roomId, context.queueId])
   }
 
@@ -304,8 +321,8 @@ export default class CallAutomation {
     if (!this.open(roomId)) message = 'Abra la sala para preparar y reproducir llamados automáticos.'
     else if (!voice.config.enabled) message = 'Active la generación en Voz de saludos para preparar automáticamente. Los audios guardados siguen disponibles.'
     else if (!voice.configured || ['error', 'limited'].includes(voice.state)) message = voice.message
-    else if (controls.enabled && (!prefs.enabled || !prefs.automation || !prefs.events.turn)) message = 'Active el animador automático y las presentaciones en Control para escuchar los llamados.'
-    else if (controls.enabled && !callSessionAllows(roomId)) message = 'La jornada terminó. Inicie una nueva jornada en Control para escuchar los llamados.'
+    else if ((controls.enabled || controls.listeningEnabled) && (!prefs.enabled || !prefs.automation || !prefs.events.turn)) message = 'Active el animador automático y las presentaciones en Control para escuchar los llamados.'
+    else if ((controls.enabled || controls.listeningEnabled) && !callSessionAllows(roomId)) message = 'La jornada terminó. Inicie una nueva jornada en Control para escuchar los llamados.'
     if (!message) {
       const failure = db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='setup' AND status IN ('failed','uncertain') ORDER BY rowid DESC LIMIT 30`, [roomId]).find((row) => {
         if (key(JSON.parse(row.profileJSON)) !== key(this.voice.profile())) return false
@@ -319,6 +336,8 @@ export default class CallAutomation {
     }
     return { controls, tablesTotal: tables.length, tablesReady: tables.filter(table => !!this.fallbackPart(roomId, `table-${table.tableId}`)).length,
       fallbackReady: !!this.fallbackPart(roomId, 'room'), message,
+      listeningRequests: this.listening.states(roomId, queue.result.map(id => queue.entities[id]).filter(item => queueId === undefined || item.queueId === queueId)).slice(-30),
+      listeningTemplates: this.listening.templates.list(roomId),
       requests: db.all<RequestRow>(`SELECT * FROM karaokeCallRequests WHERE roomId=?${queueId === undefined ? '' : ' AND queueId=?'} ORDER BY queueId DESC LIMIT 30`, queueId === undefined ? [roomId] : [roomId, queueId]).flatMap((row) => {
         const item = queue.entities[row.queueId]
         if (!item) return []

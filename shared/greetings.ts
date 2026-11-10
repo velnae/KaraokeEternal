@@ -21,7 +21,7 @@ export type GreetingVoiceStatus = 'SCREEN' | 'SCHEDULED' | 'PLAYING' | 'PLAYED' 
 export const greetingVoiceLabels: Record<GreetingVoiceStatus, string> = {
   SCREEN: 'Solo pantalla', SCHEDULED: 'Lectura programada', PLAYING: 'Leyendo saludo', PLAYED: 'Voz reproducida', FAILED: 'Voz no completada', INTERRUPTED: 'Voz interrumpida',
 }
-export interface GreetingAsset extends AnimationClip { role: 'greeting' | 'intro' | 'bed' | 'call', url: string }
+export interface GreetingAsset extends AnimationClip { role: 'greeting' | 'intro' | 'bed' | 'call' | 'signature', url: string, partId?: string, identifiesSender?: boolean, senderIncluded?: boolean }
 export interface GreetingPerformer { name: string, tableLabel: string | null, requestIntent: RequestIntent, title: string }
 export interface GreetingPreparation { queueId: number, greetingId: number | null, assets: GreetingAsset[], playbackVersion: number, performer: GreetingPerformer, call?: CallPreparation }
 export interface GreetingTransition { assets: GreetingAsset[], durationMs: number, voiceMs: number, displayMs: number, call?: CallContext }

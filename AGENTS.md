@@ -56,6 +56,21 @@ affected code, implement the smallest complete change, verify it, and summarize.
 - Tunnel setup and diagnostics: `odd/tasks/cloudflare-development-tunnel.md`.
 - Production provisioning, deployment and recovery: `docs/production-deployment.md`.
 
+## Runtime parity — Node 24
+
+- Run tests, type checks, verification builds and isolated reproduction servers
+  with **Node 24**, matching production. Use the documented production patch
+  (**24.22.2**, see `docs/production-deployment.md`) when available; report any
+  patch mismatch explicitly. Passing checks on Node 26 do not establish readiness.
+- Check `node --version` inside the selected environment before verification.
+  Select the runtime for the entire command, including npm and child servers:
+  `mise exec node@24.22.2 -- npm test -- <test-file-or-directory>`. Use an explicit
+  Node 24 binary/PATH when mise is unavailable. Do not change global runtime settings.
+- Reproduce compatibility bugs on Node 24 before fixing them and keep a focused
+  regression for the failing contract. Do not infer SQLite or other runtime API
+  behavior from a newer local Node version. If Node 24 is unavailable, prepare it
+  or report verification as blocked rather than substituting a newer major.
+
 ## Minimum quality — choose checks by impact
 
 | Change | Verification |

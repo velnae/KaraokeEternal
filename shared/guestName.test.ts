@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { guestNameError, publicGuestName, validateGuestName } from './guestName.js'
+import { guestNameError, publicGuestName, spokenGuestName, validateGuestName } from './guestName.js'
 
 describe('guest display names', () => {
   it.each(['José Pérez', 'María-José', 'O’Connor', 'D\'Angelo', 'Concha', 'Ana', 'Ñusta', 'Á'.repeat(24)])('accepts %s', (name) => {
@@ -24,5 +24,19 @@ describe('guest display names', () => {
     expect(publicGuestName('Nombre Antiguo Largo')).toBe('Invitado')
     expect(publicGuestName('Puta')).toBe('Invitado')
     expect(publicGuestName(' José ')).toBe('José')
+  })
+})
+
+describe('spoken names', () => {
+  it.each(['zz', 'AA', 'fgr', 'Ana zz', 'Puta', 'Ana123'])('uses a neutral source for %s without changing account rules', (name) => {
+    expect(spokenGuestName(name)).toBe('un invitado')
+  })
+  it.each(['Ana', 'Li', 'Jo', 'Ng', 'Ñusta', 'José', '李明'])('keeps valid short, accented and non-Latin names: %s', (name) => {
+    expect(spokenGuestName(name)).toBe(name)
+  })
+  it('shares case and whitespace equivalents without merging different accents', () => {
+    expect(spokenGuestName(' LUIS ')).toBe(spokenGuestName('luis'))
+    expect(spokenGuestName('José')).not.toBe(spokenGuestName('Jose'))
+    expect(guestNameError('zz')).toBeNull()
   })
 })

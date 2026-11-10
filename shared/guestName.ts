@@ -32,3 +32,13 @@ export function validateGuestName (value: unknown): string {
 export function publicGuestName (name: string): string {
   return guestNameError(name) ? 'Invitado' : normalizeGuestName(name)
 }
+
+/** Speech suitability is deliberately separate from permission to use an account. */
+export function spokenGuestName (value: string): string {
+  if (guestNameError(value)) return 'un invitado'
+  const name = normalizeGuestName(value).toLocaleLowerCase('es')
+  const words = name.split(/[-'’ ]/)
+  if (words.some(word => new RegExp('^(.)\\1+$', 'u').test(word)
+    || (/^[a-zñ]+$/.test(word) && word.length >= 3 && !/[aeiouy]/.test(word)))) return 'un invitado'
+  return name.replace(new RegExp('(^|[-\'’ ])\\p{L}', 'gu'), letter => letter.toLocaleUpperCase('es'))
+}
