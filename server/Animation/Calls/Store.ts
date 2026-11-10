@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { db } from '../../lib/Database.js'
 import Tables from '../../Tables/Tables.js'
 import type { GreetingVoiceProfile } from '../../Greetings/voiceProfile.js'
-import { defaultTableCallText, type CallControls, type CallJob, type CallJobPurpose, type CallOperation, type CallPart, type CallStatus, type TableCallVoice } from '../../../shared/karaokeCalls.js'
+import { defaultTableCallText, listeningHistoryLimit, type CallControls, type CallJob, type CallJobPurpose, type CallOperation, type CallPart, type CallStatus, type TableCallVoice } from '../../../shared/karaokeCalls.js'
 
 export const key = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export interface PartRow extends CallPart {
@@ -74,6 +74,11 @@ export const callSessionAllows = (roomId: number) => {
 }
 export const part = (roomId: number, id: string) => db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND id=? AND retired=0', [roomId, id])
 export const job = (roomId: number, id: string) => db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND id=?', [roomId, id])
+export const retainedListening = (roomId: number) => db.all<{ queueId: number, resultId: string | null, signatureId: string | null }>(`SELECT p.queueId,p.resultId,p.signatureId
+  FROM listeningPresentations p JOIN queue q USING(queueId) WHERE p.roomId=? AND q.roomId=p.roomId AND
+  (q.status IN ('APPROVED','PLAYING') OR q.queueId IN (SELECT q.queueId FROM queue q JOIN listeningPresentations p USING(queueId)
+    WHERE q.roomId=? AND q.historyClearedAt IS NULL AND q.status NOT IN ('APPROVED','PLAYING','REMOVED','REJECTED')
+    ORDER BY q.queueId DESC LIMIT ?))`, [roomId, roomId, listeningHistoryLimit])
 export const binding = (roomId: number, tableId: number) => db.get<Binding>('SELECT * FROM tableCallVoices WHERE roomId=? AND tableId=?', [roomId, tableId])
 export const partDTO = (row: PartRow): CallPart => ({ id: row.id, kind: row.kind, title: row.title, text: row.text, durationMs: row.durationMs, profileKey: row.profileKey, createdAt: row.createdAt, variantId: row.variantId })
 export const intros = (roomId: number) => db.all<PartRow>(`SELECT * FROM karaokeCallParts p WHERE roomId=? AND kind='intro' AND retired=0

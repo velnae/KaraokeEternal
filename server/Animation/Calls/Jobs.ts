@@ -8,7 +8,7 @@ import { GreetingVoiceError } from '../../Greetings/GeminiGreetingTts.js'
 import { callSpeechProfile, type GreetingVoiceProfile } from '../../Greetings/voiceProfile.js'
 import { AudioValidationError } from '../AudioPreparation.js'
 import { callContinuation, callText, type CallJobPurpose, type CallOperation, type CallPurpose, type CallSnapshot } from '../../../shared/karaokeCalls.js'
-import { binding, intros, job, jobDTO, jobOutdated, key, part, partDTO, tableVoice, type JobInput, type JobRow, type PartRow } from './Store.js'
+import { binding, intros, job, jobDTO, jobOutdated, key, part, partDTO, retainedListening, tableVoice, type JobInput, type JobRow, type PartRow } from './Store.js'
 import { checksum, compose, compositionRevision, preparedPart } from './Composition.js'
 import getLogger from '../../lib/Log.js'
 
@@ -57,6 +57,7 @@ export default class CallJobs {
     Tables.room(roomId)
     const profile = this.tts.profile()
     return { intros: intros(roomId).map(partDTO), profileKey: key(profile), voice: this.tts.snapshot(), error: this.startupError,
+      names: db.all<PartRow>(`SELECT * FROM karaokeCallParts WHERE roomId=? AND kind='name' AND retired=0 ORDER BY text,createdAt DESC`, [roomId]).map(partDTO),
       jobs: db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='preview'
         AND NOT (operation='source' AND json_extract(inputJSON,'$.sourceKind')='template') ORDER BY rowid DESC LIMIT 20`, [roomId]).map(row => jobDTO(row, profile)),
       tables: Tables.list(roomId).filter(table => table.status === 'active').map(table => tableVoice(roomId, table.tableId, profile)) }
@@ -277,6 +278,7 @@ export default class CallJobs {
           if (!changed.changes) throw new CallError('La mesa cambió durante la preparación.')
         }
         db.run('UPDATE karaokeCallJobs SET status=\'ready\',resultId=?,error=NULL,updatedAt=? WHERE id=?', [result.id, Date.now(), row.id])
+        db.run('UPDATE listeningPresentations SET resultId=? WHERE roomId=? AND recoveryJobId=?', [result.id, row.roomId, row.id])
         db.exec('RELEASE call_ready')
       } catch (error) {
         db.exec('ROLLBACK TO call_ready; RELEASE call_ready')
@@ -321,6 +323,7 @@ export default class CallJobs {
         const input: JobInput = JSON.parse(row.inputJSON)
         if (input.introId) keep.add(input.introId)
         if (input.tablePartId) keep.add(input.tablePartId)
+        for (const id of input.sourceIds ?? []) keep.add(id)
       }
       for (const row of db.all<{ resultId: string | null, introId: string | null }>(`SELECT r.resultId,r.introId FROM karaokeCallRequests r JOIN queue q USING(queueId)
         WHERE r.roomId=? AND q.status IN ('APPROVED','PLAYING') UNION ALL SELECT resultId,NULL FROM karaokeCallFallbacks WHERE roomId=?`, [roomId, roomId])) {
@@ -339,10 +342,11 @@ export default class CallJobs {
     }
     const rows = db.all<PartRow>('SELECT * FROM karaokeCallParts WHERE retired=0')
     for (const row of rows) if (['name', 'template', 'signature'].includes(row.kind)) keep.add(row.id)
-    for (const row of db.all<{ resultId: string | null, signatureId: string | null }>(`SELECT p.resultId,p.signatureId FROM listeningPresentations p JOIN queue q USING(queueId)
-      WHERE q.status IN ('APPROVED','PLAYING')`)) {
-      if (row.resultId) keep.add(row.resultId)
-      if (row.signatureId) keep.add(row.signatureId)
+    for (const { roomId } of db.all<{ roomId: number }>('SELECT DISTINCT roomId FROM listeningPresentations')) {
+      for (const row of retainedListening(roomId)) {
+        if (row.resultId) keep.add(row.resultId)
+        if (row.signatureId) keep.add(row.signatureId)
+      }
     }
     // Keep freshly completed compositions until server reconciliation binds them.
     for (const row of db.all<{ resultId: string }>(`SELECT resultId FROM karaokeCallJobs WHERE operation='compose' AND status='ready' AND updatedAt>?`, [Date.now() - 5000])) keep.add(row.resultId)

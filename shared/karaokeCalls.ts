@@ -37,6 +37,7 @@ export interface TableCallVoice {
   outdated: boolean
 }
 export interface CallSnapshot {
+  names?: CallPart[]
   automation?: CallAutomationSnapshot
   intros: CallPart[]
   jobs: CallJob[]
@@ -57,6 +58,10 @@ export interface CallControls {
   introIds: string[]
 }
 export interface CallRequestState {
+  playback?: 'pending' | 'playing' | 'played' | 'omitted' | 'interrupted'
+  playbackReason?: string | null
+  recoveryJob?: CallJob | null
+  canRecover?: boolean
   queueId: number
   inputKey: string
   title: string
@@ -67,6 +72,17 @@ export interface CallRequestState {
   result: CallPart | null
   startedAt: number | null
 }
+export const listeningHistoryLimit = 30
+export const callPlaybackReasons = {
+  'audio-not-ready': 'El audio no terminó de prepararse en el reproductor.',
+  'preparation-unavailable': 'La preparación no estaba disponible al llegar el turno.',
+  'not-reserved': 'La canción comenzó sin reservar la presentación.',
+  'voice-budget': 'Se alcanzó el límite de voz de la sala.',
+  'transition-time': 'No quedaba tiempo suficiente para completar la presentación.',
+  'request-changed': 'El pedido o su configuración cambió antes de anunciar.',
+  'channel-unavailable': 'El canal de voz no pudo reservarse.',
+  'channel-occupied': 'Otra intervención ocupaba el canal de voz.',
+} as const
 export interface CallAutomationSnapshot {
   listeningTemplates?: ListeningTemplate[]
   listeningRequests?: CallRequestState[]

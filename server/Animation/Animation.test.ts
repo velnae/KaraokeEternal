@@ -47,6 +47,19 @@ function reserve (overrides: Partial<Reservation> = {}, status = { queueId: -1 }
   }, status)
 }
 
+it.each([
+  ['cancelled', 'El inicio fue cancelado'],
+  ['expired', 'El permiso de inicio venció'],
+  ['owner', 'El reproductor perdió la autoridad'],
+] as const)('distinguishes a %s start rejection without acknowledging playback', (reason, message) => {
+  const row = reserve()!
+  if (reason === 'cancelled') Animation.cancel(1, 'Fixture cancellation', row.interventionId)
+  if (reason === 'expired') vi.setSystemTime(row.startBefore! + 1)
+  if (reason === 'owner') Animation.claim(1, 'player-b')
+  expect(() => Animation.event(identity, row.interventionId, row.playerEpoch!, 'STARTED')).toThrow(message)
+  expect(db.get('SELECT startedAt FROM animationInterventions WHERE interventionId=?', [row.interventionId])).toEqual({ startedAt: null })
+})
+
 async function automaticCatalog () {
   fs.copyFileSync(path.resolve('assets/animation/welcome.wav'), path.join(directory, 'voice.wav'))
   const records = ['welcome', 'turn', 'closing', 'goodbye', 'invitation', 'celebration'].flatMap(family => [1, 2, 3].map(index => ({
@@ -588,7 +601,7 @@ describe('manual animation lifecycle', () => {
     const grant = reserve()
     Animation.cancel(1)
     expect(Animation.active(1)?.status).toBe('RESERVED')
-    expect(() => Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')).toThrow('venció')
+    expect(() => Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')).toThrow('El inicio fue cancelado')
     Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'NOT_STARTED')
     expect(Animation.history(1)[0].status).toBe('CANCELLED')
   })

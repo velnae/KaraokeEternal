@@ -10,9 +10,10 @@ import { captureTransitionBackground } from '../TransitionVideo/Playback.js'
 import Animation from '../Animation/Animation.js'
 import { catalogClips } from '../Animation/catalog.js'
 import { greetingPlayback, planGreetingTransition } from './transition.js'
-import { planCallTransition, prepareCall } from '../Animation/Calls/Playback.js'
+import { callTransitionFailure, planCallTransition, prepareCall } from '../Animation/Calls/Playback.js'
 import { isGreetingAllowed } from '../../shared/greetings.js'
 import { publicGuestName } from '../../shared/guestName.js'
+import getLogger from '../lib/Log.js'
 
 export interface GreetingPlayerStatus { queueId?: number, historyJSON?: string, nextUserId?: number | null, isAtQueueEnd?: boolean, queueDecisionAt?: number }
 interface Identity { roomId: number, userId: number, role?: string, isAdmin?: boolean }
@@ -210,6 +211,18 @@ export default class Greetings {
           displayMs = candidate.displayMs
           until = intervention.leaseUntil!
         }
+      }
+      if (call?.kind === 'listening') {
+        const playbackReason = transition?.call?.kind === 'listening'
+          ? null
+          : blocker
+            ? 'channel-occupied'
+            : callCandidate?.call?.kind === 'listening'
+              ? 'channel-unavailable'
+              : callTransitionFailure(roomId, reason ? null : selected ?? null, prepared, ready, Animation.snapshot(roomId).voiceBudgetRemainingMs ?? 0, remainingMs)
+        db.run('UPDATE listeningPresentations SET playbackReason=? WHERE roomId=? AND queueId=?', [playbackReason, roomId, turnKey])
+        if (playbackReason) getLogger('calls').info('Listening presentation omitted room=%s queue=%s reason=%s remainingMs=%s budgetMs=%s ready=%s',
+          roomId, turnKey, playbackReason, Math.round(remainingMs), Animation.snapshot(roomId).voiceBudgetRemainingMs, ready.length)
       }
       const voiceReason = !prepared?.assets.some(asset => asset.role === 'greeting')
         ? 'La voz todavía no estaba preparada. El saludo se mostró en pantalla.'

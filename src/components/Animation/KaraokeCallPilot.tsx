@@ -20,6 +20,7 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
   const [song, setSong] = useState('')
   const [mode, setMode] = useState<'hybrid' | 'reference'>('hybrid')
   const [listening, setListening] = useState<CallPart | null>(null)
+  const [nameQuery, setNameQuery] = useState('')
   const intro = snapshot?.intros.find(item => item.id === introId && item.profileKey === snapshot.profileKey)
   const table = snapshot?.tables.find(item => String(item.tableId) === tableId)
   let transcript = ''
@@ -40,6 +41,24 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
         <p>Configure los llamados automáticos y pruebe las voces en privado.</p>
       </header>
       {snapshot && <AutomaticCallControls snapshot={snapshot} busy={busy} configure={configure} submit={submit} listen={setListening} />}
+      <details className={styles.section}>
+        <summary>{`Nombres guardados (${snapshot?.names?.length ?? 0})`}</summary>
+        <label className={styles.field}>
+          Buscar nombre
+          <input type='search' value={nameQuery} onChange={event => setNameQuery(event.target.value)} />
+        </label>
+        <ul className={styles.list}>
+          {snapshot?.names?.filter(item => item.text.toLocaleLowerCase('es').includes(nameQuery.trim().toLocaleLowerCase('es'))).map(item => (
+            <li className={styles.item} key={item.id}>
+              <strong translate='no'>{item.text}</strong>
+              {item.profileKey !== snapshot.profileKey && <span className={styles.hint}>Otra voz</span>}
+              <Button onClick={() => setListening(item)} aria-label={`Escuchar nombre ${item.text}`}>Escuchar</Button>
+            </li>
+          ))}
+        </ul>
+        {!snapshot?.names?.length && <p className={styles.hint}>Todavía no hay nombres guardados en esta sala.</p>}
+        {!!snapshot?.names?.length && !snapshot.names.some(item => item.text.toLocaleLowerCase('es').includes(nameQuery.trim().toLocaleLowerCase('es'))) && <p className={styles.hint}>No se encontraron nombres.</p>}
+      </details>
       <div className={styles.profile}>
         <strong>{snapshot ? `Voz de Gemini: ${snapshot.voice.config.voice}` : 'Cargando perfil…'}</strong>
         {snapshot && <p>{snapshot.voice.config.model}</p>}

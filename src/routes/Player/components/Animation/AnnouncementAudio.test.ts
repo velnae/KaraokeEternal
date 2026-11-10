@@ -7,6 +7,49 @@ import { playbackTraceSnapshot } from '../../../../lib/playbackTrace'
 
 afterEach(() => vi.unstubAllGlobals())
 
+it('prepares an urgent turn without waiting for an unrelated catalog download', async () => {
+  const audio = new AnnouncementAudio()
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration: 1, length: 24000, numberOfChannels: 1 }) } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  let finishCatalog!: (value: Response) => void
+  vi.stubGlobal('fetch', vi.fn((url: string) => url.endsWith('catalog')
+    ? new Promise<Response>((resolve) => { finishCatalog = resolve })
+    : Promise.resolve(new Response('turn'))))
+  const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+  const catalog = audio.prepare([{ id: 'catalog', checksum: hash('catalog'), durationMs: 1000, kind: 'voice' } as AnimationClip])
+  await vi.waitFor(() => expect(finishCatalog).toBeTypeOf('function'))
+  const asset = { id: 'call', role: 'call', url: 'api/turn', checksum: hash('turn'), durationMs: 1000, kind: 'voice' } as GreetingAsset
+  try {
+    await expect(audio.prepareGreetingAssets([asset], () => true, true)).resolves.toEqual([asset.checksum])
+    expect(audio.readyChecksums).toContain(asset.checksum)
+    finishCatalog(new Response('catalog'))
+    await catalog
+    expect(audio.readyChecksums).toContain(asset.checksum)
+  } finally { audio.close() }
+})
+
+it('records failed preparation stages and rejects a late response for an obsolete turn', async () => {
+  const audio = new AnnouncementAudio()
+  const decode = vi.fn(async () => ({ duration: 1, length: 24000, numberOfChannels: 1 }))
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: decode } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  const asset = { id: 'call', role: 'call', url: 'api/turn', checksum: createHash('sha256').update('turn').digest('hex'), durationMs: 1000, kind: 'voice' } as GreetingAsset
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('Unavailable', { status: 503 })))
+  expect(await audio.prepareGreetingAssets([asset])).toEqual([])
+  expect(playbackTraceSnapshot().events.reverse()[0]).toMatchObject({ event: 'turn-asset-failed', reason: 'download', checksum: asset.checksum })
+  let current = true
+  let finish!: (value: Response) => void
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+    finish = resolve
+  })))
+  const pending = audio.prepareGreetingAssets([asset], () => current, true)
+  current = false
+  finish(new Response('turn'))
+  expect(await pending).toEqual([])
+  expect(decode).not.toHaveBeenCalled()
+  audio.close()
+})
+
 it('retains the call and its fallbacks alongside greetings under catalog memory pressure', async () => {
   const audio = new AnnouncementAudio()
   audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration: 10, length: 441000, numberOfChannels: 2 }) } as unknown as AudioContext

@@ -141,10 +141,10 @@ export default class AnnouncementAudio {
   }
 
   /** A separate preparation group keeps catalog refreshes from evicting a greeting. */
-  async prepareGreetingAssets (assets: GreetingAsset[]) {
+  async prepareGreetingAssets (assets: GreetingAsset[], isCurrent = () => true, urgent = false) {
     const context = this.ensureContext()
     const generation = this.generation
-    const current = () => this.context === context && this.generation === generation && context.state !== 'closed'
+    const current = () => isCurrent() && this.context === context && this.generation === generation && context.state !== 'closed'
     const prepare = async () => {
       if (!current()) return []
       const calls = assets.filter(asset => asset.role === 'call').slice(0, 3)
@@ -158,29 +158,40 @@ export default class AnnouncementAudio {
       const retained = new Set<string>()
       const ordered = [...calls, ...greetings.sort((a, b) => Number(b.role === 'greeting') - Number(a.role === 'greeting'))]
       for (const asset of ordered) {
+        let stage = 'download'
         try {
           if (!current()) break
           if (!this.buffers.has(asset.checksum)) {
             const bytes = await this.download(asset.url)
             const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
-            if (checksum !== asset.checksum || !current()) continue
+            if (!current()) break
+            stage = 'checksum'
+            if (checksum !== asset.checksum) throw new Error('checksum')
+            stage = 'decode'
             const buffer = await context.decodeAudioData(bytes)
             if (!current()) break
             const limit = asset.role === 'greeting' ? 20000 : clipDurationLimit(asset.kind, asset.effectType)
-            if (buffer.duration <= 0 || buffer.duration * 1000 > limit || Math.abs(buffer.duration * 1000 - asset.durationMs) > 100) continue
+            stage = 'duration'
+            if (buffer.duration <= 0 || buffer.duration * 1000 > limit || Math.abs(buffer.duration * 1000 - asset.durationMs) > 100) throw new Error('duration')
             const size = buffer.length * buffer.numberOfChannels * 4
             for (const hash of this.buffers.keys()) {
               if (this.decodedBytes + size <= this.maxDecodedBytes) break
               if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.callKeys.has(hash) && !this.greetingKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
             }
-            if (this.decodedBytes + size > this.maxDecodedBytes) continue
+            stage = 'memory'
+            if (this.decodedBytes + size > this.maxDecodedBytes) throw new Error('memory')
             this.buffers.set(asset.checksum, buffer)
+            tracePlayback('turn-asset-ready', { channelId: this.traceChannelId, checksum: asset.checksum, state: asset.role })
           }
           retained.add(asset.checksum)
-        } catch { /* Optional intro/bed failure must not discard a valid greeting. */ }
+        } catch {
+          tracePlayback('turn-asset-failed', { channelId: this.traceChannelId, checksum: asset.checksum, state: asset.role, reason: stage })
+        }
       }
       return [...retained]
     }
+    // A turn must not queue behind a slow, unrelated catalog refresh.
+    if (urgent) return prepare()
     this.preparing = this.preparing.catch((): string[] => []).then(prepare)
     return this.preparing
   }

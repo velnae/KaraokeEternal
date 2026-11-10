@@ -8,6 +8,30 @@ import CallAutomation from './Automation.js'
 
 afterEach(() => close())
 
+it.each([true, false])('repairs an already applied migration 44 with missing recovery column=%s without rewriting its history', (missing) => {
+  open({ file: ':memory:', ro: false })
+  db.exec(`INSERT INTO rooms(roomId,name,status) VALUES(1,'Venue','open');
+    INSERT INTO users(userId,username,name,password,roleId) VALUES(1,'ana','Ana','test',1);
+    INSERT INTO queue(queueId,roomId,userId,source,externalId,status,title,artistOrChannel)
+      VALUES(1,1,1,'YOUTUBE','AAAAAAAAAAA','PLAYED','Song','Fixture');
+    INSERT INTO listeningPresentations(roomId,queueId,inputKey,playbackReason) VALUES(1,1,'original-input','audio-not-ready');
+    DELETE FROM migrations WHERE id=45;`)
+  if (missing) {
+    db.exec('ALTER TABLE listeningPresentations DROP COLUMN recoveryJobId')
+    db.run('UPDATE migrations SET up=? WHERE id=44', ['ALTER TABLE listeningPresentations ADD COLUMN playbackReason TEXT;'])
+  }
+  const history = db.get('SELECT * FROM migrations WHERE id=44')
+  const migrationsPath = path.join(import.meta.dirname, '../../lib/schemas')
+  db.migrate({ migrationsPath })
+  db.migrate({ migrationsPath })
+  expect(db.all<{ name: string }>('PRAGMA table_info(listeningPresentations)').map(row => row.name)).toContain('recoveryJobId')
+  expect(db.get('SELECT inputKey,playbackReason,recoveryJobId FROM listeningPresentations WHERE queueId=1')).toEqual({
+    inputKey: 'original-input', playbackReason: 'audio-not-ready', recoveryJobId: null,
+  })
+  expect(db.get('SELECT * FROM migrations WHERE id=44')).toEqual(history)
+  expect(db.all('PRAGMA foreign_key_check')).toEqual([])
+})
+
 it.each([
   { missing: ['setupRequestId', 'setupAttempt'] },
   { missing: ['setupRequestId'] },
@@ -54,7 +78,7 @@ it('adds disabled listening controls without deleting signed greetings or existi
     DELETE FROM migrations WHERE id=43;
     DROP TABLE listeningPresentations;
     ALTER TABLE karaokeCallControls DROP COLUMN listeningEnabled;
-    DELETE FROM migrations WHERE id=42;
+    DELETE FROM migrations WHERE id IN (42,44);
     INSERT INTO rooms(roomId,name,status) VALUES(1,'Venue','open');
     INSERT INTO users(userId,username,name,password,roleId) VALUES(1,'ana','Ana','test',1);
     INSERT INTO queue(queueId,roomId,userId,source,externalId,status,title,artistOrChannel) VALUES(1,1,1,'YOUTUBE','AAAAAAAAAAA','APPROVED','Song','Fixture');
@@ -70,6 +94,7 @@ it('adds disabled listening controls without deleting signed greetings or existi
   expect(db.get('SELECT message,audioJobId FROM greetings')).toMatchObject({ message: 'Hola', audioJobId: 'legacy' })
   expect(db.get('SELECT spokenText FROM greetingAudioJobs')).toMatchObject({ spokenText: 'Hola — De Ana' })
   expect(db.all('PRAGMA foreign_key_check')).toEqual([])
+  expect(db.all<{ name: string }>('PRAGMA table_info(listeningPresentations)').map(row => row.name)).toEqual(expect.arrayContaining(['playbackReason', 'recoveryJobId']))
 })
 
 it('imports existing template audio and pins legacy pending assignments without regenerating it', () => {

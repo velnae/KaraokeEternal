@@ -17,6 +17,7 @@ import { prepareGreetingTransition } from '../../Greetings/transition.js'
 import * as greetingAudio from '../../Greetings/audioRouter.js'
 import * as catalog from '../catalog.js'
 import { listeningTemplate, listeningTemplates } from './Listening.js'
+import { callTransitionFailure, recordListeningOmission } from './Playback.js'
 
 let directory: string
 let wave: Buffer
@@ -427,6 +428,102 @@ it('keeps source audio through cleanup, a new jornada and restart without synthe
   expect(db.all(`SELECT * FROM karaokeCallParts WHERE kind IN ('name','template') AND retired=0`)).toHaveLength(4)
 }, 30000)
 
+it('keeps a completed listening presentation available for private review after cleanup and restart', async () => {
+  enableListening()
+  const id = add('LISTEN')
+  await until(() => !!automatic.preparation(1, id)?.assets.length)
+  const resultId = automatic.preparation(1, id)!.assets[0].partId
+  const count = vi.mocked(provider.generate).mock.calls.length
+  db.run(`UPDATE queue SET status='PLAYED' WHERE queueId=?`, [id])
+  db.run('UPDATE karaokeCallJobs SET updatedAt=? WHERE resultId=?', [Date.now() - 6000, resultId])
+  await worker['cleanup']()
+  const state = automatic.snapshot(1).listeningRequests!.find(item => item.queueId === id)!
+  expect(state.result?.id).toBe(resultId)
+  expect(state.playback).toBe('omitted')
+  await expect(worker.bytes(1, resultId)).resolves.toBeInstanceOf(Buffer)
+  await worker.stop()
+  worker = new CallJobs(worker['directory'], voice)
+  await worker.start()
+  await expect(worker.bytes(1, resultId)).resolves.toBeInstanceOf(Buffer)
+  expect(provider.generate).toHaveBeenCalledTimes(count)
+}, 30000)
+
+it('bounds completed presentation retention at thirty per room while protecting pending audio and shared names', async () => {
+  enableListening()
+  const id = add('LISTEN')
+  await until(() => !!automatic.preparation(1, id)?.assets.length)
+  const original = part(1, automatic.preparation(1, id)!.assets[0].partId)!
+  const copies: string[] = []
+  for (let index = 0; index < 31; index++) {
+    const queueId = add('LISTEN', 'PLAYED')
+    const copyId = randomUUID()
+    const master = `masters/${copyId}.wav`
+    const filename = `production/${copyId}.mp3`
+    await fs.copyFile(path.join(worker['directory'], original.master), path.join(worker['directory'], master))
+    await fs.copyFile(path.join(worker['directory'], original.filename), path.join(worker['directory'], filename))
+    db.run(`INSERT INTO karaokeCallParts(id,roomId,kind,variantId,title,text,profileKey,cacheKey,master,filename,checksum,masterChecksum,durationMs,createdAt,dependenciesJSON,retired)
+      SELECT ?,roomId,kind,variantId,title,text,profileKey,cacheKey,?,?,checksum,masterChecksum,durationMs,createdAt,dependenciesJSON,retired
+      FROM karaokeCallParts WHERE id=?`, [copyId, master, filename, original.id])
+    db.run('INSERT INTO listeningPresentations(roomId,queueId,inputKey,resultId) VALUES(1,?,?,?)', [queueId, 'history', copyId])
+    copies.push(copyId)
+  }
+  await worker['cleanup']()
+  expect(part(1, copies[0])).toBeUndefined()
+  await expect(worker.bytes(1, copies[30])).resolves.toBeInstanceOf(Buffer)
+  await expect(worker.bytes(1, original.id)).resolves.toBeInstanceOf(Buffer)
+  const state = automatic.snapshot(1).listeningRequests!
+  expect(state).toHaveLength(31)
+  expect(state.find(row => row.queueId === id)?.result?.id).toBe(original.id)
+  const withoutAudio = add('LISTEN', 'PLAYED')
+  db.run('INSERT INTO listeningPresentations(roomId,queueId,inputKey) VALUES(1,?,?)', [withoutAudio, 'no-audio'])
+  expect(automatic.snapshot(1).listeningRequests!.find(row => row.queueId === withoutAudio)).toMatchObject({ canRecover: false, reason: 'No se generó una presentación para este pedido.' })
+  expect(worker.snapshot(1).names?.some(row => row.text === 'Ana')).toBe(true)
+  expect(worker.snapshot(2).names).toEqual([])
+}, 30000)
+
+it('explains and persists a missing player asset separately from voice budget and transition time', async () => {
+  enableListening()
+  const identity = player()
+  const id = add('LISTEN')
+  await until(() => !!automatic.preparation(1, id)?.assets.length)
+  const prepared = (await prepareGreetingTransition(1, id))!
+  const ready = prepared.assets.map(asset => asset.checksum)
+  expect(callTransitionFailure(1, null, prepared, [], 120000, 25000)).toBe('audio-not-ready')
+  expect(callTransitionFailure(1, null, prepared, ready, 0, 25000)).toBe('voice-budget')
+  expect(callTransitionFailure(1, null, prepared, ready, 120000, 0)).toBe('transition-time')
+  const grant = Greetings.reserve(1, identity.socketId, id, { queueId: -1 }, undefined, prepared, [], 1)
+  expect(grant?.transition).toBeUndefined()
+  expect(db.get('SELECT playbackReason FROM listeningPresentations WHERE queueId=?', [id])).toEqual({ playbackReason: 'audio-not-ready' })
+  expect(automatic.snapshot(1).listeningRequests!.find(item => item.queueId === id)).toMatchObject({ playback: 'omitted', playbackReason: expect.stringContaining('reproductor') })
+  expect(db.all('SELECT * FROM animationInterventions')).toEqual([])
+}, 30000)
+
+it('recovers retired historical compositions privately and idempotently without synthesis', async () => {
+  enableListening()
+  const id = add('LISTEN')
+  await until(() => !!automatic.preparation(1, id)?.assets.length)
+  const original = part(1, automatic.preparation(1, id)!.assets[0].partId)!
+  const count = vi.mocked(provider.generate).mock.calls.length
+  db.run(`UPDATE queue SET status='PLAYED' WHERE queueId=?`, [id])
+  db.run('UPDATE karaokeCallParts SET retired=1 WHERE id=?', [original.id])
+  await Promise.all([original.master, original.filename].map(file => fs.rm(path.join(worker['directory'], file))))
+  const input = { requestId: randomUUID() }
+  const submitted = await automatic.listening.recover(1, id, input)
+  await expect(automatic.listening.recover(2, id, input)).rejects.toThrow('pedido')
+  await worker.tick()
+  const recovered = await automatic.listening.recover(1, id, input)
+  expect(recovered.id).toBe(submitted.id)
+  expect(recovered.status).toBe('ready')
+  expect(recovered.result!.text).toBe(original.text)
+  expect(recovered.result!.id).not.toBe(original.id)
+  expect(automatic.snapshot(1).listeningRequests!.find(item => item.queueId === id)!.result?.id).toBe(recovered.result!.id)
+  expect(db.get('SELECT status FROM queue WHERE queueId=?', [id])).toEqual({ status: 'PLAYED' })
+  expect(db.all('SELECT * FROM animationInterventions')).toEqual([])
+  db.run('UPDATE karaokeCallParts SET retired=1 WHERE id=?', [JSON.parse(original.dependenciesJSON)[0]])
+  await expect(automatic.listening.recover(1, id, { requestId: randomUUID() })).rejects.toThrow('No se conservan los archivos')
+  expect(provider.generate).toHaveBeenCalledTimes(count)
+}, 30000)
+
 it('keeps a greeting attributed with presentation off and reuses its message when enabled', async () => {
   const identity = player()
   const id = add('LISTEN')
@@ -449,6 +546,36 @@ it('keeps a greeting attributed with presentation off and reuses its message whe
   expect(on.transition?.assets.map(asset => asset.role)).toEqual(['call', 'greeting'])
   expect(on.transition?.assets.find(asset => asset.role === 'greeting')?.checksum).toBe(message.checksum)
   expect(vi.mocked(provider.generate).mock.calls.filter(call => call[0] === 'Ana')).toHaveLength(1)
+}, 30000)
+
+it.each(['RESERVED', 'DISPLAYING'] as const)('keeps a fallback signature valid during %s reconciliation when the listening composition failed', async (status) => {
+  enableListening()
+  const identity = player()
+  const id = add('LISTEN')
+  Greetings.attach({ roomId: 1, userId: 1 }, id, { message: 'Una noche especial.' }, {})
+  Greetings.configurePlayback(1, { enabled: true, introClipId: null, ambienceEnabled: false }, 0)
+  await until(() => automatic.preparation(1, id)?.assets.length === 2)
+  const presentation = automatic.preparation(1, id)!.assets.find(asset => asset.role === 'call')!
+  db.run('UPDATE karaokeCallParts SET retired=1 WHERE id=?', [presentation.partId])
+  db.run(`UPDATE karaokeCallJobs SET status='failed',resultId=NULL,error='Fixture assembly failed' WHERE resultId=?`, [presentation.partId])
+  automatic.reconcile()
+  vi.spyOn(greetingAudio, 'getGreetingAudioAsset').mockResolvedValue({ id: 'message', role: 'greeting', senderIncluded: false, durationMs: 2000,
+    checksum: 'e'.repeat(64), kind: 'voice', title: 'Message', displayText: 'Una noche especial.', source: 'fixture', license: 'fixture', url: 'api/fixture' })
+  const prepared = (await prepareGreetingTransition(1, id))!
+  const grant = Greetings.reserve(1, identity.socketId, id, { queueId: -1 }, undefined, prepared, prepared.assets.map(asset => asset.checksum), 1)!
+  expect(grant.transition?.assets.map(asset => asset.role)).toEqual(['greeting', 'signature'])
+  const intervention = grant.transition!.intervention
+  const context = grant.transition!.call!
+  if (status === 'DISPLAYING') Greetings.event(1, identity.socketId, id, grant.items[0].greetingId, 'start')
+  automatic.reconcile()
+  expect(automatic.valid(1, context)).toBe(true)
+  Animation.sweep()
+  expect(Animation.active(1)?.stopRequestedAt).toBeNull()
+  expect(() => Animation.event(identity, intervention.interventionId, intervention.playerEpoch!, 'STARTED')).not.toThrow()
+  // Preserving the reserved signature must not authorize a different sender.
+  db.run(`UPDATE users SET name='Carla' WHERE userId=1`)
+  Animation.sweep()
+  expect(Animation.active(1)?.stopRequestedAt).toEqual(expect.any(Number))
 }, 30000)
 
 it('reserves animator, presentation and greeting in order and records each confirmed source once', async () => {
@@ -511,4 +638,60 @@ it('prioritizes upcoming listening speech and exposes failed local assembly inst
   const state = automatic.snapshot(1).listeningRequests!.find(item => item.queueId === id)!
   expect(state.status).toBe('fallback')
   expect(state.reason).toContain('supera diez segundos')
+}, 30000)
+
+it.each(['failed', 'uncertain'] as const)('rebuilds a shared %s composition once for a new request without synthesizing sources', async (status) => {
+  enableListening()
+  const first = add('LISTEN')
+  await until(() => !!automatic.preparation(1, first)?.assets.length)
+  const original = automatic.preparation(1, first)!.assets[0].partId
+  const binding = db.get<{ templateId: string, templatePartId: string }>('SELECT templateId,templatePartId FROM listeningPresentations WHERE queueId=?', [first])!
+  const receipt = db.get<{ id: string }>('SELECT id FROM karaokeCallJobs WHERE resultId=?', [original])!
+  db.run(`UPDATE queue SET status='PLAYED' WHERE queueId=?`, [first])
+  db.run('UPDATE karaokeCallParts SET retired=1 WHERE id=?', [original])
+  db.run('UPDATE karaokeCallJobs SET status=?,error=?,resultId=NULL WHERE id=?', [status, 'Original local failure', receipt.id])
+  const sourceCount = vi.mocked(provider.generate).mock.calls.length
+  const second = add('LISTEN')
+  db.run('INSERT INTO listeningPresentations(roomId,queueId,inputKey,templateId,templatePartId) VALUES(1,?,?,?,?)', [second, 'pending', binding.templateId, binding.templatePartId])
+  await until(() => !!automatic.preparation(1, second)?.assets.length)
+  const rebuilt = automatic.preparation(1, second)!.assets[0].partId
+  expect(rebuilt).not.toBe(original)
+  expect(db.get('SELECT status,error FROM karaokeCallJobs WHERE id=?', [receipt.id])).toEqual({ status, error: 'Original local failure' })
+  const jobCount = db.get<{ n: number }>('SELECT count(*) n FROM karaokeCallJobs')!.n
+  for (let n = 0; n < 5; n++) {
+    automatic.reconcile()
+    await worker.tick()
+  }
+  expect(db.get<{ n: number }>('SELECT count(*) n FROM karaokeCallJobs')!.n).toBe(jobCount)
+  expect(provider.generate).toHaveBeenCalledTimes(sourceCount)
+}, 30000)
+
+it('bounds a failed local rebuild and records omission when music starts without a reservation', async () => {
+  enableListening()
+  player()
+  const first = add('LISTEN')
+  await until(() => !!automatic.preparation(1, first)?.assets.length)
+  const original = part(1, automatic.preparation(1, first)!.assets[0].partId)!
+  const binding = db.get<{ templateId: string, templatePartId: string }>('SELECT templateId,templatePartId FROM listeningPresentations WHERE queueId=?', [first])!
+  db.run(`UPDATE queue SET status='PLAYED' WHERE queueId=?`, [first])
+  db.run('UPDATE karaokeCallParts SET retired=1 WHERE id=?', [original.id])
+  db.run(`UPDATE karaokeCallJobs SET status='failed',error='Original local failure',resultId=NULL WHERE resultId=?`, [original.id])
+  const template = part(1, binding.templatePartId)!
+  await fs.rm(path.join(worker['directory'], template.master))
+  const count = vi.mocked(provider.generate).mock.calls.length
+  const jobsBefore = db.get<{ n: number }>('SELECT count(*) n FROM karaokeCallJobs')!.n
+  const second = add('LISTEN')
+  db.run('INSERT INTO listeningPresentations(roomId,queueId,inputKey,templateId,templatePartId) VALUES(1,?,?,?,?)', [second, 'pending', binding.templateId, binding.templatePartId])
+  for (let n = 0; n < 5; n++) {
+    automatic.reconcile()
+    await worker.tick()
+  }
+  expect(db.get<{ n: number }>('SELECT count(*) n FROM karaokeCallJobs')!.n).toBe(jobsBefore + 1)
+  expect(automatic.preparation(1, second)).toBeNull()
+  db.run(`UPDATE queue SET status='PLAYING' WHERE queueId=?`, [second])
+  recordListeningOmission(1, second)
+  recordListeningOmission(1, second)
+  expect(db.get('SELECT playbackReason FROM listeningPresentations WHERE queueId=?', [second])).toEqual({ playbackReason: 'preparation-unavailable' })
+  expect(automatic.snapshot(1).listeningRequests!.find(item => item.queueId === second)?.playback).toBe('omitted')
+  expect(provider.generate).toHaveBeenCalledTimes(count)
 }, 30000)

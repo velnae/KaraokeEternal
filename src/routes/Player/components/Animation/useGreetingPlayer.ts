@@ -12,6 +12,7 @@ import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
 import GreetingCommitGate from './GreetingCommitGate'
 import type AnnouncementAudio from './AnnouncementAudio'
 import { ensureState } from 'redux-optimistic-ui'
+import { tracePlayback } from 'lib/playbackTrace'
 
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, Math.max(0, ms)))
 function upcoming () {
@@ -82,7 +83,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       try {
         const { preparation } = await greetingRequest('prepare', { queueId: next })
         if (!alive || running.current || upcoming() !== next) return
-        await channel.prepareGreetingAssets(preparation?.assets ?? [])
+        await channel.prepareGreetingAssets(preparation?.assets ?? [], () => alive && upcoming() === next)
         if (alive) await refreshReadiness()
       } catch { /* Missing or late preparation falls back to visual delivery. */ } finally { loading = false }
     }
@@ -183,6 +184,27 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       }
       if (channel.ready) await refreshReadiness()
       if (!valid()) return false
+      // A completed server job is not proof that this browser has decoded it.
+      // Join in-flight preloading before reserving, inside the existing deadline.
+      if (enabled && channel.ready) {
+        const { preparation } = await greetingRequest('prepare', { queueId: expectedQueueId })
+        if (!valid()) return false
+        const voiceMs = preparation?.call?.assets.find(asset => asset.role === 'call')?.durationMs ?? 3000
+        const waitMs = Math.max(0, Math.min(4000, deadline - performance.now() - voiceMs - 2250))
+        let preparing = true
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          if (waitMs > 0) await Promise.race([
+            channel.prepareGreetingAssets(preparation?.assets ?? [], () => preparing && valid(), true),
+            new Promise<void>((resolve) => { timer = setTimeout(resolve, waitMs) }),
+          ])
+        } finally {
+          preparing = false
+          clearTimeout(timer)
+        }
+        tracePlayback('turn-audio-prepared', { roomId, queueId: expectedQueueId, remainingMs: Math.max(0, deadline - performance.now()) })
+      }
+      if (!valid()) return false
       const reply = await greetingRequest('reserve', { queueId: expectedQueueId, audioReady: channel.ready, readyClips: channel.readyChecksums, remainingMs: Math.max(0, deadline - performance.now()) })
       if (!reply.grant) return false
       grant = reply.grant
@@ -274,6 +296,6 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       }
     }
     return !!grant
-  }, [channel, markStopped, refreshReadiness, enabled])
+  }, [channel, markStopped, refreshReadiness, enabled, roomId])
   return { active, intro, scene, performer, error, attempt, confirmMounted, busy: running.current }
 }

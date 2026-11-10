@@ -19,6 +19,7 @@ import { callControls } from './Calls/Store.js'
 import { getCallAutomation } from './Calls/Automation.js'
 import type { CallContext } from '../../shared/karaokeCalls.js'
 import { birthdayOwnsAudio } from '../Birthdays/Store.js'
+import getLogger from '../lib/Log.js'
 
 type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[], transitionBed: boolean }
 export interface AnimationIdentity { roomId: number, userId: number, socketId: string }
@@ -158,8 +159,17 @@ export default class Animation {
     const now = Date.now()
     const rows = db.all<Intervention>(`SELECT * FROM animationInterventions WHERE status IN ${activeStatuses}`)
     for (const row of rows) {
-      if (row.callJSON && !row.stopRequestedAt && !validCall(row.roomId, JSON.parse(row.callJSON), !!row.startedAt)) {
-        Animation.cancel(row.roomId, 'Cambió el pedido o la configuración del llamado.', row.interventionId)
+      if (row.callJSON && !row.stopRequestedAt) {
+        const call: CallContext = JSON.parse(row.callJSON)
+        if (!validCall(row.roomId, call, !!row.startedAt)) {
+          const binding = call.kind
+            ? db.get<{ resultId: string | null, signatureId: string | null }>('SELECT resultId,signatureId FROM listeningPresentations WHERE roomId=? AND queueId=?', [row.roomId, call.queueId])
+            : db.get<{ resultId: string | null, signatureId?: null }>('SELECT resultId FROM karaokeCallRequests WHERE roomId=? AND queueId=?', [row.roomId, call.queueId])
+          getLogger('animation').warn('Call invalidated room=%s queue=%s intervention=%s kind=%s part=%s boundPart=%s revision=%s currentRevision=%s started=%s',
+            row.roomId, call.queueId, row.interventionId, call.kind ?? 'singing', call.partId,
+            call.kind === 'signature' ? binding?.signatureId : binding?.resultId, call.revision, callControls(row.roomId).revision, !!row.startedAt)
+          Animation.cancel(row.roomId, 'Cambió el pedido o la configuración del llamado.', row.interventionId)
+        }
       }
       if (row.status === 'PENDING' ? row.expiresAt <= now : (row.leaseUntil ?? 0) <= now) {
         db.run('UPDATE animationInterventions SET status = ?, finishedAt = ?, reason = ? WHERE interventionId = ?',
@@ -545,7 +555,15 @@ export default class Animation {
       recordAudioUsage(row.roomId, `intervention:${id}`, clipId!, 'intervention', now, row.sessionId)
     } else if (event === 'STARTED') {
       if (row.status === 'PLAYING') return
-      if (row.stopRequestedAt || now > row.startBefore! || owners.get(identity.roomId)?.epoch !== epoch) throw new Error('El permiso de inicio venció')
+      const rejectStart = (code: string, message: string): never => {
+        const call: CallContext | null = row.callJSON ? JSON.parse(row.callJSON) : null
+        getLogger('animation').warn('Start rejected room=%s queue=%s intervention=%s kind=%s code=%s remainingMs=%s stopRequested=%s',
+          row.roomId, call?.queueId ?? null, row.interventionId, call?.kind ?? row.origin, code, row.startBefore! - now, !!row.stopRequestedAt)
+        throw new Error(message)
+      }
+      if (row.stopRequestedAt) rejectStart('cancelled-before-start', `El inicio fue cancelado: ${row.reason ?? 'la reserva ya no está vigente.'}`)
+      if (owners.get(identity.roomId)?.epoch !== epoch) rejectStart('authority-changed', 'El reproductor perdió la autoridad para iniciar este audio.')
+      if (now > row.startBefore!) rejectStart('start-deadline-expired', 'El permiso de inicio venció')
       const room = Animation.room(identity.roomId)
       const state = Animation.snapshot(identity.roomId)
       const call: CallContext | undefined = row.callJSON ? JSON.parse(row.callJSON) : undefined

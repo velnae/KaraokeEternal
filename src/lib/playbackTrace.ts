@@ -12,6 +12,7 @@ type TraceFields = {
   audioElapsedMs?: number
   playerEpoch?: number
   volume?: number
+  remainingMs?: number
 }
 
 export type PlaybackTraceEvent = TraceFields & { sequence: number, event: string, wallTime: number, monotonicMs: number }

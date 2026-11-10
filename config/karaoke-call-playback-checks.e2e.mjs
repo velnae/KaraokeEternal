@@ -78,14 +78,16 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
   try {
     execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180:r=10', '-f', 'lavfi', '-i', 'sine=frequency=220',
       '-t', '2', '-c:v', 'libx264', '-threads', '2', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(data, 'call-song.mp4')])
+    execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180:r=10', '-f', 'lavfi', '-i', 'sine=frequency=220',
+      '-t', '12', '-c:v', 'libx264', '-threads', '2', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(data, 'seek-song.mp4')])
     db.exec(`INSERT INTO artists(artistId,name,nameNorm) VALUES(1,'Fixture','fixture')`)
     db.prepare('INSERT INTO paths(pathId,path,priority,data) VALUES(1,?,1,?)').run(data, '{"prefs":{"isWatching":false}}')
-    for (const [index, title] of ['Rayando el sol', 'Yellow', 'Fallo de voz', 'Listen fixture', 'House fixture', 'Pause fixture', 'Listen one', 'Listen two', 'Listen signature', 'Listen neutral'].entries()) {
+    for (const [index, title] of ['Rayando el sol', 'Yellow', 'Fallo de voz', 'Listen fixture', 'House fixture', 'Pause fixture', 'Listen one', 'Listen two', 'Listen signature', 'Listen neutral', 'Listen unavailable', 'Listen signature fallback', 'Seek source', 'Listen rebuild normal', 'Listen rebuild seek'].entries()) {
       const id = index + 1
       const filename = `song-${id}.mp4`
-      fs.copyFileSync(path.join(data, 'call-song.mp4'), path.join(data, filename))
+      fs.copyFileSync(path.join(data, id === 13 ? 'seek-song.mp4' : 'call-song.mp4'), path.join(data, filename))
       db.prepare('INSERT INTO songs(songId,artistId,title,titleNorm) VALUES(?,1,?,?)').run(id, title, title.toLowerCase())
-      db.prepare('INSERT INTO media(mediaId,songId,pathId,relPath,duration,isPreferred) VALUES(?,?,1,?,2,1)').run(id, id, filename)
+      db.prepare('INSERT INTO media(mediaId,songId,pathId,relPath,duration,isPreferred) VALUES(?,?,1,?,?,1)').run(id, id, filename, id === 13 ? 12 : 2)
     }
     await restart()
     const room = (await call('rooms/1')).entities[1]

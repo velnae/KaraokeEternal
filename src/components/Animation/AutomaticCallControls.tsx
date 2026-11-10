@@ -105,8 +105,19 @@ export default function AutomaticCallControls ({ snapshot, busy, configure, subm
               <li key={item.queueId} className={styles.item}>
                 <strong translate='no'>{item.title}</strong>
                 <p translate='no'>{`${item.performer}${item.tableLabel ? ` · ${item.tableLabel}` : ''}`}</p>
-                <span className={styles.notice}>{item.startedAt ? 'Anunciado' : item.result ? 'Listo para su turno' : item.reason}</span>
-                {item.result && <Button onClick={() => listen(item.result!)} aria-label={`Escuchar presentación de ${item.performer}`}>Escuchar</Button>}
+                <span className={styles.notice}>
+                  {item.playback && item.playback !== 'pending'
+                    ? ({ playing: 'Anunciando', played: 'Anunciado', omitted: 'Omitido', interrupted: 'Interrumpido' })[item.playback]
+                    : item.result ? 'Listo para su turno' : item.reason}
+                </span>
+                {item.playbackReason && <p className={styles.hint}>{item.playbackReason}</p>}
+                <div className={styles.actions}>
+                  {item.result && <Button onClick={() => listen(item.result!)} aria-label={`Escuchar presentación de ${item.performer}`}>Escuchar</Button>}
+                  {item.canRecover && <Button disabled={busy || (!!item.recoveryJob && ['queued', 'generating', 'preparing'].includes(item.recoveryJob.status))} onClick={() => void submit(`karaoke-calls/requests/${item.queueId}/recover`, {})}>Recuperar audio</Button>}
+                </div>
+                {item.recoveryJob && ['queued', 'generating', 'preparing'].includes(item.recoveryJob.status) && <p role='status'>Recuperando audio…</p>}
+                {item.recoveryJob?.error && <p role='alert' className={styles.error}>{item.recoveryJob.error}</p>}
+                {!item.result && item.playback !== 'pending' && <p className={styles.hint}>{item.reason}</p>}
               </li>
             ))}
           </ul>

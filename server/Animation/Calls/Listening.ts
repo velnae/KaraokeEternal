@@ -2,18 +2,19 @@ import { db } from '../../lib/Database.js'
 import type GreetingVoice from '../../Greetings/GreetingVoice.js'
 import type { QueueItem } from '../../../shared/types.js'
 import { spokenGuestName } from '../../../shared/guestName.js'
-import type { CallAsset, CallContext, CallPreparation, CallPurpose, CallRequestState } from '../../../shared/karaokeCalls.js'
+import { callPlaybackReasons, type CallAsset, type CallContext, type CallPreparation, type CallPurpose, type CallRequestState } from '../../../shared/karaokeCalls.js'
 import CallJobs, { CallError } from './Jobs.js'
-import { callControls, key, part, partDTO, tableVoice, type JobRow, type PartRow } from './Store.js'
+import { callControls, job, jobDTO, key, part, partDTO, retainedListening, tableVoice, type JobRow, type PartRow } from './Store.js'
 import Tables from '../../Tables/Tables.js'
 import { callSpeechProfile } from '../../Greetings/voiceProfile.js'
 import { compositionRevision } from './Composition.js'
 import ListeningTemplates, { defaultListeningTemplates } from './ListeningTemplates.js'
+import getLogger from '../../lib/Log.js'
 
 export const listeningTemplates = defaultListeningTemplates
 export const listeningTemplate = listeningTemplates[0]
 export const isListeningRequest = (item?: QueueItem) => item?.origin === 'PARTICIPANT' && item.requestIntent === 'LISTEN'
-interface PresentationRow { inputKey: string, resultId: string | null, signatureId: string | null, startedAt: number | null, templateId: string | null, templatePartId: string | null }
+interface PresentationRow { inputKey: string, resultId: string | null, signatureId: string | null, startedAt: number | null, templateId: string | null, templatePartId: string | null, playbackReason: keyof typeof callPlaybackReasons | null, recoveryJobId: string | null }
 
 /** Reconciled by CallAutomation; sources share its worker and provider budget. */
 export default class ListeningCalls {
@@ -42,15 +43,23 @@ export default class ListeningCalls {
       item.requestIntent, item.origin, template?.text, this.table(roomId, item)?.id, this.voice.profile()])
   }
 
-  private ensure (roomId: number, operation: 'source' | 'compose', body: Record<string, unknown>) {
+  private ensure (roomId: number, operation: 'source' | 'compose', body: Record<string, unknown>, queueId?: number) {
     const sourceCacheKey = operation === 'source' ? key([body.sourceKind, body.text, callSpeechProfile(this.voice.profile(), body.sourceKind as CallPurpose), compositionRevision, null]) : null
     const cached = operation === 'source'
       ? db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND cacheKey=? AND retired=0', [roomId, sourceCacheKey])
       : db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND dependenciesJSON=? AND profileKey=? AND retired=0', [roomId, JSON.stringify(body.sourceIds), key(this.voice.profile())])
     if (cached) return cached
     const attempt = db.get<{ setupAttempt: number }>('SELECT setupAttempt FROM karaokeCallControls WHERE roomId=?', [roomId])?.setupAttempt ?? 0
-    const requestId = `listening-${key([operation, body, this.voice.profile(), sourceCacheKey, compositionRevision, attempt])}`
-    const existing = db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND requestId=?', [roomId, requestId])
+    let requestId = `listening-${key([operation, body, this.voice.profile(), sourceCacheKey, compositionRevision, attempt])}`
+    let existing = db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND requestId=?', [roomId, requestId])
+    let rebuildOf: string | undefined
+    if (operation === 'compose' && queueId !== undefined && existing && ['failed', 'uncertain'].includes(existing.status)) {
+      // A failed shared receipt is not a cached audio asset. Allow one local
+      // rebuild per request; polling/restarts cannot create an endless retry.
+      rebuildOf = existing.id
+      requestId = `listening-${key([requestId, 'local-rebuild', queueId])}`
+      existing = db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND requestId=?', [roomId, requestId])
+    }
     if (existing) {
       if (existing.status === 'ready' && existing.resultId && part(roomId, existing.resultId)) return part(roomId, existing.resultId)
       // Reassembly is local and safe; never resubmit an uncertain synthesis.
@@ -59,7 +68,8 @@ export default class ListeningCalls {
     }
     if (operation === 'source' && (!this.voice.snapshot().config.enabled || !this.voice.snapshot().configured)) return undefined
     try {
-      this.worker.submit(roomId, operation, { ...body, requestId }, undefined, 'setup', 80)
+      const submitted = this.worker.submit(roomId, operation, { ...body, requestId }, undefined, 'setup', 80)
+      if (rebuildOf) getLogger('calls').info('Local composition rebuild room=%s queue=%s originalJob=%s job=%s', roomId, queueId, rebuildOf, submitted.id)
     } catch (error) {
       if (!(error instanceof CallError && error.status === 409)) throw error
     }
@@ -76,7 +86,9 @@ export default class ListeningCalls {
     if (!enabled && !greetingsEnabled) return
     if (enabled) this.templates.reconcile(roomId)
     for (const item of items.filter(item => item.origin === 'PARTICIPANT' && item.status === 'APPROVED')) {
-      const greeting = greetingsEnabled && db.get(`SELECT 1 FROM greetings WHERE roomId=? AND queueId=? AND status='QUEUED'`, [roomId, item.queueId])
+      // A reserved/displaying greeting still owns its attribution. Dropping the
+      // signature here invalidates its reservation before STARTED can arrive.
+      const greeting = greetingsEnabled && db.get(`SELECT 1 FROM greetings WHERE roomId=? AND queueId=? AND status IN ('QUEUED','RESERVED','DISPLAYING')`, [roomId, item.queueId])
       const selected = this.template(roomId, item)
       const present = enabled && isListeningRequest(item) && !!selected
       if (!present && !greeting) continue
@@ -86,9 +98,9 @@ export default class ListeningCalls {
       const name = present || greeting ? this.source(roomId, 'name', spokenGuestName(item.userDisplayName)) : undefined
       const prefix = greeting ? this.source(roomId, 'signature', 'De') : undefined
       const template = present ? selected?.audio : undefined
-      const signature = name && prefix ? this.ensure(roomId, 'compose', { sourceIds: [prefix.id, name.id], sourceKind: 'signature' }) : undefined
+      const signature = name && prefix ? this.ensure(roomId, 'compose', { sourceIds: [prefix.id, name.id], sourceKind: 'signature' }, item.queueId) : undefined
       const table = this.table(roomId, item)
-      const result = name && template ? this.ensure(roomId, 'compose', { sourceIds: [...(table ? [table.id] : []), template.id, name.id] }) : undefined
+      const result = name && template ? this.ensure(roomId, 'compose', { sourceIds: [...(table ? [table.id] : []), template.id, name.id] }, item.queueId) : undefined
       db.run(`INSERT INTO listeningPresentations(roomId,queueId,inputKey,resultId,signatureId,templateId,templatePartId) VALUES(?,?,?,?,?,?,?)
         ON CONFLICT(roomId,queueId) DO UPDATE SET inputKey=excluded.inputKey,resultId=excluded.resultId,signatureId=excluded.signatureId,templateId=excluded.templateId,templatePartId=excluded.templatePartId`,
       [roomId, item.queueId, inputKey, result?.id ?? null, signature?.id ?? null, selected?.id ?? null, selected?.audio?.id ?? null])
@@ -142,19 +154,59 @@ export default class ListeningCalls {
       [roomId, name, template, 'De', `De ${name}`, text])
   }
 
+  async recover (roomId: number, queueId: number, input: { requestId?: unknown }) {
+    const saved = db.get<PresentationRow>(`SELECT p.* FROM listeningPresentations p JOIN queue q USING(queueId)
+      WHERE p.roomId=? AND q.roomId=? AND p.queueId=? AND q.historyClearedAt IS NULL AND q.status NOT IN ('APPROVED','PLAYING','REMOVED','REJECTED')`, [roomId, roomId, queueId])
+    if (!saved || !retainedListening(roomId).some(row => row.queueId === queueId)) throw new CallError('El pedido no está disponible en el historial.', 404)
+    const original = db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND id=?', [roomId, saved.resultId])
+    if (!original) throw new CallError('No se conservó la composición original de este pedido.')
+    const sources = JSON.parse(original.dependenciesJSON) as string[]
+    if (sources.length < 2 || sources.length > 3) throw new CallError('No se conservaron las piezas originales de este pedido.')
+    // Validate the original masters; recovery never synthesizes a replacement voice.
+    await Promise.all(sources.map(id => this.worker.bytes(roomId, id, true))).catch(() => {
+      throw new CallError('No se conservan los archivos necesarios para recuperar este audio.')
+    })
+    const result = this.worker.submit(roomId, 'compose', { requestId: input.requestId, sourceIds: sources })
+    db.run('UPDATE listeningPresentations SET recoveryJobId=?,resultId=COALESCE(?,resultId) WHERE roomId=? AND queueId=?',
+      [result.id, result.result?.id ?? null, roomId, queueId])
+    return result
+  }
+
   states (roomId: number, items: QueueItem[]): CallRequestState[] {
-    return items.filter(isListeningRequest).flatMap((item) => {
+    const retained = new Set(retainedListening(roomId).map(row => row.queueId))
+    return items.filter(item => isListeningRequest(item) && retained.has(item.queueId)).flatMap((item) => {
       const row = db.get<PresentationRow>('SELECT * FROM listeningPresentations WHERE roomId=? AND queueId=?', [roomId, item.queueId])
       if (!row) return []
-      const result = row.inputKey === this.inputKey(roomId, item) && row.resultId ? part(roomId, row.resultId) : undefined
+      const pending = item.status === 'APPROVED' || item.status === 'PLAYING'
+      const result = (!pending || row.inputKey === this.inputKey(roomId, item)) && row.resultId ? part(roomId, row.resultId) : undefined
+      const recovery = row.recoveryJobId ? job(roomId, row.recoveryJobId) : undefined
+      const intervention = db.get<{ status: string, reason: string | null, startedAt: number | null }>(`SELECT status,reason,startedAt FROM animationInterventions WHERE roomId=?
+        AND json_extract(callJSON,'$.queueId')=? AND json_extract(callJSON,'$.kind')='listening' ORDER BY requestedAt DESC LIMIT 1`, [roomId, item.queueId])
+      const playback: CallRequestState['playback'] = intervention?.status === 'PLAYED'
+        ? 'played'
+        : intervention && ['RESERVED', 'PLAYING'].includes(intervention.status)
+          ? 'playing'
+          : intervention ? intervention.startedAt ? 'interrupted' : 'omitted' : !pending || row.playbackReason ? 'omitted' : 'pending'
+      const playbackReason = row.playbackReason ? callPlaybackReasons[row.playbackReason] : intervention?.reason ?? (playback === 'omitted' ? 'No se registró la reproducción de esta presentación.' : null)
       const name = spokenGuestName(item.userDisplayName)
       const template = this.template(roomId, item)?.text ?? ''
       const text = [this.table(roomId, item)?.text, template, name].filter(Boolean).join(' ')
-      const error = db.get<{ error: string }>(`SELECT error FROM karaokeCallJobs WHERE roomId=? AND operation IN ('source','compose') AND profileJSON=? AND text IN (?,?,?)
-        AND status IN ('failed','uncertain') ORDER BY createdAt DESC LIMIT 1`, [roomId, JSON.stringify(this.voice.profile()), name, template, text])
+      const preparing = db.get(`SELECT 1 FROM karaokeCallJobs WHERE roomId=? AND operation IN ('source','compose') AND profileJSON=? AND text IN (?,?,?)
+        AND status IN ('queued','generating','preparing') LIMIT 1`, [roomId, JSON.stringify(this.voice.profile()), name, template, text])
+      const error = preparing
+        ? undefined
+        : db.get<{ error: string }>(`SELECT error FROM karaokeCallJobs WHERE roomId=? AND operation IN ('source','compose') AND profileJSON=? AND text IN (?,?,?)
+          AND status IN ('failed','uncertain') ORDER BY createdAt DESC LIMIT 1`, [roomId, JSON.stringify(this.voice.profile()), name, template, text])
+      let reason: string | null = null
+      if (!result) {
+        if (!pending) reason = row.resultId ? 'El audio de esta presentación fue retirado.' : 'No se generó una presentación para este pedido.'
+        else reason = error ? `${error.error} Use Preparar mesas para reintentar.` : 'Preparando presentación; la música continúa.'
+      }
       return [{ queueId: item.queueId, inputKey: row.inputKey, title: item.title, performer: item.userDisplayName, tableLabel: item.tableLabelSnapshot ?? null,
-        status: result ? 'ready' : error ? 'fallback' : 'preparing', result: result ? partDTO(result) : null, startedAt: row.startedAt,
-        reason: result ? null : error ? `${error.error} Use Preparar mesas para reintentar.` : 'Preparando presentación; la música continúa.' }]
+        playback, playbackReason, canRecover: !pending && !result && !!row.resultId,
+        recoveryJob: recovery ? jobDTO(recovery, this.voice.profile()) : null,
+        status: result ? 'ready' : !pending ? 'cancelled' : error ? 'fallback' : 'preparing', result: result ? partDTO(result) : null, startedAt: row.startedAt,
+        reason }]
     })
   }
 }

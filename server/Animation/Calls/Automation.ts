@@ -336,7 +336,7 @@ export default class CallAutomation {
     }
     return { controls, tablesTotal: tables.length, tablesReady: tables.filter(table => !!this.fallbackPart(roomId, `table-${table.tableId}`)).length,
       fallbackReady: !!this.fallbackPart(roomId, 'room'), message,
-      listeningRequests: this.listening.states(roomId, queue.result.map(id => queue.entities[id]).filter(item => queueId === undefined || item.queueId === queueId)).slice(-30),
+      listeningRequests: this.listening.states(roomId, queue.result.map(id => queue.entities[id]).filter(item => queueId === undefined || item.queueId === queueId)).reverse(),
       listeningTemplates: this.listening.templates.list(roomId),
       requests: db.all<RequestRow>(`SELECT * FROM karaokeCallRequests WHERE roomId=?${queueId === undefined ? '' : ' AND queueId=?'} ORDER BY queueId DESC LIMIT 30`, queueId === undefined ? [roomId] : [roomId, queueId]).flatMap((row) => {
         const item = queue.entities[row.queueId]

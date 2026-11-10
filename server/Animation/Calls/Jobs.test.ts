@@ -250,6 +250,8 @@ it('serves only authenticated room-scoped previews without exposing source files
     const audio = await finish(await response.json() as CallJob)
     const get = (room: number, admin = true) => fetch(`${base}/${room}/karaoke-calls/audio/${audio.id}`, { headers: { 'test-admin': String(admin) } })
     expect((await get(1, false)).status).toBe(403)
+    const deniedRecovery = await fetch(`${base}/1/karaoke-calls/requests/1/recover`, { method: 'POST', headers: { 'test-admin': 'false' } })
+    expect(deniedRecovery.status).toBe(403)
     expect((await get(2)).status).toBe(404)
     const valid = await get(1)
     expect(valid.headers.get('content-type')).toContain('audio/mpeg')

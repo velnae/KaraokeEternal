@@ -2,9 +2,10 @@ import { db } from '../../lib/Database.js'
 import { animationPrefs } from '../../../shared/animation.js'
 import { GREETING_START_MS, greetingDuration, type Greeting, type GreetingPreparation, type GreetingTransition } from '../../../shared/greetings.js'
 import type { CallContext } from '../../../shared/karaokeCalls.js'
-import { callControls, callSessionAllows } from './Store.js'
+import { callControls, callSessionAllows, part } from './Store.js'
 import { getCallAutomation } from './Automation.js'
 import Queue from '../../Queue/Queue.js'
+import getLogger from '../../lib/Log.js'
 
 export function callsEnabled (roomId: number) {
   const room = db.get<{ data: string, status: string }>('SELECT data,status FROM rooms WHERE roomId=?', [roomId])
@@ -15,6 +16,18 @@ export function listeningEnabled (roomId: number) {
   const room = db.get<{ data: string, status: string }>('SELECT data,status FROM rooms WHERE roomId=?', [roomId])
   const prefs = animationPrefs(room ? JSON.parse(room.data).prefs?.animation : undefined)
   return room?.status === 'open' && !!callControls(roomId).listeningEnabled && prefs.enabled && prefs.automation && prefs.events.turn && callSessionAllows(roomId)
+}
+
+/** Called once when authoritative playback consumes the announcement opportunity. */
+export function recordListeningOmission (roomId: number, queueId: number) {
+  if (!listeningEnabled(roomId)) return
+  const row = db.get<{ resultId: string | null, playbackReason: string | null }>(`SELECT p.resultId,p.playbackReason FROM listeningPresentations p
+    JOIN queue q USING(queueId) WHERE p.roomId=? AND q.roomId=p.roomId AND p.queueId=? AND q.status='PLAYING' AND q.origin='PARTICIPANT' AND q.requestIntent='LISTEN'`, [roomId, queueId])
+  if (!row || row.playbackReason || db.get(`SELECT 1 FROM animationInterventions WHERE roomId=?
+    AND json_extract(callJSON,'$.queueId')=? AND json_extract(callJSON,'$.kind')='listening' LIMIT 1`, [roomId, queueId])) return
+  const reason = row.resultId && part(roomId, row.resultId) ? 'not-reserved' : 'preparation-unavailable'
+  db.run('UPDATE listeningPresentations SET playbackReason=? WHERE roomId=? AND queueId=? AND playbackReason IS NULL', [reason, roomId, queueId])
+  getLogger('calls').info('Listening presentation omitted room=%s queue=%s reason=%s result=%s stage=music-start', roomId, queueId, reason, row.resultId)
 }
 const signatureEnabled = (roomId: number) => !!db.get(`SELECT 1 FROM greetingControls WHERE roomId=? AND audioEnabled=1 AND paused=0 AND json_extract(playbackJSON,'$.enabled')=1`, [roomId])
 export const prepareCall = (roomId: number, queueId: number) => {
@@ -86,4 +99,19 @@ function planListeningTransition (roomId: number, greeting: Greeting | null, pre
   const bed = available.find(asset => asset.role === 'bed')
   return { assets: [...(intro ? [intro] : []), ...(presentation ? [presentation] : []), ...(spoken ? [spoken] : []), ...(attribution ? [attribution] : []), ...(bed ? [bed] : [])],
     call: context, displayMs, durationMs: durationMs + 250, voiceMs: voiceMs + (intro?.durationMs ?? 0) }
+}
+
+/** Explain a rejected plan using the same planner, rather than a second set of limits. */
+export function callTransitionFailure (roomId: number, greeting: Greeting | null, prepared: GreetingPreparation | null, ready: string[], budgetMs: number, remainingMs: number) {
+  if (!prepared?.call) return 'preparation-unavailable'
+  const call = prepared.call
+  if (!call.assets.some(asset => (call.kind !== 'listening' || asset.role === 'call') && ready.includes(asset.checksum))) return 'audio-not-ready'
+  const canPresent = (budget: number, remaining: number) => {
+    const plan = planCallTransition(roomId, greeting, prepared, ready, budget, remaining)
+    return call.kind === 'listening' ? plan?.call?.kind === 'listening' : !!plan
+  }
+  if (canPresent(Infinity, remainingMs)) return 'voice-budget'
+  if (canPresent(Infinity, 25000)) return 'transition-time'
+  if (!call.assets.some(asset => validCall(roomId, { kind: call.kind, queueId: call.queueId, inputKey: call.inputKey, revision: call.revision, partId: asset.partId }))) return 'request-changed'
+  return 'audio-not-ready'
 }
