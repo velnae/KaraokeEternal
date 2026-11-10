@@ -4,6 +4,7 @@ import Prefs from '../Prefs/Prefs.js'
 import { defaultGreetingVoiceConfig, greetingVoiceModels, type GreetingVoiceConfig, type GreetingVoiceSnapshot } from '../../shared/greetingVoice.js'
 import GeminiGreetingTts, { GreetingVoiceError, type GreetingVoiceProvider } from './GeminiGreetingTts.js'
 import { callSpeechProfile, greetingAudioKey, loadGreetingVoiceProfile, type GreetingVoiceProfile } from './voiceProfile.js'
+import { nameVoiceModels, type NameVoiceModel } from '../../shared/nameVoices.js'
 
 export class GreetingVoiceSettingsError extends Error {
   constructor (message: string, readonly status = 422) { super(message) }
@@ -97,7 +98,7 @@ export default class GreetingVoice {
     return this.snapshot()
   }
 
-  async generate (text: string, profile: GreetingVoiceProfile, signal: AbortSignal, preview = false, purpose?: import('../../shared/karaokeCalls.js').CallPurpose) {
+  async generate (text: string, profile: GreetingVoiceProfile, signal: AbortSignal, preview = false, purpose?: import('../../shared/karaokeCalls.js').CallPurpose, nameStyle?: string, nameModel?: NameVoiceModel) {
     signal.throwIfAborted()
     const state = this.snapshot()
     const now = this.now()
@@ -108,6 +109,11 @@ export default class GreetingVoice {
     if (state.usage.nextAt > now) throw new GreetingVoiceError(state.message, state.usage.nextAt >= state.usage.resetsAt ? 'quota' : 'rate', state.usage.nextAt, false)
     if (greetingAudioKey(0, text, profile) !== greetingAudioKey(0, text, this.profile())) throw new GreetingVoiceError('El perfil de voz cambió.', 'disabled', 0, false)
     const effectiveProfile = callSpeechProfile(profile, purpose)
+    if (nameModel !== undefined) {
+      if (purpose !== 'name' || !nameVoiceModels.includes(nameModel)) throw new GreetingVoiceError('Modelo de pronunciación no válido.', 'invalid', 0, false)
+      effectiveProfile.model = nameModel
+    }
+    if (purpose === 'name' && nameStyle) effectiveProfile.style = nameStyle
     this.working = true
     try {
       // Reserve before sending. Interrupted/failed requests conservatively consume

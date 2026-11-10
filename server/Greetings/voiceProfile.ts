@@ -16,10 +16,11 @@ const callDirections: Record<CallPurpose, string> = {
   table: 'This is the opening clause of a longer announcement. Use a continuing intonation after the table number, with a brief comma pause, not a final sentence cadence.',
   continuation: 'Continue a karaoke introduction after the table has been named. Welcome the performer warmly and pronounce the song title clearly. Keep the delivery concise and natural.',
   reference: 'Read this complete karaoke introduction naturally, with a brief pause after the opening sentence and a warm welcome for the performer.',
-  name: 'Read only this name clearly, with a neutral, gently continuing cadence and a small natural pause. Do not add any words.',
+  name: 'Pronounce exactly the supplied name in a clear, resonant, well-supported speaking voice at normal announcement volume. Use confident articulation, a natural medium pace and a brief continuing cadence suitable for joining an announcement. No whispering, breathy delivery, extra words, music or sound effects.',
   template: 'Read this short opening to a musical request. Use warm, moderate energy and a continuing cadence before the following name. Do not add any words.',
   signature: 'Read only this short sender prefix, with a continuing cadence before the name. Do not add any words.',
 }
+export const nameVoiceRecipeRevision = 2
 export function callSpeechProfile (profile: GreetingVoiceProfile, purpose?: CallPurpose): GreetingVoiceProfile {
   if (purpose === undefined) return profile
   if (!Object.hasOwn(callDirections, purpose)) throw new Error('Propósito de voz no válido.')

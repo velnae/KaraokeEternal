@@ -92,6 +92,25 @@ it('keeps the cache profile stable when only quotas or enablement change', () =>
   expect(voice.profile()).not.toEqual(profile)
 })
 
+it('uses either name model without changing greetings or bypassing the shared budget', async () => {
+  const profile = voice.profile()
+  for (const model of ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'] as const) {
+    await voice.generate('Ana', profile, signal(), false, 'name', 'Clearly.', model)
+    expect(provider.generate).toHaveBeenLastCalledWith('Ana', { ...profile, style: 'Clearly.', model }, expect.any(AbortSignal))
+  }
+  await voice.generate('Hola', profile, signal())
+  expect(provider.generate).toHaveBeenLastCalledWith('Hola', profile, expect.any(AbortSignal))
+  expect(voice.profile()).toEqual(profile)
+  await expect(voice.generate('Ana', profile, signal(), false, 'name', undefined, 'gemini-3.8-flash-tts')).rejects.toMatchObject({ kind: 'rate', attempted: false })
+  expect(provider.generate).toHaveBeenCalledTimes(3)
+})
+
+it('rejects name model overrides for other purposes without provider consumption', async () => {
+  await expect(voice.generate('Hola', voice.profile(), signal(), false, 'intro', undefined, 'gemini-3.8-flash-tts')).rejects.toMatchObject({ kind: 'invalid', attempted: false })
+  expect(provider.generate).not.toHaveBeenCalled()
+  expect(voice.snapshot().usage.day).toBe(0)
+})
+
 it('allows an explicit private preview before enabling automatic generation', async () => {
   voice.configure({ ...voice.config(), enabled: false })
   await expect(voice.generate('Saludo', voice.profile(), signal())).rejects.toMatchObject({ kind: 'disabled', attempted: false })
