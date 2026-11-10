@@ -9,6 +9,7 @@ import { saveDisplayWithImages } from '../PlayerLogo/Store.js'
 import { validateBranding } from './branding.js'
 import { defaultModeration, setModerationTerms, validateModeration } from '../../shared/textModeration.js'
 import { defaultMusicBlocking, validateMusicBlocking, type MusicBlocking } from '../../shared/musicBlocking.js'
+import { validateNameVoiceStyle } from '../../shared/nameVoices.js'
 
 const log = getLogger('Prefs')
 
@@ -85,6 +86,7 @@ class Prefs {
     if (key === 'branding') data = validateBranding(data)
     if (key === 'playerDisplay') return saveDisplayWithImages(validatePlayerDisplay(data))
     if (key === 'moderation') data = validateModeration(data)
+    if (key === 'nameVoiceStyle') data = validateNameVoiceStyle(data)
     const query = sql`
       REPLACE INTO prefs (key, data)
       VALUES (${key}, ${JSON.stringify(data)})

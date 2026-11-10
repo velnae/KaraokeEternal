@@ -39,7 +39,7 @@ import { loadCatalog } from './Animation/catalog.js'
 import { startProduction } from './Animation/Production.js'
 import greetingVoiceRouter from './Greetings/voiceRouter.js'
 import greetingAudioRouter, { startGreetingAudio } from './Greetings/audioRouter.js'
-import callRouter, { startCallJobs } from './Animation/Calls/router.js'
+import callRouter, { startCallJobs, nameVoiceRouter } from './Animation/Calls/router.js'
 import pushQueuesAndLibrary from './lib/pushQueuesAndLibrary.js'
 import { Server as SocketIO } from 'socket.io'
 import socketActions from './socket.js'
@@ -243,6 +243,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(userRouter.routes())
   baseRouter.use(tablesRouter.routes())
   baseRouter.use(callRouter.routes())
+  baseRouter.use(nameVoiceRouter.routes())
   baseRouter.use(transitionVideoRouter.routes())
   baseRouter.use(animationRouter.routes())
   baseRouter.use(birthdayRouter.routes())

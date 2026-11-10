@@ -5,12 +5,14 @@ import { db } from '../../lib/Database.js'
 import Tables from '../../Tables/Tables.js'
 import type GreetingVoice from '../../Greetings/GreetingVoice.js'
 import { GreetingVoiceError } from '../../Greetings/GeminiGreetingTts.js'
-import { callSpeechProfile, type GreetingVoiceProfile } from '../../Greetings/voiceProfile.js'
+import { callSpeechProfile, nameVoiceRecipeRevision, type GreetingVoiceProfile } from '../../Greetings/voiceProfile.js'
 import { AudioValidationError } from '../AudioPreparation.js'
 import { callContinuation, callText, type CallJobPurpose, type CallOperation, type CallPurpose, type CallSnapshot } from '../../../shared/karaokeCalls.js'
 import { binding, intros, job, jobDTO, jobOutdated, key, part, partDTO, retainedListening, retainedSinging, tableVoice, type JobInput, type JobRow, type PartRow } from './Store.js'
 import { checksum, compose, compositionRevision, preparedPart } from './Composition.js'
 import getLogger from '../../lib/Log.js'
+import NameBank, { NameVoiceError, type NameMetadata } from './NameBank.js'
+import { getNameVoiceStyle } from './nameStyle.js'
 
 const active = '(\'queued\',\'generating\',\'preparing\')'
 export class CallError extends Error {
@@ -29,6 +31,7 @@ export default class CallJobs {
   constructor (private directory: string, private tts: Voice, private ffmpeg = 'ffmpeg') {}
 
   async start () {
+    NameBank.initialize()
     db.run(`UPDATE karaokeCallJobs SET status='uncertain',error='La preparación se interrumpió. Revise antes de generar de nuevo.',updatedAt=? WHERE status IN ('generating','preparing')`, [Date.now()])
     try {
       await fs.mkdir(this.directory, { recursive: true })
@@ -57,7 +60,7 @@ export default class CallJobs {
     Tables.room(roomId)
     const profile = this.tts.profile()
     return { intros: intros(roomId).map(partDTO), profileKey: key(profile), voice: this.tts.snapshot(), error: this.startupError,
-      names: db.all<PartRow>(`SELECT * FROM karaokeCallParts WHERE roomId=? AND kind='name' AND retired=0 ORDER BY text,createdAt DESC`, [roomId]).map(partDTO),
+      names: db.all<PartRow>(`SELECT * FROM karaokeCallParts WHERE kind='name' AND retired=0 ORDER BY text,createdAt DESC`).map(partDTO),
       jobs: db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='preview'
         AND NOT (operation='source' AND json_extract(inputJSON,'$.sourceKind')='template') ORDER BY rowid DESC LIMIT 20`, [roomId]).map(row => jobDTO(row, profile)),
       tables: Tables.list(roomId).filter(table => table.status === 'active').map(table => tableVoice(roomId, table.tableId, profile)) }
@@ -70,10 +73,16 @@ export default class CallJobs {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CallError('Datos de preparación no válidos.')
     const body = value as Record<string, unknown>
     if (typeof body.requestId !== 'string' || !/^[\w-]{8,100}$/.test(body.requestId)) throw new CallError('La solicitud necesita un identificador válido.')
+    const name = operation === 'source' && body.sourceKind === 'name'
+      ? typeof body.nameId === 'string' ? NameBank.get(body.nameId) : NameBank.ensure(callText(body.text, 24))
+      : undefined
+    if (name?.archived) throw new CallError('Reactive la pronunciación antes de generar audio.')
     const requestJSON = JSON.stringify({ operation, tableId, text: body.text, title: body.title, previousId: body.previousId,
       revision: body.revision, introId: body.introId, table: body.tableId, performer: body.performer, song: body.song,
-      sourceKind: body.sourceKind, sourceIds: body.sourceIds, regenerate: body.regenerate === true })
-    const receipt = db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND requestId=?', [roomId, body.requestId])
+      sourceKind: body.sourceKind, sourceIds: body.sourceIds, regenerate: body.regenerate === true, nameId: name?.id, reprocessPartId: body.reprocessPartId })
+    const receipt = name
+      ? db.get<JobRow>(`SELECT * FROM karaokeCallJobs WHERE requestId=? AND operation='source' AND json_extract(inputJSON,'$.nameId') IS NOT NULL`, [body.requestId])
+      : db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND requestId=?', [roomId, body.requestId])
     if (receipt) {
       if (receipt.requestJSON !== requestJSON || receipt.purpose !== purpose) throw new CallError('El identificador pertenece a otra preparación.', 409)
       return jobDTO(receipt, this.tts.profile())
@@ -87,12 +96,31 @@ export default class CallJobs {
       input.sourceKind = body.sourceKind as JobInput['sourceKind']
       input.text = callText(body.text, 100)
       input.title = input.text
+      if (name) {
+        input.nameId = name.id
+        input.nameBankRevision = 1
+        const settings = getNameVoiceStyle(profile)
+        input.nameStyle = settings.style
+        input.nameModel = settings.model
+        input.nameRecipeRevision = nameVoiceRecipeRevision
+        if (body.reprocessPartId !== undefined) {
+          const original = typeof body.reprocessPartId === 'string' ? part(roomId, body.reprocessPartId) : undefined
+          if (!original || original.kind !== 'name' || original.nameId !== name.id || !NameBank.compatible(original, profile)) throw new CallError('Seleccione una versión disponible de la voz actual.')
+          input.nameReprocessId = original.id
+          input.text = original.text
+          input.title = original.text
+          input.regenerate = true
+          input.nameStyle = NameBank.info(original).style
+          input.nameModel = NameBank.info(original).profile?.model as JobInput['nameModel']
+          input.nameRecipeRevision = NameBank.info(original).recipeRevision
+        } else if (input.text !== name.spokenText) throw new CallError('La pronunciación cambió. Actualice sus datos antes de generar.')
+      }
     } else if (operation === 'compose') {
       if (historicalProfile && purpose === 'preview') input.historical = true
       if (body.sourceKind === 'signature') input.sourceKind = 'signature'
       if (!Array.isArray(body.sourceIds) || body.sourceIds.length < 2 || body.sourceIds.length > 3) throw new CallError('La presentación necesita dos o tres piezas.')
       const sources = body.sourceIds.map(id => typeof id === 'string' ? part(roomId, id) : undefined)
-      if (sources.some(source => !source || source.profileKey !== key(profile))) throw new CallError('Una pieza cambió o no está disponible.')
+      if (sources.some(source => !source || (source.kind === 'name' ? !NameBank.compatible(source, profile) : source.profileKey !== key(profile)))) throw new CallError('Una pieza cambió o no está disponible.')
       input.sourceIds = sources.map(source => source!.id)
       input.text = callText(sources.map(source => source!.text).join(' '))
       input.title = input.text
@@ -178,9 +206,9 @@ export default class CallJobs {
     if (this.running) return this.running
     if (this.stopped || this.startupError) return Promise.resolve()
     const row = db.get<JobRow>(`SELECT * FROM karaokeCallJobs j WHERE status='queued' AND retryAt<=? AND
-      (purpose='preview' OR ((?=1 OR operation='compose') AND EXISTS(SELECT 1 FROM rooms r LEFT JOIN karaokeCallControls c USING(roomId) WHERE r.roomId=j.roomId AND r.status='open'
+      (purpose='preview' OR (?=1 AND operation='source' AND json_extract(inputJSON,'$.nameId') IS NOT NULL) OR ((?=1 OR operation='compose') AND EXISTS(SELECT 1 FROM rooms r LEFT JOIN karaokeCallControls c USING(roomId) WHERE r.roomId=j.roomId AND r.status='open'
         AND (c.preparing=1 OR c.listeningEnabled=1 OR EXISTS(SELECT 1 FROM greetingControls g WHERE g.roomId=r.roomId AND g.audioEnabled=1 AND g.paused=0 AND json_extract(g.playbackJSON,'$.enabled')=1)))))
-      ORDER BY priority DESC,rowid LIMIT 1`, [Date.now(), this.tts.snapshot().config.enabled ? 1 : 0])
+      ORDER BY priority DESC,rowid LIMIT 1`, [Date.now(), this.tts.snapshot().config.enabled ? 1 : 0, this.tts.snapshot().config.enabled ? 1 : 0])
     if (!row) return Promise.resolve()
     this.runningId = row.id
     this.controller = new AbortController()
@@ -198,9 +226,17 @@ export default class CallJobs {
     try {
       this.assertCurrent(row)
       const input: JobInput = JSON.parse(row.inputJSON)
-      db.run(`INSERT INTO karaokeCallParts(id,roomId,kind,variantId,title,text,profileKey,cacheKey,master,filename,checksum,masterChecksum,durationMs,dependenciesJSON,createdAt)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [output.id, row.roomId, kind, input.variantId, input.title, text,
-        key(JSON.parse(row.profileJSON)), cacheKey, output.master, output.filename, output.checksum, output.masterChecksum, output.durationMs, JSON.stringify(dependencies), Date.now()])
+      const profile: GreetingVoiceProfile = JSON.parse(row.profileJSON)
+      if (kind === 'name' && input.nameModel) profile.model = input.nameModel
+      const name = kind === 'name' && input.nameId ? NameBank.get(input.nameId) : undefined
+      const selected = name && row.purpose !== 'preview' && !name.archived && !NameBank.selectedFor(name.id, profile)
+      const metadata: NameMetadata | null = name
+        ? { profile, style: input.nameStyle ?? null, recipeRevision: input.nameRecipeRevision ?? null,
+            legacy: false, ...(input.nameReprocessId ? { reprocessedFrom: input.nameReprocessId } : {}) }
+        : null
+      db.run(`INSERT INTO karaokeCallParts(id,roomId,kind,variantId,title,text,profileKey,cacheKey,master,filename,checksum,masterChecksum,durationMs,dependenciesJSON,createdAt,nameId,nameSelected,nameMetadataJSON)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [output.id, name ? null : row.roomId, kind, input.variantId, input.title, text,
+        key(profile), cacheKey, output.master, output.filename, output.checksum, output.masterChecksum, output.durationMs, JSON.stringify(dependencies), Date.now(), name?.id ?? null, selected ? 1 : 0, metadata ? JSON.stringify(metadata) : null])
       return part(row.roomId, output.id)!
     } catch (error) {
       await Promise.all([output.master, output.filename].map(file => fs.rm(path.join(this.directory, file), { force: true })))
@@ -211,21 +247,36 @@ export default class CallJobs {
   private async generatePart (row: JobRow, purpose: CallPurpose, text: string) {
     const input: JobInput = JSON.parse(row.inputJSON)
     const profile: GreetingVoiceProfile = JSON.parse(row.profileJSON)
-    const cacheKey = key([purpose, text, callSpeechProfile(profile, purpose), compositionRevision, ['intro', 'table'].includes(purpose) ? input.variantId : null])
-    const cached = !input.regenerate && db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND cacheKey=? AND retired=0 ORDER BY rowid DESC LIMIT 1', [row.roomId, cacheKey])
+    const effectiveProfile = callSpeechProfile(profile, purpose)
+    if (purpose === 'name') {
+      effectiveProfile.style = input.nameStyle ?? getNameVoiceStyle(profile).style
+      effectiveProfile.model = input.nameModel ?? profile.model
+    }
+    const cacheKey = key([purpose, text, effectiveProfile, compositionRevision, ['intro', 'table'].includes(purpose) ? input.variantId : null])
+    const cached = !input.regenerate && (purpose === 'name' && input.nameId
+      ? NameBank.selectedFor(input.nameId, profile)
+      : db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND cacheKey=? AND retired=0 ORDER BY rowid DESC LIMIT 1', [row.roomId, cacheKey]))
     if (cached) {
       await this.bytes(row.roomId, cached.id, true)
       await this.bytes(row.roomId, cached.id)
       return cached
     }
+    if (purpose === 'name' && !input.nameReprocessId && !input.nameStyle) {
+      input.nameStyle = effectiveProfile.style
+      input.nameRecipeRevision = nameVoiceRecipeRevision
+      row.inputJSON = JSON.stringify(input)
+      db.run('UPDATE karaokeCallJobs SET inputJSON=? WHERE id=?', [row.inputJSON, row.id])
+    }
     this.assertCurrent(row)
-    db.run('UPDATE karaokeCallJobs SET status=\'generating\',error=NULL,updatedAt=? WHERE id=?', [Date.now(), row.id])
+    db.run('UPDATE karaokeCallJobs SET status=?,error=NULL,updatedAt=? WHERE id=?', [input.nameReprocessId ? 'preparing' : 'generating', Date.now(), row.id])
     const started = Date.now()
     let bytes: Buffer
     try {
-      bytes = await this.tts.generate(text, profile, this.controller!.signal, row.purpose === 'preview', purpose)
+      bytes = input.nameReprocessId
+        ? await this.bytes(row.roomId, input.nameReprocessId, true)
+        : await this.tts.generate(text, profile, this.controller!.signal, row.purpose === 'preview', purpose, input.nameStyle ?? undefined, input.nameModel)
     } finally {
-      db.run('UPDATE karaokeCallJobs SET providerMs=providerMs+? WHERE id=?', [Date.now() - started, row.id])
+      if (!input.nameReprocessId) db.run('UPDATE karaokeCallJobs SET providerMs=providerMs+? WHERE id=?', [Date.now() - started, row.id])
     }
     this.assertCurrent(row)
     db.run('UPDATE karaokeCallJobs SET status=\'preparing\',updatedAt=? WHERE id=?', [Date.now(), row.id])
@@ -302,7 +353,7 @@ export default class CallJobs {
           db.run('UPDATE karaokeCallJobs SET status=\'queued\',retryAt=?,error=?,updatedAt=? WHERE id=?', [Math.max(Date.now() + 1000, error.retryAt), error.message, Date.now(), row.id])
         } else {
           const uncertain = this.stopped || (error instanceof GreetingVoiceError && error.kind === 'uncertain')
-          const known = error instanceof CallError || error instanceof AudioValidationError || error instanceof GreetingVoiceError
+          const known = error instanceof CallError || error instanceof AudioValidationError || error instanceof GreetingVoiceError || error instanceof NameVoiceError
           if (!known) getLogger('calls').warn('Preparation %s (%s) failed: %s', row.id, row.operation, error instanceof Error ? error.stack ?? error.message : String(error))
           const message = known ? error.message : 'No se pudo preparar el audio. Revise el registro del servidor.'
           db.run('UPDATE karaokeCallJobs SET status=?,error=?,updatedAt=? WHERE id=?', [uncertain ? 'uncertain' : 'failed', message, Date.now(), row.id])
@@ -340,7 +391,7 @@ export default class CallJobs {
 
   private async cleanup () {
     const keep = new Set<string>()
-    for (const { roomId } of db.all<{ roomId: number }>('SELECT DISTINCT roomId FROM karaokeCallParts')) {
+    for (const { roomId } of db.all<{ roomId: number }>('SELECT DISTINCT roomId FROM karaokeCallParts WHERE roomId IS NOT NULL')) {
       for (const item of intros(roomId)) keep.add(item.id)
       for (const row of db.all<{ partId: string }>('SELECT partId FROM tableCallVoices WHERE roomId=? AND partId IS NOT NULL', [roomId])) keep.add(row.partId)
       const recent = db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='preview' AND operation IN ('hybrid','reference') AND status='ready' ORDER BY rowid DESC LIMIT 10`, [roomId])

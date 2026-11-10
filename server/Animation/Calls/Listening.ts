@@ -1,7 +1,6 @@
 import { db } from '../../lib/Database.js'
 import type GreetingVoice from '../../Greetings/GreetingVoice.js'
 import type { QueueItem } from '../../../shared/types.js'
-import { spokenGuestName } from '../../../shared/guestName.js'
 import { callPlaybackReasons, type CallAsset, type CallContext, type CallPreparation, type CallPurpose, type CallRequestState } from '../../../shared/karaokeCalls.js'
 import CallJobs, { CallError } from './Jobs.js'
 import { callControls, job, jobDTO, key, part, partDTO, retainedListening, tableVoice, type JobRow, type PartRow } from './Store.js'
@@ -10,11 +9,12 @@ import { callSpeechProfile } from '../../Greetings/voiceProfile.js'
 import { compositionRevision } from './Composition.js'
 import ListeningTemplates, { defaultListeningTemplates } from './ListeningTemplates.js'
 import getLogger from '../../lib/Log.js'
+import NameBank from './NameBank.js'
 
 export const listeningTemplates = defaultListeningTemplates
 export const listeningTemplate = listeningTemplates[0]
 export const isListeningRequest = (item?: QueueItem) => item?.origin === 'PARTICIPANT' && item.requestIntent === 'LISTEN'
-interface PresentationRow { inputKey: string, resultId: string | null, signatureId: string | null, startedAt: number | null, templateId: string | null, templatePartId: string | null, playbackReason: keyof typeof callPlaybackReasons | null, recoveryJobId: string | null }
+interface PresentationRow { inputKey: string, resultId: string | null, signatureId: string | null, startedAt: number | null, templateId: string | null, templatePartId: string | null, playbackReason: keyof typeof callPlaybackReasons | null, recoveryJobId: string | null, namePartId: string | null }
 
 /** Reconciled by CallAutomation; sources share its worker and provider budget. */
 export default class ListeningCalls {
@@ -38,9 +38,9 @@ export default class ListeningCalls {
     } catch { return undefined }
   }
 
-  private inputKey (roomId: number, item: QueueItem, template: PartRow | null | undefined = this.template(roomId, item)?.audio, recipe = 'listening-v2') {
+  private inputKey (roomId: number, item: QueueItem, template: PartRow | null | undefined = this.template(roomId, item)?.audio, recipe = 'listening-v3', namePartId = NameBank.selected(NameBank.speechName(item.userDisplayName), this.voice.profile())?.id) {
     return key([recipe, item.queueId, item.userDisplayName, item.tableId, item.tableLabelSnapshot,
-      item.requestIntent, item.origin, template?.text, this.table(roomId, item)?.id, this.voice.profile()])
+      item.requestIntent, item.origin, template?.text, this.table(roomId, item)?.id, this.voice.profile(), ...(recipe === 'listening-v3' ? [namePartId] : [])])
   }
 
   private ensure (roomId: number, operation: 'source' | 'compose', body: Record<string, unknown>, queueId?: number) {
@@ -77,6 +77,7 @@ export default class ListeningCalls {
   }
 
   private source (roomId: number, sourceKind: CallPurpose, text: string) {
+    if (sourceKind === 'name') return NameBank.ensureAudio(this.worker, roomId, text, this.voice.profile(), this.voice.snapshot().configured && this.voice.snapshot().config.enabled)
     return this.ensure(roomId, 'source', { sourceKind, text })
   }
 
@@ -95,15 +96,15 @@ export default class ListeningCalls {
       const previous = db.get<PresentationRow>('SELECT * FROM listeningPresentations WHERE roomId=? AND queueId=?', [roomId, item.queueId])
       if (previous?.startedAt) continue
       const inputKey = this.inputKey(roomId, item, selected?.audio ?? null)
-      const name = present || greeting ? this.source(roomId, 'name', spokenGuestName(item.userDisplayName)) : undefined
+      const name = present || greeting ? this.source(roomId, 'name', NameBank.speechName(item.userDisplayName)) : undefined
       const prefix = greeting ? this.source(roomId, 'signature', 'De') : undefined
       const template = present ? selected?.audio : undefined
       const signature = name && prefix ? this.ensure(roomId, 'compose', { sourceIds: [prefix.id, name.id], sourceKind: 'signature' }, item.queueId) : undefined
       const table = this.table(roomId, item)
       const result = name && template ? this.ensure(roomId, 'compose', { sourceIds: [...(table ? [table.id] : []), template.id, name.id] }, item.queueId) : undefined
-      db.run(`INSERT INTO listeningPresentations(roomId,queueId,inputKey,resultId,signatureId,templateId,templatePartId) VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(roomId,queueId) DO UPDATE SET inputKey=excluded.inputKey,resultId=excluded.resultId,signatureId=excluded.signatureId,templateId=excluded.templateId,templatePartId=excluded.templatePartId`,
-      [roomId, item.queueId, inputKey, result?.id ?? null, signature?.id ?? null, selected?.id ?? null, selected?.audio?.id ?? null])
+      db.run(`INSERT INTO listeningPresentations(roomId,queueId,inputKey,resultId,signatureId,templateId,templatePartId,namePartId) VALUES(?,?,?,?,?,?,?,?)
+        ON CONFLICT(roomId,queueId) DO UPDATE SET inputKey=excluded.inputKey,resultId=excluded.resultId,signatureId=excluded.signatureId,templateId=excluded.templateId,templatePartId=excluded.templatePartId,namePartId=excluded.namePartId`,
+      [roomId, item.queueId, inputKey, result?.id ?? null, signature?.id ?? null, selected?.id ?? null, selected?.audio?.id ?? null, name?.id ?? null])
     }
   }
 
@@ -111,17 +112,21 @@ export default class ListeningCalls {
     if (item.status !== 'APPROVED' || item.origin !== 'PARTICIPANT') return null
     const row = db.get<PresentationRow>('SELECT * FROM listeningPresentations WHERE roomId=? AND queueId=?', [roomId, item.queueId])
     const template = this.template(roomId, item, allowStarted)?.audio ?? null
-    let inputKey = this.inputKey(roomId, item, template)
     if (!row || (row.startedAt && !allowStarted)) return null
+    const namePartId = allowStarted && row.startedAt
+      ? row.namePartId ?? NameBank.sources(row.resultId ?? row.signatureId ?? '')[0]?.id
+      : NameBank.selected(NameBank.speechName(item.userDisplayName), this.voice.profile())?.id
+    let inputKey = this.inputKey(roomId, item, template, 'listening-v3', namePartId)
     // A confirmed legacy sequence finishes with its original composition.
     if (allowStarted && row.startedAt && row.inputKey === this.inputKey(roomId, item, template, 'listening-v1')) inputKey = row.inputKey
-    const signatureKey = key(['signature-v1', item.queueId, item.userDisplayName, item.origin, item.requestIntent, this.voice.profile()])
+    if (allowStarted && row.startedAt && row.inputKey === this.inputKey(roomId, item, template, 'listening-v2')) inputKey = row.inputKey
+    const signatureKey = key(['signature-v2', item.queueId, item.userDisplayName, item.origin, item.requestIntent, this.voice.profile(), namePartId])
     const controls = callControls(roomId)
     const assets: CallAsset[] = []
     const add = (id: string | null, role: 'call' | 'signature') => {
       const audio = id && part(roomId, id)
       if (!audio || audio.profileKey !== key(this.voice.profile())) return
-      if (role === 'signature' && audio.text !== `De ${spokenGuestName(item.userDisplayName)}`) return
+      if (role === 'signature' && (!namePartId || !NameBank.sources(audio.id).some(source => source.id === namePartId))) return
       assets.push({ id: `call-${audio.id}`, partId: audio.id, role, identifiesSender: true, title: audio.title, displayText: audio.text,
         durationMs: audio.durationMs, checksum: audio.checksum, kind: 'voice', source: 'Gemini', license: 'Generated with the configured provider.',
         url: `api/rooms/${roomId}/karaoke-calls/requests/${item.queueId}/audio/${audio.id}` })
@@ -147,7 +152,7 @@ export default class ListeningCalls {
   }
 
   prioritize (roomId: number, item: QueueItem) {
-    const name = spokenGuestName(item.userDisplayName)
+    const name = NameBank.pronouncedText(NameBank.speechName(item.userDisplayName), this.voice.profile())
     const template = this.template(roomId, item)?.text ?? ''
     const text = [this.table(roomId, item)?.text, template, name].filter(Boolean).join(' ')
     db.run(`UPDATE karaokeCallJobs SET priority=100 WHERE roomId=? AND status='queued' AND operation IN ('source','compose') AND text IN (?,?,?,?,?)`,
@@ -170,7 +175,7 @@ export default class ListeningCalls {
       const row = db.get<PresentationRow>('SELECT * FROM listeningPresentations WHERE roomId=? AND queueId=?', [roomId, item.queueId])
       if (!row) return []
       const pending = item.status === 'APPROVED' || item.status === 'PLAYING'
-      const result = (!pending || row.inputKey === this.inputKey(roomId, item)) && row.resultId ? part(roomId, row.resultId) : undefined
+      const result = (!pending || row.startedAt || row.inputKey === this.inputKey(roomId, item)) && row.resultId ? part(roomId, row.resultId) : undefined
       const recovery = row.recoveryJobId ? job(roomId, row.recoveryJobId) : undefined
       const intervention = db.get<{ status: string, reason: string | null, startedAt: number | null }>(`SELECT status,reason,startedAt FROM animationInterventions WHERE roomId=?
         AND json_extract(callJSON,'$.queueId')=? AND json_extract(callJSON,'$.kind')='listening' ORDER BY requestedAt DESC LIMIT 1`, [roomId, item.queueId])
@@ -180,7 +185,8 @@ export default class ListeningCalls {
           ? 'playing'
           : intervention ? intervention.startedAt ? 'interrupted' : 'omitted' : !pending || row.playbackReason ? 'omitted' : 'pending'
       const playbackReason = row.playbackReason ? callPlaybackReasons[row.playbackReason] : intervention?.reason ?? (playback === 'omitted' ? 'No se registró la reproducción de esta presentación.' : null)
-      const name = spokenGuestName(item.userDisplayName)
+      const spokenName = NameBank.speechName(item.userDisplayName)
+      const name = NameBank.pronouncedText(spokenName, this.voice.profile())
       const template = this.template(roomId, item)?.text ?? ''
       const text = [this.table(roomId, item)?.text, template, name].filter(Boolean).join(' ')
       const preparing = db.get(`SELECT 1 FROM karaokeCallJobs WHERE roomId=? AND operation IN ('source','compose') AND profileJSON=? AND text IN (?,?,?)
@@ -189,15 +195,16 @@ export default class ListeningCalls {
         ? undefined
         : db.get<{ error: string }>(`SELECT error FROM karaokeCallJobs WHERE roomId=? AND operation IN ('source','compose') AND profileJSON=? AND text IN (?,?,?)
           AND status IN ('failed','uncertain') ORDER BY createdAt DESC LIMIT 1`, [roomId, JSON.stringify(this.voice.profile()), name, template, text])
+      const nameIssue = NameBank.preparationIssue(spokenName, this.voice.profile())
       let reason: string | null = null
       if (!result) {
         if (!pending) reason = row.resultId ? 'El audio de esta presentación fue retirado.' : 'No se generó una presentación para este pedido.'
-        else reason = error ? `${error.error} Use Preparar mesas para reintentar.` : 'Preparando presentación; la música continúa.'
+        else reason = nameIssue ?? (error ? `${error.error} Use Preparar mesas para reintentar.` : 'Preparando presentación; la música continúa.')
       }
       return [{ queueId: item.queueId, inputKey: row.inputKey, title: item.title, performer: item.userDisplayName, tableLabel: item.tableLabelSnapshot ?? null,
         playback, playbackReason, canRecover: !pending && !result && !!row.resultId,
         recoveryJob: recovery ? jobDTO(recovery, this.voice.profile()) : null,
-        status: result ? 'ready' : !pending ? 'cancelled' : error ? 'fallback' : 'preparing', result: result ? partDTO(result) : null, startedAt: row.startedAt,
+        status: result ? 'ready' : !pending ? 'cancelled' : error || nameIssue ? 'fallback' : 'preparing', result: result ? partDTO(result) : null, startedAt: row.startedAt,
         reason }]
     })
   }

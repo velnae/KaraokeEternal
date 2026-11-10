@@ -133,6 +133,11 @@ export class DatabaseWrapper {
     for (const migration of migrations) {
       if (!appliedIds.has(migration.id)) {
         log.info('Running migration %s: %s', migration.id, migration.name)
+        // SQLite requires foreign keys to be disabled outside the transaction
+        // when replacing a referenced table. Validate every reference before commit.
+        const rebuild = /^-- Rebuild referenced tables[ \t]*$/m.test(migration.up)
+        const foreignKeys = rebuild ? this.get<{ foreign_keys: number }>('PRAGMA foreign_keys')!.foreign_keys : 0
+        if (rebuild) this.exec('PRAGMA foreign_keys = OFF')
         this.exec('BEGIN')
         try {
           // Compatibility migrations can cover databases that received an earlier
@@ -141,6 +146,7 @@ export class DatabaseWrapper {
           const hasColumn = missingColumn && this.all<{ name: string }>(`PRAGMA table_info("${missingColumn[1]}")`)
             .some(column => column.name === missingColumn[2])
           if (!hasColumn) this.exec(migration.up)
+          if (rebuild && this.all('PRAGMA foreign_key_check').length) throw new Error(`Migration ${migration.id} would break foreign keys`)
           this.run(
             `INSERT INTO "${table}" (id, name, up, down) VALUES (?, ?, ?, ?)`,
             [migration.id, migration.name, migration.up, migration.down || null],
@@ -149,6 +155,8 @@ export class DatabaseWrapper {
         } catch (err) {
           this.exec('ROLLBACK')
           throw err
+        } finally {
+          if (rebuild) this.exec(`PRAGMA foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`)
         }
       }
     }

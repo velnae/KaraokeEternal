@@ -59,7 +59,7 @@ const providerPort = await listen(provider)
 let server, browser, page, db
 const call = async (suffix, body, method = body === undefined ? 'GET' : 'POST') => {
   const response = await api.fetch(base + 'api/' + suffix, { method, data: body })
-  assert.ok([200, 202].includes(response.status()), `${response.status()}: ${await response.text()}`)
+  assert.ok([200, 201, 202].includes(response.status()), `${response.status()}: ${await response.text()}`)
   return response.json()
 }
 const snapshot = () => call('rooms/1/karaoke-calls')

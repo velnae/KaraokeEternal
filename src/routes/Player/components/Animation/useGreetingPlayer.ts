@@ -129,7 +129,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       return valid() && channel.ready && !!intervention && allowed && current!.prefs.volume > 0
         && current!.playerEpoch === intervention.playerEpoch && current!.active?.interventionId === intervention.interventionId && !current!.active.stopRequestedAt
     }
-    const audioEvent = (event: 'STARTED' | 'ASSET_STARTED' | 'ENDED' | 'STOPPED' | 'NOT_STARTED', clipId?: string) => {
+    const audioEvent = (event: 'STARTED' | 'ASSET_STARTED' | 'ASSET_ENDED' | 'ENDED' | 'STOPPED' | 'NOT_STARTED', clipId?: string) => {
       const intervention = grant!.transition!.intervention
       return animationRequest(ANIMATION_EVENT, { interventionId: intervention.interventionId, playerEpoch: intervention.playerEpoch, event, clipId }, 1000)
     }
@@ -152,6 +152,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       if (first && bedStarted) await audioEvent('ASSET_STARTED', bed!.id)
       await onStarted?.()
       if (await completion !== 'ENDED') throw new Error('La voz fue interrumpida')
+      if (asset.role === 'call' || asset.role === 'signature') void audioEvent('ASSET_ENDED', asset.id).catch(() => {})
     }
     const show = async (voiced: boolean) => {
       const item = grant!.items[0]

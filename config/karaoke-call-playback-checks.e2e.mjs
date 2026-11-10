@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 import { checkListeningPresentations } from './listening-presentation-checks.e2e.mjs'
+import { checkNameVoiceBank } from './name-voice-bank-checks.e2e.mjs'
 import { checkSingingHistory } from './singing-history-checks.e2e.mjs'
 
 export async function checkAutomaticCalls ({ page, context, browser, api, base, uiBase, data, db, call, snapshot, restart, fail }) {
@@ -49,9 +50,9 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     await client.route('https://dev-karaoke.puyu.pe/socket.io/**', route => forward(route, true))
     await client.routeWebSocket('**/socket.io/**', socket => socket.close())
   }
-  const join = async (name, code) => {
-    const table = (await call('rooms/1/tables')).find(item => item.code === code)
-    const { invitation } = await call(`rooms/1/tables/${table.tableId}/qr`)
+  const join = async (name, code, roomId = 1) => {
+    const table = (await call(`rooms/${roomId}/tables`)).find(item => item.code === code)
+    const { invitation } = await call(`rooms/${roomId}/tables/${table.tableId}/qr`)
     const client = await browser.newContext({ viewport: { width: 390, height: 844 } })
     const clientApi = await request.newContext()
     guests.push({ client, clientApi })
@@ -83,7 +84,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
       '-t', '12', '-c:v', 'libx264', '-threads', '2', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(data, 'seek-song.mp4')])
     db.exec(`INSERT INTO artists(artistId,name,nameNorm) VALUES(1,'Fixture','fixture')`)
     db.prepare('INSERT INTO paths(pathId,path,priority,data) VALUES(1,?,1,?)').run(data, '{"prefs":{"isWatching":false}}')
-    for (const [index, title] of ['Rayando el sol', 'Yellow', 'Fallo de voz', 'Listen fixture', 'House fixture', 'Pause fixture', 'Listen one', 'Listen two', 'Listen signature', 'Listen neutral', 'Listen unavailable', 'Listen signature fallback', 'Seek source', 'Listen rebuild normal', 'Listen rebuild seek'].entries()) {
+    for (const [index, title] of ['Rayando el sol', 'Yellow', 'Fallo de voz', 'Listen fixture', 'House fixture', 'Pause fixture', 'Listen one', 'Listen two', 'Listen signature', 'Listen neutral', 'Listen unavailable', 'Listen signature fallback', 'Seek source', 'Listen rebuild normal', 'Listen rebuild seek', 'Alias request'].entries()) {
       const id = index + 1
       const filename = `song-${id}.mp4`
       fs.copyFileSync(path.join(data, id === 13 ? 'seek-song.mp4' : 'call-song.mp4'), path.join(data, filename))
@@ -124,6 +125,10 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
       await page.setViewportSize({ width, height: 1000 })
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
       await page.screenshot({ path: path.join(data, `automatic-controls-${width}.png`), fullPage: true })
+    }
+    if (process.env.KARAOKE_E2E_NAMES_ONLY === '1') {
+      await checkNameVoiceBank({ page, browser, api, base, uiBase, data, db, call, join, add, emit, connect, proxy, fail })
+      return
     }
     const ana = await join('Ana', '01')
     const luis = await join('Luis', '03')
@@ -253,6 +258,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     await emit(operator, 'server/PLAYER_REQ_PAUSE')
     console.log('Automatic calls: setup, queue preparation without admin, singing/listening/house playback, greeting coexistence, provider fallback and pause/restart passed.')
     await checkListeningPresentations({ page, player, operator, luis, join, add, emit, db, upload, snapshot, uiBase, data, fail })
+    await checkNameVoiceBank({ page, browser, api, base, uiBase, data, db, call, join, add, emit, connect, proxy, fail })
   } finally {
     fail('')
     await player?.close()

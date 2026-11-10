@@ -6,8 +6,14 @@ import { job, jobDTO, tableVoice } from './Store.js'
 import CallJobs, { CallError } from './Jobs.js'
 import CallAutomation, { getCallAutomation } from './Automation.js'
 import Animation from '../Animation.js'
+import createNameVoiceRouter from './nameRouter.js'
+import { db } from '../../lib/Database.js'
 
 let worker: CallJobs | undefined
+export const nameVoiceRouter = createNameVoiceRouter(() => worker, getGreetingVoice, () => {
+  getCallAutomation()?.reconcile()
+  for (const { roomId } of db.all<{ roomId: number }>('SELECT roomId FROM rooms')) Animation.publish(roomId)
+})
 export async function startCallJobs (directory: string) {
   const instance = new CallJobs(directory, getGreetingVoice(), process.env.KES_FFMPEG_PATH || 'ffmpeg')
   await instance.start()
@@ -131,6 +137,7 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
     ctx.body = getWorker()!.cancel(Number(ctx.params.roomId), ctx.params.id)
   })
   router.get('/karaoke-calls/audio/:id', async (ctx) => {
+    if (!ctx.user.isAdmin && db.get(`SELECT 1 FROM karaokeCallParts WHERE id=? AND kind='name' AND roomId IS NULL`, [ctx.params.id])) ctx.throw(403)
     ctx.body = await getWorker()!.bytes(Number(ctx.params.roomId), ctx.params.id)
     ctx.type = 'audio/mpeg'
   })

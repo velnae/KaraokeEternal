@@ -6,7 +6,7 @@ import { defaultTableCallText, listeningHistoryLimit, type CallControls, type Ca
 
 export const key = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export interface PartRow extends CallPart {
-  roomId: number
+  roomId: number | null
   cacheKey: string
   master: string
   filename: string
@@ -14,6 +14,9 @@ export interface PartRow extends CallPart {
   masterChecksum: string
   dependenciesJSON: string
   retired: number
+  nameId?: string | null
+  nameSelected?: number
+  nameMetadataJSON?: string | null
 }
 export interface JobInput {
   title: string
@@ -29,6 +32,12 @@ export interface JobInput {
   sourceKind?: 'name' | 'template' | 'signature'
   sourceIds?: string[]
   historical?: boolean
+  nameId?: string
+  nameBankRevision?: number
+  nameStyle?: string | null
+  nameModel?: import('../../../shared/nameVoices.js').NameVoiceModel
+  nameRecipeRevision?: number | null
+  nameReprocessId?: string
 }
 export interface JobRow {
   purpose: CallJobPurpose
@@ -76,7 +85,8 @@ export const callSessionAllows = (roomId: number) => {
   const session = db.get<{ status: string }>('SELECT status FROM animationSessions WHERE roomId=? ORDER BY openedAt DESC,rowid DESC LIMIT 1', [roomId])
   return !session || session.status === 'OPEN'
 }
-export const part = (roomId: number, id: string) => db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND id=? AND retired=0', [roomId, id])
+export const part = (roomId: number, id: string) => db.get<PartRow>(`SELECT * FROM karaokeCallParts WHERE id=? AND retired=0
+  AND (roomId=? OR (roomId IS NULL AND kind='name'))`, [id, roomId])
 export const job = (roomId: number, id: string) => db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND id=?', [roomId, id])
 export const retainedListening = (roomId: number) => db.all<{ queueId: number, resultId: string | null, signatureId: string | null }>(`SELECT p.queueId,p.resultId,p.signatureId
   FROM listeningPresentations p JOIN queue q USING(queueId) WHERE p.roomId=? AND q.roomId=p.roomId AND

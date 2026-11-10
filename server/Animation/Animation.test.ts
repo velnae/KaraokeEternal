@@ -11,6 +11,7 @@ import handlers from './socket.js'
 import { loadCatalog, catalogClips, saveCatalogRecord } from './catalog.js'
 import { audioUsage, backfillAudioUsage } from './usage.js'
 import { animationContext, ANIMATION_CONTROL, ANIMATION_SYNC, interventionPlayback, type AnimationClip } from '../../shared/animation.js'
+import NameBank from './Calls/NameBank.js'
 
 const identity = { roomId: 1, userId: 1, socketId: 'player-a' }
 const clip: AnimationClip = { id: 'welcome', title: 'Welcome', displayText: 'Hello', checksum: 'abc', durationMs: 4000, source: 'test', license: 'test' }
@@ -58,6 +59,26 @@ it.each([
   if (reason === 'owner') Animation.claim(1, 'player-b')
   expect(() => Animation.event(identity, row.interventionId, row.playerEpoch!, 'STARTED')).toThrow(message)
   expect(db.get('SELECT startedAt FROM animationInterventions WHERE interventionId=?', [row.interventionId])).toEqual({ startedAt: null })
+})
+
+it.each([false, true])('counts a name only after its own resource completes, completed=%s', (completed) => {
+  const group = NameBank.ensure('Ana')
+  db.run(`INSERT INTO karaokeCallParts(id,roomId,kind,variantId,title,text,profileKey,cacheKey,master,filename,checksum,masterChecksum,durationMs,createdAt,nameId)
+    VALUES('name',NULL,'name','name','Ana','Ana','profile','name','masters/name.wav','production/name.mp3','name','name',1000,1,?)`, [group.id])
+  db.run(`INSERT INTO karaokeCallParts(id,roomId,kind,variantId,title,text,profileKey,cacheKey,master,filename,checksum,masterChecksum,durationMs,createdAt,dependenciesJSON)
+    VALUES('composition',1,'composition','composition','Call','From Ana','profile','call','masters/call.wav','production/call.mp3','call','call',4000,1,'["name"]')`)
+  const namedClip = { ...clip, partId: 'composition' }
+  Animation.request(identity, 'name-receipt', namedClip)
+  const row = reserve()!
+  expect(() => Animation.event(identity, row.interventionId, row.playerEpoch!, 'ASSET_ENDED', clip.id)).toThrow('iniciado')
+  Animation.event(identity, row.interventionId, row.playerEpoch!, 'STARTED')
+  expect(db.all('SELECT * FROM nameVoiceUses')).toEqual([])
+  if (completed) {
+    Animation.event(identity, row.interventionId, row.playerEpoch!, 'ASSET_ENDED', clip.id)
+    Animation.event(identity, row.interventionId, row.playerEpoch!, 'ASSET_ENDED', clip.id)
+  }
+  Animation.event(identity, row.interventionId, row.playerEpoch!, 'STOPPED')
+  expect(db.all('SELECT * FROM nameVoiceUses')).toHaveLength(completed ? 1 : 0)
 })
 
 async function automaticCatalog () {

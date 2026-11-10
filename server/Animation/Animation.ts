@@ -20,6 +20,7 @@ import { getCallAutomation } from './Calls/Automation.js'
 import type { CallContext } from '../../shared/karaokeCalls.js'
 import { birthdayOwnsAudio } from '../Birthdays/Store.js'
 import getLogger from '../lib/Log.js'
+import NameBank from './Calls/NameBank.js'
 
 type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[], transitionBed: boolean }
 export interface AnimationIdentity { roomId: number, userId: number, socketId: string }
@@ -545,12 +546,17 @@ export default class Animation {
     recordAudioUsage(identity.roomId, `ambience:${runId}`, grant.clip.id, 'ambience', Date.now(), currentSession(identity.roomId)?.sessionId)
   }
 
-  static event (identity: AnimationIdentity, id: string, epoch: number, event: 'STARTED' | 'ASSET_STARTED' | 'ENDED' | 'STOPPED' | 'NOT_STARTED' | 'FAILED', clipId?: string) {
+  static event (identity: AnimationIdentity, id: string, epoch: number, event: 'STARTED' | 'ASSET_STARTED' | 'ASSET_ENDED' | 'ENDED' | 'STOPPED' | 'NOT_STARTED' | 'FAILED', clipId?: string) {
     const row = db.get<Intervention>('SELECT * FROM animationInterventions WHERE roomId = ? AND interventionId = ?', [identity.roomId, id])
     if (!row || row.ownerSocketId !== identity.socketId || row.playerEpoch !== epoch) throw new Error('El permiso de reproducción no corresponde')
     const now = Date.now()
     if (!['RESERVED', 'PLAYING'].includes(row.status)) return
-    if (event === 'ASSET_STARTED') {
+    if (event === 'ASSET_ENDED') {
+      const asset = interventionAssets(row).find(asset => asset.id === clipId) as (AnimationClip & { partId?: string }) | undefined
+      if (row.status !== 'PLAYING' || row.stopRequestedAt || now > row.leaseUntil! || owners.get(identity.roomId)?.epoch !== epoch || !asset
+        || !db.get('SELECT 1 FROM audioUsage WHERE roomId=? AND sourceId=? AND clipId=?', [row.roomId, `intervention:${id}`, clipId])) throw new Error('La finalización no corresponde a un audio iniciado de esta intervención.')
+      if (asset.partId) NameBank.recordUse(id, asset.id, asset.partId, row.roomId, now)
+    } else if (event === 'ASSET_STARTED') {
       if (row.status !== 'PLAYING' || row.stopRequestedAt || now > row.leaseUntil! || owners.get(identity.roomId)?.epoch !== epoch || !interventionAssets(row).slice(1).some(asset => asset.id === clipId)) throw new Error('El audio no corresponde a la intervención activa.')
       recordAudioUsage(row.roomId, `intervention:${id}`, clipId!, 'intervention', now, row.sessionId)
     } else if (event === 'STARTED') {
@@ -589,6 +595,11 @@ export default class Animation {
           ? 'CANCELLED'
           : event === 'FAILED' ? 'FAILED' : row.startedAt ? 'INTERRUPTED' : 'UNCERTAIN'
       db.run('UPDATE animationInterventions SET status = ?, finishedAt = ?, reason = COALESCE(reason, ?) WHERE interventionId = ?', [status, now, event === 'ENDED' ? null : event, id])
+      // Older clients acknowledge only the complete sequence. Never infer a
+      // completed name from an intro start or an interrupted sequence.
+      if (status === 'PLAYED') for (const asset of interventionAssets(row) as Array<AnimationClip & { partId?: string }>) {
+        if (asset.partId && db.get('SELECT 1 FROM audioUsage WHERE roomId=? AND sourceId=? AND clipId=?', [row.roomId, `intervention:${id}`, asset.id])) NameBank.recordUse(id, asset.id, asset.partId, row.roomId, now)
+      }
       // Only this still-active reservation may release its room fence.
       db.run('UPDATE animationRoomState SET blockedUntil = 0 WHERE roomId = ? AND blockedUntil = ?', [identity.roomId, row.leaseUntil])
       if (row.family === 'goodbye' && row.sessionId && currentSession(identity.roomId)?.sessionId === row.sessionId) operateSession(identity.roomId, identity.userId, 'finish', 4)

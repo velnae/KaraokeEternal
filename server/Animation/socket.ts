@@ -70,8 +70,8 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       }
     } else if (type === ANIMATION_EVENT) {
       if (!isId(input.interventionId) || !Number.isInteger(input.playerEpoch)
-        || !['STARTED', 'ASSET_STARTED', 'ENDED', 'STOPPED', 'NOT_STARTED', 'FAILED'].includes(input.event)
-        || (input.event === 'ASSET_STARTED' && !isId(input.clipId))) throw new Error('Evento no válido')
+        || !['STARTED', 'ASSET_STARTED', 'ASSET_ENDED', 'ENDED', 'STOPPED', 'NOT_STARTED', 'FAILED'].includes(input.event)
+        || (['ASSET_STARTED', 'ASSET_ENDED'].includes(input.event) && !isId(input.clipId))) throw new Error('Evento no válido')
       Animation.event(identity, input.interventionId, input.playerEpoch, input.event, input.clipId)
     } else if (type === ANIMATION_SESSION) {
       if (!['open', 'close', 'finish', 'celebrate'].includes(input.operation) || (input.operation === 'celebrate' && input.confirmed !== true)) throw new Error('Confirme la operación de la jornada.')

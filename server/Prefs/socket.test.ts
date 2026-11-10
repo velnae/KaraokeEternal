@@ -101,7 +101,7 @@ describe('preference mutation authorization', () => {
     expect(server.emit).not.toHaveBeenCalled()
   })
 
-  it.each(['branding', 'playerDisplay', 'greetingVoice', 'moderation', 'musicBlocking'])('rejects %s writes through the generic preference socket action', (key) => {
+  it.each(['branding', 'playerDisplay', 'greetingVoice', 'moderation', 'musicBlocking', 'nameVoiceStyle'])('rejects %s writes through the generic preference socket action', (key) => {
     const set = vi.spyOn(Prefs, 'set')
     const acknowledge = vi.fn()
     ACTION_HANDLERS[PREFS_SET](

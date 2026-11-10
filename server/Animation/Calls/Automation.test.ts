@@ -18,6 +18,7 @@ import * as greetingAudio from '../../Greetings/audioRouter.js'
 import * as catalog from '../catalog.js'
 import { listeningTemplate, listeningTemplates } from './Listening.js'
 import { callTransitionFailure, recordCallOmission } from './Playback.js'
+import NameBank from './NameBank.js'
 
 let directory: string
 let wave: Buffer
@@ -568,7 +569,7 @@ it('bounds completed presentation retention at thirty per room while protecting 
   db.run('INSERT INTO listeningPresentations(roomId,queueId,inputKey) VALUES(1,?,?)', [withoutAudio, 'no-audio'])
   expect(automatic.snapshot(1).listeningRequests!.find(row => row.queueId === withoutAudio)).toMatchObject({ canRecover: false, reason: 'No se generó una presentación para este pedido.' })
   expect(worker.snapshot(1).names?.some(row => row.text === 'Ana')).toBe(true)
-  expect(worker.snapshot(2).names).toEqual([])
+  expect(worker.snapshot(2).names).toEqual(worker.snapshot(1).names)
 }, 30000)
 
 it('explains and persists a missing player asset separately from voice budget and transition time', async () => {
@@ -784,4 +785,62 @@ it('bounds a failed local rebuild and records omission when music starts without
   expect(db.get('SELECT playbackReason FROM listeningPresentations WHERE queueId=?', [second])).toEqual({ playbackReason: 'preparation-unavailable' })
   expect(automatic.snapshot(1).listeningRequests!.find(item => item.queueId === second)?.playback).toBe('omitted')
   expect(provider.generate).toHaveBeenCalledTimes(count)
+}, 30000)
+
+it.each([false, true])('resolves John through Yon and selects a new version without disrupting started=%s', async (started) => {
+  enableListening()
+  const identity = player()
+  db.run(`UPDATE users SET name='Yon' WHERE userId=1`)
+  const first = add('LISTEN')
+  await until(() => !!automatic.preparation(1, first)?.assets.length)
+  const group = NameBank.find('Yon')!
+  NameBank.update(group.id, { revision: group.revision, aliases: ['John', 'Jhon', 'Ion'] })
+  db.run(`UPDATE queue SET status='PLAYED' WHERE queueId=?`, [first])
+  db.run(`UPDATE users SET name='John' WHERE userId=1`)
+  const id = add('LISTEN')
+  Greetings.attach({ roomId: 1, userId: 1 }, id, { message: 'Una noche especial.' }, {})
+  Greetings.configurePlayback(1, { enabled: true, introClipId: null, ambienceEnabled: false }, 0)
+  await until(() => automatic.preparation(1, id)?.assets.length === 2)
+  const signature = automatic.preparation(1, id)!.assets.find(asset => asset.role === 'signature')!
+  expect(signature.displayText).toBe('De Yon')
+  expect(automatic.snapshot(1).listeningRequests!.find(row => row.queueId === id)?.performer).toBe('John')
+  expect(vi.mocked(provider.generate).mock.calls.filter(call => call[0] === 'Yon')).toHaveLength(1)
+  expect(vi.mocked(provider.generate).mock.calls.some(call => call[0] === 'John')).toBe(false)
+  vi.spyOn(greetingAudio, 'getGreetingAudioAsset').mockResolvedValue({ id: 'message', role: 'greeting', senderIncluded: false, durationMs: 1500,
+    checksum: 'e'.repeat(64), kind: 'voice', title: 'Message', displayText: 'Una noche especial.', source: 'fixture', license: 'fixture', url: 'api/fixture' })
+  const prepared = (await prepareGreetingTransition(1, id))!
+  const grant = Greetings.reserve(1, identity.socketId, id, { queueId: -1 }, undefined, prepared, prepared.assets.map(asset => asset.checksum), 1)!
+  const intervention = grant.transition!.intervention
+  if (started) Animation.event(identity, intervention.interventionId, intervention.playerEpoch!, 'STARTED')
+  const generated = worker.submit(1, 'source', { requestId: randomUUID(), sourceKind: 'name', nameId: group.id, text: 'Yon', regenerate: true })
+  await worker.tick()
+  NameBank.choose(group.id, job(1, generated.id)!.resultId!, NameBank.get(group.id).revision)
+  automatic.reconcile()
+  expect(automatic.valid(1, grant.transition!.call!, started)).toBe(started)
+  if (started) expect(automatic.snapshot(1).listeningRequests!.find(row => row.queueId === id)?.result?.id).toBe(grant.transition!.call!.partId)
+  Animation.sweep()
+  expect(!!Animation.active(1)?.stopRequestedAt).toBe(!started)
+}, 30000)
+
+it('reports a failed alias assembly against the actual spoken recipe rather than preparing forever', async () => {
+  enableListening()
+  db.run(`UPDATE users SET name='Yon' WHERE userId=1`)
+  const first = add('LISTEN')
+  await until(() => !!automatic.preparation(1, first)?.assets.length)
+  const group = NameBank.find('Yon')!
+  NameBank.update(group.id, { revision: group.revision, aliases: ['John'] })
+  const original = part(1, automatic.preparation(1, first)!.assets[0].partId)!
+  const binding = db.get<{ templateId: string, templatePartId: string }>('SELECT templateId,templatePartId FROM listeningPresentations WHERE queueId=?', [first])!
+  db.run(`UPDATE queue SET status='PLAYED' WHERE queueId=?`, [first])
+  db.run('UPDATE karaokeCallParts SET retired=1 WHERE id=?', [original.id])
+  db.run(`UPDATE karaokeCallJobs SET status='failed',resultId=NULL,error='Original local failure' WHERE resultId=?`, [original.id])
+  await fs.rm(path.join(worker['directory'], part(1, binding.templatePartId)!.master))
+  db.run(`UPDATE users SET name='John' WHERE userId=1`)
+  const second = add('LISTEN')
+  db.run('INSERT INTO listeningPresentations(roomId,queueId,inputKey,templateId,templatePartId) VALUES(1,?,?,?,?)', [second, 'pending', binding.templateId, binding.templatePartId])
+  for (let n = 0; n < 3; n++) {
+    automatic.reconcile()
+    await worker.tick()
+  }
+  expect(automatic.snapshot(1).listeningRequests!.find(row => row.queueId === second)).toMatchObject({ status: 'fallback', reason: expect.stringContaining('archivo') })
 }, 30000)
