@@ -84,7 +84,7 @@ export default function useAnimationPlayer () {
       if (mounted.current && owner === audioOwnerKey()) {
         setUnlocked(ready && audio.current.ready)
         if (audio.current.ready) setNeedsGesture(false)
-        if (ready) setError('')
+        if (ready) setError([...audio.current.preparationErrors.values()][0] ?? '')
       }
     } catch (error) {
       if (mounted.current && owner === audioOwnerKey()) setError((error as Error).message)

@@ -8,7 +8,7 @@ import { GreetingVoiceError } from '../../Greetings/GeminiGreetingTts.js'
 import { callSpeechProfile, type GreetingVoiceProfile } from '../../Greetings/voiceProfile.js'
 import { AudioValidationError } from '../AudioPreparation.js'
 import { callContinuation, callText, type CallJobPurpose, type CallOperation, type CallPurpose, type CallSnapshot } from '../../../shared/karaokeCalls.js'
-import { binding, intros, job, jobDTO, jobOutdated, key, part, partDTO, retainedListening, tableVoice, type JobInput, type JobRow, type PartRow } from './Store.js'
+import { binding, intros, job, jobDTO, jobOutdated, key, part, partDTO, retainedListening, retainedSinging, tableVoice, type JobInput, type JobRow, type PartRow } from './Store.js'
 import { checksum, compose, compositionRevision, preparedPart } from './Composition.js'
 import getLogger from '../../lib/Log.js'
 
@@ -63,8 +63,9 @@ export default class CallJobs {
       tables: Tables.list(roomId).filter(table => table.status === 'active').map(table => tableVoice(roomId, table.tableId, profile)) }
   }
 
-  submit (roomId: number, operation: CallOperation, value: unknown, tableId?: number, purpose: CallJobPurpose = 'preview', priority = 0) {
+  submit (roomId: number, operation: CallOperation, value: unknown, tableId?: number, purpose: CallJobPurpose = 'preview', priority = 0, historicalProfile?: GreetingVoiceProfile) {
     Tables.room(roomId)
+    if (historicalProfile && (operation !== 'compose' || purpose !== 'preview')) throw new CallError('La recuperación histórica solo permite composición privada.')
     if (this.stopped || this.startupError) throw new CallError(this.startupError ?? 'El servidor se está cerrando.', 503)
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CallError('Datos de preparación no válidos.')
     const body = value as Record<string, unknown>
@@ -79,7 +80,7 @@ export default class CallJobs {
     }
     // Leave one slot for an explicit private operation even when automation is paused.
     if (db.get<{ n: number }>(`SELECT count(*) n FROM karaokeCallJobs WHERE status IN ${active}`)!.n >= (purpose === 'preview' ? 10 : 9)) throw new CallError('La cola de preparación está ocupada. Espere o cancele una.', 409)
-    const profile = this.tts.profile()
+    const profile = historicalProfile ?? this.tts.profile()
     const input: JobInput = { title: '', text: '', variantId: randomUUID(), regenerate: body.regenerate === true }
     if (operation === 'source') {
       if (!['name', 'template', 'signature'].includes(String(body.sourceKind))) throw new CallError('Tipo de voz no válido.')
@@ -87,6 +88,7 @@ export default class CallJobs {
       input.text = callText(body.text, 100)
       input.title = input.text
     } else if (operation === 'compose') {
+      if (historicalProfile && purpose === 'preview') input.historical = true
       if (body.sourceKind === 'signature') input.sourceKind = 'signature'
       if (!Array.isArray(body.sourceIds) || body.sourceIds.length < 2 || body.sourceIds.length > 3) throw new CallError('La presentación necesita dos o tres piezas.')
       const sources = body.sourceIds.map(id => typeof id === 'string' ? part(roomId, id) : undefined)
@@ -244,7 +246,16 @@ export default class CallJobs {
         const pieces = input.sourceIds!.map(id => part(row.roomId, id))
         if (pieces.some(piece => !piece)) throw new CallError('Una pieza ya no está disponible.')
         const cacheKey = key([pieces.map(piece => [piece!.masterChecksum, piece!.text, piece!.profileKey]), compositionRevision])
-        const cached = db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND cacheKey=? AND retired=0', [row.roomId, cacheKey])
+        let cached = db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND cacheKey=? AND retired=0', [row.roomId, cacheKey])
+        if (cached && input.historical) {
+          try {
+            await this.bytes(row.roomId, cached.id, true)
+            await this.bytes(row.roomId, cached.id)
+          } catch {
+            db.run('UPDATE karaokeCallParts SET retired=1 WHERE id=?', [cached.id])
+            cached = undefined
+          }
+        }
         result = cached ?? await this.storePart(row, input.sourceKind === 'signature' ? 'signature' : 'composition', input.text, cacheKey,
           await compose(this.directory, await Promise.all(pieces.map(piece => this.bytes(row.roomId, piece!.id, true))), this.ffmpeg, this.controller!.signal), input.sourceIds)
       } else if (row.operation === 'source') {
@@ -279,6 +290,7 @@ export default class CallJobs {
         }
         db.run('UPDATE karaokeCallJobs SET status=\'ready\',resultId=?,error=NULL,updatedAt=? WHERE id=?', [result.id, Date.now(), row.id])
         db.run('UPDATE listeningPresentations SET resultId=? WHERE roomId=? AND recoveryJobId=?', [result.id, row.roomId, row.id])
+        db.run('UPDATE karaokeCallRequests SET recoveredPartId=? WHERE roomId=? AND recoveryJobId=?', [result.id, row.roomId, row.id])
         db.exec('RELEASE call_ready')
       } catch (error) {
         db.exec('ROLLBACK TO call_ready; RELEASE call_ready')
@@ -310,6 +322,20 @@ export default class CallJobs {
     })
     if (checksum(bytes) !== (master ? audio.masterChecksum : audio.checksum)) throw new CallError('El archivo cambió. Regénere el audio.')
     return bytes
+  }
+
+  async recover (roomId: number, id: string, requestId: unknown) {
+    const original = db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND id=?', [roomId, id])
+    if (!original) throw new CallError('No se conservó la composición original de este pedido.')
+    const sources = JSON.parse(original.dependenciesJSON) as string[]
+    if (sources.length < 2 || sources.length > 3) throw new CallError('No se conservaron las piezas originales de este pedido.')
+    await Promise.all(sources.map(id => this.bytes(roomId, id, true))).catch(() => {
+      throw new CallError('No se conservan los archivos necesarios para recuperar este audio.')
+    })
+    const profile = db.all<{ profileJSON: string }>('SELECT DISTINCT profileJSON FROM karaokeCallJobs WHERE roomId=?', [roomId])
+      .map(row => JSON.parse(row.profileJSON) as GreetingVoiceProfile).find(profile => key(profile) === original.profileKey)
+    if (!profile) throw new CallError('No se conservó el perfil original de este audio.')
+    return this.submit(roomId, 'compose', { requestId, sourceIds: sources }, undefined, 'preview', 0, profile)
   }
 
   private async cleanup () {
@@ -346,6 +372,14 @@ export default class CallJobs {
       for (const row of retainedListening(roomId)) {
         if (row.resultId) keep.add(row.resultId)
         if (row.signatureId) keep.add(row.signatureId)
+      }
+    }
+    for (const { roomId } of db.all<{ roomId: number }>('SELECT DISTINCT roomId FROM karaokeCallRequests')) {
+      for (const row of retainedSinging(roomId)) {
+        if (row.resultId) keep.add(row.resultId)
+        if (row.recoveredPartId) keep.add(row.recoveredPartId)
+        for (const actual of db.all<{ partId: string }>(`SELECT json_extract(callJSON,'$.partId') partId FROM animationInterventions
+          WHERE roomId=? AND json_extract(callJSON,'$.queueId')=? AND startedAt IS NOT NULL`, [roomId, row.queueId])) keep.add(actual.partId)
       }
     }
     // Keep freshly completed compositions until server reconciliation binds them.

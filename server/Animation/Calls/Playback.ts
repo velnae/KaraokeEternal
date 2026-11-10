@@ -19,15 +19,17 @@ export function listeningEnabled (roomId: number) {
 }
 
 /** Called once when authoritative playback consumes the announcement opportunity. */
-export function recordListeningOmission (roomId: number, queueId: number) {
-  if (!listeningEnabled(roomId)) return
-  const row = db.get<{ resultId: string | null, playbackReason: string | null }>(`SELECT p.resultId,p.playbackReason FROM listeningPresentations p
-    JOIN queue q USING(queueId) WHERE p.roomId=? AND q.roomId=p.roomId AND p.queueId=? AND q.status='PLAYING' AND q.origin='PARTICIPANT' AND q.requestIntent='LISTEN'`, [roomId, queueId])
+export function recordCallOmission (roomId: number, queueId: number) {
+  const item = db.get<{ requestIntent: string }>(`SELECT requestIntent FROM queue WHERE roomId=? AND queueId=? AND status='PLAYING' AND origin='PARTICIPANT'`, [roomId, queueId])
+  const listening = item?.requestIntent === 'LISTEN'
+  if (!item || (listening ? !listeningEnabled(roomId) : item.requestIntent !== 'SING' || !callsEnabled(roomId))) return
+  const table = listening ? 'listeningPresentations' : 'karaokeCallRequests'
+  const row = db.get<{ resultId: string | null, playbackReason: string | null }>(`SELECT resultId,playbackReason FROM ${table} WHERE roomId=? AND queueId=?`, [roomId, queueId])
   if (!row || row.playbackReason || db.get(`SELECT 1 FROM animationInterventions WHERE roomId=?
-    AND json_extract(callJSON,'$.queueId')=? AND json_extract(callJSON,'$.kind')='listening' LIMIT 1`, [roomId, queueId])) return
+    AND json_extract(callJSON,'$.queueId')=? AND (json_extract(callJSON,'$.kind')='listening' OR json_extract(callJSON,'$.kind') IS NULL) LIMIT 1`, [roomId, queueId])) return
   const reason = row.resultId && part(roomId, row.resultId) ? 'not-reserved' : 'preparation-unavailable'
-  db.run('UPDATE listeningPresentations SET playbackReason=? WHERE roomId=? AND queueId=? AND playbackReason IS NULL', [reason, roomId, queueId])
-  getLogger('calls').info('Listening presentation omitted room=%s queue=%s reason=%s result=%s stage=music-start', roomId, queueId, reason, row.resultId)
+  db.run(`UPDATE ${table} SET playbackReason=? WHERE roomId=? AND queueId=? AND playbackReason IS NULL`, [reason, roomId, queueId])
+  getLogger('calls').info('Call omitted room=%s queue=%s reason=%s result=%s stage=music-start', roomId, queueId, reason, row.resultId)
 }
 const signatureEnabled = (roomId: number) => !!db.get(`SELECT 1 FROM greetingControls WHERE roomId=? AND audioEnabled=1 AND paused=0 AND json_extract(playbackJSON,'$.enabled')=1`, [roomId])
 export const prepareCall = (roomId: number, queueId: number) => {

@@ -8,6 +8,25 @@ import CallAutomation from './Automation.js'
 
 afterEach(() => close())
 
+it('adds singing history fields without rewriting existing request outcomes', () => {
+  open({ file: ':memory:', ro: false })
+  db.exec(`INSERT INTO rooms(roomId,name,status) VALUES(1,'Venue','open');
+    INSERT INTO users(userId,username,name,password,roleId) VALUES(1,'ana','Ana','test',1);
+    INSERT INTO queue(queueId,roomId,userId,source,externalId,status,title,artistOrChannel) VALUES(1,1,1,'YOUTUBE','AAAAAAAAAAA','PLAYED','Song','Fixture');
+    INSERT INTO karaokeCallRequests(queueId,roomId,inputKey,status,startedAt,updatedAt) VALUES(1,1,'original','ready',100,200);
+    ALTER TABLE karaokeCallRequests DROP COLUMN recoveredPartId;
+    ALTER TABLE karaokeCallRequests DROP COLUMN recoveryJobId;
+    ALTER TABLE karaokeCallRequests DROP COLUMN playbackReason;
+    DELETE FROM migrations WHERE id=46;`)
+  const migrationsPath = path.join(import.meta.dirname, '../../lib/schemas')
+  db.migrate({ migrationsPath })
+  db.migrate({ migrationsPath })
+  expect(db.get('SELECT inputKey,status,startedAt,playbackReason,recoveryJobId,recoveredPartId FROM karaokeCallRequests')).toEqual({
+    inputKey: 'original', status: 'ready', startedAt: 100, playbackReason: null, recoveryJobId: null, recoveredPartId: null,
+  })
+  expect(db.all('PRAGMA foreign_key_check')).toEqual([])
+})
+
 it.each([true, false])('repairs an already applied migration 44 with missing recovery column=%s without rewriting its history', (missing) => {
   open({ file: ':memory:', ro: false })
   db.exec(`INSERT INTO rooms(roomId,name,status) VALUES(1,'Venue','open');

@@ -158,15 +158,7 @@ export default class ListeningCalls {
     const saved = db.get<PresentationRow>(`SELECT p.* FROM listeningPresentations p JOIN queue q USING(queueId)
       WHERE p.roomId=? AND q.roomId=? AND p.queueId=? AND q.historyClearedAt IS NULL AND q.status NOT IN ('APPROVED','PLAYING','REMOVED','REJECTED')`, [roomId, roomId, queueId])
     if (!saved || !retainedListening(roomId).some(row => row.queueId === queueId)) throw new CallError('El pedido no está disponible en el historial.', 404)
-    const original = db.get<PartRow>('SELECT * FROM karaokeCallParts WHERE roomId=? AND id=?', [roomId, saved.resultId])
-    if (!original) throw new CallError('No se conservó la composición original de este pedido.')
-    const sources = JSON.parse(original.dependenciesJSON) as string[]
-    if (sources.length < 2 || sources.length > 3) throw new CallError('No se conservaron las piezas originales de este pedido.')
-    // Validate the original masters; recovery never synthesizes a replacement voice.
-    await Promise.all(sources.map(id => this.worker.bytes(roomId, id, true))).catch(() => {
-      throw new CallError('No se conservan los archivos necesarios para recuperar este audio.')
-    })
-    const result = this.worker.submit(roomId, 'compose', { requestId: input.requestId, sourceIds: sources })
+    const result = await this.worker.recover(roomId, saved.resultId ?? '', input.requestId)
     db.run('UPDATE listeningPresentations SET recoveryJobId=?,resultId=COALESCE(?,resultId) WHERE roomId=? AND queueId=?',
       [result.id, result.result?.id ?? null, roomId, queueId])
     return result

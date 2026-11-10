@@ -78,7 +78,7 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
     ctx.status = 202
   })
   router.post('/karaoke-calls/requests/:queueId/recover', async (ctx) => {
-    ctx.body = await automatic().listening.recover(Number(ctx.params.roomId), queueId(ctx), body(ctx))
+    ctx.body = await automatic().recover(Number(ctx.params.roomId), queueId(ctx), body(ctx))
     ctx.status = 202
   })
   router.get('/karaoke-calls/requests/:queueId/audio/:id', async (ctx) => {

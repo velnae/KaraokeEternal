@@ -212,16 +212,17 @@ export default class Greetings {
           until = intervention.leaseUntil!
         }
       }
-      if (call?.kind === 'listening') {
-        const playbackReason = transition?.call?.kind === 'listening'
+      if (call && call.kind !== 'signature') {
+        const playbackReason = transition?.call && transition.call.kind === call.kind
           ? null
           : blocker
             ? 'channel-occupied'
-            : callCandidate?.call?.kind === 'listening'
+            : callCandidate?.call && callCandidate.call.kind === call.kind
               ? 'channel-unavailable'
               : callTransitionFailure(roomId, reason ? null : selected ?? null, prepared, ready, Animation.snapshot(roomId).voiceBudgetRemainingMs ?? 0, remainingMs)
-        db.run('UPDATE listeningPresentations SET playbackReason=? WHERE roomId=? AND queueId=?', [playbackReason, roomId, turnKey])
-        if (playbackReason) getLogger('calls').info('Listening presentation omitted room=%s queue=%s reason=%s remainingMs=%s budgetMs=%s ready=%s',
+        const table = call.kind === 'listening' ? 'listeningPresentations' : 'karaokeCallRequests'
+        db.run(`UPDATE ${table} SET playbackReason=? WHERE roomId=? AND queueId=?`, [playbackReason, roomId, turnKey])
+        if (playbackReason) getLogger('calls').info('Call omitted room=%s queue=%s reason=%s remainingMs=%s budgetMs=%s ready=%s',
           roomId, turnKey, playbackReason, Math.round(remainingMs), Animation.snapshot(roomId).voiceBudgetRemainingMs, ready.length)
       }
       const voiceReason = !prepared?.assets.some(asset => asset.role === 'greeting')

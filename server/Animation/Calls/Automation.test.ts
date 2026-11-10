@@ -17,7 +17,7 @@ import { prepareGreetingTransition } from '../../Greetings/transition.js'
 import * as greetingAudio from '../../Greetings/audioRouter.js'
 import * as catalog from '../catalog.js'
 import { listeningTemplate, listeningTemplates } from './Listening.js'
-import { callTransitionFailure, recordListeningOmission } from './Playback.js'
+import { callTransitionFailure, recordCallOmission } from './Playback.js'
 
 let directory: string
 let wave: Buffer
@@ -76,6 +76,96 @@ async function bank () {
   await until(() => automatic.snapshot(1).tablesReady === 1)
 }
 
+it('retains singing history and privately recovers original speech after identity and profile changes', async () => {
+  await bank()
+  const id = add()
+  await until(() => requestCall(1, id)?.status === 'ready')
+  const original = part(1, requestCall(1, id)!.resultId!)!
+  const count = vi.mocked(provider.generate).mock.calls.length
+  db.run(`UPDATE queue SET status='PLAYED',title='Changed title' WHERE queueId=?`, [id])
+  db.run(`UPDATE users SET name='Changed name' WHERE userId=1`)
+  voice.configure({ ...voice.config(), voice: 'Kore', enabled: false })
+  expect(() => worker.submit(1, 'compose', { requestId: randomUUID(), sourceIds: JSON.parse(original.dependenciesJSON), historical: true })).toThrow('pieza')
+  await worker['cleanup']()
+  expect(automatic.snapshot(1).requests.find(row => row.queueId === id)).toMatchObject({
+    title: 'Rayando el sol', performer: 'Ana', playback: 'omitted', result: { id: original.id },
+  })
+  await expect(worker.bytes(1, original.id)).resolves.toBeInstanceOf(Buffer)
+  db.run('UPDATE karaokeCallParts SET retired=1 WHERE id=?', [original.id])
+  await Promise.all([original.master, original.filename].map(file => fs.rm(path.join(worker['directory'], file))))
+  const input = { requestId: randomUUID() }
+  const submitted = await automatic.recover(1, id, input)
+  await worker.tick()
+  const recovered = await automatic.recover(1, id, input)
+  expect(recovered.id).toBe(submitted.id)
+  expect(recovered.result?.text).toBe(original.text)
+  expect(requestCall(1, id)?.resultId).toBe(original.id)
+  expect(automatic.snapshot(1).requests.find(row => row.queueId === id)?.result?.id).toBe(recovered.result?.id)
+  await expect(automatic.recover(2, id, input)).rejects.toThrow('pedido')
+  db.run('UPDATE karaokeCallParts SET retired=1 WHERE id=?', [JSON.parse(original.dependenciesJSON)[0]])
+  await expect(automatic.recover(1, id, { requestId: randomUUID() })).rejects.toThrow('No se conservan los archivos')
+  expect(db.get('SELECT status FROM queue WHERE queueId=?', [id])).toEqual({ status: 'PLAYED' })
+  expect(db.all('SELECT * FROM animationInterventions')).toEqual([])
+  expect(provider.generate).toHaveBeenCalledTimes(count)
+}, 30000)
+
+it('records singing omission at authoritative music start and preserves an earlier precise reason', async () => {
+  await bank()
+  player()
+  const id = add()
+  await until(() => requestCall(1, id)?.status === 'ready')
+  db.run(`UPDATE queue SET status='PLAYING' WHERE queueId=?`, [id])
+  const count = vi.mocked(provider.generate).mock.calls.length
+  recordCallOmission(1, id)
+  expect(requestCall(1, id)?.playbackReason).toBe('not-reserved')
+  expect(automatic.snapshot(1).requests.find(row => row.queueId === id)?.playback).toBe('omitted')
+  db.run(`UPDATE karaokeCallRequests SET playbackReason='audio-not-ready' WHERE queueId=?`, [id])
+  recordCallOmission(1, id)
+  expect(requestCall(1, id)?.playbackReason).toBe('audio-not-ready')
+  expect(provider.generate).toHaveBeenCalledTimes(count)
+}, 30000)
+
+it('reports the confirmed singing fallback and interruption instead of equating started with announced', async () => {
+  await bank()
+  const identity = player()
+  const id = add()
+  await until(() => requestCall(1, id)?.status === 'ready')
+  const prepared = (await prepareGreetingTransition(1, id))!
+  const fallback = prepared.call!.assets.find(asset => !asset.identifiesSender)!
+  const available = { ...prepared, call: { ...prepared.call!, assets: [fallback] } }
+  const grant = Greetings.reserve(1, identity.socketId, id, { queueId: -1 }, undefined, available, [fallback.checksum], 1)!
+  expect(grant.transition!.call!.partId).toBe(fallback.partId)
+  const intervention = grant.transition!.intervention
+  Animation.event(identity, intervention.interventionId, intervention.playerEpoch!, 'STARTED')
+  Animation.event(identity, intervention.interventionId, intervention.playerEpoch!, 'STOPPED')
+  db.run(`UPDATE queue SET status='PLAYED' WHERE queueId=?`, [id])
+  await worker['cleanup']()
+  expect(automatic.snapshot(1).requests.find(row => row.queueId === id)).toMatchObject({ playback: 'interrupted', usedFallback: true, playedResult: { id: fallback.partId } })
+}, 30000)
+
+it('bounds terminal singing history without displacing pending requests', async () => {
+  await bank()
+  const pending = add()
+  await until(() => requestCall(1, pending)?.status === 'ready')
+  const original = requestCall(1, pending)!
+  const terminal: number[] = []
+  for (let index = 0; index < 31; index++) {
+    const id = add('SING', 'PLAYED')
+    terminal.push(id)
+    db.run(`INSERT INTO karaokeCallRequests(queueId,roomId,inputKey,introId,jobId,resultId,status,updatedAt) VALUES(?,1,?,?,?,?,'ready',?)`,
+      [id, original.inputKey, original.introId, original.jobId, original.resultId, Date.now()])
+  }
+  await worker['cleanup']()
+  const history = automatic.snapshot(1).requests
+  expect(history).toHaveLength(31)
+  expect(history.some(row => row.queueId === pending)).toBe(true)
+  expect(history.some(row => row.queueId === terminal[0])).toBe(false)
+  await expect(worker.bytes(1, original.resultId!)).resolves.toBeInstanceOf(Buffer)
+  expect(automatic.snapshot(2).requests).toEqual([])
+  db.run('UPDATE queue SET historyClearedAt=? WHERE queueId=?', [Date.now(), terminal[30]])
+  expect(automatic.snapshot(1).requests.some(row => row.queueId === terminal[30])).toBe(false)
+}, 30000)
+
 it('prepares the bank once and supports idempotent setup without enabling public calls', async () => {
   const request = { requestId: randomUUID(), revision: 0 }
   const controls = automatic.setup(1, request)
@@ -125,12 +215,12 @@ it('obeys disabled automatic generation while retaining explicit private preview
   expect(provider.generate).toHaveBeenCalledTimes(1)
 })
 
-it('keeps an individual pending request inspectable outside the recent thirty-item window', () => {
+it('keeps all pending requests and individual inspection outside the terminal history window', () => {
   voice.configure({ ...voice.config(), enabled: false })
   enable()
   const ids = Array.from({ length: 35 }, (_, index) => add('SING', 'APPROVED', 'PARTICIPANT', `Canción ${index}`))
   automatic.reconcile()
-  expect(automatic.snapshot(1).requests).toHaveLength(30)
+  expect(automatic.snapshot(1).requests).toHaveLength(35)
   expect(automatic.snapshot(1, ids[0]).requests[0].queueId).toBe(ids[0])
   expect(automatic.snapshot(2, ids[0]).requests).toEqual([])
 })
@@ -689,8 +779,8 @@ it('bounds a failed local rebuild and records omission when music starts without
   expect(db.get<{ n: number }>('SELECT count(*) n FROM karaokeCallJobs')!.n).toBe(jobsBefore + 1)
   expect(automatic.preparation(1, second)).toBeNull()
   db.run(`UPDATE queue SET status='PLAYING' WHERE queueId=?`, [second])
-  recordListeningOmission(1, second)
-  recordListeningOmission(1, second)
+  recordCallOmission(1, second)
+  recordCallOmission(1, second)
   expect(db.get('SELECT playbackReason FROM listeningPresentations WHERE queueId=?', [second])).toEqual({ playbackReason: 'preparation-unavailable' })
   expect(automatic.snapshot(1).listeningRequests!.find(item => item.queueId === second)?.playback).toBe('omitted')
   expect(provider.generate).toHaveBeenCalledTimes(count)

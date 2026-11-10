@@ -7,6 +7,27 @@ import { playbackTraceSnapshot } from '../../../../lib/playbackTrace'
 
 afterEach(() => vi.unstubAllGlobals())
 
+it.each(['download', 'checksum', 'decode', 'duration'])('isolates a catalog %s failure and retains later valid clips', async (stage) => {
+  const audio = new AnnouncementAudio()
+  const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: async (bytes: ArrayBuffer) => {
+    const text = new TextDecoder().decode(bytes)
+    if (text === 'bad' && stage === 'decode') throw new Error('Invalid audio')
+    return { duration: text === 'bad' && stage === 'duration' ? 40 : 1, length: 24000, numberOfChannels: 1 }
+  } } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/bad') && stage === 'download'
+    ? new Response('', { status: 503 })
+    : new Response(url.split('/').pop())))
+  const clips = ['bad', 'good'].map(id => ({ id, title: id, checksum: hash(id === 'bad' && stage === 'checksum' ? 'expected' : id), durationMs: 1000, kind: 'voice' } as AnimationClip))
+  try {
+    await expect(audio.prepare(clips)).resolves.toEqual([clips[1].checksum])
+    expect(audio.readyChecksums).toEqual([clips[1].checksum])
+    expect(audio.preparationErrors.size).toBe(1)
+    expect(playbackTraceSnapshot().events.some(event => event.event === 'catalog-asset-failed' && event.reason === stage)).toBe(true)
+  } finally { audio.close() }
+})
+
 it('prepares an urgent turn without waiting for an unrelated catalog download', async () => {
   const audio = new AnnouncementAudio()
   audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration: 1, length: 24000, numberOfChannels: 1 }) } as unknown as AudioContext
@@ -245,7 +266,10 @@ it.each([
   const clip = { id: 'transition', checksum, durationMs: duration * 1000, kind, effectType } as AnimationClip
   const preparing = audio.unlock([clip])
   if (allowed) await expect(preparing).resolves.toEqual([checksum])
-  else await expect(preparing).rejects.toThrow('duración')
+  else {
+    await expect(preparing).resolves.toEqual([])
+    expect(audio.preparationErrors.has(clip.id)).toBe(true)
+  }
   audio.close()
 })
 

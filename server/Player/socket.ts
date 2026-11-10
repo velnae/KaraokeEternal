@@ -2,7 +2,7 @@ import Rooms from '../Rooms/Rooms.js'
 import { canOperate } from '../../shared/permissions.js'
 import Queue from '../Queue/Queue.js'
 import Animation from '../Animation/Animation.js'
-import { recordListeningOmission } from '../Animation/Calls/Playback.js'
+import { recordCallOmission } from '../Animation/Calls/Playback.js'
 import Playlists from '../Playlists/Playlists.js'
 import getLogger from '../lib/Log.js'
 import { db } from '../lib/Database.js'
@@ -268,7 +268,7 @@ const ACTION_HANDLERS = {
     Animation.claim(sock.user.roomId, sock.id)
 
     let changed = Queue.syncPlayerLifecycle(sock.user.roomId, payload)
-    if (changed && reported?.status === 'APPROVED' && payload?.isPlaying === true && !payload.isErrored) recordListeningOmission(sock.user.roomId, payload.queueId)
+    if (changed && reported?.status === 'APPROVED' && payload?.isPlaying === true && !payload.isErrored) recordCallOmission(sock.user.roomId, payload.queueId)
     try {
       changed = Playlists.reconcile(sock.user.roomId) || changed
     } catch (error) { log.error('House refill: %s', (error as Error).message) }

@@ -58,6 +58,8 @@ export interface CallControls {
   introIds: string[]
 }
 export interface CallRequestState {
+  playedResult?: CallPart | null
+  usedFallback?: boolean
   playback?: 'pending' | 'playing' | 'played' | 'omitted' | 'interrupted'
   playbackReason?: string | null
   recoveryJob?: CallJob | null

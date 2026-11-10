@@ -26,6 +26,7 @@ export default class AnnouncementAudio {
   private bedCompletion: Promise<'ENDED' | 'STOPPED'> | null = null
   private ambienceHeld = false
   readonly maxDecodedBytes = 64 * 1024 * 1024
+  readonly preparationErrors = new Map<string, string>()
 
   get decodedBytes () { return [...this.buffers.values()].reduce((total, buffer) => total + buffer.length * buffer.numberOfChannels * 4, 0) }
   get hasBed () { return !!this.bedStop }
@@ -92,6 +93,7 @@ export default class AnnouncementAudio {
     assertCurrent()
     const prepare = async () => {
       assertCurrent()
+      this.preparationErrors.clear()
       const desired = new Set(clips.slice(0, 24).map(clip => clip.checksum))
       this.catalogKeys = desired
       for (const hash of this.buffers.keys()) {
@@ -103,23 +105,34 @@ export default class AnnouncementAudio {
           retained.add(clip.checksum)
           continue
         }
-        const bytes = await this.download(`api/animation/assets/${encodeURIComponent(clip.id)}`)
-        assertCurrent()
-        const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
-        if (checksum !== clip.checksum) throw new Error('La versión del clip cambió')
-        assertCurrent()
-        const buffer = await context.decodeAudioData(bytes)
-        assertCurrent()
-        if (buffer.duration <= 0 || buffer.duration * 1000 > clipDurationLimit(clip.kind, clip.effectType) || Math.abs(buffer.duration * 1000 - clip.durationMs) > 100) throw new Error('La duración del clip no es válida')
-        const size = buffer.length * buffer.numberOfChannels * 4
-        if (size > this.maxDecodedBytes) throw new Error('El audio supera la memoria disponible para este canal.')
-        for (const hash of this.buffers.keys()) {
-          if (this.decodedBytes + size <= this.maxDecodedBytes) break
-          if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
+        let stage = 'download'
+        try {
+          const bytes = await this.download(`api/animation/assets/${encodeURIComponent(clip.id)}`)
+          assertCurrent()
+          stage = 'checksum'
+          const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
+          if (checksum !== clip.checksum) throw new Error('La versión del clip cambió')
+          assertCurrent()
+          stage = 'decode'
+          const buffer = await context.decodeAudioData(bytes)
+          assertCurrent()
+          stage = 'duration'
+          if (buffer.duration <= 0 || buffer.duration * 1000 > clipDurationLimit(clip.kind, clip.effectType) || Math.abs(buffer.duration * 1000 - clip.durationMs) > 100) throw new Error('La duración del clip no es válida')
+          const size = buffer.length * buffer.numberOfChannels * 4
+          stage = 'memory'
+          if (size > this.maxDecodedBytes) throw new Error('El audio supera la memoria disponible para este canal.')
+          for (const hash of this.buffers.keys()) {
+            if (this.decodedBytes + size <= this.maxDecodedBytes) break
+            if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
+          }
+          if (this.decodedBytes + size > this.maxDecodedBytes) continue
+          this.buffers.set(clip.checksum, buffer)
+          retained.add(clip.checksum)
+        } catch {
+          assertCurrent()
+          this.preparationErrors.set(clip.id, `No se pudo preparar el audio «${clip.title ?? clip.id}». Vuelva a intentarlo.`)
+          tracePlayback('catalog-asset-failed', { channelId: this.traceChannelId, checksum: clip.checksum, reason: stage })
         }
-        if (this.decodedBytes + size > this.maxDecodedBytes) continue
-        this.buffers.set(clip.checksum, buffer)
-        retained.add(clip.checksum)
       }
       return [...this.buffers.keys()]
     }
@@ -389,6 +402,7 @@ export default class AnnouncementAudio {
     this.generation++
     this.context = null
     this.buffers.clear()
+    this.preparationErrors.clear()
     this.catalogKeys.clear()
     this.greetingKeys.clear()
     this.callKeys.clear()

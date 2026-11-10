@@ -28,6 +28,7 @@ export interface JobInput {
   continuation?: string
   sourceKind?: 'name' | 'template' | 'signature'
   sourceIds?: string[]
+  historical?: boolean
 }
 export interface JobRow {
   purpose: CallJobPurpose
@@ -51,6 +52,9 @@ export interface JobRow {
 }
 export interface Binding { tableId: number, roomId: number, spokenText: string, codeSnapshot: string, revision: number, partId: string | null }
 export interface RequestRow {
+  playbackReason: string | null
+  recoveryJobId: string | null
+  recoveredPartId: string | null
   queueId: number
   roomId: number
   inputKey: string
@@ -79,6 +83,11 @@ export const retainedListening = (roomId: number) => db.all<{ queueId: number, r
   (q.status IN ('APPROVED','PLAYING') OR q.queueId IN (SELECT q.queueId FROM queue q JOIN listeningPresentations p USING(queueId)
     WHERE q.roomId=? AND q.historyClearedAt IS NULL AND q.status NOT IN ('APPROVED','PLAYING','REMOVED','REJECTED')
     ORDER BY q.queueId DESC LIMIT ?))`, [roomId, roomId, listeningHistoryLimit])
+export const retainedSinging = (roomId: number) => db.all<{ queueId: number, resultId: string | null, recoveredPartId: string | null }>(`SELECT r.queueId,r.resultId,r.recoveredPartId
+  FROM karaokeCallRequests r JOIN queue q USING(queueId) WHERE r.roomId=? AND q.roomId=r.roomId AND
+  (q.status IN ('APPROVED','PLAYING') OR q.queueId IN (SELECT q.queueId FROM queue q JOIN karaokeCallRequests r USING(queueId)
+    WHERE q.roomId=? AND q.historyClearedAt IS NULL AND q.status NOT IN ('APPROVED','PLAYING','REMOVED','REJECTED')
+    ORDER BY q.queueId DESC LIMIT ?))`, [roomId, roomId, listeningHistoryLimit])
 export const binding = (roomId: number, tableId: number) => db.get<Binding>('SELECT * FROM tableCallVoices WHERE roomId=? AND tableId=?', [roomId, tableId])
 export const partDTO = (row: PartRow): CallPart => ({ id: row.id, kind: row.kind, title: row.title, text: row.text, durationMs: row.durationMs, profileKey: row.profileKey, createdAt: row.createdAt, variantId: row.variantId })
 export const intros = (roomId: number) => db.all<PartRow>(`SELECT * FROM karaokeCallParts p WHERE roomId=? AND kind='intro' AND retired=0
@@ -92,8 +101,9 @@ export function tableVoice (roomId: number, tableId: number, profile: GreetingVo
     outdated: !!saved && (!audio || saved.codeSnapshot !== table.code || saved.spokenText !== audio.text || audio.profileKey !== key(profile)) }
 }
 export function jobOutdated (row: JobRow, profile: GreetingVoiceProfile) {
-  if (key(JSON.parse(row.profileJSON)) !== key(profile)) return true
   const input: JobInput = JSON.parse(row.inputJSON)
+  if (row.operation === 'compose' && row.purpose === 'preview' && input.historical) return false
+  if (key(JSON.parse(row.profileJSON)) !== key(profile)) return true
   if (input.tableId !== undefined) {
     try {
       const table = Tables.get(row.roomId, input.tableId)

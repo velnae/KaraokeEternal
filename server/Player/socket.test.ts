@@ -28,11 +28,11 @@ import Rooms from '../Rooms/Rooms.js'
 import Playlists from '../Playlists/Playlists.js'
 import ACTION_HANDLERS from './socket.js'
 import { db } from '../lib/Database.js'
-import { recordListeningOmission } from '../Animation/Calls/Playback.js'
+import { recordCallOmission } from '../Animation/Calls/Playback.js'
 
 vi.mock('../Animation/Animation.js', () => ({ default: { claim: vi.fn(), cancel: vi.fn(), disconnect: vi.fn() } }))
 vi.mock('../Playlists/Playlists.js', () => ({ default: { reconcile: vi.fn(() => false) } }))
-vi.mock('../Animation/Calls/Playback.js', () => ({ recordListeningOmission: vi.fn() }))
+vi.mock('../Animation/Calls/Playback.js', () => ({ recordCallOmission: vi.fn() }))
 vi.mock('../lib/Database.js', async importOriginal => ({
   ...await importOriginal<typeof import('../lib/Database.js')>(),
   db: { get: vi.fn() },
@@ -82,7 +82,7 @@ describe('player queue lifecycle', () => {
     vi.restoreAllMocks()
     failureInfo.mockClear()
     refillError.mockClear()
-    vi.mocked(recordListeningOmission).mockClear()
+    vi.mocked(recordCallOmission).mockClear()
   })
 
   it('checks a missing announcement only on the authoritative transition into music playback', () => {
@@ -91,10 +91,10 @@ describe('player queue lifecycle', () => {
     vi.spyOn(Queue, 'get').mockReturnValue({ result: [], entities: {} })
     vi.mocked(db.get).mockReturnValueOnce({ status: 'APPROVED', historyClearedAt: null })
     ACTION_HANDLERS[PLAYER_EMIT_STATUS](socket, { payload: { queueId: 4, isPlaying: true } }, vi.fn())
-    expect(recordListeningOmission).toHaveBeenCalledExactlyOnceWith(1, 4)
+    expect(recordCallOmission).toHaveBeenCalledExactlyOnceWith(1, 4)
     vi.mocked(db.get).mockReturnValue({ status: 'PLAYING', historyClearedAt: null })
     ACTION_HANDLERS[PLAYER_EMIT_STATUS](socket, { payload: { queueId: 4, isPlaying: true, position: 90 } }, vi.fn())
-    expect(recordListeningOmission).toHaveBeenCalledTimes(1)
+    expect(recordCallOmission).toHaveBeenCalledTimes(1)
   })
 
   it('rejects status reports from non-admin sockets', () => {

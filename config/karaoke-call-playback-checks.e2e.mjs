@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 import { checkListeningPresentations } from './listening-presentation-checks.e2e.mjs'
+import { checkSingingHistory } from './singing-history-checks.e2e.mjs'
 
 export async function checkAutomaticCalls ({ page, context, browser, api, base, uiBase, data, db, call, snapshot, restart, fail }) {
   const sockets = []
@@ -102,6 +103,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
       events: { welcome: false, turn: true, closing: false, invitation: false, celebration: false, goodbye: false, booth: false, promotion: false } })
     await emit(operator, 'server/ANIMATION_SESSION', { operation: 'open' })
     const ordinary = await upload('ordinary-call', 'voice', 'turn', 1, 700)
+    const broken = await upload('catalog-unavailable', 'voice', 'manual', 1, 900)
     const bed = await upload('call-bed', 'ambience', 'manual', 7, 110)
     const background = await api.post(base + 'api/animation/background/upload', { multipart: { requestId: 'calls-background', file: {
       name: 'background.mp4', mimeType: 'video/mp4', buffer: fs.readFileSync(path.join(data, 'call-song.mp4')) } } })
@@ -188,17 +190,40 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
       }).observe(document, { subtree: true, childList: true })
     }, kinds)
     player = await context.newPage()
+    // Put a broken clip before usable catalog audio, with cold singing speech.
+    await player.route('**/api/animation/preparation', async (route) => {
+      const clips = await call('animation/preparation')
+      const bad = clips.find(clip => clip.id === broken.id)
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([...(bad ? [bad] : []), ...clips.filter(clip => clip.id !== broken.id)]) })
+    })
+    await player.route(`**/api/animation/assets/${broken.id}`, route => route.fulfill({ status: 503, body: 'Unavailable fixture audio' }))
+    await player.route(`**/api/animation/assets/${ordinary.id}`, async (route) => {
+      await new Promise(resolve => setTimeout(resolve, 3500))
+      await route.fallback()
+    })
+    let releaseColdAudio = false
+    const callPattern = '**/karaoke-calls/requests/*/audio/*'
+    await player.route(callPattern, async (route) => {
+      if (!releaseColdAudio) return route.fulfill({ status: 503, body: 'Delayed fixture speech' })
+      await new Promise(resolve => setTimeout(resolve, 3500))
+      await route.fallback()
+    })
     await player.goto(uiBase + 'player')
     await expect.poll(async () => (await emit(operator, 'server/ANIMATION_SYNC')).payload.playerPresent).toBe(true)
     const firstChecksum = db.prepare('SELECT p.checksum FROM karaokeCallParts p JOIN karaokeCallRequests r ON p.id=r.resultId WHERE r.queueId=?').get(first).checksum
-    await expect.poll(() => player.evaluate(hash => window.callTrace.decoded.includes(hash), firstChecksum), { timeout: 15000 }).toBe(true)
+    assert.equal(await player.evaluate(hash => window.callTrace.decoded.includes(hash), firstChecksum), false)
     await player.locator('body').click({ position: { x: 10, y: 10 } })
+    releaseColdAudio = true
     await emit(operator, 'server/PLAYER_REQ_PLAY')
     await expect.poll(() => db.prepare('SELECT count(*) n FROM queue WHERE status=?').get('PLAYED').n, { timeout: 90000 }).toBe(5)
     const played = db.prepare('SELECT * FROM animationInterventions WHERE callJSON IS NOT NULL AND startedAt IS NOT NULL ORDER BY requestedAt').all()
     assert.equal(played.length, 3, JSON.stringify(db.prepare('SELECT status,reason,callJSON FROM animationInterventions').all()))
     assert.deepEqual(played.map(row => JSON.parse(row.callJSON).queueId).sort((a, b) => a - b), [first, second, fallback].sort((a, b) => a - b))
     assert.ok(played.every(row => row.status === 'PLAYED'))
+    await player.unroute(callPattern)
+    const preparationTrace = await player.evaluate(() => window.karaokePlaybackTrace.snapshot())
+    assert.ok(preparationTrace.events.some(event => event.event === 'catalog-asset-failed' && event.checksum === broken.checksum))
+    assert.ok(await player.evaluate(hash => window.callTrace.decoded.includes(hash), ordinary.checksum))
     assert.ok(played.find(row => JSON.parse(row.callJSON).queueId === fallback).displayText.includes('próximo cantante'))
     assert.equal(db.prepare('SELECT status FROM greetings WHERE queueId=?').get(second).status, 'DISPLAYED')
     assert.equal(db.prepare('SELECT voiceStatus FROM greetingTurns WHERE turnKey=?').get(second).voiceStatus, 'PLAYED')
@@ -219,6 +244,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     await emit(operator, 'server/PLAYER_REQ_PLAY')
     await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(interrupted).status, { timeout: 20000 }).toBe('PLAYED')
     assert.equal(db.prepare('SELECT count(*) n FROM animationInterventions WHERE json_extract(callJSON,?)=? AND startedAt IS NOT NULL').get('$.queueId', interrupted).n, 1)
+    await checkSingingHistory({ page, uiBase, data, db, snapshot, first, fallback })
     await page.goto(uiBase + 'admin/settings/animator?view=calls')
     await page.getByRole('switch', { name: 'Llamados automáticos' }).focus()
     await page.keyboard.press('Space')

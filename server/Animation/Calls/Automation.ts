@@ -5,10 +5,10 @@ import getLogger from '../../lib/Log.js'
 import type GreetingVoice from '../../Greetings/GreetingVoice.js'
 import type { QueueItem } from '../../../shared/types.js'
 import { animationPrefs } from '../../../shared/animation.js'
-import { callContinuation, type CallAsset, type CallAutomationSnapshot, type CallContext, type CallControls, type CallPreparation } from '../../../shared/karaokeCalls.js'
+import { callContinuation, callPlaybackReasons, type CallAsset, type CallAutomationSnapshot, type CallContext, type CallControls, type CallPreparation, type CallRequestState } from '../../../shared/karaokeCalls.js'
 import { CallError } from './Jobs.js'
 import type CallJobs from './Jobs.js'
-import { binding, callControls, callSessionAllows, intros, job, jobOutdated, key, part, partDTO, requestCall, tableVoice, type JobInput, type JobRow, type PartRow, type RequestRow } from './Store.js'
+import { binding, callControls, callSessionAllows, intros, job, jobDTO, jobOutdated, key, part, partDTO, requestCall, retainedSinging, tableVoice, type JobInput, type JobRow, type PartRow, type RequestRow } from './Store.js'
 import { compositionRevision } from './Composition.js'
 import ListeningCalls from './Listening.js'
 
@@ -113,6 +113,17 @@ export default class CallAutomation {
     if (!row || !this.eligible(roomId, song) || row.startedAt || inputKey !== row.inputKey) throw new CallError('El pedido cambió o ya comenzó.', 409)
     if (!['waiting', 'preparing'].includes(row.status)) db.run(`UPDATE karaokeCallRequests SET attempt=attempt+1,jobId=NULL,resultId=NULL,status='waiting',reason=NULL WHERE roomId=? AND queueId=?`, [roomId, queueId])
     this.reconcile()
+  }
+
+  async recover (roomId: number, queueId: number, input: { requestId?: unknown }) {
+    const saved = requestCall(roomId, queueId)
+    if (!saved) return this.listening.recover(roomId, queueId, input)
+    const item = Queue.get(roomId).entities[queueId]
+    if (!item || ['APPROVED', 'PLAYING'].includes(item.status) || !retainedSinging(roomId).some(row => row.queueId === queueId)) throw new CallError('El pedido no está disponible en el historial.', 404)
+    const result = await this.worker.recover(roomId, saved.resultId ?? '', input.requestId)
+    db.run('UPDATE karaokeCallRequests SET recoveryJobId=?,recoveredPartId=COALESCE(?,recoveredPartId) WHERE roomId=? AND queueId=?',
+      [result.id, result.result?.id ?? null, roomId, queueId])
+    return result
   }
 
   prioritize (roomId: number, queueId: number) {
@@ -317,6 +328,7 @@ export default class CallAutomation {
     const voice = this.voice.snapshot()
     const room = db.get<{ data: string }>('SELECT data FROM rooms WHERE roomId=?', [roomId])!
     const prefs = animationPrefs(JSON.parse(room.data).prefs?.animation)
+    const retained = new Set(retainedSinging(roomId).map(row => row.queueId))
     let message: string | null = null
     if (!this.open(roomId)) message = 'Abra la sala para preparar y reproducir llamados automáticos.'
     else if (!voice.config.enabled) message = 'Active la generación en Voz de saludos para preparar automáticamente. Los audios guardados siguen disponibles.'
@@ -338,14 +350,34 @@ export default class CallAutomation {
       fallbackReady: !!this.fallbackPart(roomId, 'room'), message,
       listeningRequests: this.listening.states(roomId, queue.result.map(id => queue.entities[id]).filter(item => queueId === undefined || item.queueId === queueId)).reverse(),
       listeningTemplates: this.listening.templates.list(roomId),
-      requests: db.all<RequestRow>(`SELECT * FROM karaokeCallRequests WHERE roomId=?${queueId === undefined ? '' : ' AND queueId=?'} ORDER BY queueId DESC LIMIT 30`, queueId === undefined ? [roomId] : [roomId, queueId]).flatMap((row) => {
+      requests: db.all<RequestRow>(`SELECT * FROM karaokeCallRequests WHERE roomId=?${queueId === undefined ? '' : ' AND queueId=?'} ORDER BY queueId DESC`, queueId === undefined ? [roomId] : [roomId, queueId]).flatMap((row) => {
         const item = queue.entities[row.queueId]
-        if (!item) return []
-        const result = row.resultId && part(roomId, row.resultId)
-        const compatible = row.inputKey === this.inputKey(roomId, item, this.compatibleIntros(roomId).find(intro => intro.id === row.introId))
-        return [{ queueId: row.queueId, inputKey: row.inputKey, title: item.title, performer: item.userDisplayName, tableLabel: item.tableLabelSnapshot ?? null,
+        if (!item || !retained.has(row.queueId)) return []
+        const pending = ['APPROVED', 'PLAYING'].includes(item.status)
+        const result = (row.recoveredPartId && part(roomId, row.recoveredPartId)) || (row.resultId && part(roomId, row.resultId))
+        const compatible = !pending || row.inputKey === this.inputKey(roomId, item, this.compatibleIntros(roomId).find(intro => intro.id === row.introId))
+        const original = row.jobId ? job(roomId, row.jobId) : undefined
+        const saved = original ? JSON.parse(original.requestJSON) as { performer?: string, song?: string } : {}
+        const recovery = row.recoveryJobId ? job(roomId, row.recoveryJobId) : undefined
+        const intervention = db.get<{ status: string, reason: string | null, startedAt: number | null, partId: string }>(`SELECT status,reason,startedAt,json_extract(callJSON,'$.partId') partId
+          FROM animationInterventions WHERE roomId=? AND json_extract(callJSON,'$.queueId')=? AND json_extract(callJSON,'$.kind') IS NULL ORDER BY requestedAt DESC LIMIT 1`, [roomId, row.queueId])
+        const playback: CallRequestState['playback'] = intervention?.status === 'PLAYED'
+          ? 'played'
+          : intervention && ['RESERVED', 'PLAYING'].includes(intervention.status)
+            ? 'playing'
+            : intervention ? intervention.startedAt ? 'interrupted' : 'omitted' : !pending || row.playbackReason ? 'omitted' : 'pending'
+        const played = intervention?.startedAt ? part(roomId, intervention.partId) : undefined
+        const playbackReason = row.playbackReason
+          ? callPlaybackReasons[row.playbackReason as keyof typeof callPlaybackReasons]
+          : intervention?.reason ?? (playback === 'omitted' ? 'No se registró la reproducción de este llamado.' : null)
+        return [{ queueId: row.queueId, inputKey: row.inputKey, title: !pending && saved.song ? saved.song : item.title,
+          performer: !pending && saved.performer ? saved.performer : item.userDisplayName, tableLabel: item.tableLabelSnapshot ?? null,
+          playback, playbackReason, playedResult: played ? partDTO(played) : null, usedFallback: !!played && played.id !== row.resultId,
+          canRecover: !pending && !result && !!row.resultId,
+          recoveryJob: recovery ? jobDTO(recovery, this.voice.profile()) : null,
           status: row.status === 'ready' && (!compatible || !result) && !row.startedAt ? 'fallback' as const : row.status,
-          reason: row.reason, result: result && compatible ? partDTO(result) : null, startedAt: row.startedAt }]
+          reason: !pending && !result ? played ? null : row.resultId ? 'El audio de este llamado fue retirado.' : 'No se generó un llamado para este pedido.' : row.reason,
+          result: result && compatible ? partDTO(result) : null, startedAt: row.startedAt }]
       }) }
   }
 }
