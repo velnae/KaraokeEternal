@@ -164,6 +164,15 @@ approved scripts and record job IDs for resumable execution. Valid generated
 resources become automatically eligible in the catalog; communicate this
 behavior before submission and preserve the room's playback controls.
 
+## Resource promotion from development — project skill
+
+For requests to publish tested resources or settings from development to the VPS,
+load `.opencode/skills/promote-resources/SKILL.md`. Use its `resources:promote`
+CLI to compare explicit room scopes, bundle media, publish through authenticated
+APIs and resume receipts. See `docs/resource-promotion.md`. Production reads and
+writes require an explicit production request. Deploy the accompanying backend
+before importing birthday assets; never replace the live database to promote content.
+
 ## YouTube resource imports from chat — project skill
 
 For downloading or trimming YouTube audio/video and importing it into the audio

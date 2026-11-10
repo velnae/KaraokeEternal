@@ -11,6 +11,7 @@ import { listBirthdayVoices } from './gemini.js'
 import { speechProfile } from './personalization.js'
 import { birthdayHistory, birthdayHistoryDetail } from './history.js'
 import { birthdayService } from './Service.js'
+import { importBirthdayAsset, type BirthdayImport } from './import.js'
 import { assertRoom, asset, assetDTO, changeBirthday, createBirthday, eventDTO, getBirthday, rows, saveSettings, settings, type AssetRow } from './Store.js'
 
 const router = new Router({ prefix: '/api/birthdays' })
@@ -92,6 +93,15 @@ router.post('/upload', async (ctx) => {
     assertRoom(ctx.user.roomId)
     if (!['intro', 'music'].includes(request.body?.kind) || files.length !== 1 || files[0].size > 20 * 1024 * 1024) ctx.throw(422, 'Seleccione un audio de hasta 20 MB.')
     ctx.body = assetDTO(await birthdayService().upload(ctx.user.roomId, request.body.kind as 'intro' | 'music', files[0].originalFilename || 'Audio de cumpleaños', await fs.readFile(files[0].filepath)))
+  } finally { await Promise.all(files.map(file => fs.rm(file.filepath, { force: true }))) }
+})
+router.post('/import', async (ctx) => {
+  const request = ctx.request as unknown as { body: { metadata?: string }, files?: Record<string, { filepath: string } | { filepath: string }[]> }
+  const files = Object.values(request.files ?? {}).flat()
+  try {
+    if (files.length !== 1) ctx.throw(422, 'Seleccione un recurso para importar.')
+    const metadata = JSON.parse(request.body?.metadata ?? 'null') as BirthdayImport
+    ctx.body = await importBirthdayAsset(birthdayService().directory, ctx.user.roomId, metadata, await fs.readFile(files[0].filepath))
   } finally { await Promise.all(files.map(file => fs.rm(file.filepath, { force: true }))) }
 })
 router.get('/assets/:id', async (ctx) => {

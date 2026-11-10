@@ -211,11 +211,13 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   // Authenticate bounded audio uploads before multipart parsing/storage.
   const parseBody = koaBody({ multipart: true })
   const parseAudio = koaBody({ multipart: true, formidable: { maxFileSize: 20 * 1024 * 1024, maxTotalFileSize: 20 * 1024 * 1024, maxFiles: 1, maxFieldsSize: 64 * 1024 } })
+  const parseBirthdayImport = koaBody({ multipart: true, formidable: { maxFileSize: 40 * 1024 * 1024, maxTotalFileSize: 40 * 1024 * 1024, maxFiles: 1, maxFields: 1, maxFieldsSize: 16 * 1024 } })
   app.use((ctx, next) => {
     // This router authenticates before its own bounded parsers touch the body.
     if (isTransitionVideoPath(ctx.path, urlPath) || isPlayerLogoPath(ctx.path, urlPath)) return next()
-    if (ctx.path.startsWith(`${urlPath}api/birthdays/`)) {
+    if (ctx.path.toLowerCase().startsWith(`${urlPath}api/birthdays/`.toLowerCase())) {
       if (!canOperate(ctx.user) || !Number.isInteger(ctx.user.roomId) || (!ctx.user.isAdmin && !['GET', 'HEAD'].includes(ctx.method))) ctx.throw(403)
+      if (ctx.path.toLowerCase().replace(/\/+$/, '') === `${urlPath}api/birthdays/import`.toLowerCase()) return parseBirthdayImport(ctx, next)
       return ctx.path.replace(/\/+$/, '') === `${urlPath}api/birthdays/upload` ? parseAudio(ctx, next) : parseBody(ctx, next)
     }
     const audioPath = ctx.path.slice(`${urlPath}api/animation/resources/`.length)
