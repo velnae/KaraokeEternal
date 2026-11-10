@@ -94,6 +94,20 @@ try {
   await page.getByLabel('Tu nombre').fill('Cliente prueba')
   await page.getByRole('button', { name: 'Entrar', exact: true }).click()
   await expect(page).toHaveURL(`${uiBase}library`)
+  const input = page.getByRole('searchbox', { name: 'Buscar canción o artista' })
+  await expect(input).toBeFocused()
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.screenshot({ path: path.join(data, `search-focus-${width}.png`) })
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.keyboard.type('Canción')
+  await expect(input).toHaveValue('Canción')
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('button', { name: 'Limpiar búsqueda', exact: true })).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(input).toBeFocused()
+  pass('Search receives focus after guest login, accepts typing and preserves keyboard navigation')
   const search = async () => {
     await page.getByRole('radio', { name: 'Cantar karaoke', exact: true }).check()
     const input = page.getByRole('searchbox', { name: 'Buscar canción o artista' })
@@ -102,7 +116,6 @@ try {
     await input.press('Enter')
     await expect(page.locator('article[data-source-id]')).toHaveCount(3)
   }
-  const input = page.getByRole('searchbox', { name: 'Buscar canción o artista' })
   await input.fill('Canción')
   await input.press('Enter')
   await expect(page.locator('article[data-source-id]')).toHaveCount(4)

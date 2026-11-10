@@ -297,7 +297,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
               </div>
             </fieldset>
             <div className={styles.searchRow}>
-              <input ref={searchInput} id='youtube-query' type='search' aria-label='Buscar canción o artista' aria-describedby={searchDescription} value={query} onChange={event => setQuery(event.target.value)} placeholder='Canción, artista o enlace' maxLength={200} enterKeyHint='search' />
+              <input ref={searchInput} autoFocus id='youtube-query' type='search' aria-label='Buscar canción o artista' aria-describedby={searchDescription} value={query} onChange={event => setQuery(event.target.value)} placeholder='Canción, artista o enlace' maxLength={200} enterKeyHint='search' />
               {query && (
                 <Button
                   className={styles.clearSearch}
