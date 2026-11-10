@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { Greeting } from '../../../../../shared/greetings'
 import type { OptimisticQueueItem, QueueItem } from '../../../../../shared/types'
 import PlayerTransitionPresentation from './PlayerTransitionPresentation'
-import { createTransitionPresentationSelector, transitionTrack, transitionTracks } from './transitionPresentation'
+import { createTransitionPresentationSelector, normalizeTransitionTitle, transitionTrack, transitionTracks } from './transitionPresentation'
 
 function track (queueId: number, patch: Partial<QueueItem> = {}): QueueItem {
   return {
@@ -84,6 +84,22 @@ describe('transition queue context', () => {
 })
 
 describe('track presentation contract', () => {
+  it('removes whole emoji sequences and controls while preserving readable multilingual titles', () => {
+    expect(normalizeTransitionTitle('🎤  Ｍａｎá\t— Rayando el Sol 🔥👩🏽‍🎤🇵🇪1️⃣')).toBe('Maná — Rayando el Sol')
+    expect(normalizeTransitionTitle('¿Qué será? (En vivo) — AC/DC & Guns N’ Roses')).toBe('¿Qué será? (En vivo) — AC/DC & Guns N’ Roses')
+    expect(normalizeTransitionTitle('Cafe\u0301\u200b\u202e\n東京')).toBe('Café 東京')
+    expect(normalizeTransitionTitle('Sinfonía № 9 © 1990')).toBe('Sinfonía No 9 1990')
+  })
+
+  it('normalizes both sources for display without modifying stored titles and falls back for emoji-only titles', () => {
+    for (const source of ['LOCAL', 'YOUTUBE'] as const) {
+      const item = track(1, { source, title: '🎵  Canción  🎶' })
+      expect(transitionTrack(item).title).toBe('Canción')
+      expect(item.title).toBe('🎵  Canción  🎶')
+      expect(transitionTrack({ ...item, title: '👨‍👩‍👧‍👦 🇵🇪 1️⃣' }).title).toBe('Próxima canción')
+    }
+  })
+
   it('uses intent and origin instead of guessing from a title or source', () => {
     expect(transitionTrack(track(1, { origin: 'HOUSE', requestIntent: 'SING' })).kind).toBe('house')
     expect(transitionTrack(track(1, { origin: 'OPERATOR', requestIntent: 'SING' })).kind).toBe('sing')

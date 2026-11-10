@@ -13,15 +13,15 @@
 }
 
 .foreground { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 0; min-width: 0; gap: clamp(12px, 2cqh, 24px); }
-.current { width: 100%; max-width: 1320px; min-width: 0; text-align: center; }
+.current { width: 100%; max-width: 1320px; min-width: 0; flex-shrink: 0; text-align: center; }
 .current[data-kind='house'] { --accent: var(--amber, #edc47c); }
 .current[data-kind='listen'], .current[data-kind='request'] { --accent: var(--lyrics, #f4f7ff); }
 .current :is(h1, p) { margin: 0; }
 .label { color: var(--accent); font-size: clamp(22px, min(3.2cqw, 5cqh), 48px); line-height: 1.2; font-weight: 600; overflow-wrap: anywhere; }
 .label[data-neon='true'] { font-family: 'Beon', var(--font-family, system-ui), sans-serif; font-weight: 400; text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 35%, transparent), 0 2px 8px #000; }
 .current .table { margin-top: clamp(12px, 2.2cqh, 28px); color: var(--lyrics, #f4f7ff); font-size: clamp(28px, min(4.2cqw, 7cqh), 64px); line-height: 1.15; font-weight: 600; font-variant-numeric: tabular-nums; }
-.current .headline { margin-top: clamp(12px, 2cqh, 24px); font-size: clamp(36px, min(6.3cqw, 12cqh), 112px); line-height: 1.08; font-weight: 700; letter-spacing: -.025em; text-wrap: balance; }
-.current .song { margin-top: clamp(12px, 2cqh, 24px); font-size: clamp(23px, min(3.3cqw, 5.5cqh), 48px); line-height: 1.25; font-weight: 500; text-wrap: balance; }
+.current .headline { --title-floor: 24; margin-top: clamp(12px, 2cqh, 24px); font-size: clamp(36px, min(6.3cqw, 12cqh), 112px); line-height: 1.08; font-weight: 700; letter-spacing: -.025em; text-wrap: balance; }
+.current .song { --title-floor: 18; margin-top: clamp(12px, 2cqh, 24px); font-size: clamp(23px, min(3.3cqw, 5.5cqh), 48px); line-height: 1.25; font-weight: 500; text-wrap: balance; }
 .current .artist, .current .attribution { margin-top: clamp(8px, 1.2cqh, 16px); font-size: clamp(18px, min(2.3cqw, 4cqh), 32px); line-height: 1.35; color: #d1d9e8; }
 .headline, .table, .song, .artist, .attribution, .nextTitle, .nextPerson { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 
@@ -30,7 +30,7 @@
 .nextLabel > :first-child { color: var(--lyrics, #f4f7ff); font-weight: 600; }
 .following[data-kind='sing'] .nextLabel > :last-child { color: var(--cyan, #76e0ec); }
 .following[data-kind='house'] .nextLabel > :last-child { color: var(--amber, #edc47c); }
-.nextTitle { margin: 6px 0 0; color: var(--lyrics, #f4f7ff); font-size: clamp(20px, 2.3cqw, 36px); line-height: 1.2; font-weight: 600; }
+.nextTitle { --title-floor: 16; margin: 6px 0 0; color: var(--lyrics, #f4f7ff); font-size: clamp(20px, 2.3cqw, 36px); line-height: 1.2; font-weight: 600; }
 .nextPerson { margin: 6px 0 0; color: #d1d9e8; font-size: clamp(16px, 1.8cqw, 28px); line-height: 1.25; }
 
 .presentation[data-greeting='true'] .foreground { justify-content: center; }
@@ -48,11 +48,12 @@
   .current .label { flex-basis: 100%; font-size: 20px; }
   .current .table { font-size: 24px; margin: 0; }
   .current .headline { flex: 0 1 auto; max-width: 100%; margin: 0; font-size: clamp(26px, min(5cqw, 8cqh), 40px); }
-  .current :is(.song, .attribution) { flex-basis: 100%; margin-top: 4px; font-size: 18px; -webkit-line-clamp: 1; }
+  .current :is(.song, .attribution) { flex-basis: 100%; margin-top: 4px; font-size: 18px; }
+  .current .attribution { -webkit-line-clamp: 1; }
   .current .artist { display: none; }
   .following { padding: 8px 16px; }
   .nextLabel, .nextPerson { font-size: 14px; }
-  .nextTitle { font-size: 18px; margin-top: 4px; -webkit-line-clamp: 1; }
+  .nextTitle { font-size: 18px; margin-top: 4px; }
   .nextPerson { margin-top: 4px; -webkit-line-clamp: 1; }
   .presentation[data-greeting='true'] .current :is(h1, p) { font-size: 16px; }
   .presentation[data-greeting='true'] .current .song { flex-basis: auto; }

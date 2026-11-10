@@ -46,6 +46,18 @@ export function transitionTracks (queue: Queue, player: PlayerPosition, preferen
   return { incoming, following }
 }
 
+const emojiPart = '[\\p{Extended_Pictographic}\\p{Regional_Indicator}\\p{Emoji_Presentation}][\\uFE0E\\uFE0F\\p{Emoji_Modifier}\\u{E0020}-\\u{E007F}]*'
+const titleEmoji = new RegExp(`[#*0-9]\\uFE0F?\\u20E3|${emojiPart}(?:\\u200D${emojiPart})*`, 'gu')
+const titleControls = new RegExp('[\\p{Cc}\\p{Cf}]', 'gu')
+
+export function normalizeTransitionTitle (title: string): string {
+  return title.normalize('NFKC')
+    .replace(titleEmoji, ' ')
+    .replace(titleControls, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export function transitionTrack (item: QueueItem) {
   const kind: TransitionTrackKind = item.origin === 'HOUSE'
     ? 'house'
@@ -57,7 +69,7 @@ export function transitionTrack (item: QueueItem) {
   return {
     kind,
     label,
-    title: item.title.trim() || 'Próxima canción',
+    title: normalizeTransitionTitle(item.title) || 'Próxima canción',
     person: showPerson ? item.userDisplayName.trim() : '',
     table: showPerson ? item.tableLabelSnapshot?.trim() ?? '' : '',
     // A YouTube channel is not necessarily the performing artist.
