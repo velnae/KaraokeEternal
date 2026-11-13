@@ -43,7 +43,7 @@ const provider = createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost')
   res.setHeader('Content-Type', 'application/json')
   res.end(JSON.stringify({ items: (url.searchParams.get('id') || videoIds[0]).split(',').map(id => ({
-    id, snippet: { title: `Canción ${id}`, channelTitle: 'Fixture', categoryId: '10', liveBroadcastContent: 'none', thumbnails: {} },
+    id, snippet: { title: `Canción ${id} karaoke`, channelTitle: 'Fixture', categoryId: '10', liveBroadcastContent: 'none', thumbnails: {} },
     contentDetails: { duration: 'PT5S' }, status: { embeddable: true, privacyStatus: 'public', uploadStatus: 'processed' },
   })) }))
 })
@@ -232,13 +232,16 @@ try {
     await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
     await expect(admin.getByRole('navigation', { name: 'Secciones de administración' })).toBeVisible()
   }
-  await admin.goto(`${base}admin/settings/animator?view=greeting-voice`)
-  await admin.getByRole('checkbox', { name: 'Generar nuevos saludos con Gemini', exact: true }).check()
+  await admin.goto(`${base}admin/settings/audio-providers?use=greetings`)
+  await admin.getByRole('checkbox', { name: 'Generar nuevas voces con Gemini', exact: true }).check()
+  await admin.getByText('Límites de generación', { exact: true }).click()
   await admin.getByLabel('Solicitudes por minuto', { exact: true }).fill('1000')
   await admin.getByLabel('Solicitudes por día', { exact: true }).fill('10000')
   await admin.getByRole('button', { name: 'Guardar ajustes', exact: true }).click()
   await expect(admin.getByText('Gemini configurado', { exact: true })).toBeVisible()
   await expect(admin.getByText('Configuración guardada.', { exact: true })).toBeVisible()
+  await admin.goto(`${base}admin/settings/animator?view=greeting-voice`)
+  await expect(admin.getByRole('checkbox', { name: 'Preparar voz mientras los pedidos esperan' })).toBeEnabled()
   await admin.getByRole('checkbox', { name: 'Preparar voz mientras los pedidos esperan' }).focus()
   await admin.keyboard.press('Space')
   await expect.poll(() => db.prepare('SELECT audioEnabled FROM greetingControls WHERE roomId=1').get()?.audioEnabled).toBe(1)

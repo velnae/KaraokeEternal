@@ -29,7 +29,10 @@ export async function prepareGreetingTransition (roomId: number, queueId: number
   const room = db.get<{ data: string }>('SELECT data FROM rooms WHERE roomId=?', [roomId])
   const prefs = animationPrefs(room ? JSON.parse(room.data).prefs?.animation : undefined)
   const clips = catalogClips(roomId).filter(clip => clip.approvedForAuto && (!clip.validUntil || clip.validUntil > Date.now()))
-  if (call?.kind && prefs.enabled && prefs.automation && prefs.events.turn && currentSession(roomId)?.status === 'OPEN') {
+  const preferredIntro = control.enabled && item && (!call || call.kind === 'signature')
+    ? clips.find(clip => clip.id === control.prefs.introClipId && (clip.kind ?? 'voice') === 'voice')
+    : undefined
+  if (call?.kind && !preferredIntro && prefs.enabled && prefs.automation && prefs.events.turn && currentSession(roomId)?.status === 'OPEN') {
     const history = db.all<Intervention>('SELECT * FROM animationInterventions WHERE roomId=? ORDER BY requestedAt DESC', [roomId]).map((row) => {
       const intro = (interventionAssets(row) as GreetingAsset[]).find(asset => asset.role === 'intro')
       return intro ? { ...row, displayText: intro.displayText, family: 'turn' } : row
@@ -42,7 +45,7 @@ export async function prepareGreetingTransition (roomId: number, queueId: number
     const voice = await getGreetingAudioAsset(roomId, item.greetingId)
     if (voice) {
       assets.push(voice)
-      const intro = !call && clips.find(clip => clip.id === control.prefs.introClipId && (clip.kind ?? 'voice') === 'voice')
+      const intro = preferredIntro
       if (intro) assets.push({ ...intro, role: 'intro', url: `api/animation/assets/${encodeURIComponent(intro.id)}` })
       const bed = control.prefs.ambienceEnabled && leastUsedAudio(roomId, eligibleAmbience(clips, prefs))
       if (bed) assets.push({ ...bed, role: 'bed', url: `api/animation/assets/${encodeURIComponent(bed.id)}` })

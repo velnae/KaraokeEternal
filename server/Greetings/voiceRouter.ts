@@ -1,6 +1,6 @@
 import Router from '@koa/router'
 import { getGreetingVoice, GreetingVoiceSettingsError } from './GreetingVoice.js'
-import { GreetingVoiceError } from './GeminiGreetingTts.js'
+import { VoiceError as GreetingVoiceError } from '../AudioProviders/errors.js'
 import { AudioValidationError } from '../Animation/AudioPreparation.js'
 import { previewGreetingAudio } from './audioRouter.js'
 

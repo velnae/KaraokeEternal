@@ -80,7 +80,7 @@ engine instructions or substitute ElevenLabs for local personalized TTS.
 - [Tag defaults, parsing and suggestions](../../../../shared/audioTags.ts)
 - [Generation contracts](../../../../shared/catalogProduction.ts)
 - [Validation and generation pipeline](../../../../server/Animation/Production.ts)
-- [ElevenLabs adapter](../../../../server/Animation/ElevenLabs.ts)
+- [ElevenLabs adapter](../../../../server/AudioProviders/ElevenLabs.ts)
 - [Common audio preparation](../../../../server/Animation/AudioPreparation.ts)
 - [Editor](../../../../src/components/Animation/AudioTagEditor.tsx)
 - [Generator form](../../../../src/components/Animation/AudioResourceForm.tsx)

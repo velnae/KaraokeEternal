@@ -90,7 +90,7 @@ export default function NameVoiceStyleEditor ({ settings, onSaved }: { settings:
     } catch (err) { if (alive.current) setError(errorMessage(err)) }
   }
   return (
-    <details className={styles.styleSettings}>
+    <details open className={styles.styleSettings}>
       <summary>Modelo y estilo de pronunciación (Gemini)</summary>
       <form
         aria-label='Estilo para nombres'

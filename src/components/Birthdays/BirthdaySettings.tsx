@@ -8,8 +8,8 @@ import HttpApi from 'lib/HttpApi'
 import { birthdayApi, birthdayUrl } from './api'
 import useBirthdayOverview from './useBirthdayOverview'
 import BirthdayProfileEditor from './BirthdayProfileEditor'
-import BirthdayVoiceSelect from './BirthdayVoiceSelect'
-import { birthdayProfileAges, birthdayProfileTitle, birthdaySampleKey, birthdayVoiceName, type BirthdayVoiceOption } from './settingsHelpers'
+import { birthdayProfileAges, birthdayProfileTitle, birthdaySampleKey, birthdayVoiceName } from './settingsHelpers'
+import useProviderVoices from 'components/AudioProviders/useProviderVoices'
 import styles from './BirthdaySettings.css'
 
 type ResourceKind = 'intro' | 'music' | 'video'
@@ -20,9 +20,6 @@ export default function BirthdaySettings () {
   const { overview, error: loadError, refresh } = useBirthdayOverview()
   const [config, setConfig] = useState<Settings | null>(null)
   const [saved, setSaved] = useState<Settings | null>(null)
-  const [catalogue, setCatalogue] = useState<{ key: string, voices: BirthdayVoiceOption[], error?: string }>({ key: '', voices: [] })
-  const [language, setLanguage] = useState<string | null>(null)
-  const [retryVoices, setRetryVoices] = useState(0)
   const [videos, setVideos] = useState<{ id: string, title: string }[]>([])
   const [videoError, setVideoError] = useState('')
   const [video, setVideo] = useState('')
@@ -40,36 +37,18 @@ export default function BirthdaySettings () {
   const [previewError, setPreviewError] = useState('')
   const [samples, setSamples] = useState<Record<string, BirthdayAsset>>({})
   const errorRef = useRef<HTMLDivElement>(null)
-  const advanced = useRef<HTMLDetailsElement>(null)
   const opener = useRef<HTMLButtonElement | null>(null)
   const addProfile = useRef<HTMLDivElement>(null)
   const media = useRef<HTMLMediaElement>(null)
-  const selectedLanguage = language ?? (config?.defaultVoiceId.toLowerCase().startsWith('es-419-') ? 'es-419' : 'es-PE')
-  const catalogueKey = config ? JSON.stringify([config.speechProvider, config.speechModel, selectedLanguage]) : ''
-  const voices = catalogue.key === catalogueKey ? catalogue.voices : []
+  const selectedLanguage = config?.defaultVoiceId.toLowerCase().startsWith('es-419-') ? 'es-419' : 'es-PE'
+  const catalogue = useProviderVoices({ providerId: config?.speechProvider ?? 'elevenlabs', use: 'birthdays', model: config?.speechModel ?? '', language: selectedLanguage, enabled: !!config })
+  const voices = catalogue.voices
   useEffect(() => {
     if (overview) {
       setConfig(previous => previous ?? overview.settings)
       setSaved(previous => previous ?? overview.settings)
     }
   }, [overview])
-  useEffect(() => {
-    if (!catalogueKey) return
-    const [provider, model, locale] = JSON.parse(catalogueKey)
-    const controller = new AbortController()
-    let live = true
-    const timer = setTimeout(() => {
-      void birthdayApi.post<BirthdayVoiceOption[]>('voices', { body: { provider, model, language: locale }, signal: controller.signal }).then((result): void => {
-        if (live) setCatalogue({ key: catalogueKey, voices: result })
-        return undefined
-      }).catch((failure) => { if (live) setCatalogue({ key: catalogueKey, voices: [], error: failure.message }) })
-    }, 350)
-    return () => {
-      live = false
-      clearTimeout(timer)
-      controller.abort()
-    }
-  }, [catalogueKey, retryVoices])
   useEffect(() => {
     let live = true
     void new HttpApi('animation/background/').get<TransitionVideoOverview>('').then((result): void => {
@@ -195,10 +174,7 @@ export default function BirthdaySettings () {
       <fieldset disabled={!!busy} className={styles.section}>
         <legend>Saludo predeterminado</legend>
         <div className={styles.defaults}>
-          <label>
-            Voz predeterminada
-            <BirthdayVoiceSelect id={config.defaultVoiceId} voices={voices} onChange={defaultVoiceId => setConfig({ ...config, defaultVoiceId })} />
-          </label>
+          <Link to='/admin/settings/audio-providers?use=birthdays'>Configurar proveedor y voz predeterminada</Link>
           <label>
             Duración objetivo (segundos)
             <input type='number' min={15} max={60} value={Number.isFinite(config.targetSeconds) ? config.targetSeconds : ''} onChange={event => setConfig({ ...config, targetSeconds: event.target.valueAsNumber })} />
@@ -210,60 +186,24 @@ export default function BirthdaySettings () {
               {Array.from({ length: 20 }, (_, index) => index + 1).map(number => <option key={number} value={number}>{number === 1 ? 'Cada cumpleaños elegible' : `${number} cumpleaños elegibles`}</option>)}
             </select>
           </label>
-          <Button onClick={() => void audition(config, config.defaultVoiceId, config.speechStyle, false, 'Voz predeterminada')}>{voicePreview()}</Button>
         </div>
-        {catalogue.key !== catalogueKey && <p role='status' className={styles.muted}>Consultando voces…</p>}
-        {catalogue.key === catalogueKey && (catalogue.error || !voices.length) && (
+        {catalogue.loading && <p role='status' className={styles.muted}>Consultando voces…</p>}
+        {!catalogue.loading && (catalogue.error || !voices.length) && (
           <div role='status' className={styles.catalogue}>
-            <p>{catalogue.error || 'No hay voces en este idioma. Seleccione otro idioma en Opciones avanzadas.'}</p>
-            <Button onClick={() => { if (advanced.current) advanced.current.open = true }}>Revisar conexión e idioma</Button>
+            <p>{catalogue.error || 'No hay voces disponibles para esta configuración.'}</p>
+            <Button onClick={catalogue.retry}>Reintentar voces</Button>
+            <Link to='/admin/settings/audio-providers?use=birthdays'>Revisar proveedor e idioma</Link>
           </div>
         )}
-        <details ref={advanced} className={styles.advanced}>
-          <summary>Opciones avanzadas</summary>
+        <details className={styles.advanced}>
+          <summary>Más opciones</summary>
           <div className={styles.advancedFields}>
-            <label>
-              Modelo de texto Gemini
-              <input type='text' value={config.textModel} onChange={event => setConfig({ ...config, textModel: event.target.value })} />
-            </label>
-            <label>
-              Proveedor de voz
-              <select
-                value={config.speechProvider ?? 'elevenlabs'}
-                onChange={(event) => {
-                  setConfig({ ...config, speechProvider: event.target.value as Settings['speechProvider'], speechModel: event.target.value === 'gemini' ? 'gemini-3.8-flash-tts' : 'eleven_v4', defaultVoiceId: '', rules: [] })
-                  setNotice('Seleccione las voces del nuevo proveedor.')
-                }}
-              >
-                <option value='gemini'>Gemini</option>
-                <option value='elevenlabs'>ElevenLabs</option>
-              </select>
-            </label>
-            <label>
-              Modelo de voz
-              <input type='text' value={config.speechModel ?? 'eleven_v4'} onChange={event => setConfig({ ...config, speechModel: event.target.value })} />
-            </label>
-            {config.speechProvider === 'gemini' && (
-              <label>
-                Idioma del catálogo
-                <select value={selectedLanguage} onChange={event => setLanguage(event.target.value)}>
-                  <option value='es-PE'>Español de Perú</option>
-                  <option value='es-419'>Español latinoamericano</option>
-                  <option value='es'>Español</option>
-                </select>
-              </label>
-            )}
             <label>
               Duración máxima (segundos)
               <input type='number' min={15} max={60} value={Number.isFinite(config.maxVoiceSeconds) ? config.maxVoiceSeconds : ''} onChange={event => setConfig({ ...config, maxVoiceSeconds: event.target.valueAsNumber })} />
             </label>
           </div>
-          <label>
-            Interpretación predeterminada
-            <textarea rows={3} maxLength={400} value={config.speechStyle ?? ''} onChange={event => setConfig({ ...config, speechStyle: event.target.value })} />
-          </label>
           <div className={styles.actions}>
-            <Button onClick={() => setRetryVoices(value => value + 1)}>Consultar voces disponibles</Button>
             <Button onClick={() => setConfig({ ...config, rules: initialBirthdayProfiles(config.speechProvider === 'gemini' ? '' : config.defaultVoiceId) })}>Restaurar perfiles iniciales</Button>
           </div>
         </details>
@@ -271,7 +211,7 @@ export default function BirthdaySettings () {
       <fieldset disabled={!!busy} className={styles.section}>
         <legend>Perfiles por edad</legend>
         <div>
-          {config.rules.length === 0 && <p>Agregue un perfil o restaure los perfiles iniciales desde Opciones avanzadas.</p>}
+          {config.rules.length === 0 && <p>Agregue un perfil o restaure los perfiles iniciales desde Más opciones.</p>}
           {config.rules.map((rule, index) => (
             <article key={rule.id ?? index} className={styles.profile} aria-label={rule.title || `Perfil ${index + 1}`}>
               <div>

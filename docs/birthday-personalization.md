@@ -6,12 +6,14 @@ the playback authority.
 
 ## Configure
 
-1. Open **Ajustes → Cumpleaños**. Existing installations retain ElevenLabs;
+1. Open **Ajustes → Proveedores de audio → Cumpleaños** for the current room.
+   Existing installations retain ElevenLabs;
    new configurations default to Gemini text and Gemini Flash TTS.
-2. Consult voices, select a default and load/edit the five initial age profiles.
+2. Consult voices and select a default. In **Ajustes → Cumpleaños**, load/edit
+   the five initial age profiles.
    Candidate voice names are suggestions, not evidence of availability or accent.
-   Listen to each chosen profile before use. Switching provider clears unsaved
-   voice assignments rather than interpreting one provider's IDs as another's.
+   Listen to each chosen profile before use. Switching provider preserves profile
+   definitions and requires new default/profile voice assignments before saving.
 3. Set writing directions, delivery, permitted approaches and historical frequency
    (`0` disables history; default `4`). Save settings.
 4. Prepare a birthday with name, sex, birth year and optional public dedication.
@@ -24,12 +26,13 @@ The greeting targets 25 seconds; measured audio must satisfy the saved maximum
 
 ## Content and identity
 
-The configuration screen groups the default greeting, compact age profiles and
+The provider page owns the provider, speech/text models, default voice and delivery.
+The birthday configuration screen groups greeting duration, compact age profiles and
 the birthday scene. Profile dialogs use **Aplicar perfil** to update the local
 draft; **Guardar cambios** persists the whole configuration. **Descartar** restores
 the saved draft. Resource selection/upload stays behind **Cambiar**; original
 settings and media IDs remain compatible. Introductions use the saved default
-voice, so unsaved default-voice changes must be saved before generating a variant.
+voice. Save provider-page changes before generating an introduction variant.
 
 Voice tests explicitly distinguish **Generar prueba** from **Escuchar prueba**.
 Samples are reused for the current page session by provider, speech model, voice,
@@ -60,9 +63,14 @@ local audio/video. Reloading the page clears this client-side sample cache.
   synthesizes audio or changes a queued event's voice.
 
 Gemini uses server-side `KES_GEMINI_API_KEY`, a configurable text model, and a
-saved TTS model. Speech uses the existing `GeminiGreetingTts` transport with clean
+saved TTS model. Speech uses `server/AudioProviders/Gemini.ts` with clean
 transcript and separate `speech_metadata.style`. Model and catalogue voice access
 are checked before synthesis. The birthday worker reports failures explicitly.
+
+`server/AudioProviders/` owns Gemini and ElevenLabs clients, credentials, endpoints
+and voice queries. Birthday prompts, saved profiles, preparation and playback
+remain in the birthday module. Greeting/call request budgets and catalog production
+budgets retain their existing scopes.
 
 ## Select and preview the celebration
 
@@ -118,7 +126,7 @@ and room-scoped. It returns explicit detail fields, not player authority tokens.
 ## Verification
 
 ```sh
-npm test -- shared/birthdays.test.ts server/Birthdays server/Greetings/GeminiGreetingTts.test.ts
+npm test -- shared/birthdays.test.ts server/Birthdays server/AudioProviders
 npm run typecheck
 node config/birthdays.e2e.mjs
 KARAOKE_E2E_MODE=development node config/birthdays.e2e.mjs

@@ -4,8 +4,8 @@ import { randomUUID } from 'node:crypto'
 import type { Server } from 'socket.io'
 import { db } from '../lib/Database.js'
 import Rooms from '../Rooms/Rooms.js'
-import { ElevenLabs } from '../Animation/ElevenLabs.js'
-import { productionOptions } from '../Animation/Production.js'
+import { createElevenLabs, createGemini } from '../AudioProviders/index.js'
+import { elevenLabsConfig } from '../AudioProviders/config.js'
 import { prepareAudio } from '../Animation/AudioPreparation.js'
 import { getTransitionVideoService } from '../TransitionVideo/Service.js'
 import Prefs from '../Prefs/Prefs.js'
@@ -23,40 +23,17 @@ export interface BirthdayProviders {
   speak(text: string, voiceId: string, signal: AbortSignal, profile?: BirthdaySpeech): Promise<Buffer>
 }
 export function birthdayProviders (): BirthdayProviders {
-  const options = productionOptions()
-  const voice = new ElevenLabs(options.key, options.baseUrl, options.model)
+  const options = elevenLabsConfig()
+  const voice = createElevenLabs(options)
   return {
     async write (row, config, signal) {
       const context = readPersonalization(row)
-      const key = process.env.KES_GEMINI_API_KEY
-      if (!key) throw new Error('Configure Gemini en el servidor para crear el saludo.')
-      const base = process.env.KES_GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com'
-      const response = await fetch(`${base}/v1beta/models/${encodeURIComponent(config.textModel)}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-        signal: AbortSignal.any([signal, AbortSignal.timeout(60000)]),
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: birthdayPrompt(context, config.targetSeconds ?? 25, Prefs.get().branding.name || 'Il Gatto') }] },
-          contents: [{ role: 'user', parts: [{ text: JSON.stringify({ name: row.name, age: row.celebrationYear - row.birthYear, targetSeconds: config.targetSeconds ?? 25,
-            dedication: context?.dedication, reference: context?.reference, recentOpenings: context?.recentOpenings }) }] }],
-          generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'OBJECT', properties: { script: { type: 'STRING' } }, required: ['script'] } },
-        }),
-      })
-      if (!response.ok) throw new Error(`No se pudo crear el saludo (Gemini HTTP ${response.status}). Revise el modelo y la conexión.`)
-      const reader = response.body?.getReader()
-      if (!reader) throw new Error('Gemini no entregó un saludo.')
-      const chunks: Uint8Array[] = []
-      let length = 0
-      try {
-        while (true) {
-          const part = await reader.read()
-          if (part.done) break
-          length += part.value.length
-          if (length > 65536) throw new Error('La respuesta de texto es demasiado grande.')
-          chunks.push(part.value)
-        }
-      } finally { await reader.cancel().catch(() => {}) }
-      const body = JSON.parse(Buffer.concat(chunks).toString())
-      const text = body.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? '').join('')
+      const text = await createGemini().generateText(config.textModel, {
+        systemInstruction: { parts: [{ text: birthdayPrompt(context, config.targetSeconds ?? 25, Prefs.get().branding.name || 'Il Gatto') }] },
+        contents: [{ role: 'user', parts: [{ text: JSON.stringify({ name: row.name, age: row.celebrationYear - row.birthYear, targetSeconds: config.targetSeconds ?? 25,
+          dedication: context?.dedication, reference: context?.reference, recentOpenings: context?.recentOpenings }) }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'OBJECT', properties: { script: { type: 'STRING' } }, required: ['script'] } },
+      }, signal)
       return JSON.parse(text || '{}').script
     },
     async speak (text, voiceId, signal, profile) {
@@ -64,8 +41,8 @@ export function birthdayProviders (): BirthdayProviders {
       if (!options.key) throw new Error('Configure ElevenLabs en el servidor para generar la voz.')
       const voices = await voice.check(profile?.model ?? options.model)
       if (!voices.some(item => item.voiceId === voiceId)) throw new Error('La voz configurada no está disponible. Revise Ajustes → Cumpleaños.')
-      const result = await voice.generate({ title: 'Cumpleaños', text, spokenText: text, kind: 'voice', family: 'manual', voiceId,
-        model: profile?.model ?? options.model, providerId: 'elevenlabs', revision: 0, modes: ['dinner', 'mixed', 'party'], processingRevision: 1,
+      const result = await voice.generate({ text, spokenText: text, kind: 'voice', voiceId,
+        model: profile?.model ?? options.model,
         settings: { stability: 0.5, similarity_boost: 0.75 } }, signal)
       return result.bytes
     },

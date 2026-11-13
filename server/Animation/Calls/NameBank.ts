@@ -111,7 +111,7 @@ export default class NameBank {
     if (NameBank.latestJob(group.id, profile) || !canGenerate) return undefined
     try {
       worker.submit(roomId, 'source', { sourceKind: 'name', nameId: group.id, text: group.spokenText,
-        requestId: `name-${key([group.id, profile])}` }, undefined, 'setup', 80)
+        requestId: `name-${key([group.id, profile])}` }, undefined, 'setup', 80, undefined, { profile })
     } catch (error) {
       if ((error as { status?: number }).status !== 409) throw error
     }

@@ -38,8 +38,10 @@ import Animation from './Animation/Animation.js'
 import { loadCatalog } from './Animation/catalog.js'
 import { startProduction } from './Animation/Production.js'
 import greetingVoiceRouter from './Greetings/voiceRouter.js'
+import audioProvidersRouter from './AudioProviders/router.js'
 import greetingAudioRouter, { startGreetingAudio } from './Greetings/audioRouter.js'
-import callRouter, { startCallJobs, nameVoiceRouter } from './Animation/Calls/router.js'
+import callRouter, { startCallJobs, nameVoiceRouter, callPromotionRouter } from './Animation/Calls/router.js'
+import { isCallPromotionPath } from './Animation/Calls/promotionRouter.js'
 import pushQueuesAndLibrary from './lib/pushQueuesAndLibrary.js'
 import { Server as SocketIO } from 'socket.io'
 import socketActions from './socket.js'
@@ -214,7 +216,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   const parseBirthdayImport = koaBody({ multipart: true, formidable: { maxFileSize: 40 * 1024 * 1024, maxTotalFileSize: 40 * 1024 * 1024, maxFiles: 1, maxFields: 1, maxFieldsSize: 16 * 1024 } })
   app.use((ctx, next) => {
     // This router authenticates before its own bounded parsers touch the body.
-    if (isTransitionVideoPath(ctx.path, urlPath) || isPlayerLogoPath(ctx.path, urlPath)) return next()
+    if (isTransitionVideoPath(ctx.path, urlPath) || isPlayerLogoPath(ctx.path, urlPath) || isCallPromotionPath(ctx.path, urlPath)) return next()
     if (ctx.path.toLowerCase().startsWith(`${urlPath}api/birthdays/`.toLowerCase())) {
       if (!canOperate(ctx.user) || !Number.isInteger(ctx.user.roomId) || (!ctx.user.isAdmin && !['GET', 'HEAD'].includes(ctx.method))) ctx.throw(403)
       if (ctx.path.toLowerCase().replace(/\/+$/, '') === `${urlPath}api/birthdays/import`.toLowerCase()) return parseBirthdayImport(ctx, next)
@@ -243,8 +245,10 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(userRouter.routes())
   baseRouter.use(tablesRouter.routes())
   baseRouter.use(callRouter.routes())
+  baseRouter.use(callPromotionRouter.routes())
   baseRouter.use(nameVoiceRouter.routes())
   baseRouter.use(transitionVideoRouter.routes())
+  baseRouter.use(audioProvidersRouter.routes())
   baseRouter.use(animationRouter.routes())
   baseRouter.use(birthdayRouter.routes())
   baseRouter.use(playlistsRouter.routes())

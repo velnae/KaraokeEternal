@@ -2,9 +2,9 @@ import React, { useEffect, useId, useRef, useState } from 'react'
 import Button from 'components/Button/Button'
 import HttpApi from 'lib/HttpApi'
 import { defaultGreetingVoiceConfig, greetingVoiceModels, greetingVoiceSample, greetingVoiceStateLabels, type GreetingVoiceConfig, type GreetingVoiceSnapshot } from 'shared/greetingVoice'
-import useGreetings from 'components/Greetings/useGreetings'
-import GreetingPlaybackControls from 'components/Greetings/GreetingPlaybackControls'
-import styles from './GreetingVoiceSettings.css'
+import VoiceSelect from './VoiceSelect'
+import useProviderVoices from './useProviderVoices'
+import styles from '../Animation/GreetingVoiceSettings.css'
 
 const api = new HttpApi('prefs/greeting-voice')
 
@@ -24,7 +24,7 @@ export default function GreetingVoiceSettings () {
   const [previewError, setPreviewError] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const greetings = useGreetings()
+  const catalogue = useProviderVoices({ providerId: 'gemini', use: 'greetings', model: draft.model, enabled: !!snapshot?.configured })
 
   useEffect(() => {
     mounted.current = true
@@ -135,8 +135,8 @@ export default function GreetingVoiceSettings () {
   return (
     <section className={styles.panel} aria-labelledby={`${id}-title`}>
       <header className={styles.heading}>
-        <h2 id={`${id}-title`}>Voz de saludos</h2>
-        <p>Gemini prepara los saludos en español latino mientras los pedidos esperan.</p>
+        <h2 id={`${id}-title`}>Saludos de participantes</h2>
+        <p>Todas las salas</p>
       </header>
       <div className={styles.status} data-state={snapshot?.state} role='status'>
         <strong>{snapshot ? greetingVoiceStateLabels[snapshot.state] : error ? 'No se pudieron cargar los ajustes' : 'Cargando ajustes…'}</strong>
@@ -157,8 +157,9 @@ export default function GreetingVoiceSettings () {
       >
         <label className={styles.check}>
           <input type='checkbox' checked={draft.enabled} disabled={!snapshot || busy} onChange={event => change({ enabled: event.target.checked })} />
-          Generar nuevos saludos con Gemini
+          Generar nuevas voces con Gemini
         </label>
+        <p className={styles.hint}>La habilitación y los límites de generación se comparten con llamados.</p>
         <label className={styles.field}>
           Modelo
           <select value={draft.model} disabled={!snapshot || busy} onChange={event => change({ model: event.target.value as GreetingVoiceConfig['model'] })}>
@@ -167,14 +168,19 @@ export default function GreetingVoiceSettings () {
         </label>
         <label className={styles.field}>
           Voz de Gemini
-          <input type='text' value={draft.voice} maxLength={64} required disabled={!snapshot || busy} onChange={event => change({ voice: event.target.value })} autoComplete='off' spellCheck={false} />
+          <VoiceSelect id={draft.voice} voices={catalogue.voices} required disabled={!snapshot || busy} onChange={voice => change({ voice })} />
         </label>
-        <p className={styles.hint}>Por ejemplo, Puck o Kore. Compruebe la pronunciación con una prueba privada.</p>
+        {catalogue.loading && <p role='status'>Consultando voces…</p>}
+        {catalogue.error && (
+          <div role='alert'>
+            <p>{catalogue.error}</p>
+            <Button onClick={catalogue.retry}>Reintentar voces</Button>
+          </div>
+        )}
         <label className={styles.field}>
           Estilo y acento
           <textarea value={draft.style} maxLength={800} rows={4} required disabled={!snapshot || busy} onChange={event => change({ style: event.target.value })} />
         </label>
-        <p className={styles.hint}>Estas indicaciones dirigen la voz; el texto del participante se envía por separado.</p>
         <div className={styles.actions}>
           <Button type='submit' variant='primary' disabled={!snapshot || busy || changedElsewhere} aria-describedby={`${id}-help`}>Guardar ajustes</Button>
           <Button disabled={!snapshot?.configured || busy || dirty || processing} aria-describedby={`${id}-help ${id}-preview-help`} onClick={() => void execute('check')}>Comprobar conexión</Button>
@@ -199,29 +205,20 @@ export default function GreetingVoiceSettings () {
             </div>
           )}
         </section>
-        <div className={styles.limits}>
-          <label className={styles.field}>
-            Solicitudes por minuto
-            <input type='number' min={1} max={1000} value={draft.requestsPerMinute} disabled={!snapshot || busy} onChange={event => change({ requestsPerMinute: Number(event.target.value) })} />
-          </label>
-          <label className={styles.field}>
-            Solicitudes por día
-            <input type='number' min={1} max={100000} value={draft.requestsPerDay} disabled={!snapshot || busy} onChange={event => change({ requestsPerDay: Number(event.target.value) })} />
-          </label>
-        </div>
-        <p className={styles.hint}>Límites compartidos entre salas y pruebas. Los valores iniciales son 3 por minuto y 10 al día; aumentarlos aquí no amplía la cuota de Google.</p>
+        <details>
+          <summary>Límites de generación</summary>
+          <div className={styles.limits}>
+            <label className={styles.field}>
+              Solicitudes por minuto
+              <input type='number' min={1} max={1000} value={draft.requestsPerMinute} disabled={!snapshot || busy} onChange={event => change({ requestsPerMinute: Number(event.target.value) })} />
+            </label>
+            <label className={styles.field}>
+              Solicitudes por día
+              <input type='number' min={1} max={100000} value={draft.requestsPerDay} disabled={!snapshot || busy} onChange={event => change({ requestsPerDay: Number(event.target.value) })} />
+            </label>
+          </div>
+        </details>
       </form>
-      <div className={styles.preparation}>
-        <h3>Preparación de saludos en esta sala</h3>
-        <label className={styles.check}>
-          <input type='checkbox' checked={greetings.snapshot?.audioEnabled ?? false} disabled={!greetings.snapshot || greetings.busy} aria-describedby={`${id}-preparation-help`} onChange={event => void greetings.execute('prepareAudio', { enabled: event.target.checked })} />
-          Preparar voz mientras los pedidos esperan
-        </label>
-        <p id={`${id}-preparation-help`} className={styles.hint}>{!greetings.snapshot ? 'Conectando con la sala para cargar esta opción.' : greetings.busy ? 'Esperando la confirmación del servidor…' : 'Se prepara un saludo a la vez y se reutiliza su audio. Si la voz falla, tarda o no hay cuota, su entrega en pantalla continúa.'}</p>
-        {greetings.error && <p className={styles.error} role='alert'>{greetings.error}</p>}
-      </div>
-      <GreetingPlaybackControls snapshot={greetings.snapshot} busy={greetings.busy} save={(settings, version) => void greetings.execute('playback', { settings, version })} />
-      <p className={styles.scope}>Gemini genera únicamente el saludo. La presentación y el ambiente provienen del catálogo. Desactivar la preparación de esta sala también desactiva su lectura en voz alta.</p>
     </section>
   )
 }

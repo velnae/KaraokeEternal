@@ -11,9 +11,23 @@ import type CallJobs from './Jobs.js'
 import { binding, callControls, callSessionAllows, intros, job, jobDTO, jobOutdated, key, part, partDTO, requestCall, retainedSinging, tableVoice, type JobInput, type JobRow, type PartRow, type RequestRow } from './Store.js'
 import { compositionRevision } from './Composition.js'
 import ListeningCalls from './Listening.js'
+import type { GreetingVoiceProfile } from '../../Greetings/voiceProfile.js'
+import { fixedPart, partProfile } from './Store.js'
 
 const pending = new Set(['queued', 'generating', 'preparing'])
 interface FallbackRow { scope: string, inputKey: string, jobId: string | null, resultId: string | null }
+interface BankTask {
+  operation: 'intro' | 'table' | 'source'
+  title: string
+  body: Record<string, unknown>
+  profile: GreetingVoiceProfile
+  tableId?: number
+  code?: string
+  templateId?: string
+  revision?: number
+  error?: string
+}
+interface BankPlan { requestId: string, tasks: BankTask[], paused?: boolean }
 const service: { current?: CallAutomation } = {}
 export const getCallAutomation = () => service.current
 export const isSingingRequest = (item?: QueueItem) => !!item && item.origin !== 'HOUSE' && item.requestIntent === 'SING'
@@ -51,7 +65,7 @@ export default class CallAutomation {
   private eligible (roomId: number, item?: QueueItem) { return this.open(roomId) && isSingingRequest(item) && item?.status === 'APPROVED' }
   private compatibleIntros (roomId: number) {
     const controls = callControls(roomId)
-    return intros(roomId).filter(item => item.profileKey === key(this.voice.profile()) && (!controls.introIds.length || controls.introIds.includes(item.variantId)))
+    return intros(roomId).filter(item => !controls.introIds.length || controls.introIds.includes(item.variantId))
   }
 
   private table (roomId: number, item: QueueItem) {
@@ -68,7 +82,7 @@ export default class CallAutomation {
   private inputKey (roomId: number, item: QueueItem, intro?: PartRow) {
     const table = this.table(roomId, item)
     return key([roomId, item.queueId, item.tableId, item.tableLabelSnapshot, item.userDisplayName, item.title,
-      item.origin, item.requestIntent, key(this.voice.profile()), intro?.id, table?.code, table?.revision, table?.part?.id, compositionRevision])
+      item.origin, item.requestIntent, intro?.profileKey ?? '', intro?.id, table?.code, table?.revision, table?.part?.id, compositionRevision])
   }
 
   private chooseIntro (roomId: number, previous?: RequestRow) {
@@ -90,24 +104,101 @@ export default class CallAutomation {
     db.run(`INSERT INTO karaokeCallControls(roomId,revision,preparing,enabled,introIdsJSON,listeningEnabled) VALUES(?,?,?,?,?,?)
       ON CONFLICT(roomId) DO UPDATE SET revision=excluded.revision,preparing=excluded.preparing,enabled=excluded.enabled,introIdsJSON=excluded.introIdsJSON,listeningEnabled=excluded.listeningEnabled`,
     [roomId, current.revision + 1, value.preparing || value.enabled ? 1 : 0, value.enabled ? 1 : 0, JSON.stringify([...new Set(value.introIds)]), (value.listeningEnabled ?? current.listeningEnabled) ? 1 : 0])
+    if (!value.preparing && this.bankPending(roomId)) {
+      const plan = JSON.parse(db.get<{ setupPlanJSON: string }>('SELECT setupPlanJSON FROM karaokeCallControls WHERE roomId=?', [roomId])!.setupPlanJSON) as BankPlan
+      plan.paused = true
+      db.run('UPDATE karaokeCallControls SET setupPlanJSON=? WHERE roomId=?', [JSON.stringify(plan), roomId])
+    }
     this.reconcile()
     return callControls(roomId)
   }
 
-  setup (roomId: number, input: { requestId?: unknown, revision?: unknown }) {
+  setup (roomId: number, input: { requestId?: unknown, revision?: unknown, quote?: unknown }) {
     Tables.room(roomId)
     if (typeof input.requestId !== 'string' || !/^[\w-]{8,100}$/.test(input.requestId)) throw new CallError('Identificador de preparación no válido.')
     if (db.get<{ setupRequestId: string }>('SELECT setupRequestId FROM karaokeCallControls WHERE roomId=?', [roomId])?.setupRequestId === input.requestId) return callControls(roomId)
     const current = callControls(roomId)
     if (input.revision !== current.revision) throw new CallError('Los controles cambiaron. Actualice antes de preparar.', 409)
+    if (!this.open(roomId)) throw new CallError('Abra la sala para preparar sus plantillas.')
+    if (!this.voice.snapshot().configured || !this.voice.snapshot().config.enabled) throw new CallError('Habilite la generación de voz antes de preparar plantillas.')
+    if (this.bankPending(roomId)) {
+      const plan = JSON.parse(db.get<{ setupPlanJSON: string }>('SELECT setupPlanJSON FROM karaokeCallControls WHERE roomId=?', [roomId])!.setupPlanJSON) as BankPlan
+      if (current.preparing && !plan.paused) throw new CallError('Hay un lote de plantillas en preparación. Espere a que termine.', 409)
+      plan.paused = false
+      db.run('UPDATE karaokeCallControls SET preparing=1,revision=revision+1,setupRequestId=?,setupPlanJSON=? WHERE roomId=?', [input.requestId, JSON.stringify(plan), roomId])
+      this.reconcile()
+      return callControls(roomId)
+    }
+    const plan: BankPlan = { requestId: input.requestId, tasks: this.bankTasks(roomId) }
+    if (input.quote !== undefined && input.quote !== key(plan.tasks)) throw new CallError('Cambió la lista de audios. Revise el lote antes de generar.', 409)
     db.run(`INSERT INTO karaokeCallControls(roomId,revision,preparing,setupRequestId,setupAttempt) VALUES(?,?,1,?,1)
       ON CONFLICT(roomId) DO UPDATE SET revision=excluded.revision,preparing=1,setupRequestId=excluded.setupRequestId,setupAttempt=setupAttempt+1`, [roomId, current.revision + 1, input.requestId])
+    db.run('UPDATE karaokeCallControls SET setupPlanJSON=? WHERE roomId=?', [JSON.stringify(plan), roomId])
     this.reconcile()
     return callControls(roomId)
   }
 
+  private bankPending (roomId: number) {
+    const stored = db.get<{ setupPlanJSON: string | null }>('SELECT setupPlanJSON FROM karaokeCallControls WHERE roomId=?', [roomId])
+    if (!stored?.setupPlanJSON) return false
+    const plan: BankPlan = JSON.parse(stored.setupPlanJSON)
+    return plan.tasks.some((task, index) => {
+      if (task.error) return false
+      const row = db.get<{ status: string }>('SELECT status FROM karaokeCallJobs WHERE roomId=? AND requestId=?', [roomId, `bank-${key([plan.requestId, index])}`])
+      return !row || pending.has(row.status)
+    })
+  }
+
+  private bankTasks (roomId: number): BankTask[] {
+    const profile = this.voice.profile()
+    const tasks: BankTask[] = []
+    const intro = this.compatibleIntros(roomId)[0]
+    if (!intro && !callControls(roomId).introIds.length) tasks.push({ operation: 'intro', title: 'Introducción de karaoke', body: { title: 'Vamos con el karaoke', text: '¡Vamos con el karaoke!' }, profile })
+    for (const table of Tables.list(roomId).filter(table => table.status === 'active')) {
+      const state = tableVoice(roomId, table.tableId, profile)
+      if (!state.part || state.outdated) tasks.push({ operation: 'table', title: `Mesa ${table.code}`, tableId: table.tableId, code: table.code,
+        body: { text: state.spokenText, revision: binding(roomId, table.tableId)?.revision ?? 0 }, profile })
+    }
+    const templates = this.listening.templates.list(roomId)
+    for (const template of templates.filter(template => template.enabled && (!template.audio || template.audio.text !== template.text))) {
+      tasks.push({ operation: 'source', title: template.text, body: { sourceKind: 'template', text: template.text }, templateId: template.id, revision: template.revision, profile })
+    }
+    const template = templates.find(template => template.enabled && template.audio)?.audio
+    const reference = template ? part(roomId, template.id) : undefined
+    if (!fixedPart(roomId, 'signature', 'De', reference)) tasks.push({ operation: 'source', title: 'Presentación del remitente', body: { sourceKind: 'signature', text: 'De' }, profile: { ...profile, voice: reference ? partProfile(reference, profile)?.voice ?? profile.voice : profile.voice } })
+    const fallbackProfile = { ...profile, voice: intro ? partProfile(intro, profile)?.voice ?? profile.voice : profile.voice }
+    for (const text of ['¡Es momento de cantar!', 'recibamos a nuestro próximo cantante. ¡Un aplauso!']) {
+      if (!fixedPart(roomId, 'continuation', text, intro)) tasks.push({ operation: 'source', title: text, body: { sourceKind: 'continuation', text }, profile: fallbackProfile })
+    }
+    return tasks
+  }
+
+  private prepareBank (roomId: number) {
+    const stored = db.get<{ setupPlanJSON: string | null }>('SELECT setupPlanJSON FROM karaokeCallControls WHERE roomId=?', [roomId])
+    if (!stored?.setupPlanJSON) return
+    const plan: BankPlan = JSON.parse(stored.setupPlanJSON)
+    if (plan.paused) return
+    let changed = false
+    for (const [index, task] of plan.tasks.entries()) {
+      if (task.error) continue
+      const requestId = `bank-${key([plan.requestId, index])}`
+      if (db.get('SELECT id FROM karaokeCallJobs WHERE roomId=? AND requestId=?', [roomId, requestId])) continue
+      try {
+        if (task.tableId !== undefined && Tables.get(roomId, task.tableId).code !== task.code) throw new CallError('El número de mesa cambió. Prepare la nueva versión explícitamente.')
+        if (task.templateId && !this.listening.templates.list(roomId).some(template => template.id === task.templateId && template.revision === task.revision)) throw new CallError('La introducción cambió durante la preparación.')
+        const result = this.worker.submit(roomId, task.operation, { ...task.body, requestId }, task.tableId, 'setup', 80, undefined, { profile: task.profile, manualBank: true, templateId: task.templateId, templateRevision: task.revision })
+        if (task.templateId) db.run('UPDATE listeningTemplates SET jobId=? WHERE roomId=? AND id=? AND revision=?', [result.id, roomId, task.templateId, task.revision!])
+      } catch (error) {
+        if (error instanceof CallError && error.status === 409 && error.message.includes('cola')) break
+        task.error = (error as Error).message
+        changed = true
+      }
+    }
+    if (changed) db.run('UPDATE karaokeCallControls SET setupPlanJSON=? WHERE roomId=?', [JSON.stringify(plan), roomId])
+  }
+
   retry (roomId: number, queueId: number, inputKey: unknown) {
-    if (!callControls(roomId).preparing) throw new CallError('Active los llamados automáticos o prepare las mesas antes de reintentar.')
+    if (!callControls(roomId).enabled) throw new CallError('Active los llamados automáticos antes de reintentar.')
     const row = requestCall(roomId, queueId)
     const song = Queue.get(roomId).entities[queueId]
     if (!row || !this.eligible(roomId, song) || row.startedAt || inputKey !== row.inputKey) throw new CallError('El pedido cambió o ya comenzó.', 409)
@@ -150,7 +241,7 @@ export default class CallAutomation {
 
   private admit (roomId: number, operation: Parameters<CallJobs['submit']>[1], identity: unknown[], body: Record<string, unknown>, tableId?: number, priority = 0) {
     const attempt = db.get<{ setupAttempt: number }>('SELECT setupAttempt FROM karaokeCallControls WHERE roomId=?', [roomId])?.setupAttempt ?? 0
-    const requestId = `setup-${key([roomId, operation, identity, key(this.voice.profile()), attempt])}`
+    const requestId = `setup-${key([roomId, operation, identity, attempt])}`
     const existing = db.get<JobRow>('SELECT * FROM karaokeCallJobs WHERE roomId=? AND requestId=?', [roomId, requestId])
     if (existing) return existing
     if (!this.voice.snapshot().config.enabled || !this.voice.snapshot().configured) return undefined
@@ -166,8 +257,9 @@ export default class CallAutomation {
   private fallback (roomId: number, intro: PartRow, tableId?: number) {
     const table = tableId === undefined ? null : tableVoice(roomId, tableId, this.voice.profile())
     if (table && (!table.part || table.outdated)) return
+    if (!fixedPart(roomId, 'continuation', table ? 'recibamos a nuestro próximo cantante. ¡Un aplauso!' : '¡Es momento de cantar!', intro)) return
     const scope = tableId === undefined ? 'room' : `table-${tableId}`
-    const inputKey = key([intro.id, table?.part?.id, table?.revision, key(this.voice.profile()), compositionRevision])
+    const inputKey = key([intro.id, table?.part?.id, table?.revision, intro.profileKey, compositionRevision])
     const old = db.get<FallbackRow>('SELECT * FROM karaokeCallFallbacks WHERE roomId=? AND scope=?', [roomId, scope])
     if (old?.inputKey === inputKey && old.resultId && part(roomId, old.resultId)) return
     const result = this.admit(roomId, 'fallback', [inputKey], { introId: intro.id, ...(tableId === undefined ? {} : { tableId }) }, undefined, tableId === undefined ? 90 : 20)
@@ -188,7 +280,7 @@ export default class CallAutomation {
       row = requestCall(roomId, item.queueId)!
     }
     const table = this.table(roomId, item)
-    let reason: string | null = !intro ? 'Preparando una introducción compatible.' : !table?.part || table.outdated ? 'La mesa todavía no tiene una voz compatible con este pedido.' : null
+    let reason: string | null = !intro ? 'Falta preparar una introducción desde Llamados.' : !table?.part || table.outdated ? 'Falta preparar la voz de la mesa desde Llamados.' : null
     try {
       const continuation = callContinuation(item.userDisplayName, item.title)
       if ([...(intro?.text ?? ''), ...(table?.part?.text ?? ''), ...continuation].length + 2 > 220) reason = 'La presentación es muy larga. Se usará el llamado básico.'
@@ -231,33 +323,19 @@ export default class CallAutomation {
         if (!controls.preparing || !this.open(roomId)) continue
         const candidates = queue.result.map(id => queue.entities[id]).filter(item => this.eligible(roomId, item))
           .sort((a, b) => Number(b.queueId === this.next.get(roomId)) - Number(a.queueId === this.next.get(roomId)))
-        let introductions = this.compatibleIntros(roomId)
-        const savedIntros = intros(roomId).filter(item => !controls.introIds.length || controls.introIds.includes(item.variantId))
-        for (const saved of savedIntros.filter(item => item.profileKey !== key(this.voice.profile()))) {
-          this.admit(roomId, 'intro', [saved.variantId, saved.text, saved.title], { previousId: saved.id, title: saved.title, text: saved.text }, undefined, 90)
-        }
-        if (!savedIntros.length && !controls.introIds.length) {
-          this.admit(roomId, 'intro', ['default-intro'], { title: 'Vamos con el karaoke', text: '¡Vamos con el karaoke!' }, undefined, 95)
-          introductions = this.compatibleIntros(roomId)
-        }
+        const introductions = this.compatibleIntros(roomId)
         const intro = introductions[0]
         if (intro) this.fallback(roomId, intro)
-        for (const item of candidates) this.reconcileRequest(roomId, item)
+        if (controls.enabled) for (const item of candidates) this.reconcileRequest(roomId, item)
+        this.prepareBank(roomId)
         // Admit upcoming requests before completing the rest of the setup bank.
         const tables = Tables.list(roomId).filter(table => table.status === 'active')
           .sort((a, b) => Number(candidates[0]?.tableId === b.tableId) - Number(candidates[0]?.tableId === a.tableId))
         for (const table of tables) {
           const state = tableVoice(roomId, table.tableId, this.voice.profile())
-          if (!state.part || state.outdated) {
-            const saved = binding(roomId, table.tableId)
-            const unfinished = db.get<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND operation='table' AND json_extract(inputJSON,'$.tableId')=? AND status IN ('queued','generating','preparing')`, [roomId, table.tableId])
-            if (!unfinished) {
-              // Desired identity excludes binding revision: a failed job must not loop.
-              this.admit(roomId, 'table', [table.tableId, table.code, state.spokenText], { text: state.spokenText, revision: saved?.revision ?? 0 }, table.tableId, candidates[0]?.tableId === table.tableId ? 90 : 10)
-            }
-          } else if (intro) this.fallback(roomId, intro, table.tableId)
+          if (state.part && !state.outdated && intro) this.fallback(roomId, intro, table.tableId)
         }
-        for (const item of candidates) this.reconcileRequest(roomId, item)
+        if (controls.enabled) for (const item of candidates) this.reconcileRequest(roomId, item)
       }
     } finally { this.reconciling = false }
   }
@@ -337,16 +415,18 @@ export default class CallAutomation {
     else if ((controls.enabled || controls.listeningEnabled) && !callSessionAllows(roomId)) message = 'La jornada terminó. Inicie una nueva jornada en Control para escuchar los llamados.'
     if (!message) {
       const failure = db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='setup' AND status IN ('failed','uncertain') ORDER BY rowid DESC LIMIT 30`, [roomId]).find((row) => {
-        if (key(JSON.parse(row.profileJSON)) !== key(this.voice.profile())) return false
         const input: JobInput = JSON.parse(row.inputJSON)
         if (row.operation === 'intro') return !this.compatibleIntros(roomId).length && (!controls.introIds.length || controls.introIds.includes(input.variantId))
         if (row.operation === 'fallback') return !!db.get('SELECT 1 FROM karaokeCallFallbacks WHERE roomId=? AND jobId=?', [roomId, row.id])
         const table = tables.find(table => table.tableId === input.tableId)
         return !!table && binding(roomId, table.tableId)?.revision === input.revision && tableVoice(roomId, table.tableId, this.voice.profile()).outdated
       })
-      if (failure) message = `${JSON.parse(failure.inputJSON).title}: ${failure.error ?? 'No se pudo preparar la voz.'} Use Preparar mesas para reintentar.`
+      if (failure) message = `${JSON.parse(failure.inputJSON).title}: ${failure.error ?? 'No se pudo preparar la voz.'} Solicite la preparación de plantillas para reintentar.`
     }
-    return { controls, tablesTotal: tables.length, tablesReady: tables.filter(table => !!this.fallbackPart(roomId, `table-${table.tableId}`)).length,
+    const bankPending = this.bankPending(roomId)
+    const bankPaused = bankPending && !!db.get<{ paused: number }>('SELECT COALESCE(json_extract(setupPlanJSON,\'$.paused\'),0) paused FROM karaokeCallControls WHERE roomId=?', [roomId])?.paused
+    const bankTasks = this.bankTasks(roomId)
+    return { controls, bankQuote: key(bankTasks), bankPreparing: controls.preparing && bankPending && !bankPaused, bankPaused: bankPending && (!controls.preparing || bankPaused), missingBankParts: bankTasks.map(task => task.title), tablesTotal: tables.length, tablesReady: tables.filter(table => !!this.fallbackPart(roomId, `table-${table.tableId}`)).length,
       fallbackReady: !!this.fallbackPart(roomId, 'room'), message,
       listeningRequests: this.listening.states(roomId, queue.result.map(id => queue.entities[id]).filter(item => queueId === undefined || item.queueId === queueId)).reverse(),
       listeningTemplates: this.listening.templates.list(roomId),

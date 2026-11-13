@@ -6,12 +6,13 @@ of the new automatic workflow remain separate.**
 
 ## Delivered workflow — 2026-11-06
 
-1. In **Animador → Voz de saludos**, verify the shared Gemini profile and generation
-   switch. Automatic calls honor that switch; explicit private previews remain usable.
+1. In **Proveedores de audio → Saludos de participantes**, review shared generation
+   enablement and request limits. Set the independent sound defaults in
+   **Llamados y plantillas**. Explicit private previews remain usable.
 2. In **Animador → Llamados**, choose automatic introduction rotation or one saved
-   variant. **Preparar mesas** prepares missing sources and basic fallbacks without
-   enabling public speech. It resumes through the bounded worker and can be retried
-   explicitly after a reported setup failure.
+   variant. **Generar N audios de plantillas** explicitly prepares the listed missing
+   fixed sources without enabling public speech. The server validates the quoted
+   task list, captures its profiles and processes it through the bounded worker.
 3. Enable **Llamados automáticos** once for the room. It also starts any missing
    setup work. Keep the animator's automatic mode/presentations enabled in Control;
    a deliberately closed jornada needs a new jornada before calls resume.
@@ -22,6 +23,30 @@ of the new automatic workflow remain separate.**
    fallback, or the visual presentation if no voice is playable. Listening and
    house music retain the general animator. Pause/skip and existing room controls
    retain authority.
+
+## Current fixed-bank and credit policy
+
+This policy supersedes automatic bank rebuilding described in the original plan.
+Existing selected recordings retain their files, checksums and source profile.
+Changing model, voice or style defaults, opening administration or restarting the
+server never authorizes a new fixed-bank synthesis. Changed table codes/text remain
+blocking, so an outdated number cannot be announced as a different table.
+
+The manual bank action quotes a closed list, including missing table voices,
+introductions, sender prefix and basic fallback phrases. A changed list is rejected
+before generation. Duplicate submissions reuse the receipt. Paused batches resume
+only explicitly, retaining their original list and profiles; enabling automatic
+calls does not resume a paused paid batch. Local composition cannot synthesize a
+missing fixed source. Names and request-specific singing continuations retain their
+existing request-driven generation and shared budget. Singing continuations require
+**Llamados automáticos** to be enabled; preparing the fixed bank alone does not
+authorize request-specific singing speech.
+
+Migration `049-persistent-call-bank.sql` adds nullable source-profile metadata and
+the bank manifest to existing tables. Startup backfills only known exact profile
+identities and cancels old unsent automatic bank receipts; it never regenerates
+audio or repeats uncertain requests. Pausing cannot undo a request already sent
+to the provider.
 
 Migration `027-automatic-karaoke-calls.sql` adds controls, request/fallback bindings
 and intervention call context. Existing installations start with calls disabled.

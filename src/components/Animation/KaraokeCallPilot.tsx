@@ -20,7 +20,7 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
   const [song, setSong] = useState('')
   const [mode, setMode] = useState<'hybrid' | 'reference'>('hybrid')
   const [listening, setListening] = useState<CallPart | null>(null)
-  const intro = snapshot?.intros.find(item => item.id === introId && item.profileKey === snapshot.profileKey)
+  const intro = snapshot?.intros.find(item => item.id === introId)
   const table = snapshot?.tables.find(item => String(item.tableId) === tableId)
   let transcript = ''
   let reason = unavailable
@@ -45,7 +45,7 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
         <strong>{snapshot ? `Voz de Gemini: ${snapshot.voice.config.voice}` : 'Cargando perfil…'}</strong>
         {snapshot && <p>{snapshot.voice.config.model}</p>}
         <p>Introducción, mesa y presentación comparten el perfil de Gemini y sus límites de generación.</p>
-        <Link to='?view=greeting-voice'>Ver ajustes de voz</Link>
+        <Link to='/admin/settings/audio-providers?use=calls'>Ver ajustes de voz</Link>
         {unavailable && <p className={styles.warning} role='status'>{unavailable}</p>}
       </div>
       {error && <p className={styles.error} role='alert'>{error}</p>}
@@ -90,7 +90,7 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
             <li className={styles.item} key={item.id}>
               <strong>{item.title}</strong>
               <p translate='no'>{item.text}</p>
-              <p className={styles.hint}>{`${(item.durationMs / 1000).toFixed(1)} s${item.profileKey !== snapshot.profileKey ? ' · Desactualizado: cambió el perfil de voz' : ''}`}</p>
+              <p className={styles.hint}>{`${(item.durationMs / 1000).toFixed(1)} s`}</p>
               <div className={styles.actions}>
                 <Button onClick={() => setListening(item)} aria-label={`Escuchar ${item.title}`}>Escuchar</Button>
                 <Button onClick={() => {
@@ -119,7 +119,7 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
               Introducción
               <select aria-label='Introducción' value={introId} onChange={event => setIntroId(event.target.value)} required>
                 <option value=''>Seleccione una introducción</option>
-                {snapshot?.intros.filter(item => item.profileKey === snapshot.profileKey).map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+                {snapshot?.intros.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
               </select>
             </label>
             <label className={styles.field}>

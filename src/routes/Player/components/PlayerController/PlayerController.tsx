@@ -390,7 +390,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       // Next and a resumed boundary need the same full transition as natural end.
       void handleLoadNext(!player._isBetweenTracks, true, first ? 'start' : 'ended')
     }
-  }, [handleLoadNext, player.isPlaying, player.queueId, player._isPlayingNext, player._isBetweenTracks, animation.busy, animation.blocked, advanceRevision])
+  }, [handleLoadNext, player.isPlaying, player.queueId, player._isPlayingNext, player._isBetweenTracks, player._authority, animation.busy, animation.blocked, advanceRevision])
 
   // replaying?
   useEffect(() => {

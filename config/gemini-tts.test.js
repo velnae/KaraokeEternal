@@ -23,6 +23,8 @@ describe('standalone Gemini TTS script', () => {
     vi.stubGlobal('fetch', fetchMock)
     vi.stubEnv('GEMINI_API_KEY', 'test-key')
     vi.stubEnv('GOOGLE_API_KEY', '')
+    vi.stubEnv('KES_GEMINI_API_KEY', '')
+    vi.stubEnv('KES_GEMINI_BASE_URL', '')
     vi.spyOn(console, 'log').mockImplementation(() => {})
   })
 
@@ -66,6 +68,17 @@ describe('standalone Gemini TTS script', () => {
     expect(await readFile(nested)).toEqual(wav)
   })
 
+  it('prefers the application key and uses its configured endpoint', async () => {
+    vi.stubEnv('KES_GEMINI_API_KEY', 'app-key')
+    vi.stubEnv('KES_GEMINI_BASE_URL', 'https://fixture.test')
+    fetchMock.mockResolvedValue(audioResponse(wav))
+    await main(['--output', output])
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(new URL(url).origin).toBe('https://fixture.test')
+    expect(options.headers['x-goog-api-key']).toBe('app-key')
+    expect(await readFile(output)).toEqual(wav)
+  })
+
   it('allows help without a key and fails before sending a request when the key is missing', async () => {
     vi.stubEnv('GEMINI_API_KEY', '')
     await main(['--help'])
@@ -75,9 +88,9 @@ describe('standalone Gemini TTS script', () => {
   })
 
   it.each([
-    ['quota error', () => Response.json({ error: { message: 'Quota exceeded' } }, { status: 429 }), 'Gemini HTTP 429: Quota exceeded'],
-    ['blocked prompt', () => Response.json({ promptFeedback: { blockReason: 'SAFETY' } }), 'Gemini returned no audio: SAFETY'],
-    ['unexpected raw PCM', () => audioResponse(Buffer.alloc(100)), 'Gemini did not return the requested WAV audio'],
+    ['quota error', () => Response.json({ error: { message: 'Quota exceeded' } }, { status: 429 }), 'Gemini limitó las solicitudes'],
+    ['blocked prompt', () => Response.json({ promptFeedback: { blockReason: 'SAFETY' } }), 'Gemini no entregó audio'],
+    ['unexpected raw PCM', () => audioResponse(Buffer.alloc(100)), 'Gemini devolvió un audio inválido'],
   ])('reports %s without writing an invalid audio file', async (_name, response, message) => {
     fetchMock.mockResolvedValue(response())
     await expect(main(['--output', output])).rejects.toThrow(message)

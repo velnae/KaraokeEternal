@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { db } from '../lib/Database.js'
 import Prefs from '../Prefs/Prefs.js'
 import { defaultGreetingVoiceConfig, greetingVoiceModels, type GreetingVoiceConfig, type GreetingVoiceSnapshot } from '../../shared/greetingVoice.js'
-import GeminiGreetingTts, { GreetingVoiceError, type GreetingVoiceProvider } from './GeminiGreetingTts.js'
+import { createGemini } from '../AudioProviders/index.js'
+import { VoiceError as GreetingVoiceError } from '../AudioProviders/errors.js'
+import type { SpeechProvider as GreetingVoiceProvider } from '../AudioProviders/types.js'
 import { callSpeechProfile, greetingAudioKey, loadGreetingVoiceProfile, type GreetingVoiceProfile } from './voiceProfile.js'
 import { nameVoiceModels, type NameVoiceModel } from '../../shared/nameVoices.js'
 
@@ -26,7 +28,7 @@ export default class GreetingVoice {
   private working = false
   private checking = false
   private checkedAt: number | null = null
-  constructor (private provider: GreetingVoiceProvider = new GeminiGreetingTts(), private now = Date.now) {}
+  constructor (private provider: GreetingVoiceProvider = createGemini(), private now = Date.now) {}
 
   config (): GreetingVoiceConfig {
     return { ...defaultGreetingVoiceConfig, ...(Prefs.get() as { greetingVoice?: GreetingVoiceConfig }).greetingVoice }
@@ -98,7 +100,7 @@ export default class GreetingVoice {
     return this.snapshot()
   }
 
-  async generate (text: string, profile: GreetingVoiceProfile, signal: AbortSignal, preview = false, purpose?: import('../../shared/karaokeCalls.js').CallPurpose, nameStyle?: string, nameModel?: NameVoiceModel) {
+  async generate (text: string, profile: GreetingVoiceProfile, signal: AbortSignal, preview = false, purpose?: import('../../shared/karaokeCalls.js').CallPurpose, nameStyle?: string, nameModel?: NameVoiceModel, scope: 'greetings' | 'calls' = 'greetings') {
     signal.throwIfAborted()
     const state = this.snapshot()
     const now = this.now()
@@ -107,7 +109,7 @@ export default class GreetingVoice {
     if (block.code === 'auth') throw new GreetingVoiceError(block.reason, 'auth', 0, false)
     if (this.working) throw new GreetingVoiceError('Hay otra generación en curso.', 'busy', now + 500, false)
     if (state.usage.nextAt > now) throw new GreetingVoiceError(state.message, state.usage.nextAt >= state.usage.resetsAt ? 'quota' : 'rate', state.usage.nextAt, false)
-    if (greetingAudioKey(0, text, profile) !== greetingAudioKey(0, text, this.profile())) throw new GreetingVoiceError('El perfil de voz cambió.', 'disabled', 0, false)
+    if (scope === 'greetings' && greetingAudioKey(0, text, profile) !== greetingAudioKey(0, text, this.profile())) throw new GreetingVoiceError('El perfil de voz cambió.', 'disabled', 0, false)
     const effectiveProfile = callSpeechProfile(profile, purpose)
     if (nameModel !== undefined) {
       if (purpose !== 'name' || !nameVoiceModels.includes(nameModel)) throw new GreetingVoiceError('Modelo de pronunciación no válido.', 'invalid', 0, false)

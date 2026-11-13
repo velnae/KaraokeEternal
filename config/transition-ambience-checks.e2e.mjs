@@ -57,6 +57,7 @@ export async function installYouTubeTransitionFixture (context, mediaPath) {
 
         pauseVideo () { this.video.pause() }
         getCurrentTime () { return this.video.currentTime }
+        getDuration () { return this.video.duration }
         getVideoUrl () { return `https://www.youtube.com/watch?v=${this.videoId}` }
         seekTo (seconds) { this.video.currentTime = seconds }
         setVolume (volume) { this.video.volume = volume / 100 }

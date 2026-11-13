@@ -82,7 +82,7 @@ export default function ListeningTemplateManager ({ roomId, templates, unavailab
         <p className={styles.warning} role='status'>
           {unavailable}
           {' '}
-          <Link to='?view=greeting-voice'>Ajustes de voz</Link>
+          <Link to='/admin/settings/audio-providers?use=calls'>Ajustes de voz</Link>
         </p>
       )}
       {!templates.length && <p className={styles.hint}>Agrega una introducción para presentar los pedidos.</p>}
@@ -148,7 +148,7 @@ export default function ListeningTemplateManager ({ roomId, templates, unavailab
               <p className={styles.warning} role='status'>
                 {unavailable}
                 {' '}
-                <Link to='?view=greeting-voice'>Ajustes de voz</Link>
+                <Link to='/admin/settings/audio-providers?use=calls'>Ajustes de voz</Link>
               </p>
             )}
             <div className={styles.actions}>

@@ -4,11 +4,11 @@ import { randomUUID } from 'node:crypto'
 import { db } from '../../lib/Database.js'
 import Tables from '../../Tables/Tables.js'
 import type GreetingVoice from '../../Greetings/GreetingVoice.js'
-import { GreetingVoiceError } from '../../Greetings/GeminiGreetingTts.js'
+import { VoiceError as GreetingVoiceError } from '../../AudioProviders/errors.js'
 import { callSpeechProfile, nameVoiceRecipeRevision, type GreetingVoiceProfile } from '../../Greetings/voiceProfile.js'
 import { AudioValidationError } from '../AudioPreparation.js'
 import { callContinuation, callText, type CallJobPurpose, type CallOperation, type CallPurpose, type CallSnapshot } from '../../../shared/karaokeCalls.js'
-import { binding, intros, job, jobDTO, jobOutdated, key, part, partDTO, retainedListening, retainedSinging, tableVoice, type JobInput, type JobRow, type PartRow } from './Store.js'
+import { backfillPartProfiles, binding, fixedPart, intros, job, jobDTO, jobOutdated, key, part, partDTO, partProfile, retainedListening, retainedSinging, sameSpeaker, tableVoice, type JobInput, type JobRow, type PartRow } from './Store.js'
 import { checksum, compose, compositionRevision, preparedPart } from './Composition.js'
 import getLogger from '../../lib/Log.js'
 import NameBank, { NameVoiceError, type NameMetadata } from './NameBank.js'
@@ -28,10 +28,14 @@ export default class CallJobs {
   private stopped = false
   private startupError: string | null = null
   validateAutomatic?: (row: JobRow) => boolean
-  constructor (private directory: string, private tts: Voice, private ffmpeg = 'ffmpeg') {}
+  constructor (readonly directory: string, private tts: Voice, private ffmpeg = 'ffmpeg') {}
 
   async start () {
     NameBank.initialize()
+    backfillPartProfiles(this.tts.profile())
+    db.run(`UPDATE karaokeCallJobs SET status='cancelled',error='La preparación de plantillas requiere una solicitud manual.'
+      WHERE status='queued' AND purpose='setup' AND COALESCE(json_extract(inputJSON,'$.manualBank'),0)!=1 AND
+      (operation IN ('intro','table') OR (operation='source' AND json_extract(inputJSON,'$.sourceKind') IN ('template','signature','continuation')))`)
     db.run(`UPDATE karaokeCallJobs SET status='uncertain',error='La preparación se interrumpió. Revise antes de generar de nuevo.',updatedAt=? WHERE status IN ('generating','preparing')`, [Date.now()])
     try {
       await fs.mkdir(this.directory, { recursive: true })
@@ -66,7 +70,7 @@ export default class CallJobs {
       tables: Tables.list(roomId).filter(table => table.status === 'active').map(table => tableVoice(roomId, table.tableId, profile)) }
   }
 
-  submit (roomId: number, operation: CallOperation, value: unknown, tableId?: number, purpose: CallJobPurpose = 'preview', priority = 0, historicalProfile?: GreetingVoiceProfile) {
+  submit (roomId: number, operation: CallOperation, value: unknown, tableId?: number, purpose: CallJobPurpose = 'preview', priority = 0, historicalProfile?: GreetingVoiceProfile, admission?: { profile?: GreetingVoiceProfile, manualBank?: boolean, templateId?: string, templateRevision?: number }) {
     Tables.room(roomId)
     if (historicalProfile && (operation !== 'compose' || purpose !== 'preview')) throw new CallError('La recuperación histórica solo permite composición privada.')
     if (this.stopped || this.startupError) throw new CallError(this.startupError ?? 'El servidor se está cerrando.', 503)
@@ -89,10 +93,15 @@ export default class CallJobs {
     }
     // Leave one slot for an explicit private operation even when automation is paused.
     if (db.get<{ n: number }>(`SELECT count(*) n FROM karaokeCallJobs WHERE status IN ${active}`)!.n >= (purpose === 'preview' ? 10 : 9)) throw new CallError('La cola de preparación está ocupada. Espere o cancele una.', 409)
-    const profile = historicalProfile ?? this.tts.profile()
+    let profile = historicalProfile ?? admission?.profile ?? this.tts.profile()
     const input: JobInput = { title: '', text: '', variantId: randomUUID(), regenerate: body.regenerate === true }
+    if (admission?.manualBank) input.manualBank = true
+    if (admission?.templateId) {
+      input.bankTemplateId = admission.templateId
+      input.bankTemplateRevision = admission.templateRevision
+    }
     if (operation === 'source') {
-      if (!['name', 'template', 'signature'].includes(String(body.sourceKind))) throw new CallError('Tipo de voz no válido.')
+      if (!['name', 'template', 'signature', 'continuation'].includes(String(body.sourceKind))) throw new CallError('Tipo de voz no válido.')
       input.sourceKind = body.sourceKind as JobInput['sourceKind']
       input.text = callText(body.text, 100)
       input.title = input.text
@@ -120,7 +129,8 @@ export default class CallJobs {
       if (body.sourceKind === 'signature') input.sourceKind = 'signature'
       if (!Array.isArray(body.sourceIds) || body.sourceIds.length < 2 || body.sourceIds.length > 3) throw new CallError('La presentación necesita dos o tres piezas.')
       const sources = body.sourceIds.map(id => typeof id === 'string' ? part(roomId, id) : undefined)
-      if (sources.some(source => !source || (source.kind === 'name' ? !NameBank.compatible(source, profile) : source.profileKey !== key(profile)))) throw new CallError('Una pieza cambió o no está disponible.')
+      if (sources.some(source => !source || !sameSpeaker(sources[0]!, source))) throw new CallError('Una pieza cambió o pertenece a otra voz.')
+      profile = partProfile(sources[0]!, profile) ?? profile
       input.sourceIds = sources.map(source => source!.id)
       input.text = callText(sources.map(source => source!.text).join(' '))
       input.title = input.text
@@ -143,11 +153,13 @@ export default class CallJobs {
       Object.assign(input, { title: `Voz de mesa ${table.code}`, text: callText(body.text, 100), tableId: table.tableId,
         code: table.code, revision: (saved?.revision ?? 0) + 1, variantId: `table-${table.tableId}` })
     } else if (operation === 'fallback') {
-      const intro = intros(roomId).find(item => item.id === body.introId && item.profileKey === key(profile))
+      const intro = intros(roomId).find(item => item.id === body.introId)
       if (!intro) throw new CallError('Prepare una introducción con la voz actual.')
       const table = body.tableId === undefined ? undefined : Tables.get(roomId, Number(body.tableId))
       const voice = table && tableVoice(roomId, table.tableId, profile)
       if (table && (table.status !== 'active' || !voice?.part || voice.outdated)) throw new CallError('Prepare la voz de la mesa.')
+      if (voice?.part && !sameSpeaker(intro, part(roomId, voice.part.id)!)) throw new CallError('La mesa y la introducción usan voces distintas.')
+      profile = partProfile(intro, profile) ?? profile
       const continuation = table ? 'recibamos a nuestro próximo cantante. ¡Un aplauso!' : '¡Es momento de cantar!'
       Object.assign(input, { title: table ? `Llamado básico · Mesa ${table.code}` : 'Llamado básico de karaoke', introId: intro.id,
         ...(table ? { tableId: table.tableId, code: table.code, revision: voice!.revision, tablePartId: voice!.part!.id } : {}),
@@ -156,8 +168,10 @@ export default class CallJobs {
       if (!Number.isSafeInteger(body.tableId) || typeof body.introId !== 'string') throw new CallError('Seleccione introducción y mesa.')
       const table = Tables.get(roomId, body.tableId as number)
       const tableAudio = tableVoice(roomId, table.tableId, profile)
-      const intro = intros(roomId).find(item => item.id === body.introId && item.profileKey === key(profile))
+      const intro = intros(roomId).find(item => item.id === body.introId)
       if (table.status !== 'active' || !tableAudio.part || tableAudio.outdated || !intro) throw new CallError('Prepare una introducción y una mesa con el perfil de voz actual.')
+      if (!sameSpeaker(intro, part(roomId, tableAudio.part.id)!)) throw new CallError('La mesa y la introducción usan voces distintas.')
+      profile = partProfile(intro, profile) ?? profile
       const continuation = callContinuation(body.performer, body.song)
       Object.assign(input, { title: `${callText(body.performer, 60)} · Mesa ${table.code}`, tableId: table.tableId, code: table.code,
         revision: tableAudio.revision, tablePartId: tableAudio.part.id, introId: intro.id, continuation,
@@ -195,6 +209,8 @@ export default class CallJobs {
     if (this.stopped || current?.status === 'cancelled') throw new CallError('Preparación cancelada.')
     if (row.purpose !== 'preview' && this.validateAutomatic && !this.validateAutomatic(row)) throw new CallError('La preparación automática ya no corresponde al pedido o a la sala.')
     if (jobOutdated(row, this.tts.profile())) throw new CallError('Los datos o el perfil cambiaron. Prepare una nueva versión.')
+    const captured: JobInput = JSON.parse(row.inputJSON)
+    if (captured.bankTemplateId && !db.get('SELECT id FROM listeningTemplates WHERE roomId=? AND id=? AND revision=? AND jobId=? AND archived=0', [row.roomId, captured.bankTemplateId, captured.bankTemplateRevision!, row.id])) throw new CallError('La introducción cambió durante la preparación.')
     if (row.operation === 'intro') {
       const input: JobInput = JSON.parse(row.inputJSON)
       const newer = db.get(`SELECT 1 FROM karaokeCallJobs WHERE roomId=? AND operation='intro' AND json_extract(inputJSON,'$.variantId')=? AND rowid>(SELECT rowid FROM karaokeCallJobs WHERE id=?) AND status!='cancelled'`, [row.roomId, input.variantId, row.id])
@@ -208,6 +224,8 @@ export default class CallJobs {
     const row = db.get<JobRow>(`SELECT * FROM karaokeCallJobs j WHERE status='queued' AND retryAt<=? AND
       (purpose='preview' OR (?=1 AND operation='source' AND json_extract(inputJSON,'$.nameId') IS NOT NULL) OR ((?=1 OR operation='compose') AND EXISTS(SELECT 1 FROM rooms r LEFT JOIN karaokeCallControls c USING(roomId) WHERE r.roomId=j.roomId AND r.status='open'
         AND (c.preparing=1 OR c.listeningEnabled=1 OR EXISTS(SELECT 1 FROM greetingControls g WHERE g.roomId=r.roomId AND g.audioEnabled=1 AND g.paused=0 AND json_extract(g.playbackJSON,'$.enabled')=1)))))
+      AND (purpose!='automatic' OR EXISTS(SELECT 1 FROM karaokeCallControls a WHERE a.roomId=j.roomId AND a.enabled=1))
+      AND (COALESCE(json_extract(inputJSON,'$.manualBank'),0)!=1 OR EXISTS(SELECT 1 FROM karaokeCallControls b WHERE b.roomId=j.roomId AND b.preparing=1 AND COALESCE(json_extract(b.setupPlanJSON,'$.paused'),0)=0))
       ORDER BY priority DESC,rowid LIMIT 1`, [Date.now(), this.tts.snapshot().config.enabled ? 1 : 0, this.tts.snapshot().config.enabled ? 1 : 0])
     if (!row) return Promise.resolve()
     this.runningId = row.id
@@ -234,9 +252,9 @@ export default class CallJobs {
         ? { profile, style: input.nameStyle ?? null, recipeRevision: input.nameRecipeRevision ?? null,
             legacy: false, ...(input.nameReprocessId ? { reprocessedFrom: input.nameReprocessId } : {}) }
         : null
-      db.run(`INSERT INTO karaokeCallParts(id,roomId,kind,variantId,title,text,profileKey,cacheKey,master,filename,checksum,masterChecksum,durationMs,dependenciesJSON,createdAt,nameId,nameSelected,nameMetadataJSON)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [output.id, name ? null : row.roomId, kind, input.variantId, input.title, text,
-        key(profile), cacheKey, output.master, output.filename, output.checksum, output.masterChecksum, output.durationMs, JSON.stringify(dependencies), Date.now(), name?.id ?? null, selected ? 1 : 0, metadata ? JSON.stringify(metadata) : null])
+      db.run(`INSERT INTO karaokeCallParts(id,roomId,kind,variantId,title,text,profileKey,cacheKey,master,filename,checksum,masterChecksum,durationMs,dependenciesJSON,createdAt,nameId,nameSelected,nameMetadataJSON,profileJSON)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [output.id, name ? null : row.roomId, kind, input.variantId, input.title, text,
+        key(profile), cacheKey, output.master, output.filename, output.checksum, output.masterChecksum, output.durationMs, JSON.stringify(dependencies), Date.now(), name?.id ?? null, selected ? 1 : 0, metadata ? JSON.stringify(metadata) : null, JSON.stringify(profile)])
       return part(row.roomId, output.id)!
     } catch (error) {
       await Promise.all([output.master, output.filename].map(file => fs.rm(path.join(this.directory, file), { force: true })))
@@ -247,6 +265,12 @@ export default class CallJobs {
   private async generatePart (row: JobRow, purpose: CallPurpose, text: string) {
     const input: JobInput = JSON.parse(row.inputJSON)
     const profile: GreetingVoiceProfile = JSON.parse(row.profileJSON)
+    if (row.operation === 'fallback') {
+      const reference = part(row.roomId, input.introId!)
+      const cached = fixedPart(row.roomId, 'continuation', text, reference)
+      if (!cached) throw new CallError('Falta preparar el respaldo. Genérelo desde Preparar plantillas.')
+      return cached
+    }
     const effectiveProfile = callSpeechProfile(profile, purpose)
     if (purpose === 'name') {
       effectiveProfile.style = input.nameStyle ?? getNameVoiceStyle(profile).style
@@ -419,6 +443,7 @@ export default class CallJobs {
     }
     const rows = db.all<PartRow>('SELECT * FROM karaokeCallParts WHERE retired=0')
     for (const row of rows) if (['name', 'template', 'signature'].includes(row.kind)) keep.add(row.id)
+    for (const row of rows) if (row.kind === 'continuation' && ['¡Es momento de cantar!', 'recibamos a nuestro próximo cantante. ¡Un aplauso!'].includes(row.text)) keep.add(row.id)
     for (const { roomId } of db.all<{ roomId: number }>('SELECT DISTINCT roomId FROM listeningPresentations')) {
       for (const row of retainedListening(roomId)) {
         if (row.resultId) keep.add(row.resultId)

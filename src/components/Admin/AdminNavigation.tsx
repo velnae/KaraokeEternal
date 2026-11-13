@@ -10,6 +10,7 @@ const sections = [
 ] as const
 const settings = [
   ['/admin/settings/animator', 'Animador'], ['/admin/settings/playback', 'Reproducción'],
+  ['/admin/settings/audio-providers', 'Proveedores de audio'],
   ['/admin/settings/display', 'Pantalla'],
   ['/admin/settings/birthdays', 'Cumpleaños'],
   ['/admin/settings/files', 'Archivos'], ['/admin/settings/branding', 'Marca del local'],

@@ -172,6 +172,8 @@ CLI to compare explicit room scopes, bundle media, publish through authenticated
 APIs and resume receipts. See `docs/resource-promotion.md`. Production reads and
 writes require an explicit production request. Deploy the accompanying backend
 before importing birthday assets; never replace the live database to promote content.
+Use `resources:promote:calls` for selected name pronunciations and “para escuchar”
+introductions, preserving exact WAV masters, MP3s, aliases and template bindings.
 
 ## YouTube resource imports from chat — project skill
 

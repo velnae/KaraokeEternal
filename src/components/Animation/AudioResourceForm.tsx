@@ -12,6 +12,9 @@ import EffectCategorySelect from './EffectCategorySelect'
 import { effectCategory } from 'shared/effectCategories'
 import CelebrationModeSelect from './CelebrationModeSelect'
 import { DEFAULT_ANIMATOR_VOICE_ID, DEFAULT_ANIMATOR_VOICE_NAME } from 'shared/audioTags'
+import useProviderVoices from 'components/AudioProviders/useProviderVoices'
+import VoiceSelect from 'components/AudioProviders/VoiceSelect'
+import { Link } from 'react-router'
 
 const api = new HttpApi('animation/')
 export default function AudioResourceForm ({ kind, mode, providers, source, onClose, onSaved }: {
@@ -25,8 +28,7 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
   const available = providers.filter(provider => provider.configured && provider.kinds.includes(kind))
   const [providerId, setProviderId] = useState(source?.metadata.providerId ?? available[0]?.id ?? '')
   const provider = available.find(item => item.id === providerId)
-  const [connection, setConnection] = useState<{ key: string, voices: { voiceId: string, name: string }[], error?: string } | null>(null)
-  const [attempt, setAttempt] = useState(0)
+  const connection = useProviderVoices({ providerId, use: 'catalog', kind, model: provider?.models[kind] ?? '', enabled: mode === 'generate' })
   const [voice, setVoice] = useState(source?.metadata.voiceId ?? '')
   const [title, setTitle] = useState(source?.title ?? '')
   const [text, setText] = useState(source?.metadata.text ?? '')
@@ -54,19 +56,7 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
       mounted.current = false
     }
   }, [])
-  const connectionKey = `${providerId}:${kind}:${attempt}`
-  useEffect(() => {
-    if (mode !== 'generate' || !providerId) return
-    let alive = true
-    void api.post<{ voices: { voiceId: string, name: string }[] }>('production/check', { body: { providerId, kind } }).then((result): void => {
-      if (alive) setConnection({ key: connectionKey, voices: result.voices })
-      return undefined
-    }).catch((error) => { if (alive) setConnection({ key: connectionKey, voices: [], error: error.message }) })
-    return () => {
-      alive = false
-    }
-  }, [mode, providerId, kind, connectionKey])
-  const voices = connection?.key === connectionKey ? connection.voices : []
+  const voices = connection.voices
   const selectedVoice = voice || provider?.defaultVoiceId || voices[0]?.voiceId || ''
   const hasVoice = voices.some(item => item.voiceId === selectedVoice)
   const blocker = !title.trim()
@@ -75,7 +65,7 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
       ? 'Seleccione un archivo.'
       : mode === 'generate' && !provider
         ? 'Configure un proveedor en Ajustes.'
-        : mode === 'generate' && connection?.key !== connectionKey
+        : mode === 'generate' && connection.loading
           ? 'Conectando con el proveedor…'
           : mode === 'generate' && connection?.error
             ? connection.error
@@ -167,10 +157,7 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
                 {mode === 'generate' && (
                   <label>
                     Voz
-                    <select aria-label='Voz' value={selectedVoice} onChange={event => setVoice(event.target.value)}>
-                      {!hasVoice && <option value={selectedVoice}>{selectedVoice === DEFAULT_ANIMATOR_VOICE_ID ? `${DEFAULT_ANIMATOR_VOICE_NAME} (no disponible en la cuenta)` : 'Seleccione una voz disponible'}</option>}
-                      {voices.map(item => <option key={item.voiceId} value={item.voiceId}>{item.name}</option>)}
-                    </select>
+                    <VoiceSelect aria-label='Voz' id={selectedVoice} onChange={setVoice} voices={hasVoice ? voices : [{ voiceId: selectedVoice, name: selectedVoice === DEFAULT_ANIMATOR_VOICE_ID ? `${DEFAULT_ANIMATOR_VOICE_NAME} (no disponible en la cuenta)` : 'Seleccione una voz disponible' }, ...voices]} />
                   </label>
                 )}
               </>
@@ -251,7 +238,8 @@ export default function AudioResourceForm ({ kind, mode, providers, source, onCl
           </fieldset>
         </details>
         {error && <p role='alert' className={styles.notice}>{error}</p>}
-        {connection?.error && mode === 'generate' && <Button className={styles.secondary} onClick={() => setAttempt(value => value + 1)}>Reintentar conexión</Button>}
+        {connection.error && mode === 'generate' && <Button className={styles.secondary} onClick={connection.retry}>Reintentar conexión</Button>}
+        {mode === 'generate' && !provider && <Link to='/admin/settings/audio-providers'>Configurar proveedores de audio</Link>}
         {(busy || blocker) && <p id='resource-form-help' className={styles.help}>{busy ? 'Preparando el audio… Puede cerrar esta ventana; la solicitud continuará en el servidor.' : blocker}</p>}
         <div className={styles.actions}>
           <Button className={styles.secondary} onClick={onClose}>Cerrar</Button>

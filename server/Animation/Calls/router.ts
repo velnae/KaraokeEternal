@@ -1,6 +1,6 @@
 import Router from '@koa/router'
 import { canOperate } from '../../../shared/permissions.js'
-import { getGreetingVoice } from '../../Greetings/GreetingVoice.js'
+import { getCallVoice } from './CallVoice.js'
 import Tables from '../../Tables/Tables.js'
 import { job, jobDTO, tableVoice } from './Store.js'
 import CallJobs, { CallError } from './Jobs.js'
@@ -8,17 +8,19 @@ import CallAutomation, { getCallAutomation } from './Automation.js'
 import Animation from '../Animation.js'
 import createNameVoiceRouter from './nameRouter.js'
 import { db } from '../../lib/Database.js'
+import { createCallPromotionRouter } from './promotionRouter.js'
 
 let worker: CallJobs | undefined
-export const nameVoiceRouter = createNameVoiceRouter(() => worker, getGreetingVoice, () => {
+export const callPromotionRouter = createCallPromotionRouter(() => worker)
+export const nameVoiceRouter = createNameVoiceRouter(() => worker, getCallVoice, () => {
   getCallAutomation()?.reconcile()
   for (const { roomId } of db.all<{ roomId: number }>('SELECT roomId FROM rooms')) Animation.publish(roomId)
 })
 export async function startCallJobs (directory: string) {
-  const instance = new CallJobs(directory, getGreetingVoice(), process.env.KES_FFMPEG_PATH || 'ffmpeg')
+  const instance = new CallJobs(directory, getCallVoice(), process.env.KES_FFMPEG_PATH || 'ffmpeg')
   await instance.start()
   worker = instance
-  const automatic = new CallAutomation(instance, getGreetingVoice())
+  const automatic = new CallAutomation(instance, getCallVoice())
   automatic.start()
   return async () => {
     automatic.stop()
@@ -64,6 +66,7 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
   })
   router.post('/karaoke-calls/setup', (ctx) => {
     const roomId = Number(ctx.params.roomId)
+    if (typeof body(ctx).quote !== 'string') throw new CallError('Actualice la página y revise el lote antes de generar plantillas.', 409)
     ctx.body = automatic().setup(roomId, body(ctx))
     changed(roomId)
     ctx.status = 202
@@ -116,7 +119,7 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
     ctx.status = 202
   })
   router.get('/tables/:tableId/voice', (ctx) => {
-    ctx.body = tableVoice(Number(ctx.params.roomId), Number(ctx.params.tableId), getGreetingVoice().profile())
+    ctx.body = tableVoice(Number(ctx.params.roomId), Number(ctx.params.tableId), getCallVoice().profile())
   })
   router.post('/tables/:tableId/voice/generate', (ctx) => {
     ctx.body = getWorker()!.submit(Number(ctx.params.roomId), 'table', body(ctx), Number(ctx.params.tableId))
@@ -131,7 +134,7 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
   router.get('/karaoke-calls/jobs/:id', (ctx) => {
     const row = job(Number(ctx.params.roomId), ctx.params.id)
     if (!row) ctx.throw(404)
-    ctx.body = jobDTO(row, getGreetingVoice().profile())
+    ctx.body = jobDTO(row, getCallVoice().profile())
   })
   router.post('/karaoke-calls/jobs/:id/cancel', (ctx) => {
     ctx.body = getWorker()!.cancel(Number(ctx.params.roomId), ctx.params.id)

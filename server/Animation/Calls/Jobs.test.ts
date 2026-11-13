@@ -12,7 +12,8 @@ import type { AddressInfo } from 'node:net'
 import { open, close, db } from '../../lib/Database.js'
 import Tables from '../../Tables/Tables.js'
 import GreetingVoice from '../../Greetings/GreetingVoice.js'
-import { GreetingVoiceError, type GreetingVoiceProvider } from '../../Greetings/GeminiGreetingTts.js'
+import { VoiceError as GreetingVoiceError } from '../../AudioProviders/errors.js'
+import type { SpeechProvider as GreetingVoiceProvider } from '../../AudioProviders/types.js'
 import { callContinuation, callText, defaultTableCallText, type CallJob } from '../../../shared/karaokeCalls.js'
 import CallJobs from './Jobs.js'
 import { createCallRouter } from './router.js'
@@ -103,6 +104,7 @@ it('deduplicates lost acknowledgments and unchanged compositions without new gen
 
 it('prepares the generic karaoke fallback without a table on the production runtime', async () => {
   const saved = await finish(intro())
+  await finish(worker.submit(1, 'source', { ...input(), sourceKind: 'continuation', text: '¡Es momento de cantar!' }))
   voice.configure({ ...voice.config(), enabled: true })
   db.run('INSERT INTO karaokeCallControls(roomId,preparing) VALUES(1,1)')
   const pending = worker.submit(1, 'fallback', { ...input(), introId: saved.id }, undefined, 'setup')
@@ -118,6 +120,18 @@ it('prepares the generic karaoke fallback without a table on the production runt
   expect(metadata.format.duration).toBeGreaterThan(0)
   expect(metadata.format.duration).toBeLessThanOrEqual(10)
   expect(provider.generate).toHaveBeenCalledTimes(2)
+})
+
+it('never synthesizes a missing fixed continuation during local fallback composition', async () => {
+  const saved = await finish(intro())
+  voice.configure({ ...voice.config(), enabled: true })
+  db.run('INSERT INTO karaokeCallControls(roomId,preparing) VALUES(1,1)')
+  const count = vi.mocked(provider.generate).mock.calls.length
+  const pending = worker.submit(1, 'fallback', { ...input(), introId: saved.id }, undefined, 'setup')
+  await worker.tick()
+  expect(job(1, pending.id)).toMatchObject({ status: 'failed' })
+  expect(job(1, pending.id)!.error).toContain('Falta preparar el respaldo')
+  expect(provider.generate).toHaveBeenCalledTimes(count)
 })
 
 it('reuses an unchanged introduction and regenerates only an explicitly requested new take', async () => {

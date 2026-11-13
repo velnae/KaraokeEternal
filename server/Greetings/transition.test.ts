@@ -13,6 +13,8 @@ import { GREETING_START_MS, type Greeting, type GreetingAsset, type GreetingPrep
 import { heardAt, voiceBudget } from '../Animation/selection.js'
 import * as catalog from '../Animation/catalog.js'
 import * as audioRouter from './audioRouter.js'
+import * as callPlayback from '../Animation/Calls/Playback.js'
+import * as sessions from '../Animation/sessions.js'
 
 let directory: string
 let socketId: string
@@ -79,6 +81,23 @@ it('uses the room ambience selection for greeting beds without replacing unavail
   expect((await prepareGreetingTransition(1, queueId))?.assets.map(asset => asset.id)).toEqual(['greeting'])
   Animation.control(1, 1, { ambienceClipId: null })
   expect((await prepareGreetingTransition(1, queueId))?.assets.map(asset => asset.id)).toEqual(['greeting', 'bed'])
+})
+
+it('retains the configured greeting introduction with a recorded sender signature, without duplicating a listening presentation intro', async () => {
+  const { queueId } = request()
+  const intro = { ...asset('intro', 800), approvedForAuto: true, modes: ['mixed' as const] }
+  const general = { ...intro, id: 'general', checksum: 'x'.repeat(64), family: 'turn' as const, displayText: 'General announcement' }
+  vi.spyOn(catalog, 'catalogClips').mockReturnValue([general, intro])
+  vi.spyOn(audioRouter, 'getGreetingAudioAsset').mockResolvedValue({ ...asset('greeting', 3000), senderIncluded: false })
+  Greetings.configurePlayback(1, { enabled: true, introClipId: intro.id, ambienceEnabled: false }, 1)
+  Animation.control(1, 0, { enabled: true, automation: true, profile: 'mixed' })
+  vi.spyOn(sessions, 'currentSession').mockReturnValue({ status: 'OPEN', sessionId: 'fixture' } as ReturnType<typeof sessions.currentSession>)
+  const signature = { ...asset('signature', 1000), role: 'signature' as const, partId: 'signature', identifiesSender: true }
+  const call = { kind: 'signature' as const, queueId, inputKey: 'signature', revision: 1, assets: [signature], reason: null }
+  const preparedCall = vi.spyOn(callPlayback, 'prepareCall').mockReturnValue(call)
+  expect((await prepareGreetingTransition(1, queueId))?.assets.map(item => item.role)).toEqual(['signature', 'greeting', 'intro'])
+  preparedCall.mockReturnValue({ ...call, kind: 'listening', assets: [{ ...signature, role: 'call' }] })
+  expect((await prepareGreetingTransition(1, queueId))?.assets.filter(item => item.role === 'intro').map(item => item.id)).toEqual(['general'])
 })
 
 it('allows a greeting over its own transition bed and leaves the bed alive for music loading', () => {

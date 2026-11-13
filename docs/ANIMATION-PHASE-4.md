@@ -8,10 +8,12 @@ the greeting on screen without waiting for generation at the musical transition.
 ## Configure and try
 
 1. Set `KES_GEMINI_API_KEY` in the server environment or root `.env`, then restart
-   the server with its existing data directory. The standalone `config/gemini-tts.js`
-   probe uses `GEMINI_API_KEY`; application configuration is deliberately separate.
-2. Open **Ajustes → Animador → Voz de saludos**.
-3. Enable **Generar nuevos saludos con Gemini**. Review the model, voice, delivery
+   the server with its existing data directory. The standalone probe shares the
+   provider client: `node --import tsx --env-file-if-exists=.env config/gemini-tts.js`.
+   It prefers `KES_GEMINI_API_KEY` and also accepts `GEMINI_API_KEY` or
+   `GOOGLE_API_KEY`; these aliases are exclusive to the CLI.
+2. Open **Ajustes → Proveedores de audio → Saludos de participantes**.
+3. Enable **Generar nuevas voces con Gemini**. Review the model, voice, delivery
    style and shared request limits, then select **Guardar ajustes**.
 4. Select **Comprobar conexión** to validate access to model metadata. This does
    not generate speech or prove that the project's generation quota is available.
@@ -19,7 +21,7 @@ the greeting on screen without waiting for generation at the musical transition.
    consumes one request from the same budget as greetings. Press the audio
    control's play button to listen in this browser; it does not publish to a room.
    Private previews also work before enabling automatic generation.
-6. Enable **Preparar voz mientras los pedidos esperan** for the current room.
+6. In **Animador → Saludos**, enable **Preparar voz mientras los pedidos esperan** for the current room.
    Enable **Leer saludos en voz alta** when the room should publicly read them.
 
 Initial settings use `gemini-3.8-flash-lite-tts`, `Puck`, Latin American Spanish
@@ -31,6 +33,15 @@ authorize reading. Disabling room preparation also disables reading.
 Credentials are never stored in preferences, browser state or audio profiles.
 The administrator can change nonsecret settings using revision-checked updates.
 **Recargar ajustes** resolves a stale edit from another session.
+
+**Llamados y plantillas** has an independent model, voice and style. It is initialized
+once from the existing greeting settings. Changing participant speech to Lite does
+not regenerate table numbers, introductions, prefixes or selected name recordings.
+Generation enablement and request limits remain shared. Fixed call-bank audio is
+prepared explicitly in **Animador → Llamados → Generar N audios de plantillas**.
+The room's selected greeting introduction remains eligible with a saved sender
+signature. A full listening presentation keeps its own introduction selection,
+so two introductory clips are not added to the same sequence.
 
 ## Quotas and failure behavior
 

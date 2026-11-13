@@ -26,10 +26,10 @@ const ACTION_HANDLERS = {
     if (payload.key === 'moderation') {
       return acknowledge({ type: PREFS_SET + _ERROR, error: 'Use Ajustes → Moderación para guardar el diccionario.' })
     }
-    if (payload.key === 'branding' || payload.key === 'greetingVoice') {
+    if (payload.key === 'branding' || payload.key === 'greetingVoice' || payload.key === 'callVoice') {
       return acknowledge({
         type: PREFS_SET + _ERROR,
-        error: payload.key === 'greetingVoice' ? 'Use los ajustes de voz de saludos para guardar los cambios.' : 'Use los ajustes de marca del cliente para guardar los cambios.',
+        error: payload.key === 'branding' ? 'Use los ajustes de marca del cliente para guardar los cambios.' : 'Use los ajustes de proveedores de audio para guardar los cambios.',
       })
     }
     Prefs.set(payload.key, payload.data)
