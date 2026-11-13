@@ -45,7 +45,7 @@ sample before selecting it.
 
 ### Global pronunciation model and style
 
-Expand **Modelo y estilo de pronunciación (Gemini)** on the Names page. Choose
+Open **Ajustes → Proveedores de audio → Nombres**. Choose
 **Gemini 3.8 Flash TTS · Lite** (`gemini-3.8-flash-lite-tts`) or
 **Gemini 3.8 Flash TTS · Normal** (`gemini-3.8-flash-tts`) and edit the complete
 `speech_metadata.style` used for future name generations. Save both with
@@ -61,6 +61,13 @@ Queued generations and existing audio versions keep their captured model and
 instructions; only newly submitted synthesis receives the newly saved settings.
 Local reprocessing retains the original model and never requests new synthesis.
 Model selection uses the same shared generation budget as greetings.
+
+The base voice now comes from **Proveedores de audio → Llamados y plantillas**,
+independently of participant greeting speech. Listening compositions resolve names
+against the recorded profile of their selected template/prefix, not current sound
+defaults. Switching participant greetings to Lite or another voice does not
+regenerate the selected bank. A new participant name may still require one new
+request-bound pronunciation when no matching selected recording exists.
 
 ## Confirmed usage
 

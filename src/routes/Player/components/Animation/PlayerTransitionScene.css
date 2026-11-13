@@ -1,11 +1,18 @@
 .scene { position: absolute; inset: 0; z-index: 12; pointer-events: none; container-type: size; opacity: 1; animation: scene-enter 240ms ease-out; transition: opacity 240ms ease-out; }
 .scene[data-exiting='true'] { opacity: 0; transition-duration: var(--scene-exit-duration); transition-timing-function: ease-in-out; }
+.scene { animation-duration: var(--scene-enter-duration, 240ms); }
+.scene[data-animation='none'] { animation: none; }
+.scene[data-animation='slide'] { animation-name: scene-slide; }
 .scene .frame { width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; }
 .scene :is(h1, h2, p, footer) { text-shadow: 0 2px 16px #000, 0 1px 3px #000; }
 
 @keyframes scene-enter {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+@keyframes scene-slide {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {

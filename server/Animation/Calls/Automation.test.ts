@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto'
 import { open, close, db } from '../../lib/Database.js'
 import Tables from '../../Tables/Tables.js'
 import GreetingVoice from '../../Greetings/GreetingVoice.js'
-import { GreetingVoiceError, type GreetingVoiceProvider } from '../../Greetings/GeminiGreetingTts.js'
+import { VoiceError as GreetingVoiceError } from '../../AudioProviders/errors.js'
+import type { SpeechProvider as GreetingVoiceProvider } from '../../AudioProviders/types.js'
 import CallJobs from './Jobs.js'
 import CallAutomation from './Automation.js'
 import { callControls, job, key, part, requestCall } from './Store.js'
@@ -67,13 +68,14 @@ async function until (condition: () => boolean) {
     automatic.reconcile()
     await worker.tick()
     automatic.reconcile()
-    if (condition()) return
+    if (condition() && !db.get('SELECT id FROM karaokeCallJobs WHERE status IN (\'queued\',\'generating\',\'preparing\') LIMIT 1')) return
     await new Promise(resolve => setTimeout(resolve, 10))
   }
   throw new Error(JSON.stringify(automatic.snapshot(1)))
 }
 async function bank () {
   enable()
+  automatic.setup(1, { requestId: randomUUID(), revision: callControls(1).revision })
   await until(() => automatic.snapshot(1).tablesReady === 1)
 }
 
@@ -86,7 +88,8 @@ it('retains singing history and privately recovers original speech after identit
   db.run(`UPDATE queue SET status='PLAYED',title='Changed title' WHERE queueId=?`, [id])
   db.run(`UPDATE users SET name='Changed name' WHERE userId=1`)
   voice.configure({ ...voice.config(), voice: 'Kore', enabled: false })
-  expect(() => worker.submit(1, 'compose', { requestId: randomUUID(), sourceIds: JSON.parse(original.dependenciesJSON), historical: true })).toThrow('pieza')
+  const local = worker.submit(1, 'compose', { requestId: randomUUID(), sourceIds: JSON.parse(original.dependenciesJSON) })
+  await until(() => job(1, local.id)?.status === 'ready')
   await worker['cleanup']()
   expect(automatic.snapshot(1).requests.find(row => row.queueId === id)).toMatchObject({
     title: 'Rayando el sol', performer: 'Ana', playback: 'omitted', result: { id: original.id },
@@ -230,10 +233,11 @@ it('exposes setup failures and retries only after an explicit new setup request'
   vi.mocked(provider.generate).mockRejectedValueOnce(new GreetingVoiceError('Sin confirmación', 'uncertain'))
   automatic.setup(1, { requestId: randomUUID(), revision: 0 })
   await worker.tick()
-  expect(automatic.snapshot(1).message).toContain('Preparar mesas')
+  expect(automatic.snapshot(1).message).toContain('plantillas')
   automatic.reconcile()
   await worker.tick()
   expect(vi.mocked(provider.generate).mock.calls.filter(call => call[0] === '¡Vamos con el karaoke!')).toHaveLength(1)
+  await until(() => !automatic.snapshot(1).bankPreparing)
   automatic.setup(1, { requestId: randomUUID(), revision: callControls(1).revision })
   await until(() => automatic.snapshot(1).tablesReady === 1)
   expect(automatic.snapshot(1).message).toBeNull()
@@ -275,16 +279,20 @@ it('resumes queued preparation after disable/re-enable without repeating existin
   expect(provider.generate).toHaveBeenCalledTimes(count + 1)
 }, 30000)
 
-it('rebuilds incompatible intro/table dependencies after an explicit profile change', async () => {
+it('keeps the selected bank and spends nothing when model, voice or style defaults change', async () => {
   await bank()
   const original = worker.snapshot(1).intros[0]
-  voice.configure({ ...voice.config(), voice: 'Kore' })
-  await until(() => automatic.snapshot(1).tablesReady === 1 && worker.snapshot(1).intros[0].profileKey !== original.profileKey)
-  expect(worker.snapshot(1).intros[0].variantId).toBe(original.variantId)
-  const id = add()
-  await until(() => requestCall(1, id)?.status === 'ready')
-  const result = part(1, requestCall(1, id)!.resultId!)!
-  expect(result.profileKey).toBe(worker.snapshot(1).profileKey)
+  const table = worker.snapshot(1).tables[0].part!
+  const count = vi.mocked(provider.generate).mock.calls.length
+  voice.configure({ ...voice.config(), model: 'gemini-3.8-flash-tts', voice: 'Kore', style: 'A new style for future speech.' })
+  for (let n = 0; n < 4; n++) {
+    automatic.reconcile()
+    await worker.tick()
+  }
+  expect(worker.snapshot(1).intros[0].id).toBe(original.id)
+  expect(worker.snapshot(1).tables[0].part?.id).toBe(table.id)
+  expect(automatic.snapshot(1).tablesReady).toBe(1)
+  expect(provider.generate).toHaveBeenCalledTimes(count)
 }, 30000)
 
 it('invalidates changed names and never speaks another table after a code rename', async () => {
@@ -325,6 +333,7 @@ it('keeps request audio beyond ten private previews and releases cancelled reque
 it('admits fourteen tables through the bounded worker instead of rejecting the bulk setup', async () => {
   for (let number = 1; number <= 14; number++) if (number !== 7) Tables.save(1, undefined, { code: String(number).padStart(2, '0') })
   enable()
+  automatic.setup(1, { requestId: randomUUID(), revision: callControls(1).revision })
   await until(() => automatic.snapshot(1).tablesReady === 14)
   expect(automatic.snapshot(1)).toMatchObject({ tablesTotal: 14, fallbackReady: true })
   expect(db.get<{ n: number }>(`SELECT count(*) n FROM karaokeCallJobs WHERE status IN ('queued','generating','preparing')`)!.n).toBeLessThanOrEqual(10)
@@ -414,6 +423,7 @@ it('respects closing and finished jornadas without implicitly reopening public c
 
 function enableListening () {
   automatic.configure(1, { ...callControls(1), listeningEnabled: true })
+  automatic.setup(1, { requestId: randomUUID(), revision: callControls(1).revision })
 }
 
 it('shares one name across concurrent listening requests, users, tables and reorder', async () => {
@@ -616,6 +626,7 @@ it('recovers retired historical compositions privately and idempotently without 
 }, 30000)
 
 it('keeps a greeting attributed with presentation off and reuses its message when enabled', async () => {
+  automatic.setup(1, { requestId: randomUUID(), revision: callControls(1).revision })
   const identity = player()
   const id = add('LISTEN')
   Greetings.attach({ roomId: 1, userId: 1 }, id, { message: '¡Feliz cumpleaños!' }, {})
@@ -718,6 +729,7 @@ it('invalidates names and removed requests and never retries uncertain name gene
 }, 30000)
 
 it('prioritizes upcoming listening speech and exposes failed local assembly instead of endless preparation', async () => {
+  await bank()
   enableListening()
   const id = add('LISTEN')
   automatic.reconcile()

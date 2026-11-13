@@ -1,11 +1,7 @@
-import type { ProductionConfig } from '../../shared/catalogProduction.js'
-import type { AudioProvider } from './AudioProvider.js'
+import type { AudioGenerationInput, AudioProvider } from './types.js'
 import type { AudioKind } from '../../shared/animation.js'
 import { DEFAULT_ANIMATOR_VOICE_ID } from '../../shared/audioTags.js'
-
-export class ProviderError extends Error {
-  constructor (message: string, public uncertain: boolean) { super(message) }
-}
+import { ProviderError } from './errors.js'
 
 const rejectionMessages: Record<string, string> = {
   invalid_api_key: 'La clave de ElevenLabs no es válida. Revise la configuración del servidor.',
@@ -68,7 +64,7 @@ export class ElevenLabs implements AudioProvider {
     return voices.voices.map(voice => ({ voiceId: voice.voice_id, name: voice.name }))
   }
 
-  async generate (config: ProductionConfig, signal?: AbortSignal) {
+  async generate (config: AudioGenerationInput, signal?: AbortSignal) {
     const voice = config.kind === 'voice'
     const endpoint = voice ? `text-to-speech/${encodeURIComponent(config.voiceId!)}` : 'sound-generation'
     const body = voice

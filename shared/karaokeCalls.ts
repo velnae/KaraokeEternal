@@ -29,6 +29,7 @@ export interface CallJob {
   outdated: boolean
 }
 export interface TableCallVoice {
+  recordedProfile?: { provider: string, model: string, voice: string, style: string, processingRevision: number } | null
   tableId: number
   code: string
   spokenText: string
@@ -86,6 +87,10 @@ export const callPlaybackReasons = {
   'channel-occupied': 'Otra intervención ocupaba el canal de voz.',
 } as const
 export interface CallAutomationSnapshot {
+  bankPreparing?: boolean
+  bankPaused?: boolean
+  bankQuote?: string
+  missingBankParts?: string[]
   listeningTemplates?: ListeningTemplate[]
   listeningRequests?: CallRequestState[]
   controls: CallControls

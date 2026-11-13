@@ -45,7 +45,7 @@ export default class ListeningTemplates {
   private dto (input: TemplateRow): ListeningTemplate {
     const row = this.settle(input)
     const audio = row.partId ? part(row.roomId, row.partId) : undefined
-    const compatible = audio?.profileKey === key(this.voice.profile())
+    const compatible = !!audio
     const pending = row.jobId ? job(row.roomId, row.jobId) : undefined
     const current = pending && !jobOutdated(pending, this.voice.profile())
     return { id: row.id, text: row.text, revision: row.revision, enabled: !!row.enabled,
@@ -58,18 +58,7 @@ export default class ListeningTemplates {
 
   reconcile (roomId: number) {
     for (const row of this.rows(roomId)) {
-      const state = this.dto(row)
-      if (!row.enabled || (state.audio?.text === row.text && state.status === 'ready')) continue
-      const pending = row.jobId ? job(roomId, row.jobId) : undefined
-      if (pending && !jobOutdated(pending, this.voice.profile())) continue
-      if (!this.voice.snapshot().configured || !this.voice.snapshot().config.enabled) continue
-      try {
-        const submitted = this.worker.submit(roomId, 'source', { sourceKind: 'template', text: row.text,
-          requestId: `template-auto-${key([row.id, row.revision, this.voice.profile()])}` }, undefined, 'setup', 80)
-        db.run('UPDATE listeningTemplates SET jobId=? WHERE roomId=? AND id=?', [submitted.id, roomId, row.id])
-      } catch (error) {
-        if (!(error instanceof CallError && error.status === 409)) throw error
-      }
+      this.settle(row)
     }
   }
 
@@ -109,21 +98,21 @@ export default class ListeningTemplates {
     const rows = this.rows(roomId)
     const previous = previousId && rows.find(row => row.id === previousId && (row.enabled || started))
     const saved = previousPartId ? part(roomId, previousPartId) : undefined
-    if (started && previousPartId && saved?.profileKey === key(this.voice.profile())) return { id: previousId!, text: saved.text, audio: saved }
+    if (started && previousPartId && saved) return { id: previousId!, text: saved.text, audio: saved }
     if (previous) {
       this.settle(previous)
-      const audio = saved?.profileKey === key(this.voice.profile()) ? saved : previous.partId ? part(roomId, previous.partId) : undefined
-      if (audio?.profileKey === key(this.voice.profile())) return { id: previous.id, text: audio.text, audio }
+      const audio = saved ?? (previous.partId ? part(roomId, previous.partId) : undefined)
+      if (audio) return { id: previous.id, text: audio.text, audio }
       const pending = previous.jobId ? job(roomId, previous.jobId) : undefined
       if (!pending || ['queued', 'generating', 'preparing'].includes(pending.status)) return { id: previous.id, text: previous.text, audio: undefined }
     }
     const candidates = rows.filter(row => row.enabled).map(row => this.settle(row))
-    const ready = candidates.filter(row => row.partId && part(roomId, row.partId)?.profileKey === key(this.voice.profile()))
+    const ready = candidates.filter(row => row.partId && part(roomId, row.partId))
     const selectable = ready.length ? ready : candidates.filter(row => !row.jobId || ['queued', 'generating', 'preparing'].includes(job(roomId, row.jobId)?.status ?? ''))
     const counts = new Map(db.all<{ templateId: string, n: number }>('SELECT templateId,count(*) n FROM listeningPresentations WHERE roomId=? GROUP BY templateId', [roomId]).map(row => [row.templateId, row.n]))
     const selected = selectable.sort((a, b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0) || a.id.localeCompare(b.id))[0]
     if (!selected) return null
     const audio = selected.partId ? part(roomId, selected.partId) : undefined
-    return { id: selected.id, text: audio?.text ?? selected.text, audio: audio?.profileKey === key(this.voice.profile()) ? audio : undefined }
+    return { id: selected.id, text: audio?.text ?? selected.text, audio: audio || undefined }
   }
 }

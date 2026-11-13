@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import React, { useEffect, useRef, useState } from 'react'
+import { Link, Navigate, useSearchParams } from 'react-router'
 import { useAppSelector } from 'store/hooks'
 import Button from 'components/Button/Button'
 import Modal from 'components/Modal/Modal'
@@ -7,63 +7,20 @@ import AnimationPanel from 'components/Animation/AnimationPanel'
 import CatalogProductionPanel from 'components/Animation/CatalogProductionPanel'
 import AnimationQuickControls from 'components/Animation/AnimationQuickControls'
 import OperationControls from 'components/Animation/OperationControls'
-import GreetingVoiceSettings from 'components/Animation/GreetingVoiceSettings'
+import GreetingRoomSettings from 'components/Animation/GreetingRoomSettings'
 import KaraokeCallPilot from 'components/Animation/KaraokeCallPilot'
 import NameVoicePanel from 'components/Animation/NameVoicePanel'
 import TransitionVideoSettings from 'components/Animation/TransitionVideoSettings'
+import SceneEditor from 'components/Animation/Scenes/SceneEditor'
 import { animationRequest } from 'lib/animationApi'
 import { ANIMATION_CONTROL } from 'shared/animation'
-import type { ProviderCapabilities } from 'shared/audioCatalog'
-import HttpApi from 'lib/HttpApi'
 import styles from './Admin.css'
 import audioStyles from 'components/Animation/AudioLibrary.css'
-
-function ProviderSettings () {
-  const [providers, setProviders] = useState<ProviderCapabilities[]>([])
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
-  const [busy, setBusy] = useState(false)
-  useEffect(() => {
-    void new HttpApi('animation/').get<{ providers: ProviderCapabilities[] }>('providers').then(result => setProviders(result.providers)).catch(error => setError(error.message))
-  }, [])
-  const check = async (provider: ProviderCapabilities) => {
-    setBusy(true)
-    setError('')
-    try {
-      await new HttpApi('animation/').post('production/check', { body: { providerId: provider.id, kind: provider.kinds[0] } })
-      setMessage(`${provider.name}: conexión disponible`)
-    } catch (error) {
-      setError((error as Error).message)
-    } finally { setBusy(false) }
-  }
-  return (
-    <section aria-label='Proveedores de audio'>
-      <h3>Proveedores de audio</h3>
-      {providers.map(provider => (
-        <div key={provider.id} className={audioStyles.toolbar}>
-          <span>{provider.name}</span>
-          {provider.configured
-            ? <Button className={audioStyles.secondary} disabled={busy} onClick={() => void check(provider)}>Comprobar conexión</Button>
-            : (
-                <p className={audioStyles.help}>
-                  Configure las credenciales de
-                  {provider.name}
-                  {' '}
-                  en el servidor.
-                </p>
-              )}
-        </div>
-      ))}
-      {message && <p role='status'>{message}</p>}
-      {error && <p role='alert' className={audioStyles.notice}>{error}</p>}
-    </section>
-  )
-}
 
 export default function AnimatorSettings () {
   const isAdmin = useAppSelector(state => state.user.isAdmin)
   const [params, setParams] = useSearchParams()
-  const view = params.get('view') === 'names' ? 'names' : params.get('view') === 'calls' ? 'calls' : params.get('view') === 'background' ? 'background' : params.get('view') === 'greeting-voice' ? 'greeting-voice' : params.get('view') === 'audio' ? 'audio' : 'control'
+  const view = params.get('view') === 'scenes' ? 'scenes' : params.get('view') === 'names' ? 'names' : params.get('view') === 'calls' ? 'calls' : params.get('view') === 'background' ? 'background' : params.get('view') === 'greeting-voice' ? 'greeting-voice' : params.get('view') === 'audio' ? 'audio' : 'control'
   const liveView = view === 'control' || view === 'audio'
   const settings = params.get('panel') === 'settings' || params.get('view') === 'connection'
   const roomId = useAppSelector(state => state.user.roomId)
@@ -71,6 +28,19 @@ export default function AnimatorSettings () {
   const current = snapshot?.roomId === roomId ? snapshot : null
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const tabs = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const node = tabs.current
+    if (view !== 'scenes' || !node) return
+    const reveal = () => {
+      const selected = node.querySelector<HTMLElement>('[aria-current="page"]')
+      if (selected) node.scrollLeft = Math.max(0, selected.offsetLeft + selected.offsetWidth - node.clientWidth)
+    }
+    reveal()
+    const observer = new ResizeObserver(reveal)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [view])
   const toggle = async () => {
     if (busy) return
     setBusy(true)
@@ -87,6 +57,7 @@ export default function AnimatorSettings () {
     if (next.get('view') === 'connection') next.set('view', 'control')
     setParams(next, { replace: true })
   }
+  if (isAdmin && params.get('view') === 'connection') return <Navigate to='/admin/settings/audio-providers' replace />
   if (!isAdmin) return (
     <>
       <Button variant='default' disabled={!current || !connected || busy} onClick={() => void toggle()}>{current?.prefs.enabled ? 'Desactivar animador' : 'Activar animador'}</Button>
@@ -120,25 +91,27 @@ export default function AnimatorSettings () {
       )}
       {liveView && (!connected || !current) && <p role='status' className={audioStyles.notice}>Conectando con la sala… Los controles se habilitarán al recuperar la conexión.</p>}
       {liveView && error && <p role='alert' className={audioStyles.notice}>{error}</p>}
-      <nav className={styles.tabs} aria-label='Ajustes del animador'>
+      <nav ref={tabs} className={styles.tabs} data-compact={view === 'scenes'} aria-label='Ajustes del animador'>
         <Link to='?view=control' aria-current={view === 'control' ? 'page' : undefined}>Control</Link>
         <Link to='?view=audio' aria-current={view === 'audio' ? 'page' : undefined}>Audios</Link>
         <Link to='?view=calls' aria-current={view === 'calls' ? 'page' : undefined}>Llamados</Link>
         <Link to='?view=names' aria-current={view === 'names' ? 'page' : undefined}>Nombres</Link>
-        <Link to='?view=greeting-voice' aria-current={view === 'greeting-voice' ? 'page' : undefined}>Voz de saludos</Link>
+        <Link to='?view=greeting-voice' aria-current={view === 'greeting-voice' ? 'page' : undefined}>Saludos</Link>
         <Link to='?view=background' aria-current={view === 'background' ? 'page' : undefined}>Fondo</Link>
+        <Link to='?view=scenes' aria-current={view === 'scenes' ? 'page' : undefined}>Coreografías</Link>
       </nav>
       <div hidden={view !== 'control'}><AnimationPanel /></div>
       <CatalogProductionPanel key={roomId} visible={view === 'audio'} />
       {view === 'calls' && typeof roomId === 'number' && <KaraokeCallPilot key={`calls-${roomId}`} roomId={roomId} />}
       {view === 'names' && <NameVoicePanel />}
-      {view === 'greeting-voice' && <GreetingVoiceSettings key={`greeting-voice-${roomId}`} />}
+      {view === 'scenes' && <SceneEditor key={`scenes-${roomId}`} />}
+      {view === 'greeting-voice' && <GreetingRoomSettings key={`greeting-voice-${roomId}`} />}
       {view === 'background' && (typeof roomId === 'number' ? <TransitionVideoSettings key={`background-${roomId}`} roomId={roomId} /> : <p role='status'>Ingrese a una sala para configurar su fondo.</p>)}
       {view === 'background' && typeof roomId === 'number' && <OperationControls key={`ambience-${roomId}`} ambienceOnly />}
       {liveView && settings && (
         <Modal className={audioStyles.dialog} title='Ajustes del animador' onClose={close}>
           <OperationControls settings />
-          <ProviderSettings />
+          <Link to='/admin/settings/audio-providers'>Proveedores de audio</Link>
           <div className={audioStyles.actions}><Button className={audioStyles.secondary} onClick={close}>Cerrar ajustes</Button></div>
         </Modal>
       )}

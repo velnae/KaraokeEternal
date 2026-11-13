@@ -14,5 +14,5 @@ export const visibleRoomPrefs = (identity: AccessIdentity, prefs: Partial<IRoomP
   ? prefs
   : {
       ...participantPrefs(prefs),
-      ...(canOperate(identity) ? { qr: prefs.qr, animation: prefs.animation, transitionVideo: prefs.transitionVideo } : {}),
+      ...(canOperate(identity) ? { qr: prefs.qr, animation: prefs.animation, transitionVideo: prefs.transitionVideo, eventScenes: prefs.eventScenes } : {}),
     }

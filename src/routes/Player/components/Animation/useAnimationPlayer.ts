@@ -16,6 +16,9 @@ import AnnouncementAudio from './AnnouncementAudio'
 import { hasLocalPlaybackProof } from './playbackFence'
 import { needsAnimationClock, ReadinessPublication } from './playerEfficiency'
 import { tracePlayback } from '../../../../lib/playbackTrace'
+import type SceneRun from './SceneRun'
+import { sceneContextAfterEnd } from 'shared/eventScenes'
+import { sceneHasReferences, sceneVoiceCue } from 'shared/eventScenes'
 
 const voiceRequested = (snapshot?: AnimationSnapshot | null) => !!snapshot && (snapshot.prefs.enabled || snapshot.greetingVoiceEnabled === true)
 
@@ -64,6 +67,8 @@ export default function useAnimationPlayer () {
   const ambientCursor = useRef({ clipId: '', offsetMs: 0 })
   const ambientUse = useRef<{ clipId: string, id: string } | null>(null)
   const transitionGrant = useRef<AmbienceGrant | null>(null)
+  const transitionVolume = useRef(1)
+  const transitionVersion = useRef(0)
   const transitionCompletion = useRef<Promise<void> | null>(null)
   const [ambientPlaying, setAmbientPlaying] = useState(false)
   const preparedOwner = useRef<string | null>(null)
@@ -154,7 +159,7 @@ export default function useAnimationPlayer () {
         || (player && !player.isAtQueueEnd && player.queueId !== -1)) ambientUse.current = null
       const grant = grantRef.current
       if (current) audio.current.volume(ambientRun.current ? current.prefs.ambienceVolume ?? 0.2 : current.prefs.volume)
-      if (current) audio.current.bedVolume(ambienceBedVolume(current.prefs))
+      if (current) audio.current.bedVolume(ambienceBedVolume(current.prefs) * (transitionGrant.current ? transitionVolume.current : 1))
       const transition = transitionGrant.current
       if (transition && (!current || !current.prefs.ambienceEnabled || (!current.prefs.enabled && !current.greetingVoiceEnabled)
         || current.playerEpoch !== transition.playerEpoch || current.ambience?.id !== transition.id
@@ -291,12 +296,13 @@ export default function useAnimationPlayer () {
   }, [])
 
   const stopTransition = useCallback(async (fadeMs = 120) => {
+    transitionVersion.current++
     if (!transitionGrant.current) return
     await audio.current.stopBed(fadeMs)
     await transitionCompletion.current
   }, [])
 
-  const startTransition = useCallback(async (sourceQueueId: number | null, expectedNextQueueId: number | null) => {
+  const startTransition = useCallback(async (sourceQueueId: number | null, expectedNextQueueId: number | null, volume = 1, run?: SceneRun | null) => {
     const state = store.getState()
     const current = state.animation.snapshot
     const generation = version.current
@@ -306,6 +312,7 @@ export default function useAnimationPlayer () {
     try {
       await stopAmbience()
       await stopTransition(30)
+      const bedVersion = ++transitionVersion.current
       store.dispatch(playerStatusCancel())
       const status = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
       await animationRequest(PLAYER_EMIT_STATUS, { ...status, visualizer: state.playerVisualizer }, ANIMATION_LIMITS.startMs)
@@ -316,18 +323,27 @@ export default function useAnimationPlayer () {
       const fresh = store.getState()
       if (generation !== version.current || !mounted.current || fresh.player._authority !== 'GRANTED' || !socket.connected
         || audio.current.waitingForMusic || !fresh.animation.snapshot?.prefs.ambienceEnabled) throw new Error('La transición cambió antes de iniciar')
-      const completion = audio.current.playBed(grant.clip.checksum, ambienceBedVolume(fresh.animation.snapshot.prefs), grant.until - animationTime() - 200, grant.clip.loop !== false)
+      transitionVolume.current = volume
       transitionGrant.current = grant
       const id = grant.id
-      transitionCompletion.current = completion.then(async (): Promise<void> => {
+      const play = async (): Promise<void> => {
+        const cue = run?.scene.cues.find(cue => cue.lane === 'ambience' && cue.enabled !== false)
+        if (run && !await run.wait(cue, undefined, () => transitionVersion.current === bedVersion && generation === version.current)) return
+        if (bedVersion !== transitionVersion.current || generation !== version.current || !mounted.current) return
+        const duration = Math.min(cue?.durationMs ?? Infinity, grant!.until - animationTime() - 200)
+        if (duration <= 0) return
+        const completion = audio.current.playBed(grant!.clip.checksum, ambienceBedVolume(fresh.animation.snapshot.prefs) * volume, duration, grant!.clip.loop !== false, cue?.fadeMs ?? 200)
+        void animationRequest(ANIMATION_AMBIENCE_STARTED, { id, runId: id }, ANIMATION_LIMITS.startMs).catch(() => {
+          if (transitionGrant.current?.id === id) void audio.current.stopBed(30)
+        })
+        await completion
+      }
+      transitionCompletion.current = play().catch(() => {}).then(async (): Promise<void> => {
         try {
           if (socket.connected) await animationRequest(ANIMATION_AMBIENCE_STOP, { id }, 1000)
         } catch { /* The finite permit still fences an unconfirmed stop. */ }
         if (transitionGrant.current?.id === id) transitionGrant.current = null
         return undefined
-      })
-      void animationRequest(ANIMATION_AMBIENCE_STARTED, { id, runId: id }, ANIMATION_LIMITS.startMs).catch(() => {
-        if (transitionGrant.current?.id === id) void audio.current.stopBed(30)
       })
       return grant
     } catch (error) {
@@ -419,7 +435,7 @@ export default function useAnimationPlayer () {
     })
   }, [ambientPlaying, ambientTick])
 
-  const attempt = useCallback(async (boundary: 'ended' | 'idle' | 'start', sourceQueueId: number | null, expectedNextQueueId: number | null) => {
+  const attempt = useCallback(async (boundary: 'ended' | 'idle' | 'start' | 'tail', sourceQueueId: number | null, expectedNextQueueId: number | null, run?: SceneRun | null) => {
     const state = store.getState()
     const current = state.animation.snapshot
     const active = current?.active
@@ -441,7 +457,7 @@ export default function useAnimationPlayer () {
     let started = false
     const ownsBed = !audio.current.hasBed
     try {
-      if (automatic && boundary === 'idle') {
+      if (automatic && (boundary === 'idle' || run)) {
         const room = state.rooms.entities[state.user.roomId]
         const probe = await animationRequest(ANIMATION_AUTO, {
           probeOnly: true, playerEpoch: current.playerEpoch, controlVersion: current.controlVersion,
@@ -449,12 +465,13 @@ export default function useAnimationPlayer () {
           boundary, sourceQueueId, expectedNextQueueId, replay: state.player._isReplayPlayback,
         }, ANIMATION_LIMITS.startMs)
         if (!probe.eligible) return
+        if (run && !sceneHasReferences(run.scene)) await run.wait(run.scene.cues.find(cue => cue.id === probe.sceneFirstCueId), undefined, () => mounted.current && generation === version.current && socket.connected)
       }
       await stopAmbience()
       // Flush the boundary before reserving. Periodic status is throttled and
       // may still describe the preceding (now ended) song as occupying the room.
       store.dispatch(playerStatusCancel())
-      const playerStatus = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
+      const playerStatus = Object.fromEntries(Object.entries(store.getState().player).filter(([key]) => !key.startsWith('_')))
       await animationRequest(PLAYER_EMIT_STATUS, { ...playerStatus, visualizer: state.playerVisualizer }, ANIMATION_LIMITS.startMs)
       const refreshed = store.getState()
       const room = refreshed.rooms.entities[refreshed.user.roomId]
@@ -465,7 +482,7 @@ export default function useAnimationPlayer () {
       began = performance.now()
       const reply = await animationRequest(automatic ? ANIMATION_AUTO : ANIMATION_RESERVE, {
         interventionId: active?.interventionId, playerEpoch: current.playerEpoch, controlVersion: current.controlVersion,
-        contextKey, transitionId: crypto.randomUUID(), boundary, sourceQueueId, expectedNextQueueId, replay: state.player._isReplayPlayback,
+        contextKey, transitionId: crypto.randomUUID(), boundary: boundary === 'tail' && run?.endedAt !== null && run?.endedAt !== undefined ? 'ended' : boundary, sourceQueueId, expectedNextQueueId, replay: state.player._isReplayPlayback,
       }, ANIMATION_LIMITS.startMs)
       grant = reply.grant
       if (!grant) return
@@ -480,7 +497,7 @@ export default function useAnimationPlayer () {
         || !socket.connected || latest.player._authority !== 'GRANTED' || !latestSnapshot?.prefs.enabled
         || latestSnapshot.prefs.volume <= 0 || latestSnapshot.active?.stopRequestedAt
         || latestSnapshot.playerEpoch !== grant.playerEpoch || latestSnapshot.active?.interventionId !== grant.interventionId
-        || latestContext !== grant.contextKey || animationTime() >= grant.startBefore!
+        || !(latestContext === grant.contextKey || (boundary === 'tail' && sourceQueueId !== null && JSON.parse(latest.player.historyJSON).includes(sourceQueueId) && sceneContextAfterEnd(grant.contextKey!, latestContext, [sourceQueueId]))) || animationTime() >= grant.startBefore!
         || attempted.current.has(grant.interventionId) || sessionStorage.getItem(storageKey)) {
         await animationRequest(ANIMATION_EVENT, { interventionId: grant.interventionId, playerEpoch: grant.playerEpoch, event: 'NOT_STARTED' })
         return
@@ -488,8 +505,9 @@ export default function useAnimationPlayer () {
       sessionStorage.setItem(storageKey, '1')
       attempted.current.add(grant.interventionId)
       const { sequence: assets, bed } = interventionPlayback(grant)
+      run?.installAudio(assets, item => (audio.current.buffers.get(item.checksum)?.duration ?? item.durationMs / 1000) * 1000)
       const prepareAsset = async (asset: typeof assets[number]) => {
-        if (isMusicalCurtain(asset)) await audio.current.holdAmbienceUntilMusic()
+        if (isMusicalCurtain(asset) && !asset.sceneCueId) await audio.current.holdAmbienceUntilMusic()
         const latest = store.getState()
         return mounted.current && generation === version.current && socket.connected && audio.current.ready
           && latest.player._authority === 'GRANTED' && latest.animation.snapshot?.prefs.enabled
@@ -498,8 +516,10 @@ export default function useAnimationPlayer () {
           && animationTime() < grant!.leaseUntil!
       }
       ambientUse.current = null
+      if (run && sceneHasReferences(run.scene) && assets[0]?.sceneCueId) await run.wait(sceneVoiceCue(run.scene, 'announcement', assets[0].sceneCueId), undefined, () => mounted.current && generation === version.current && socket.connected && !store.getState().animation.snapshot?.active?.stopRequestedAt)
       if (!await prepareAsset(assets[0]) || animationTime() >= grant.startBefore!) throw new Error('La pausa cambió antes de iniciar el audio')
-      const completion = audio.current.play(assets[0].checksum, latestSnapshot.prefs.volume)
+      const completion = audio.current.play(assets[0].checksum, latestSnapshot.prefs.volume, undefined, assets[0].sceneFadeMs ?? 0, assets[0].sceneVolume ?? 1)
+      run?.startAudio(assets[0], assets, item => (audio.current.buffers.get(item.checksum)?.duration ?? item.durationMs / 1000) * 1000)
       started = true
       setScene(grant)
       setText(assets.length === 1 || assets[0].kind === 'voice' ? grant.displayText : '')
@@ -517,7 +537,12 @@ export default function useAnimationPlayer () {
         if (bedStarted) await animationPlaybackEvent(grant, 'ASSET_STARTED', bed!.id)
       } catch { audio.current.stopForeground('start-ack-failed') }
       let outcome = await completion
+      if (outcome === 'ENDED') run?.endAudio(assets[0], assets)
       for (const asset of assets.slice(1)) {
+        const firstPart = !assets.slice(0, assets.indexOf(asset)).some(item => item.sceneCueId === asset.sceneCueId)
+        if (run && sceneHasReferences(run.scene) && firstPart) await run.wait(sceneVoiceCue(run.scene, 'announcement', asset.sceneCueId), undefined, () => mounted.current && generation === version.current && socket.connected && !store.getState().animation.snapshot?.active?.stopRequestedAt)
+        const waitUntil = performance.now() + (run && sceneHasReferences(run.scene) ? 0 : asset.sceneDelayMs ?? 0)
+        while (performance.now() < waitUntil && version.current === generation && socket.connected) await new Promise(resolve => setTimeout(resolve, 40))
         const latest = store.getState().animation.snapshot
         if (outcome !== 'ENDED' || version.current !== generation || !socket.connected || latest?.active?.stopRequestedAt || latest?.active?.interventionId !== grant.interventionId) {
           outcome = 'STOPPED'
@@ -527,12 +552,14 @@ export default function useAnimationPlayer () {
           outcome = 'STOPPED'
           break
         }
-        const effectCompletion = audio.current.play(asset.checksum, latest.prefs.volume)
+        const effectCompletion = audio.current.play(asset.checksum, latest.prefs.volume, undefined, asset.sceneFadeMs ?? 0, asset.sceneVolume ?? 1)
+        run?.startAudio(asset, assets, item => (audio.current.buffers.get(item.checksum)?.duration ?? item.durationMs / 1000) * 1000)
         if (asset.kind === 'voice') setText(grant.displayText)
         try {
           await animationPlaybackEvent(grant, 'ASSET_STARTED', asset.id)
         } catch { audio.current.stopForeground('asset-ack-failed') }
         outcome = await effectCompletion
+        if (outcome === 'ENDED') run?.endAudio(asset, assets)
       }
       if (ownsBed) await audio.current.stopBed(outcome === 'ENDED' ? 250 : 30)
       setText('')
@@ -559,6 +586,7 @@ export default function useAnimationPlayer () {
         setScene(null)
       }
     }
+    return started
   }, [stopAmbience])
 
   // This tab knows it has stopped (or never started). A successor does not,

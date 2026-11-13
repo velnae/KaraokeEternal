@@ -5,7 +5,6 @@ import Modal from 'components/Modal/Modal'
 import HttpApi from 'lib/HttpApi'
 import type { NameVoiceDetail, NameVoiceSnapshot, NamePronunciation, NameVoiceVersion } from 'shared/nameVoices'
 import PrivateCallAudio from './PrivateCallAudio'
-import NameVoiceStyleEditor from './NameVoiceStyleEditor'
 import styles from './NameVoicePanel.css'
 import formStyles from './KaraokeCallPilot.css'
 
@@ -204,7 +203,7 @@ export default function NameVoicePanel () {
         </div>
         <Button variant='primary' onClick={event => void open(null, event.currentTarget)}>Nueva pronunciación</Button>
       </header>
-      {snapshot?.promptStyle && <NameVoiceStyleEditor settings={snapshot.promptStyle} onSaved={refresh} />}
+      <Link to='/admin/settings/audio-providers?use=names'>Configurar voz de nombres</Link>
       <div className={styles.toolbar}>
         <label className={formStyles.field}>
           Buscar nombre
@@ -343,7 +342,7 @@ export default function NameVoicePanel () {
                   {unavailable && (
                     <p id='name-generation-status' role='status' className={formStyles.warning}>
                       {unavailable}
-                      {!snapshot?.generation.allowed && !busy && !pending(detail) && !detail.archived && <Link to='?view=greeting-voice'> Ajustes de voz</Link>}
+                      {!snapshot?.generation.allowed && !busy && !pending(detail) && !detail.archived && <Link to='/admin/settings/audio-providers?use=calls'> Ajustes de voz</Link>}
                     </p>
                   )}
                   {detail.job?.error && <p role='alert' className={formStyles.error}>{detail.job.error}</p>}
@@ -369,7 +368,7 @@ export default function NameVoicePanel () {
                           <p className={styles.meta}>
                             Para usar esta versión, seleccione su voz en
                             {' '}
-                            <Link to='?view=greeting-voice'>Ajustes de voz</Link>
+                            <Link to='/admin/settings/audio-providers?use=calls'>Ajustes de voz</Link>
                             .
                           </p>
                         )}

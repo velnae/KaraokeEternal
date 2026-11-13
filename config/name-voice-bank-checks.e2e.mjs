@@ -12,16 +12,16 @@ export async function checkNameVoiceBank ({ page, browser, base, uiBase, data, d
   const customStyle = 'Pronounce only the supplied name clearly in Latin American Spanish, with a resonant, well-supported voice at normal announcement volume. No whispering or extra words.'
   const jobsBeforeStyle = db.prepare('SELECT count(*) n FROM karaokeCallJobs').get().n
   const budgetBeforeStyle = db.prepare('SELECT count(*) n FROM greetingVoiceRequests').get().n
-  await bank.getByText('Modelo y estilo de pronunciación (Gemini)', { exact: true }).click()
-  let styleForm = bank.getByRole('form', { name: 'Estilo para nombres' })
+  await page.goto(uiBase + 'admin/settings/audio-providers?use=names')
+  const voiceSettings = page.getByRole('region', { name: 'Configuración de nombres', exact: true })
+  let styleForm = voiceSettings.getByRole('form', { name: 'Estilo para nombres' })
   await styleForm.getByRole('combobox', { name: 'Modelo para nuevas generaciones' }).selectOption('gemini-3.8-flash-tts')
   await styleForm.getByLabel('Estilo para nuevas generaciones', { exact: true }).fill(customStyle)
   await styleForm.getByRole('button', { name: 'Guardar configuración', exact: true }).focus()
   await page.keyboard.press('Enter')
   await expect(styleForm.getByRole('status')).toHaveText('Configuración guardada.')
   await page.reload()
-  await bank.getByText('Modelo y estilo de pronunciación (Gemini)', { exact: true }).click()
-  styleForm = bank.getByRole('form', { name: 'Estilo para nombres' })
+  styleForm = voiceSettings.getByRole('form', { name: 'Estilo para nombres' })
   await expect(styleForm.getByRole('combobox', { name: 'Modelo para nuevas generaciones' })).toHaveValue('gemini-3.8-flash-tts')
   const modelSelect = styleForm.getByRole('combobox', { name: 'Modelo para nuevas generaciones' })
   await modelSelect.focus()
@@ -43,7 +43,8 @@ export async function checkNameVoiceBank ({ page, browser, base, uiBase, data, d
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
     await page.screenshot({ path: path.join(data, `name-style-${width}.png`), fullPage: true })
   }
-  await bank.getByText('Modelo y estilo de pronunciación (Gemini)', { exact: true }).click()
+  await page.goto(uiBase + 'admin/settings/animator?view=names')
+  await expect(bank.getByRole('link', { name: 'Configurar voz de nombres' })).toBeVisible()
   const before = db.prepare('SELECT count(*) n FROM animationInterventions').get().n
   // Create without synthesis; the existing John alias must require explicit reassignment.
   const orphanGroup = await call('name-voices', { spokenText: 'John' })
@@ -113,6 +114,10 @@ export async function checkNameVoiceBank ({ page, browser, base, uiBase, data, d
     const login = await api2.post(base + 'api/login', { data: { username: 'admin', password: 'call-pilot-test', roomId: 2 } })
     assert.equal(login.status(), 200)
     const operator2 = await connect(await api2.storageState())
+    const bankState = await (await api2.get(base + 'api/rooms/2/karaoke-calls')).json()
+    const bank = await api2.post(base + 'api/rooms/2/karaoke-calls/setup', { data: { requestId: crypto.randomUUID(), revision: bankState.automation.controls.revision, quote: bankState.automation.bankQuote } })
+    assert.equal(bank.status(), 202)
+    await expect.poll(async () => (await (await api2.get(base + 'api/rooms/2/karaoke-calls')).json()).automation.bankPreparing, { timeout: 30000 }).toBe(false)
     await emit(operator2, 'server/GREETINGS', { operation: 'prepareAudio', enabled: true })
     await emit(operator2, 'server/GREETINGS', { operation: 'playback', version: 0, settings: { enabled: true, introClipId: null, ambienceEnabled: false } })
     const queueId = await add(ion, 16, 'LISTEN')

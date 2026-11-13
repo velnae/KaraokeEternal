@@ -5,7 +5,10 @@ import styles from './PlayerTransitionScene.css'
 
 const EXIT_DURATION_MS = 1000
 
-export default function PlayerTransitionScene ({ background, playing, sceneId, exiting = false, onExited, children }: {
+export default function PlayerTransitionScene ({ background, playing, sceneId, exiting = false, onExited, children, exitMs = EXIT_DURATION_MS, transparent = false, entrance }: {
+  entrance?: { animation: 'fade' | 'slide' | 'none', fadeMs: number }
+  transparent?: boolean
+  exitMs?: number
   background: TransitionVideoBackground | null
   playing: boolean
   sceneId: string
@@ -23,21 +26,22 @@ export default function PlayerTransitionScene ({ background, playing, sceneId, e
   useEffect(() => {
     if (!exiting) return
     // Reduced motion and interrupted CSS transitions may not emit transitionend.
-    const timer = setTimeout(() => onExited?.(), reducedMotion ? 0 : EXIT_DURATION_MS + 100)
+    const timer = setTimeout(() => onExited?.(), reducedMotion ? 0 : exitMs + 100)
     return () => clearTimeout(timer)
-  }, [exiting, onExited, reducedMotion])
+  }, [exiting, onExited, reducedMotion, exitMs])
   return (
     <div
       className={styles.scene}
       data-testid='transition-scene'
       data-scene-id={sceneId}
       data-exiting={exiting}
-      style={{ '--scene-exit-duration': `${EXIT_DURATION_MS}ms` } as React.CSSProperties}
+      data-animation={entrance?.animation ?? 'fade'}
+      style={{ '--scene-exit-duration': `${exitMs}ms`, '--scene-enter-duration': `${entrance?.fadeMs ?? 240}ms`, '--scene-media-fade': `${entrance?.fadeMs ?? 220}ms` } as React.CSSProperties}
       onTransitionEnd={(event) => {
         if (exiting && event.target === event.currentTarget && event.propertyName === 'opacity') onExited?.()
       }}
     >
-      <TransitionBackground className={styles.frame} resource={background?.resource ?? null} dimOpacity={background?.dimOpacity ?? 0.55} playing={playing && !reducedMotion}>
+      <TransitionBackground transparent={transparent} className={styles.frame} resource={background?.resource ?? null} dimOpacity={background?.dimOpacity ?? 0.55} playing={playing && !reducedMotion}>
         {children}
       </TransitionBackground>
     </div>

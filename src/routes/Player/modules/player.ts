@@ -111,6 +111,7 @@ export function playerLeave (): AppThunk {
 // Reducer
 // ------------------------------------
 export interface PlayerState {
+  duration?: number
   cdgAlpha: number
   cdgSize: number
   errorMessage: string

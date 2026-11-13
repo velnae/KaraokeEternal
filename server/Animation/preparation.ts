@@ -3,6 +3,7 @@ import { catalogClips } from './catalog.js'
 import { animationPrefs, eligibleAmbience, interventionAssets, type AnimationClip } from '../../shared/animation.js'
 import { audioUsage } from './usage.js'
 import { effectCategoryValue } from '../../shared/effectCategories.js'
+import { getEventScenes } from './Scenes/Store.js'
 
 // Balance kinds/event families and rotate toward least-recently used resources.
 // This is a preparation window, not the complete management inventory.
@@ -34,6 +35,9 @@ export function preparationClips (roomId: number) {
   if (active) for (const clip of interventionAssets(active)) if (catalogIds.has(clip.id)) add(clip)
   const ambient = Animation.ambience(roomId)
   if (ambient) add(ambient.clip)
+  const scenes = getEventScenes(roomId)
+  const sceneIds = new Set(scenes.templates.filter(scene => scenes.selected[scene.event] === scene.id).flatMap(scene => scene.cues.flatMap(cue => cue.resourceId ? [cue.resourceId] : [])))
+  for (const clip of clips) if (sceneIds.has(clip.id)) add(clip)
   if (prefs.ambienceEnabled) {
     let remaining = ambient ? 1 : 2
     for (const clip of eligibleAmbience(clips, prefs)) {

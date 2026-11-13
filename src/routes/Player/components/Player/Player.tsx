@@ -13,6 +13,7 @@ import { tracePlayback } from '../../../../lib/playbackTrace'
 const PlayerVisualizer = React.lazy(() => import('./PlayerVisualizer/PlayerVisualizer'))
 
 interface PlayerProps {
+  onProgress?: (progress: import('shared/eventScenes').SceneProgress) => void
   cdgAlpha: number
   cdgSize: number
   isPlaying: boolean
@@ -215,6 +216,7 @@ class Player extends React.PureComponent<PlayerProps> {
           mediaKey={mediaKey}
           mediaReplayKey={this.props.mediaReplayKey}
           onEnd={this.props.onEnd}
+          onProgress={this.props.onProgress}
           onError={this.props.onError}
           onLoad={this.props.onLoad}
           onPlay={this.handlePlay}

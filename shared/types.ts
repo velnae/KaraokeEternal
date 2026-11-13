@@ -54,6 +54,7 @@ export interface OptimisticQueueItem {
 }
 
 export interface IRoomPrefs {
+  eventScenes?: import('./eventScenes.js').EventSceneSettings
   animation?: import('./animation.js').AnimationPrefs
   transitionVideo?: import('./transitionVideo.js').TransitionVideoPrefs
   tables?: { mode: import('./tableAccess.js').TableMode }

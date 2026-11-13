@@ -84,6 +84,7 @@ const loadYouTubeIframeApi = (): Promise<YouTubeApi> => {
 }
 
 interface YouTubePlayerProps {
+  onProgress?: (progress: import('shared/eventScenes').SceneProgress) => void
   controls?: 0 | 1
   showAutoplayRecovery?: boolean
   height: number
@@ -265,6 +266,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
       this.stopStatusUpdates()
     } else {
       this.stopStatusUpdates()
+      this.props.onProgress?.({ position: this.player.getCurrentTime(), duration: this.player.getDuration(), playing: false })
     }
 
     if (event.data === window.YT?.PlayerState.ENDED && !this.awaitingPreparedStart) this.props.onEnd()
@@ -339,10 +341,20 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
 
   startStatusUpdates = () => {
     this.stopStatusUpdates()
+    let lastStatus = 0
     this.statusTimer = setInterval(() => {
       const position = this.player?.getCurrentTime()
-      if (typeof position === 'number' && Number.isFinite(position)) this.props.onStatus({ position })
-    }, STATUS_INTERVAL_MS)
+      if (typeof position === 'number' && Number.isFinite(position)) {
+        if (this.props.onProgress) {
+          const duration = this.player!.getDuration()
+          if (duration > 0 && duration - position <= 11) this.props.onProgress({ position, duration, playing: true })
+        }
+        if (performance.now() - lastStatus >= STATUS_INTERVAL_MS) {
+          this.props.onStatus({ position })
+          lastStatus = performance.now()
+        }
+      }
+    }, this.props.onProgress ? 100 : STATUS_INTERVAL_MS)
   }
 
   stopStatusUpdates = () => {

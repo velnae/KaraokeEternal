@@ -9,8 +9,10 @@ import { clipDurationLimit, normalizeEffectType, VOICE_FAMILIES, type AudioKind,
 import { voicePrompt, type GenerationJob, type ProductionConfig, type ProductionInput, type ProductionStatus } from '../../shared/catalogProduction.js'
 import type { AudioMetadata } from '../../shared/audioCatalog.js'
 import { catalogAsset, catalogChanged, resourceFile, saveCatalogRecord, removeUnreferencedFile } from './catalog.js'
-import { ElevenLabs, ProviderError } from './ElevenLabs.js'
-import type { AudioProvider } from './AudioProvider.js'
+import { createElevenLabs } from '../AudioProviders/index.js'
+import { elevenLabsConfig } from '../AudioProviders/config.js'
+import { ProviderError } from '../AudioProviders/errors.js'
+import type { AudioProvider } from '../AudioProviders/types.js'
 import { prepareAudio, AudioValidationError } from './AudioPreparation.js'
 import { assertResourceUnused, completeResource, createResource, getResource, isResourceDeleted, prepareResource, resourceDTO, validateMetadata } from './Resources.js'
 import { generationKey } from './generationKey.js'
@@ -32,8 +34,7 @@ export interface ProductionOptions {
   ffmpeg: string
 }
 export const productionOptions = (): ProductionOptions => ({
-  key: process.env.KES_ELEVENLABS_API_KEY ?? '', baseUrl: process.env.KES_ELEVENLABS_BASE_URL,
-  voiceId: process.env.KES_ELEVENLABS_VOICE_ID || DEFAULT_ANIMATOR_VOICE_ID, model: process.env.KES_ELEVENLABS_MODEL ?? 'eleven_v4',
+  ...elevenLabsConfig(),
   characterLimit: positive(process.env.KES_ELEVENLABS_CHARACTER_LIMIT, 10000), effectSecondsLimit: positive(process.env.KES_ELEVENLABS_EFFECT_SECONDS_LIMIT, 300),
   pricePerThousandCharacters: process.env.KES_ELEVENLABS_PRICE_PER_1K_CHARS ? positive(process.env.KES_ELEVENLABS_PRICE_PER_1K_CHARS, 0) : null,
   pricePerEffectSecond: process.env.KES_ELEVENLABS_PRICE_PER_EFFECT_SECOND ? positive(process.env.KES_ELEVENLABS_PRICE_PER_EFFECT_SECOND, 0) : null,
@@ -53,7 +54,7 @@ export class CatalogProduction {
   private replacements = new Set<string>()
 
   constructor (private directory: string, private options: ProductionOptions, private onPublished: (roomId: number) => void = () => {}, providers?: AudioProvider[]) {
-    this.providers = new Map((providers ?? [new ElevenLabs(options.key, options.baseUrl, options.model, options.voiceId || DEFAULT_ANIMATOR_VOICE_ID)]).map(provider => [provider.capabilities.id, provider] as const))
+    this.providers = new Map((providers ?? [createElevenLabs({ ...options, voiceId: options.voiceId || DEFAULT_ANIMATOR_VOICE_ID })]).map(provider => [provider.capabilities.id, provider] as const))
   }
 
   capabilities () {

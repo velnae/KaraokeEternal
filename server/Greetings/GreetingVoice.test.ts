@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { open, close, db } from '../lib/Database.js'
 import GreetingVoice, { voiceQuotaDay, voiceQuotaReset } from './GreetingVoice.js'
-import { GreetingVoiceError, type GreetingVoiceProvider } from './GeminiGreetingTts.js'
+import { VoiceError as GreetingVoiceError } from '../AudioProviders/errors.js'
+import type { SpeechProvider as GreetingVoiceProvider } from '../AudioProviders/types.js'
 
 let now: number
 let provider: GreetingVoiceProvider

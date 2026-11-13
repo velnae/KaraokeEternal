@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import GeminiGreetingTts from './GeminiGreetingTts.js'
-import { loadGreetingVoiceProfile } from './voiceProfile.js'
+import GeminiGreetingTts from './Gemini.js'
+import { loadGreetingVoiceProfile } from '../Greetings/voiceProfile.js'
 import { defaultGreetingVoiceConfig } from '../../shared/greetingVoice.js'
+import { createGemini } from './index.js'
 
 const profile = loadGreetingVoiceProfile(defaultGreetingVoiceConfig)
 const wav = Buffer.from('524946462800000057415645666d74201000000001000100c05d000080bb000002001000646174610400000000000000', 'hex')
@@ -71,5 +72,40 @@ describe('Gemini greeting provider', () => {
     controller.abort()
     await expect(new GeminiGreetingTts('key', request).generate('Hola', profile, controller.signal)).rejects.toThrow()
     expect(request).not.toHaveBeenCalled()
+  })
+
+  it('uses one configured transport for model checks, paginated voices, speech and structured text', async () => {
+    const request = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const target = new URL(String(url))
+      if (target.pathname.endsWith('/voices')) {
+        return Response.json(target.searchParams.has('page_token')
+          ? { voices: [{ id: 'Sulafat', display_name: 'Sulafat', accent: 'Latinoamericano' }] }
+          : { voices: [], next_page_token: 'second-page' })
+      }
+      if (target.pathname.endsWith('/text-model:generateContent')) return Response.json({ candidates: [{ content: { parts: [{ text: '{"script":"Hola"}' }] } }] })
+      if (target.pathname.endsWith(':generateContent')) return audio()
+      return Response.json({ name: `models/${profile.model}`, supportedGenerationMethods: ['generateContent'] })
+    })
+    const provider = createGemini({ key: 'private-key', baseUrl: 'https://fixture.test' }, request)
+    expect(await provider.listVoices(profile.model, 'es-PE', 'Sulafat')).toEqual([{ voiceId: 'Sulafat', name: 'Sulafat · Latinoamericano' }])
+    expect(await provider.generate('Hola', profile, new AbortController().signal)).toEqual(wav)
+    const input = { contents: [{ parts: [{ text: 'Write a greeting' }] }], generationConfig: { responseMimeType: 'application/json' } }
+    expect(await provider.generateText('text-model', input, new AbortController().signal)).toBe('{"script":"Hola"}')
+    expect(request).toHaveBeenCalledTimes(5)
+    for (const [url, options] of request.mock.calls) {
+      expect(new URL(String(url)).origin).toBe('https://fixture.test')
+      expect(new Headers(options?.headers).get('x-goog-api-key')).toBe('private-key')
+    }
+    expect(String(request.mock.calls[2][0])).toContain('page_token=second-page')
+    expect(JSON.parse(request.mock.calls[4][1]!.body as string)).toEqual(input)
+  })
+
+  it('bounds structured text responses and does not repeat an uncertain text request', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response('x'.repeat(65537)))
+    const provider = createGemini({ key: 'private-key' }, request)
+    await expect(provider.generateText('text-model', {}, new AbortController().signal)).rejects.toMatchObject({ kind: 'invalid' })
+    request.mockRejectedValueOnce(new Error('private-key private prompt'))
+    await expect(provider.generateText('text-model', {}, new AbortController().signal)).rejects.toMatchObject({ kind: 'uncertain' })
+    expect(request).toHaveBeenCalledTimes(2)
   })
 })

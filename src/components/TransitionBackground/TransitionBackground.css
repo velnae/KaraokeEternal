@@ -1,5 +1,7 @@
 .background { position: relative; isolation: isolate; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 12px; background: var(--stage, #030509); color: var(--lyrics, #f4f7ff); }
-.media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: opacity 220ms ease-out; }
+.background[data-transparent='true'] { background: transparent; }
+.background[data-transparent='true'] .scrim { opacity: 0 !important; }
+.media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: opacity var(--scene-media-fade, 220ms) ease-out; }
 .video { opacity: 0; }
 .poster { opacity: 0; }
 .background[data-video-visible='true'] .video { opacity: 1; }

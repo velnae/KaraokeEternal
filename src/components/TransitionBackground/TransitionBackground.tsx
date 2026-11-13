@@ -5,6 +5,7 @@ import styles from './TransitionBackground.css'
 
 export type BackgroundPlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'blocked' | 'failed'
 interface Props {
+  transparent?: boolean
   className?: string
   resource: TransitionVideo | null
   dimOpacity: number
@@ -17,7 +18,7 @@ export default function TransitionBackground (props: Props) {
   return <Background {...props} />
 }
 
-function Background ({ resource, dimOpacity, playing, children, onPlaybackStateChange, className = '' }: Props) {
+function Background ({ resource, dimOpacity, playing, children, onPlaybackStateChange, className = '', transparent = false }: Props) {
   const video = useRef<HTMLVideoElement>(null)
   const pendingFrame = useRef<number | null>(null)
   const [status, setStatus] = useState<BackgroundPlaybackState>(playing ? 'loading' : 'idle')
@@ -103,7 +104,7 @@ function Background ({ resource, dimOpacity, playing, children, onPlaybackStateC
   }
 
   return (
-    <div className={`${styles.background} ${className}`} data-playback={displayStatus} data-video-visible={hasFrame && displayStatus !== 'failed' && displayStatus !== 'blocked'} data-poster-ready={posterReady} data-resource-id={resource?.id}>
+    <div className={`${styles.background} ${className}`} data-transparent={transparent} data-playback={displayStatus} data-video-visible={hasFrame && displayStatus !== 'failed' && displayStatus !== 'blocked'} data-poster-ready={posterReady} data-resource-id={resource?.id}>
       {poster && !posterFailed && <img key={resourceKey} className={`${styles.media} ${styles.poster}`} src={poster} alt='' aria-hidden='true' onLoad={() => setPosterReady(true)} onError={() => setPosterFailed(true)} />}
       <video
         ref={video}

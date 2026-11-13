@@ -140,7 +140,8 @@ class Rooms {
             ${passwordSql}
             status = ${status},
             data = json_set(data, '$.prefs', json_set(json(${JSON.stringify(normalizedPrefs)}),
-              '$.transitionVideo', json(COALESCE(json_extract(data, '$.prefs.transitionVideo'), ${JSON.stringify(normalizeTransitionVideoPrefs())}))))
+              '$.transitionVideo', json(COALESCE(json_extract(data, '$.prefs.transitionVideo'), ${JSON.stringify(normalizeTransitionVideoPrefs())})),
+              '$.eventScenes', json(COALESCE(json_extract(data, '$.prefs.eventScenes'), 'null'))))
         WHERE roomId = ${roomId}
       `
     } else {

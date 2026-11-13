@@ -8,6 +8,10 @@ import { createBirthday, changeBirthday, eventDTO, getBirthday, publicEvents, sa
 import { birthdayIntroText } from '../../shared/birthdays.js'
 import { changeScene } from './scenes.js'
 import Animation, { type Reservation } from '../Animation/Animation.js'
+import { defaultEventScenes } from '../../shared/eventScenes.js'
+import { saveEventScenes } from '../Animation/Scenes/Store.js'
+import * as catalog from '../Animation/catalog.js'
+import { sceneCue } from '../../shared/eventScenes.js'
 
 function wave (seconds = 12) {
   const samples = Math.round(24000 * seconds)
@@ -60,6 +64,67 @@ const prepared = async () => {
   await service.drain()
   return getBirthday(1, row.id)
 }
+it('freezes the choreography and validates configured phase delays without generating another voice', async () => {
+  const row = await prepared()
+  const scenes = defaultEventScenes()
+  scenes.selected.birthday = 'birthday'
+  const scene = scenes.templates.find(scene => scene.event === 'birthday')!
+  scene.cues.find(cue => cue.slot === 'greeting')!.offsetMs = 1500
+  const saved = saveEventScenes(1, scenes)
+  changeBirthday(1, row.id, row.revision, 'schedule')
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const now = Date.now()
+  const grant = await service.reserve(1, 'player')
+  expect(grant && 'token' in grant).toBe(true)
+  if (!grant || !('token' in grant)) throw new Error('Missing grant')
+  expect(grant.scene?.cues.find(cue => cue.slot === 'greeting')?.offsetMs).toBe(1500)
+  saved.templates.find(scene => scene.event === 'birthday')!.cues.find(cue => cue.slot === 'greeting')!.offsetMs = 0
+  saveEventScenes(1, saved)
+  const resumed = await service.reserve(1, 'player')
+  expect(resumed && 'scene' in resumed && resumed.scene?.cues.find(cue => cue.slot === 'greeting')?.offsetMs).toBe(1500)
+  vi.setSystemTime(now + 1000)
+  expect(() => service.progress(1, 'player', row.id, grant.token, 'phase', 'greeting')).toThrow('momento')
+  vi.setSystemTime(now + 2500)
+  service.progress(1, 'player', row.id, grant.token, 'phase', 'greeting')
+  vi.setSystemTime(now + 14500)
+  service.progress(1, 'player', row.id, grant.token, 'heartbeat')
+  service.progress(1, 'player', row.id, grant.token, 'phase', 'music')
+  vi.setSystemTime(now + 15500)
+  service.progress(1, 'player', row.id, grant.token, 'finish')
+  expect(getBirthday(1, row.id).playback).toBe('completed')
+  expect(write).toHaveBeenCalledTimes(1)
+  expect(speak).toHaveBeenCalledTimes(1)
+  vi.useRealTimers()
+})
+it('authorizes an independent ending effect and includes it in the birthday completion bound', async () => {
+  const row = await prepared()
+  vi.spyOn(catalog, 'catalogClips').mockReturnValue([{ id: 'applause', title: 'Applause', durationMs: 800, checksum: 'f'.repeat(64), kind: 'effect', displayText: '', source: 'fixture', license: 'fixture' }])
+  const scenes = defaultEventScenes()
+  scenes.selected.birthday = 'birthday'
+  scenes.templates.find(scene => scene.event === 'birthday')!.cues.push({ ...sceneCue('announcement', 'voice', 'previous'), id: 'ending-effect', binding: 'resource', resourceId: 'applause' })
+  saveEventScenes(1, scenes)
+  changeBirthday(1, row.id, row.revision, 'schedule')
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const now = Date.now()
+  const grant = await service.reserve(1, 'player')
+  if (!grant || !('token' in grant)) throw new Error('Missing grant')
+  expect(grant.extraAudio).toEqual([expect.objectContaining({ cueId: 'ending-effect', asset: expect.objectContaining({ id: 'applause' }) })])
+  const introMs = grant.assets.find(asset => asset.kind === 'intro')!.durationMs
+  const greetingMs = grant.assets.find(asset => asset.kind === 'greeting')!.durationMs
+  const nativeMs = grant.assets.filter(asset => asset.kind !== 'video').reduce((sum, asset) => sum + asset.durationMs, 0)
+  expect(grant.event.durationMs).toBe(nativeMs + 800)
+  vi.setSystemTime(now + introMs)
+  service.progress(1, 'player', row.id, grant.token, 'phase', 'greeting')
+  vi.setSystemTime(now + introMs + greetingMs)
+  service.progress(1, 'player', row.id, grant.token, 'phase', 'music')
+  vi.setSystemTime(now + nativeMs)
+  expect(() => service.progress(1, 'player', row.id, grant.token, 'finish')).toThrow('momento')
+  vi.setSystemTime(now + nativeMs + 800)
+  service.progress(1, 'player', row.id, grant.token, 'finish')
+  expect(getBirthday(1, row.id).playback).toBe('completed')
+  expect(speak).toHaveBeenCalledOnce()
+  vi.useRealTimers()
+})
 it('persists a held event with no public exposure and deduplicates creation', () => {
   const row = create()
   expect(create().id).toBe(row.id)

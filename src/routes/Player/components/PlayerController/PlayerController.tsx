@@ -26,9 +26,14 @@ import getRoomPrefs from '../../selectors/getRoomPrefs'
 import type { QueueItem } from 'shared/types'
 import { TRANSITION_VIDEO_SCENE, type TransitionVideoBackground } from 'shared/transitionVideo'
 import { animationRequest } from 'lib/animationApi'
-import { ANIMATION_LIMITS, TRANSITION_INTRO_MS } from 'shared/animation'
+import { ANIMATION_LIMITS, TRANSITION_INTRO_MS, interventionAssets, type AnimationClip } from 'shared/animation'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
 import styles from './PlayerController.css'
+import { selectedEventScene, sceneEventFor, sceneTailDue, resolveSceneVisuals, sceneHasReferences, type SceneProgress, type SceneResources, type SceneSlot } from 'shared/eventScenes'
+import SceneRun from '../Animation/SceneRun'
+import SceneLayers from 'components/Animation/Scenes/SceneLayers'
+import SceneBackgrounds from 'components/Animation/Scenes/SceneBackgrounds'
+import { isGreetingAllowed } from 'shared/greetings'
 import {
   appendCompletedToHistory,
   playbackToken,
@@ -76,6 +81,11 @@ const PlayerController = (props: PlayerControllerProps) => {
   const backgroundRef = useRef(selectedBackground)
   backgroundRef.current = selectedBackground
   const [transition, setTransition] = useState<TransitionScene | null>(null)
+  const [sceneRun, setSceneRun] = useState<SceneRun | null>(null)
+  const [sceneClock, setSceneClock] = useState(0)
+  const sceneTime = sceneRun ? sceneClock - sceneRun.startedAt : 0
+  const activeScene = useRef<SceneRun | null>(null)
+  const tail = useRef<{ run: SceneRun, completion: Promise<void>, handled: boolean } | null>(null)
   const [preparingQueueId, setPreparingQueueId] = useState<number | null>(null)
   const selectPresentation = useMemo(createTransitionPresentationSelector, [])
   const transitionRef = useRef<TransitionScene | null>(null)
@@ -99,6 +109,10 @@ const PlayerController = (props: PlayerControllerProps) => {
     await animationRef.current.stopTransition(fadeMs)
     if (scene && socket.connected) void animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: true }, 1000).catch(() => {})
     if (transitionRef.current === scene) updateTransition(null)
+    activeScene.current?.cancel()
+    activeScene.current = null
+    tail.current = null
+    if (mounted.current) setSceneRun(null)
   }, [updateTransition])
   const handlePlay = useCallback(() => {
     animationRef.current.channel.musicStarted()
@@ -112,7 +126,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       // Local media starts muted until the remaining bed has finished fading.
       void animationRef.current.stopTransition(80).then(fadeVisuals)
     } else if (scene?.phase === 'handoff') {
-      fadeVisuals()
+      void animationRef.current.stopTransition(80).then(fadeVisuals)
     } else dispatch(playerPlay())
   }, [dispatch, updateTransition])
   const handleVisualExit = useCallback(() => {
@@ -121,6 +135,10 @@ const PlayerController = (props: PlayerControllerProps) => {
 
   useEffect(() => {
     const cancel = () => {
+      activeScene.current?.cancel()
+      activeScene.current = null
+      tail.current = null
+      setSceneRun(null)
       setPreparingQueueId(null)
       const scene = transitionRef.current
       if (scene && socket.connected) void animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: true }, 1000).catch(() => {})
@@ -141,6 +159,14 @@ const PlayerController = (props: PlayerControllerProps) => {
   }, [roomId, updateTransition, dispatch])
 
   useEffect(() => {
+    if (!sceneRun) return
+    const tick = () => setSceneClock(performance.now())
+    tick()
+    const timer = setInterval(tick, 50)
+    return () => clearInterval(timer)
+  }, [sceneRun])
+
+  useEffect(() => {
     if (player._authority !== 'GRANTED') {
       setPreparingQueueId(null)
       updateTransition(null)
@@ -157,7 +183,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     if (transition.phase === 'loading' && queueItem?.source === 'YOUTUBE') {
       // Release audio first; keep the picture until YouTube actually starts.
       const scene = transitionRef.current
-      void animationRef.current.stopTransition(80).then((): void => {
+      void (activeScene.current?.scene.continueBed ? Promise.resolve() : animationRef.current.stopTransition(80)).then((): void => {
         if (mounted.current && scene && transitionRef.current === scene) updateTransition({ ...scene, phase: 'handoff' })
         return undefined
       })
@@ -197,9 +223,23 @@ const PlayerController = (props: PlayerControllerProps) => {
   }, [handleStatus, player.historyJSON, player.queueId, queue.entities])
 
   const handleLoadNext = useCallback(async (includeCurrentInHistory = true, announce = false, boundary: 'ended' | 'idle' | 'start' = 'ended') => {
-    if (!socket.connected || advancing.current || animationRef.current.busy || animationRef.current.blocked
+    let early = tail.current
+    if (!socket.connected || advancing.current || (!early && (animationRef.current.busy || animationRef.current.blocked))
       || store.getState().player._authority !== 'GRANTED' || store.getState().player._isQueueStopped) return
     advancing.current = true
+    if (early) {
+      early.run.end()
+      await early.completion
+      if (early.run.controller.signal.aborted) {
+        advancing.current = false
+        const current = store.getState().player
+        if (current.isPlaying && !current._isQueueStopped) {
+          dispatch(playerStatus({ _isBetweenTracks: true }))
+          retryAdvance(value => value + 1)
+        }
+        return
+      }
+    }
     const controlVersion = animationRef.current.controlVersion()
     const before = store.getState().player
     const transitionStartedAt = performance.now()
@@ -221,44 +261,63 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (celebration === 'waiting') return
       if (celebration === 'finished') dispatch(playerStatus({ isPlaying: true }))
       const upcoming = selection()
+      if (early && early.run.scene.event !== 'birthday' && early.run.nextQueueId !== (upcoming?.queueId ?? null)) {
+        await finishTransition(30)
+        early = null
+      }
       setPreparingQueueId(upcoming?.source === 'YOUTUBE' ? upcoming.queueId : null)
       const callRequested = (animationRef.current.snapshot?.karaokeCallsEnabled && upcoming?.origin !== 'HOUSE' && upcoming?.requestIntent === 'SING')
         || (animationRef.current.snapshot?.listeningPresentationsEnabled && upcoming?.origin === 'PARTICIPANT' && upcoming?.requestIntent === 'LISTEN')
-      const scene: TransitionScene | null = (announce || callRequested) && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
-        && (backgroundRef.current || store.getState().rooms.entities[store.getState().user.roomId]?.prefs?.transitionVideo?.mode === 'all'
-          || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)
-        ? { id: crypto.randomUUID(), background: backgroundRef.current ?? animationRef.current.snapshot?.ambience?.background ?? null, phase: 'intro' }
-        : null
+      const scene: TransitionScene | null = early
+        ? transitionRef.current
+        : (announce || callRequested) && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
+          && (backgroundRef.current || store.getState().rooms.entities[store.getState().user.roomId]?.prefs?.transitionVideo?.mode === 'all'
+            || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)
+            ? { id: crypto.randomUUID(), background: backgroundRef.current ?? animationRef.current.snapshot?.ambience?.background ?? null, phase: 'intro' }
+            : null
       // Retain the current backdrop before releasing idle ambience or awaiting a new selection.
       if (scene) updateTransition(scene)
+      if (!early && scene) {
+        const configured = selectedEventScene(store.getState().rooms.entities[store.getState().user.roomId]?.prefs?.eventScenes, sceneEventFor(upcoming))
+        if (configured) {
+          const run = new SceneRun(configured, sourceId, upcoming?.queueId ?? null, before._lastReplayTime, sceneHasReferences(configured))
+          run.end()
+          activeScene.current = run
+          setSceneRun(run)
+          if (!run.awaitingAudio && configured.startOffsetMs > 0) await run.until(run.startedAt, () => controlVersion === animationRef.current.controlVersion())
+        }
+      }
       if (upcoming || boundary !== 'idle') await animationRef.current.stopAmbience()
       // A pause can arrive while the previous ambience is being released.
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
-      if (scene) {
+      if (scene && !early) {
         // A scene owns one choice across intro, speech and loading. Preview and
         // audio-permit renewals must not consume another position in the rotation.
-        const visual = await animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: false }, ANIMATION_LIMITS.startMs).catch((): null => null)
+        const visual = await animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: false, sceneTemplateId: activeScene.current?.scene.id, nextQueueId: upcoming?.queueId ?? null }, ANIMATION_LIMITS.startMs).catch((): null => null)
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         scene.background = visual?.background ?? null
+        if (activeScene.current && visual?.sceneResources) Object.assign(activeScene.current.resources, visual.sceneResources)
         updateTransition({ ...scene })
-        const grant = await animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null)
+        const grant = await animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null, activeScene.current?.scene.cues.find(cue => cue.lane === 'ambience')?.volume ?? 1, activeScene.current)
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         if (!visual && grant?.background) {
           scene.background = grant.background
           updateTransition({ ...scene })
         }
-        const until = performance.now() + TRANSITION_INTRO_MS
+        const firstCue = activeScene.current?.scene.cues.find(cue => cue.lane === 'voice' && cue.enabled !== false)
+        if (activeScene.current && firstCue && !sceneHasReferences(activeScene.current.scene) && !activeScene.current.scene.cues.some(cue => cue.lane === 'voice' && cue.binding === 'resource' && cue.enabled !== false)) await activeScene.current.wait(firstCue, undefined, () => controlVersion === animationRef.current.controlVersion())
+        const until = performance.now() + (activeScene.current ? 0 : TRANSITION_INTRO_MS)
         while (performance.now() < until && mounted.current && controlVersion === animationRef.current.controlVersion() && transitionRef.current?.id === scene.id) {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         updateTransition({ ...scene, phase: 'voice' })
       }
-      const greeted = upcoming && controlVersion === animationRef.current.controlVersion()
-        ? await greetingsRef.current.attempt(upcoming.queueId, callRequested ? Math.max(0, 25000 - (performance.now() - transitionStartedAt)) : undefined)
+      const greeted = (!early || !early.handled) && upcoming && controlVersion === animationRef.current.controlVersion()
+        ? await greetingsRef.current.attempt(upcoming.queueId, callRequested ? Math.max(0, 25000 - (performance.now() - transitionStartedAt)) : undefined, false, activeScene.current)
         : false
-      if (!greeted && announce && controlVersion === animationRef.current.controlVersion()) {
-        await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null)
+      if ((!early || !early.handled) && !greeted && announce && controlVersion === animationRef.current.controlVersion()) {
+        await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null, activeScene.current)
       }
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       const current = store.getState().player
@@ -298,13 +357,65 @@ const PlayerController = (props: PlayerControllerProps) => {
         nextUserId: next.origin === 'PARTICIPANT' ? null : current.nextUserId,
         _isPlayingNext: false, _isBetweenTracks: false, _isReplayPlayback: false,
       }))
+    } catch {
+      await finishTransition(30)
     } finally {
       if (mounted.current) setPreparingQueueId(null)
       advancing.current = false
+      if (tail.current === early) tail.current = null
       // A command received during an idle probe must get a fresh transition,
       // including its greeting, after the previous async owner releases it.
       if (mounted.current && (retryHouseSelection || controlVersion !== animationRef.current.controlVersion())) retryAdvance(value => value + 1)
     }
+  }, [dispatch, finishTransition, updateTransition])
+
+  const handleProgress = useCallback((progress: SceneProgress) => {
+    const state = store.getState()
+    const next = getPlaybackQueue(state)
+    const index = next.result.indexOf(state.player.queueId)
+    const upcoming = next.result.slice(index + 1).map(id => next.entities[id]).find(item => item.status === 'APPROVED')
+    const birthdayPending = birthdayRef.current.pending
+    if (tail.current && (tail.current.run.sourceQueueId !== state.player.queueId || (tail.current.run.scene.event !== 'birthday' && (birthdayPending || tail.current.run.nextQueueId !== (upcoming?.queueId ?? null))))) {
+      tail.current.run.cancel()
+      animationRef.current.abort('scene-changed')
+      void finishTransition(30)
+      return
+    }
+    if (tail.current && progress.playing) tail.current.run.estimateMediaEnd((progress.duration - progress.position) * 1000)
+    if (tail.current || advancing.current || state.player._isReplayPlayback || state.player._authority !== 'GRANTED'
+      || animationRef.current.busy || animationRef.current.blocked || !progress.playing) return
+    const configured = selectedEventScene(state.rooms.entities[state.user.roomId]?.prefs?.eventScenes, birthdayPending ? 'birthday' : sceneEventFor(upcoming))
+    if (!sceneTailDue(configured, progress)) return
+    const run = new SceneRun(configured!, state.player.queueId, birthdayPending ? null : upcoming?.queueId ?? null, state.player._lastReplayTime)
+    run.estimateMediaEnd((progress.duration - progress.position) * 1000)
+    const version = animationRef.current.controlVersion()
+    activeScene.current = run
+    setSceneRun(run)
+    const scene: TransitionScene = { id: crypto.randomUUID(), background: backgroundRef.current, phase: 'intro' }
+    updateTransition(scene)
+    dispatch(playerStatus({ duration: progress.duration, position: progress.position }))
+    const completion = (async () => {
+      try {
+        if (birthdayPending) {
+          await birthdayRef.current.attempt('tail', run.sourceQueueId, run)
+          if (tail.current?.run === run) tail.current.handled = true
+          return
+        }
+        const visual = await animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: false, sceneTemplateId: run.scene.id, nextQueueId: run.nextQueueId }, ANIMATION_LIMITS.startMs).catch((): null => null)
+        if (run.controller.signal.aborted || version !== animationRef.current.controlVersion()) return
+        scene.background = visual?.background ?? scene.background
+        if (visual?.sceneResources) Object.assign(run.resources, visual.sceneResources)
+        updateTransition({ ...scene })
+        await animationRef.current.startTransition(run.sourceQueueId, run.nextQueueId, run.scene.cues.find(cue => cue.lane === 'ambience')?.volume ?? 1, run)
+        if (!sceneHasReferences(run.scene) && !run.scene.cues.some(cue => cue.lane === 'voice' && cue.binding === 'resource' && cue.enabled !== false)) await run.wait(run.scene.cues.find(cue => cue.lane === 'voice' && cue.enabled !== false), undefined, () => version === animationRef.current.controlVersion())
+        if (run.controller.signal.aborted) return
+        updateTransition({ ...scene, phase: 'voice' })
+        const greeted = upcoming ? await greetingsRef.current.attempt(upcoming.queueId, 25000, run.endedAt === null, run) : false
+        const animated = !greeted && !run.controller.signal.aborted ? await animationRef.current.attempt(run.endedAt === null ? 'tail' : 'ended', run.sourceQueueId, run.nextQueueId, run) : false
+        if (tail.current?.run === run) tail.current.handled = !!greeted || !!animated
+      } catch { /* The natural boundary retains its normal recovery path. */ }
+    })()
+    tail.current = { run, completion, handled: false }
   }, [dispatch, finishTransition, updateTransition])
 
   useEffect(() => {
@@ -322,11 +433,13 @@ const PlayerController = (props: PlayerControllerProps) => {
 
   const handleEnd = useCallback(() => {
     if (!queueItem) return
+    tail.current?.run.end()
+    if (tail.current) dispatch(playerStatus({ historyJSON: appendCompletedToHistory(store.getState().player.historyJSON, queueItem.queueId) }))
     const token = playbackToken(queueItem.queueId, player._lastReplayTime)
     settlePlayback(settlement.current, token, 'ENDED', { onAdvance: (include) => {
       void handleLoadNext(include, true)
     } })
-  }, [handleLoadNext, player._lastReplayTime, queueItem])
+  }, [dispatch, handleLoadNext, player._lastReplayTime, queueItem])
 
   const handleError = useCallback((msg: string, diagnostic?: { category: 'iframe' | 'api-load', code?: number }) => {
     logPlayerDiagnostic('media', msg, store.getState().user.roomId, queueItem?.queueId)
@@ -390,7 +503,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       // Next and a resumed boundary need the same full transition as natural end.
       void handleLoadNext(!player._isBetweenTracks, true, first ? 'start' : 'ended')
     }
-  }, [handleLoadNext, player.isPlaying, player.queueId, player._isPlayingNext, player._isBetweenTracks, animation.busy, animation.blocked, advanceRevision])
+  }, [handleLoadNext, player.isPlaying, player.queueId, player._isPlayingNext, player._isBetweenTracks, player._authority, animation.busy, animation.blocked, advanceRevision])
 
   // replaying?
   useEffect(() => {
@@ -445,7 +558,35 @@ const PlayerController = (props: PlayerControllerProps) => {
         : animation.ambientPlaying ? animation.snapshot?.ambience?.background ?? selectedBackground : selectedBackground
   const sceneId = greetings.scene ? `greeting:${greetings.scene.turnKey}` : animation.scene?.interventionId ?? animation.snapshot?.ambience?.id ?? 'boundary'
   const handingOff = transition?.phase === 'handoff' || transition?.phase === 'exiting'
+  const playingTail = !!sceneRun && sceneRun.sourceQueueId === player.queueId && sceneRun.endedAt === null
   const presentedTracks = selectPresentation({ queue: rawQueue, player, preferences: roomPrefs?.queue, loading: transition?.phase === 'loading' || handingOff })
+  const visibleGreeting = greetings.active && isGreetingAllowed(greetings.active, prefs.moderation.terms) ? greetings.active : null
+  useEffect(() => {
+    if (!sceneRun) return
+    const assets: Array<AnimationClip & { role?: string }> = greetings.scene?.transition?.assets ?? (animation.scene ? interventionAssets(animation.scene) : [])
+    if (!assets.length) return
+    const resources: SceneResources = {}
+    for (const asset of assets) {
+      const role = asset.role ?? (asset.kind === 'ambience' ? 'bed' : 'announcement')
+      const slot = (role === 'call' || role === 'effect' || (role === 'intro' && !sceneRun.scene.cues.some(cue => cue.slot === 'intro')) ? 'announcement' : role === 'bed' ? 'ambience' : role) as SceneSlot
+      const key = asset.sceneCueId ?? slot
+      resources[key] = { id: asset.id, durationMs: (resources[key]?.durationMs ?? 0) + asset.durationMs }
+    }
+    for (const [key, resource] of Object.entries(resources)) if (!sceneRun.resources[key]) sceneRun.resources[key] = resource
+  }, [sceneRun, greetings.scene, animation.scene])
+  const visualCues = sceneRun && !sceneRun.awaitingAudio ? resolveSceneVisuals(sceneRun.scene, sceneRun.resources, sceneRun.mediaEndMs(), sceneRun.timing) : []
+  const backgroundActive = !sceneRun || visualCues.some(cue => cue.lane === 'background' && sceneTime >= cue.startMs && sceneTime < cue.endMs)
+  const presentation = (
+    <PlayerTransitionPresentation
+      {...presentedTracks}
+      venueName={prefs.branding.name}
+      announcementActive={!!(animation.text || animation.scene || greetings.scene?.transition?.call)}
+      greetingIntro={!!greetings.intro}
+      greeting={greetings.active}
+      moderationTerms={prefs.moderation.terms}
+      onGreetingMounted={greetings.confirmMounted}
+    />
+  )
   const preparingItem = preparingQueueId === null ? undefined : rawQueue.entities[preparingQueueId]
   const preparedYouTube = preparingItem && preparingItem.isOptimistic !== true
     && preparingItem.source === 'YOUTUBE' && preparingItem.status === 'APPROVED' && preparingItem.externalId
@@ -474,7 +615,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         phase={phase}
         diagnostics={[audioStatus, greetings.error, animation.error, uiError, player.isErrored && player.errorMessage].filter(Boolean) as string[]}
         canSeek={queueItem?.source === 'YOUTUBE' && !foregroundScene && !player.isAtQueueEnd && !player.isErrored}
-        isPlaying={player.isPlaying && !birthday.busy}
+        isPlaying={player.isPlaying && (!birthday.busy || playingTail)}
         onSeek={target => mediaPlayerRef.current?.seekForDevelopment(target)}
       />
     </React.Suspense>
@@ -510,9 +651,9 @@ const PlayerController = (props: PlayerControllerProps) => {
         ref={mediaPlayerRef}
         cdgAlpha={player.cdgAlpha}
         cdgSize={player.cdgSize}
-        isPlaying={player.isPlaying && !birthday.busy}
-        isVisible={!!queueItem && !player.isErrored && !player.isAtQueueEnd && !player._isBetweenTracks && !animation.busy && !animation.blocked
-          && !(queueItem.source === 'YOUTUBE' && transition && !handingOff)}
+        isPlaying={player.isPlaying && (!birthday.busy || playingTail)}
+        isVisible={!!queueItem && !player.isErrored && !player.isAtQueueEnd && !player._isBetweenTracks && (playingTail || (!animation.busy && !animation.blocked
+          && !(queueItem.source === 'YOUTUBE' && transition && !handingOff)))}
         preparedYouTube={preparedYouTube}
         isReplayGainEnabled={prefs.isReplayGainEnabled}
         isVideoKeyingEnabled={!!queueItem?.isVideoKeyingEnabled}
@@ -524,6 +665,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         mediaType={queueItem ? queueItem.mediaType : null}
         mp4Alpha={player.mp4Alpha}
         onEnd={handleEnd}
+        onProgress={Object.values(roomPrefs?.eventScenes?.selected ?? {}).some(Boolean) ? handleProgress : undefined}
         onError={handleError}
         onLoad={handleLoad}
         onPlay={handlePlay}
@@ -532,19 +674,31 @@ const PlayerController = (props: PlayerControllerProps) => {
         rgTrackPeak={queueItem ? queueItem.rgTrackPeak : null}
         source={queueItem?.source}
         visualizer={playerVisualizer}
-        volume={transition && !handingOff ? 0 : player.volume}
+        volume={!playingTail && transition && !handingOff ? 0 : player.volume}
         width={props.width}
         height={props.height}
       />
-      {birthday.scene && <BirthdayScene key={birthday.scene.grant.event.id} grant={birthday.scene.grant} />}
+      {birthday.scene && (
+        <BirthdayScene
+          key={birthday.scene.grant.event.id}
+          grant={birthday.scene.grant}
+          startedAt={birthday.scene.startedAt}
+          run={birthday.scene.run ?? (sceneRun?.scene.event === 'birthday' ? sceneRun : null)}
+          mediaEndMs={sceneRun?.scene.event === 'birthday' ? sceneRun.endedAt === null ? Math.max(0, -sceneRun.scene.startOffsetMs) : sceneRun.endedAt - sceneRun.startedAt : 0}
+        />
+      )}
       {showScene && !birthday.scene && (
         <PlayerTransitionScene
-          background={background}
+          background={sceneRun ? null : backgroundActive ? background : null}
+          transparent={playingTail && !backgroundActive}
           playing={!!(transition || animation.scene || greetings.scene || animation.ambientPlaying || player.isPlaying || player._isPlayingNext)}
           sceneId={sceneId}
           exiting={transition?.phase === 'exiting'}
           onExited={handleVisualExit}
+          exitMs={sceneRun?.scene.exitMs}
+          entrance={sceneRun?.scene.cues.find(cue => cue.lane === 'background')}
         >
+          {sceneRun && <SceneBackgrounds cues={visualCues} elapsedMs={sceneTime} playing={player.isPlaying || player._isPlayingNext} />}
           {birthday.pendingEvent
             ? (
                 <div className={styles.authorityNotice} role='status'>
@@ -554,15 +708,20 @@ const PlayerController = (props: PlayerControllerProps) => {
               )
             : foregroundScene
               ? (
-                  <PlayerTransitionPresentation
-                    {...presentedTracks}
-                    venueName={prefs.branding.name}
-                    announcementActive={!!(animation.text || animation.scene || greetings.scene?.transition?.call)}
-                    greetingIntro={!!greetings.intro}
-                    greeting={greetings.active}
-                    moderationTerms={prefs.moderation.terms}
-                    onGreetingMounted={greetings.confirmMounted}
-                  />
+                  sceneRun
+                    ? (
+                        <SceneLayers
+                          fill
+                          cues={visualCues}
+                          elapsedMs={sceneTime}
+                          values={{ name: presentedTracks.incoming?.userDisplayName ?? '', table: presentedTracks.incoming?.tableLabelSnapshot ?? '', song: presentedTracks.incoming?.title ?? '', venue: prefs.branding.name, message: visibleGreeting?.message ?? '', sender: visibleGreeting?.sender ?? '' }}
+                          greeting={visibleGreeting ? { id: visibleGreeting.greetingId, message: visibleGreeting.message, sender: visibleGreeting.sender } : undefined}
+                          onGreetingMounted={greetings.confirmMounted}
+                        >
+                          {presentation}
+                        </SceneLayers>
+                      )
+                    : presentation
                 )
               : idleOverlay}
         </PlayerTransitionScene>

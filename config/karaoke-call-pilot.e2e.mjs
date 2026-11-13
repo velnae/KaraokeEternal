@@ -37,6 +37,10 @@ let failText = ''
 const provider = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json')
   if (req.method === 'GET') {
+    if (req.url.startsWith('/v1beta/voices')) {
+      res.end(JSON.stringify({ voices: [{ id: 'Puck', display_name: 'Puck' }, { id: 'Kore', display_name: 'Kore' }] }))
+      return
+    }
     res.end(JSON.stringify({ name: `models/${req.url.split('/').at(-1)}`, supportedGenerationMethods: ['generateContent'] }))
     return
   }

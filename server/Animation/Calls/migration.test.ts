@@ -80,7 +80,8 @@ it.each([
   expect(db.get('SELECT durationMs,filename FROM karaokeCallParts WHERE id=?', ['existing-voice'])).toMatchObject({ durationMs: 1124, filename: 'production/existing.mp3' })
 
   const generate = vi.fn()
-  const voice = new GreetingVoice({ configured: false, check: vi.fn(), generate })
+  const voice = new GreetingVoice({ configured: true, check: vi.fn(), generate })
+  voice.configure({ ...voice.config(), enabled: true })
   const automatic = new CallAutomation(new CallJobs('/unused', voice), voice)
   const setup = { requestId: 'new-setup-receipt', revision: 4 }
   const result = automatic.setup(1, setup)

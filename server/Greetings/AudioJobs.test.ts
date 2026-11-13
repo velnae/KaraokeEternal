@@ -7,7 +7,8 @@ import { open, close, db } from '../lib/Database.js'
 import Queue from '../Queue/Queue.js'
 import Greetings from './Greetings.js'
 import GreetingVoice from './GreetingVoice.js'
-import { GreetingVoiceError, type GreetingVoiceProvider } from './GeminiGreetingTts.js'
+import { VoiceError as GreetingVoiceError } from '../AudioProviders/errors.js'
+import type { SpeechProvider as GreetingVoiceProvider } from '../AudioProviders/types.js'
 import GreetingAudioJobs, { type GreetingAudioJob } from './AudioJobs.js'
 
 function wave (seconds = 0.4, silent = false) {
@@ -342,6 +343,9 @@ it('validates cached bytes before reuse and cleans expired audio without deletin
   await waitReady(second.greetingId)
   expect(model.state.received).toHaveLength(2)
   const current = jobFor(second.greetingId)!
+  // A ready file can precede asynchronous worker finalization. Retention cleanup
+  // deliberately skips that active job, so finish it before testing expiration.
+  await jobs.stop()
   db.run('UPDATE greetingAudioJobs SET updatedAt=?', [Date.now() - 40 * 86400000])
   await jobs.cleanup()
   expect(await fs.stat(path.join(data, current.filename!))).toBeDefined()

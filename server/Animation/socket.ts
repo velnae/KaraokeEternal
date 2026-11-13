@@ -6,6 +6,8 @@ import Queue from '../Queue/Queue.js'
 import { QUEUE_PUSH } from '../../shared/actionTypes.js'
 import { TRANSITION_VIDEO_SCENE } from '../../shared/transitionVideo.js'
 import { transitionVideoScene } from '../TransitionVideo/Playback.js'
+import { getEventScenes, sceneVisualResources, eventSceneForQueue, sceneFixedAudio } from './Scenes/Store.js'
+import { sceneAudioPlan } from '../../shared/sceneAudio.js'
 import {
   ANIMATION_REQUEST, ANIMATION_CANCEL, ANIMATION_CONTROL, ANIMATION_RESERVE,
   ANIMATION_READY, ANIMATION_EVENT, ANIMATION_SYNC, ANIMATION_STATE,
@@ -28,10 +30,17 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
     let grant
     let ambience
     let background
+    let sceneResources
+    let sceneFirstCueId: string | undefined
     let eligible: boolean | undefined
     if (type === TRANSITION_VIDEO_SCENE) {
       if (!isId(input.sceneId) || typeof input.finished !== 'boolean') throw new Error('Escena de video no válida.')
-      background = transitionVideoScene(roomId, input.sceneId, input.finished)
+      const settings = getEventScenes(roomId)
+      const template = settings.templates.find(scene => scene.id === input.sceneTemplateId && settings.selected[scene.event] === scene.id)
+      if (input.nextQueueId !== undefined && input.nextQueueId !== null && (!Number.isSafeInteger(input.nextQueueId) || !Queue.get(roomId).entities[input.nextQueueId])) throw new Error('El pedido de la coreografía no pertenece a esta sala.')
+      background = transitionVideoScene(roomId, input.sceneId, input.finished, template?.cues.find(cue => cue.lane === 'background')?.resourceId,
+        { template: template ?? null, nextQueueId: input.nextQueueId ?? null, ownerSocketId: sock.id })
+      if (!input.finished && template) sceneResources = sceneVisualResources(roomId, template, background, { key: `scene:${roomId}:${input.sceneId}`, until: Date.now() + 60000 })
     } else if (type === ANIMATION_REQUEST) {
       if (!isId(input.requestId) || !isId(input.clipId)) throw new Error('Solicitud no válida')
       const asset = catalogAsset(input.clipId, roomId)
@@ -63,8 +72,17 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
         || !(input.sourceQueueId === null || Number.isInteger(input.sourceQueueId))
         || !(input.expectedNextQueueId === null || Number.isInteger(input.expectedNextQueueId))) throw new Error('Reserva no válida')
       if (input.probeOnly !== undefined && (type !== ANIMATION_AUTO || typeof input.probeOnly !== 'boolean')) throw new Error('Consulta no válida')
-      if (input.probeOnly) eligible = !!Animation.automaticPlan(identity, input)
-      else {
+      if (input.probeOnly) {
+        const plan = Animation.automaticPlan(identity, input)
+        eligible = !!plan
+        if (plan) {
+          const scene = eventSceneForQueue(roomId, input.expectedNextQueueId, sock.id)
+          const native: Array<import('../../shared/animation.js').AnimationClip & { role?: string }> = plan.sceneOnly ? [] : [{ ...plan.clip, role: 'announcement' }]
+          const sequence = sceneAudioPlan(scene, native, sceneFixedAudio(roomId, scene, Animation.snapshot(roomId).readyClips))
+          sceneFirstCueId = sequence[0]?.sceneCueId
+          if (scene && !sequence.length) eligible = false
+        }
+      } else {
         grant = type === ANIMATION_AUTO ? Animation.automatic(identity, input, sock._lastPlayerStatus ?? {}) : Animation.reserve(identity, input, sock._lastPlayerStatus ?? {})
         sock.server.to(Rooms.prefix(roomId)).emit('action', { type: QUEUE_PUSH, payload: Queue.get(roomId) })
       }
@@ -94,7 +112,7 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       Animation.ambienceStarted(identity, input.id, input.runId)
     }
     Animation.sweep()
-    acknowledge?.({ type: ANIMATION_STATE, payload: Animation.snapshot(roomId), ...(background !== undefined ? { background } : {}), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
+    acknowledge?.({ type: ANIMATION_STATE, payload: Animation.snapshot(roomId), ...(sceneResources ? { sceneResources } : {}), ...(sceneFirstCueId ? { sceneFirstCueId } : {}), ...(background !== undefined ? { background } : {}), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
   } catch (error) {
     acknowledge?.({ type: ANIMATION_STATE, error: (error as Error).message })
   }

@@ -98,7 +98,16 @@ export interface BirthdayEvent extends PublicBirthday, BirthdayInput {
 }
 export interface BirthdaySnapshot { roomId: number, events: PublicBirthday[] }
 export interface BirthdayOverview { settings: BirthdaySettings, events: BirthdayEvent[], assets: BirthdayAsset[], configured: { text: boolean, voice: boolean } }
-export interface BirthdayGrant { event: PublicBirthday, assets: BirthdayAsset[], token: string, remainingMs: number }
+export interface BirthdayGrant {
+  event: PublicBirthday
+  assets: BirthdayAsset[]
+  token: string
+  remainingMs: number
+  scene?: import('./eventScenes.js').EventScene | null
+  ambience?: BirthdayAsset | null
+  extraAudio?: Array<{ cueId: string, asset: BirthdayAsset }>
+  resources?: import('./eventScenes.js').SceneResources
+}
 
 export const celebrationYear = (now = new Date()) => Number(new Intl.DateTimeFormat('en', { timeZone: 'America/Lima', year: 'numeric' }).format(now))
 export function validateBirthdayInput (value: unknown, year = celebrationYear()): BirthdayInput {

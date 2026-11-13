@@ -13,6 +13,7 @@ export default class AnnouncementAudio {
   private finishSource: (() => void) | null = null
   private renewSource: ((milliseconds: number, loop?: boolean) => boolean) | null = null
   private gain: GainNode | null = null
+  private foregroundMultiplier = 1
   private generation = 0
   private preparing: Promise<string[]> = Promise.resolve([])
   private playingChecksum: string | null = null
@@ -161,7 +162,7 @@ export default class AnnouncementAudio {
     const prepare = async () => {
       if (!current()) return []
       const calls = assets.filter(asset => asset.role === 'call').slice(0, 3)
-      const greetings = assets.filter(asset => asset.role !== 'call').slice(0, 3)
+      const greetings = [...assets.filter(asset => asset.role !== 'call' && !asset.sceneCueId).slice(0, 3), ...assets.filter(asset => asset.sceneCueId).slice(0, 18)]
       const desired = new Set([...calls, ...greetings].map(asset => asset.checksum))
       for (const hash of [...this.greetingKeys, ...this.callKeys]) {
         if (!desired.has(hash) && !this.catalogKeys.has(hash) && hash !== this.playingChecksum && hash !== this.bedChecksum) this.buffers.delete(hash)
@@ -210,12 +211,13 @@ export default class AnnouncementAudio {
   }
 
   /** A bounded second source under the voice, never a continuation into the song. */
-  playBed (checksum: string, volume: number, durationMs: number, loop = false) {
+  playBed (checksum: string, volume: number, durationMs: number, loop = false, fadeMs = 200) {
     const context = this.context
     const buffer = this.buffers.get(checksum)
     if (!context || context.state !== 'running' || !buffer || this.bedStop || this.ambienceHeld || durationMs <= 0) throw new Error('El fondo no está disponible')
     const duration = Math.min(TRANSITION_BED_MS / 1000, durationMs / 1000, loop ? Infinity : buffer.duration)
     const until = context.currentTime + duration
+    const fade = Math.min(Math.max(0, fadeMs) / 1000, duration / 2)
     this.bedChecksum = checksum
     this.bedCompletion = new Promise<'ENDED' | 'STOPPED'>((resolve) => {
       const source = context.createBufferSource()
@@ -224,8 +226,8 @@ export default class AnnouncementAudio {
       source.loop = loop
       source.connect(gain).connect(context.destination)
       gain.gain.setValueAtTime(0, context.currentTime)
-      gain.gain.linearRampToValueAtTime(volume, Math.min(until, context.currentTime + 0.2))
-      gain.gain.setValueAtTime(volume, Math.max(context.currentTime, until - 0.25))
+      gain.gain.linearRampToValueAtTime(volume, Math.min(until, context.currentTime + fade))
+      gain.gain.setValueAtTime(volume, Math.max(context.currentTime, until - fade))
       gain.gain.linearRampToValueAtTime(0, until)
       let settled = false
       let stopped = false
@@ -285,7 +287,7 @@ export default class AnnouncementAudio {
 
   bedVolume (value: number) { this.bedVolumeChange?.(value) }
 
-  play (checksum: string, volume: number, segment?: { offsetMs: number, durationMs: number, renewable?: boolean, loop?: boolean }): Promise<'ENDED' | 'STOPPED'> {
+  play (checksum: string, volume: number, segment?: { offsetMs: number, durationMs: number, renewable?: boolean, loop?: boolean }, fadeMs = 0, multiplier = 1): Promise<'ENDED' | 'STOPPED'> {
     const context = this.context
     const buffer = this.buffers.get(checksum)
     if (!context || context.state !== 'running' || !buffer || this.stopSource) throw new Error('El canal de voz no está disponible')
@@ -294,6 +296,8 @@ export default class AnnouncementAudio {
     const duration = segment?.renewable ? buffer.duration - offset : Math.min(buffer.duration - offset, (segment?.durationMs ?? buffer.duration * 1000) / 1000)
     if (duration <= 0 || (segment?.renewable && (!Number.isFinite(segment.durationMs) || segment.durationMs <= 0))) throw new Error('Tramo de audio no válido')
     this.playingChecksum = checksum
+    this.foregroundMultiplier = multiplier
+    volume *= multiplier
     const runId = nextTraceIdentity()
     const began = performance.now()
     const audioBegan = context.currentTime
@@ -305,6 +309,13 @@ export default class AnnouncementAudio {
       source.buffer = buffer
       source.loop = segment?.renewable === true && segment.loop === true
       gain.gain.value = volume
+      if (fadeMs > 0 && !segment?.renewable) {
+        const fade = Math.min(fadeMs / 1000, duration / 2)
+        gain.gain.setValueAtTime(0, context.currentTime)
+        gain.gain.linearRampToValueAtTime(volume, context.currentTime + fade)
+        gain.gain.setValueAtTime(volume, context.currentTime + duration - fade)
+        gain.gain.linearRampToValueAtTime(0, context.currentTime + duration)
+      }
       source.connect(gain).connect(context.destination)
       let stopped = false
       let settled = false
@@ -388,6 +399,7 @@ export default class AnnouncementAudio {
   renewAmbience (milliseconds: number, loop?: boolean) { return this.renewSource?.(milliseconds, loop) ?? false }
 
   volume (value: number) {
+    value *= this.foregroundMultiplier
     if (this.gain && value === 0 && this.gain.gain.value !== 0) tracePlayback('audio-muted', { channelId: this.traceChannelId, volume: value })
     if (this.context && this.gain) this.gain.gain.setTargetAtTime(value, this.context.currentTime, 0.02)
   }

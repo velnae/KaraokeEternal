@@ -106,7 +106,7 @@ operate independently of the pilot.
 | --- | --- |
 | `server/Tables/Tables.ts` and `router.ts` | Stable room/table identity and administrative routes already exist. Voice binding must not modify QR tokens or participant sessions. |
 | `src/routes/Account/components/Rooms/Tables/Tables.tsx` | Extend the current table manager with a small voice editor rather than a second table-management screen. |
-| `server/Greetings/GeminiGreetingTts.ts` | Reuse the existing REST adapter, complete WAV response and separate text/style fields. |
+| `server/AudioProviders/Gemini.ts` | Reuse the existing REST adapter, complete WAV response and separate text/style fields. |
 | `server/Greetings/GreetingVoice.ts` | Reuse the application-wide generation gate, credentials, quota accounting and concurrency limit. Do not instantiate a separate quota bypass for calls. |
 | `server/Greetings/AudioJobs.ts` | Reuse job-lifecycle patterns, not greeting-specific eligibility queries. Its current preview uses a fixed sample and deletes the result, so it is not a persistent call store. |
 | `server/Animation/AudioPreparation.ts` | Reuse final validation, loudness normalization, MP3 export and checksum. It removes its raw temporary input, so composition masters must be preserved separately. |

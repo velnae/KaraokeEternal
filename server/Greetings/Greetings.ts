@@ -14,8 +14,12 @@ import { callTransitionFailure, planCallTransition, prepareCall } from '../Anima
 import { isGreetingAllowed } from '../../shared/greetings.js'
 import { publicGuestName } from '../../shared/guestName.js'
 import getLogger from '../lib/Log.js'
+import { GREETING_START_MS } from '../../shared/greetings.js'
+import type { GreetingAsset } from '../../shared/greetings.js'
+import { sceneAudioPlan } from '../../shared/sceneAudio.js'
+import { eventSceneForQueue, sceneTailAllowed, sceneFixedAudio } from '../Animation/Scenes/Store.js'
 
-export interface GreetingPlayerStatus { queueId?: number, historyJSON?: string, nextUserId?: number | null, isAtQueueEnd?: boolean, queueDecisionAt?: number }
+export interface GreetingPlayerStatus { queueId?: number, historyJSON?: string, nextUserId?: number | null, isAtQueueEnd?: boolean, queueDecisionAt?: number, position?: number, duration?: number, isPlaying?: boolean }
 interface Identity { roomId: number, userId: number, role?: string, isAdmin?: boolean }
 interface Delivery { ownerSocketId: string, untilAt: number, finished: number, displayMs: number | null, interventionId: string | null, voiceStatus: GreetingVoiceStatus | null }
 
@@ -172,7 +176,7 @@ export default class Greetings {
     }
   }
 
-  static reserve (roomId: number, socketId: string, expectedQueueId: number, status: GreetingPlayerStatus, blocker?: string, prepared: GreetingPreparation | null = null, ready: string[] = [], userId = 0, remainingMs = 25000): GreetingGrant | null {
+  static reserve (roomId: number, socketId: string, expectedQueueId: number, status: GreetingPlayerStatus, blocker?: string, prepared: GreetingPreparation | null = null, ready: string[] = [], userId = 0, remainingMs = 25000, tail = false): GreetingGrant | null {
     if (!Rooms.get(roomId).entities[roomId]) throw new Error('La sala está cerrada')
     Greetings.reconcile(roomId)
     const order = Greetings.order(roomId, status)
@@ -180,7 +184,7 @@ export default class Greetings {
     const next = order.result.slice(index + 1).find(id => order.entities[id].status === 'APPROVED')
     if (next !== expectedQueueId) throw new Error('El próximo turno cambió')
     const current = order.entities[status.queueId ?? -1]
-    if (current && !status.isAtQueueEnd && !['PLAYED', 'FAILED'].includes(current.status)) throw new Error('La canción todavía ocupa la sala')
+    if (current && !status.isAtQueueEnd && !['PLAYED', 'FAILED'].includes(current.status) && !(tail && sceneTailAllowed(roomId, expectedQueueId, status, socketId))) throw new Error('La canción todavía ocupa la sala')
     const turn = order.turns.find(turn => turn.ids.includes(next!))
     const call = prepareCall(roomId, next!)
     if (!turn && !call) return null
@@ -195,17 +199,33 @@ export default class Greetings {
           { ...prepared, assets: prepared.assets.filter(asset => asset.role !== 'greeting' || (compatible && control.enabled && !reason)) },
           ready, Animation.snapshot(roomId).voiceBudgetRemainingMs ?? 0, remainingMs)
       : null
-    const candidate = callCandidate ?? (!reason && selected && compatible && control.enabled
+    let candidate = callCandidate ?? (!reason && selected && compatible && control.enabled
       ? planGreetingTransition(selected, prepared, ready, Animation.snapshot(roomId).voiceBudgetRemainingMs ?? 0, remainingMs)
       : null)
+    const scene = eventSceneForQueue(roomId, expectedQueueId, socketId)
+    const fixed: Record<string, GreetingAsset> = Object.fromEntries(Object.entries(sceneFixedAudio(roomId, scene, ready)).map(([cueId, clip]) => [cueId, { ...clip, role: 'intro' as const, url: `api/animation/assets/${encodeURIComponent(clip.id)}` }]))
+    if (candidate) {
+      const foreground = sceneAudioPlan(scene, candidate.assets.filter(asset => asset.role !== 'bed'), fixed)
+      const extraMs = foreground.reduce((sum, asset) => sum + (asset.sceneDelayMs ?? 0), 0) + Object.values(fixed).reduce((sum, asset) => sum + asset.durationMs, 0)
+      candidate = candidate.durationMs + extraMs <= Math.min(25000 - GREETING_START_MS, remainingMs - GREETING_START_MS)
+        ? { ...candidate, assets: [...foreground, ...candidate.assets.filter(asset => asset.role === 'bed')], durationMs: candidate.durationMs + extraMs, voiceMs: candidate.voiceMs + Object.values(fixed).filter(asset => asset.kind !== 'effect').reduce((sum, asset) => sum + asset.durationMs, 0) }
+        : null
+    }
+    if (!candidate && !reason && !blocker && Object.keys(fixed).length) {
+      const foreground = sceneAudioPlan(scene, [], fixed)
+      const contentMs = foreground.reduce((sum, asset) => sum + asset.durationMs + (asset.sceneDelayMs ?? 0), 0)
+      const displayMs = selected ? greetingDuration(selected) : 0
+      const durationMs = Math.max(contentMs, displayMs) + 250
+      if (durationMs <= Math.min(25000 - GREETING_START_MS, remainingMs - GREETING_START_MS)) candidate = { assets: foreground, durationMs, displayMs, voiceMs: foreground.reduce((sum, asset) => sum + asset.durationMs, 0), sceneOnly: true }
+    }
     let transition: GreetingGrant['transition']
     let displayMs = selected ? greetingDuration(selected) : 0
     let until = Date.now() + displayMs + 2000
     db.exec('SAVEPOINT greeting_turn')
     try {
       if (candidate) {
-        const text = candidate.call ? candidate.assets.find(asset => asset.role === 'call' || asset.role === 'signature')!.displayText : selected!.message
-        const intervention = Animation.reserveGreeting({ roomId, socketId, userId }, turnKey, candidate.assets, candidate.durationMs, candidate.voiceMs, text, candidate.call)
+        const text = candidate.call ? candidate.assets.find(asset => asset.role === 'call' || asset.role === 'signature')!.displayText : selected?.message ?? candidate.assets[0].displayText
+        const intervention = Animation.reserveGreeting({ roomId, socketId, userId }, turnKey, candidate.assets, candidate.durationMs, candidate.voiceMs, text, candidate.call, candidate.sceneOnly)
         if (intervention) {
           transition = { ...candidate, intervention }
           displayMs = candidate.displayMs

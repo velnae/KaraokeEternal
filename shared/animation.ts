@@ -65,6 +65,11 @@ export const TRANSITION_BED_MS = 40000
 export const ambienceBedVolume = (prefs: AnimationPrefs) => prefs.ambienceVolume ?? 0.2
 
 export interface AnimationClip {
+  sceneCueId?: string
+  sceneStartMs?: number
+  sceneDelayMs?: number
+  sceneVolume?: number
+  sceneFadeMs?: number
   id: string
   title: string
   displayText: string
@@ -173,6 +178,8 @@ export interface AnimationSnapshot extends AnimationRoomState {
   greetingVoiceEnabled?: boolean
 }
 export interface AnimationReply {
+  sceneResources?: import('./eventScenes.js').SceneResources
+  sceneFirstCueId?: string
   background?: TransitionVideoBackground | null
   eligible?: boolean
   type: string

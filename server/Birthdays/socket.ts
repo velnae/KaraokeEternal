@@ -5,6 +5,8 @@ import Animation from '../Animation/Animation.js'
 import Queue from '../Queue/Queue.js'
 import { birthdayService } from './Service.js'
 import { assertRoom, getBirthday, publicEvents } from './Store.js'
+import { selectedEventScene, sceneTailDue } from '../../shared/eventScenes.js'
+import { getEventScenes } from '../Animation/Scenes/Store.js'
 
 export default {
   [BIRTHDAY_SYNC]: (sock, _action, acknowledge) => {
@@ -16,11 +18,14 @@ export default {
     const roomId = sock.user.roomId
     assertRoom(roomId)
     const service = birthdayService()
+    if (payload?.operation === 'prepare') return acknowledge({ payload: service.preparePlayback(roomId) })
     if (payload?.operation === 'reserve') {
       if (!publicEvents(roomId).length) return acknowledge({ payload: null })
       const status = Rooms.getPlayerStatus(sock.server, roomId)
       const idle = status?.isAtQueueEnd || status?.queueId === -1
-      if (!idle && !(payload.boundary === 'ended' && status?.queueId === payload.sourceQueueId)) throw new Error('La canción actual todavía ocupa la sala.')
+      const tail = payload.boundary === 'tail' && status?.queueId === payload.sourceQueueId
+        && sceneTailDue(selectedEventScene(getEventScenes(roomId), 'birthday'), { position: status?.position, duration: status?.duration, playing: status?.isPlaying })
+      if (!idle && !tail && !(payload.boundary === 'ended' && status?.queueId === payload.sourceQueueId)) throw new Error('La canción actual todavía ocupa la sala.')
       // Persist the boundary before waiting for preparation or sound permission;
       // reconnecting must not requeue a song that has already ended.
       if (payload.boundary === 'ended' && status?.queueId === payload.sourceQueueId) Queue.transition(roomId, payload.sourceQueueId, 'PLAYED')
@@ -29,7 +34,7 @@ export default {
         return acknowledge({ payload: { waiting: true } })
       }
       if (Animation.active(roomId) && Animation.active(roomId)?.status !== 'PENDING') return acknowledge({ payload: { waiting: true } })
-      const grant = await service.reserve(roomId, sock.id)
+      const grant = await service.reserve(roomId, sock.id, tail ? Math.max(0, status.duration - status.position) * 1000 : 0)
       if (!Rooms.isAuthoritativePlayer(sock)) {
         service.interrupt(roomId, 'El reproductor se desconectó.', sock.id)
         throw new Error('Se perdió la autoridad del reproductor.')

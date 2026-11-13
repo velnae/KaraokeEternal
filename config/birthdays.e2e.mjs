@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import { checkBirthdayHistory } from './birthday-history-checks.e2e.mjs'
 import { checkBirthdaySettings } from './birthday-settings-checks.e2e.mjs'
 import { checkBirthdayScene } from './birthday-scene-checks.e2e.mjs'
+import { installYouTubeTransitionFixture } from './transition-ambience-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -32,7 +33,7 @@ const calls = []
 let server, browser, socket, db, player
 const errors = []
 let lastStatus
-for (const [name, seconds, hz] of [['intro', 1, 330], ['greeting', 12, 440], ['music', 15, 550]]) {
+for (const [name, seconds, hz] of [['intro', 1, 330], ['greeting', 12, 440], ['music', 15, 550], ['effect', 0.6, 660]]) {
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `sine=frequency=${hz}:sample_rate=24000`, '-t', String(seconds), path.join(data, `${name}.wav`)])
 }
 execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=purple:s=320x180:r=10', '-f', 'lavfi', '-i', 'sine=frequency=220', '-t', '5', '-c:v', 'libx264', '-threads', '2', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(data, 'song.mp4')])
@@ -219,7 +220,7 @@ try {
     await admin.screenshot({ path: path.join(data, `queue-${width}.png`), fullPage: true })
   }
   await admin.goto(`${uiBase}admin/settings/birthdays?view=settings`)
-  await checkBirthdaySettings({ admin, api, base, calls, personalized, data })
+  if (process.env.KARAOKE_E2E_BIRTHDAY_SCENES !== '1') await checkBirthdaySettings({ admin, api, base, calls, personalized, data })
   for (const width of [390, 1440]) {
     await admin.setViewportSize({ width, height: 900 })
     await admin.getByRole('heading', { name: 'Cumpleaños', exact: true }).scrollIntoViewIfNeeded()
@@ -240,6 +241,16 @@ try {
   }
   await context.addInitScript(() => {
     window.birthdayTrace = []
+    window.birthdayBackgroundEnded = 0
+    window.birthdayLeadTimes = []
+    document.addEventListener('DOMContentLoaded', () => {
+      let present = false
+      new MutationObserver(() => {
+        const active = !!document.querySelector('[data-scene-cue="greeting-lead"]')
+        if (active && !present) window.birthdayLeadTimes.push(performance.now())
+        present = active
+      }).observe(document.body, { childList: true, subtree: true })
+    })
     const create = AudioContext.prototype.createBufferSource
     AudioContext.prototype.createBufferSource = function () {
       const node = create.call(this)
@@ -251,12 +262,31 @@ try {
       }
       node.start = (...args) => {
         window.birthdayGain = node.birthdayGain
-        window.birthdayTrace.push({ duration: node.buffer?.duration, at: performance.now() })
+        window.birthdayTrace.push({ duration: node.buffer?.duration, at: performance.now(), loop: node.loop })
+        if (node.loop) node.addEventListener('ended', () => window.birthdayBackgroundEnded++)
         return start(...args)
       }
       return node
     }
   })
+  if (process.env.KARAOKE_E2E_BIRTHDAY_SCENES === '1') {
+    const upload = await api.post(`${base}api/animation/resources/upload`, { multipart: { requestId: 'birthday-scene-bed', title: 'Birthday ambience', kind: 'ambience',
+      metadata: JSON.stringify({ text: '', family: 'manual', modes: ['mixed'], loop: true }), file: { name: 'bed.wav', mimeType: 'audio/wav', buffer: fs.readFileSync(path.join(data, 'intro.wav')) } } })
+    assert.equal(upload.status(), 200, await upload.text())
+    const ambience = await upload.json()
+    const effectUpload = await api.post(`${base}api/animation/resources/upload`, { multipart: { requestId: 'birthday-scene-effect', title: 'Birthday ending effect', kind: 'effect',
+      metadata: JSON.stringify({ text: '', family: 'manual', modes: ['mixed'], effectType: 'short', category: 'appreciation' }), file: { name: 'effect.wav', mimeType: 'audio/wav', buffer: fs.readFileSync(path.join(data, 'effect.wav')) } } })
+    assert.equal(effectUpload.status(), 200, await effectUpload.text())
+    const effect = await effectUpload.json()
+    const scenes = (await call('animation/scenes/')).settings
+    scenes.selected.birthday = 'birthday'
+    const scene = scenes.templates.find(scene => scene.id === 'birthday')
+    Object.assign(scene.cues.find(cue => cue.slot === 'greeting'), { anchor: 'block', referenceId: 'intro', referenceEdge: 'end', offsetMs: 500 })
+    scene.cues.find(cue => cue.lane === 'ambience').resourceId = ambience.id
+    scene.cues.unshift({ id: 'ending-effect', lane: 'voice', slot: 'announcement', binding: 'resource', resourceId: effect.id, anchor: 'block', referenceId: 'music', referenceEdge: 'end', offsetMs: 0, durationMs: null, volume: 1, fadeMs: 0, animation: 'none', position: 'center', text: '', label: 'Ending effect' })
+    scene.cues.push({ ...scene.cues.find(cue => cue.lane === 'text'), id: 'greeting-lead', anchor: 'block', referenceId: 'greeting', referenceEdge: 'start', offsetMs: -500, durationMs: 1000, text: '{name}' })
+    await call('animation/scenes/', scenes, 'PUT')
+  }
   player = await context.newPage()
   player.on('pageerror', error => errors.push(error.message))
   await player.goto(`${uiBase}player`)
@@ -300,25 +330,62 @@ try {
   await expect(player.getByRole('heading', { name: 'María', exact: true })).toBeVisible()
   await expect.poll(async () => (await event(birthday.id)).playback, { timeout: 45000 }).toBe('completed')
   assert.equal(db.prepare('SELECT count(*) n FROM birthdayIntroUses WHERE birthdayId=?').get(birthday.id).n, 1)
-  const trace = await player.evaluate(() => window.birthdayTrace)
+  const trace = await player.evaluate(() => window.birthdayTrace.filter(item => !item.loop && item.duration > 0.9))
+  if (process.env.KARAOKE_E2E_BIRTHDAY_SCENES === '1') {
+    assert.equal(await player.evaluate(() => window.birthdayTrace.filter(item => item.loop).length), 1)
+    await expect.poll(() => player.evaluate(() => window.birthdayBackgroundEnded)).toBe(1)
+    assert.equal(await player.evaluate(() => window.birthdayTrace.filter(item => !item.loop && item.duration > 0.5 && item.duration < 0.8).length), 1, 'the independent birthday ending effect must play exactly once')
+  }
   assert.equal(trace.length, 3, JSON.stringify(trace))
   assert.ok(trace[0].duration >= 1 && trace[0].duration < 1.2)
   assert.ok(trace[1].duration >= 12 && trace[1].duration < 12.2)
   assert.ok(trace[2].duration >= 15 && trace[2].duration < 15.2)
   assert.ok(trace[1].at - trace[0].at >= 900)
+  if (process.env.KARAOKE_E2E_BIRTHDAY_SCENES === '1') {
+    assert.ok(trace[1].at - trace[0].at >= 1400, 'birthday choreography preserves the configured pause before the greeting')
+    const lead = await player.evaluate(() => window.birthdayLeadTimes[0])
+    assert.ok(lead < trace[1].at - 200 && lead > trace[1].at - 800, `birthday text leads the greeting by approximately 500ms: ${JSON.stringify({ lead, trace })}`)
+  }
   assert.ok(trace[2].at - trace[1].at >= 11900)
   await expect.poll(() => db.prepare('SELECT count(*) n FROM queue WHERE status=\'PLAYED\'').get().n, { timeout: 12000 }).toBe(2)
   const idle = await call('birthdays/events', { name: 'José', sex: 'male', birthYear: 1990, requestId: crypto.randomUUID() })
   await expect.poll(async () => (await event(idle.id)).preparation, { timeout: 20000 }).toBe('ready')
+  let tailSource
+  if (process.env.KARAOKE_E2E_BIRTHDAY_SCENES === '1') {
+    await emit('server/PLAYER_REQ_PAUSE')
+    await player.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
+    await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).playerPresent).toBe(false)
+    await installYouTubeTransitionFixture(context, path.join(data, 'song.mp4'))
+    const scenes = (await call('animation/scenes/')).settings
+    const scene = scenes.templates.find(scene => scene.id === 'birthday')
+    scene.startOffsetMs = -2000
+    scene.cues.find(cue => cue.lane === 'background').anchor = 'mediaEnd'
+    scene.cues.find(cue => cue.lane === 'text').anchor = 'mediaEnd'
+    await call('animation/scenes/', scenes, 'PUT')
+    tailSource = Number(db.prepare(`INSERT INTO queue(roomId,userId,prevQueueId,source,externalId,title,artistOrChannel,origin,requestIntent)
+      VALUES(1,1,(SELECT max(queueId) FROM queue),'YOUTUBE','fixture0001','Birthday tail','Fixture','OPERATOR','LISTEN')`).run().lastInsertRowid)
+    await player.goto(`${uiBase}player`)
+    await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).playerPresent).toBe(true)
+    await emit('server/PLAYER_REQ_PLAY')
+    await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(tailSource).status, { timeout: 15000 }).toBe('PLAYING')
+  }
   await call(`birthdays/events/${idle.id}`, { operation: 'schedule', revision: idle.revision })
+  if (tailSource) {
+    await player.getByRole('button', { name: 'Permitir sonido', exact: true }).click()
+  }
   await expect.poll(async () => (await event(idle.id)).playback).toBe('playing')
+  if (tailSource) {
+    assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(tailSource).status, 'PLAYING', 'birthday pre-roll must not finish YouTube early')
+    assert.equal(await player.evaluate(() => window.youtubeTransition.video.paused), false)
+    await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(tailSource).status, { timeout: 10000 }).toBe('PLAYED')
+  }
   await emit('server/PLAYER_REQ_PAUSE')
   await expect.poll(async () => (await event(idle.id)).playback).toBe('interrupted')
   await player.reload()
   assert.equal((await event(idle.id)).playback, 'interrupted')
-  await checkBirthdayHistory({ admin, api, base, uiBase, db, birthday, data, calls })
+  if (process.env.KARAOKE_E2E_BIRTHDAY_SCENES !== '1') await checkBirthdayHistory({ admin, api, base, uiBase, db, birthday, data, calls })
   assert.deepEqual(errors, [])
-  console.log(JSON.stringify({ mode: development ? 'development' : 'production', httpsUi, assertions: 'private context; real generation pipeline with fixture providers; >25s event; held/reload/preview; keyboard/mobile; paused song and withdrawal; queued next without interruption; exclusive intro/greeting/full music; video failure keeps name and audio; resumes next song; idle start; interrupted no replay', artifacts: data }, null, 2))
+  console.log(JSON.stringify({ mode: development ? 'development' : 'production', httpsUi, choreography: process.env.KARAOKE_E2E_BIRTHDAY_SCENES === '1' ? 'explicit intro/greeting/music/effect references, 500ms greeting delay, negative text lead and bounded ambience' : 'original sequence', assertions: 'private context; real generation pipeline with fixture providers; >25s event; held/reload/preview; keyboard/mobile; paused song and withdrawal; queued next without interruption; exclusive intro/greeting/full music; video failure keeps name and audio; resumes next song; idle start; interrupted no replay', artifacts: data }, null, 2))
 } catch (error) {
   console.error('Last player status', lastStatus, 'page errors', errors)
   for (const context of browser?.contexts() ?? []) for (const page of context.pages()) {

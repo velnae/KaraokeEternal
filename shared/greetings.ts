@@ -23,8 +23,8 @@ export const greetingVoiceLabels: Record<GreetingVoiceStatus, string> = {
 }
 export interface GreetingAsset extends AnimationClip { role: 'greeting' | 'intro' | 'bed' | 'call' | 'signature', url: string, partId?: string, identifiesSender?: boolean, senderIncluded?: boolean }
 export interface GreetingPerformer { name: string, tableLabel: string | null, requestIntent: RequestIntent, title: string }
-export interface GreetingPreparation { queueId: number, greetingId: number | null, assets: GreetingAsset[], playbackVersion: number, performer: GreetingPerformer, call?: CallPreparation }
-export interface GreetingTransition { assets: GreetingAsset[], durationMs: number, voiceMs: number, displayMs: number, call?: CallContext }
+export interface GreetingPreparation { queueId: number, greetingId: number | null, assets: GreetingAsset[], playbackVersion: number, performer: GreetingPerformer, call?: CallPreparation, fixed?: Record<string, GreetingAsset> }
+export interface GreetingTransition { assets: GreetingAsset[], durationMs: number, voiceMs: number, displayMs: number, call?: CallContext, sceneOnly?: boolean }
 export const greetingAudioLabels: Record<GreetingAudioStatus, string> = {
   queued: 'Voz en espera', generating: 'Generando voz', preparing: 'Preparando audio', ready: 'Audio preparado',
   uncertain: 'Solo pantalla', failed: 'Solo pantalla', cancelled: 'Solo pantalla', unavailable: 'Solo pantalla',

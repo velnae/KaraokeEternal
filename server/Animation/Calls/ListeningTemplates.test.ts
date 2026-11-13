@@ -10,7 +10,8 @@ import Koa from 'koa'
 import { koaBody } from 'koa-body'
 import { open, close, db } from '../../lib/Database.js'
 import GreetingVoice from '../../Greetings/GreetingVoice.js'
-import { GreetingVoiceError, type GreetingVoiceProvider } from '../../Greetings/GeminiGreetingTts.js'
+import { VoiceError as GreetingVoiceError } from '../../AudioProviders/errors.js'
+import type { SpeechProvider as GreetingVoiceProvider } from '../../AudioProviders/types.js'
 import Greetings from '../../Greetings/Greetings.js'
 import CallJobs from './Jobs.js'
 import CallAutomation from './Automation.js'
@@ -52,7 +53,10 @@ const templates = () => automatic.listening.templates
 const create = (text = 'Este tema llega gracias a…') => templates().save(1, undefined, { requestId: randomUUID(), text })
 const add = () => Number(db.run(`INSERT INTO queue(roomId,userId,origin,requestIntent,status,source,externalId,title,artistOrChannel)
   VALUES(1,1,'PARTICIPANT','LISTEN','APPROVED','YOUTUBE',?,'Song','Artist')`, [randomUUID()]).lastID)
-const enable = () => automatic.configure(1, { ...callControls(1), listeningEnabled: true })
+const enable = () => {
+  automatic.configure(1, { ...callControls(1), listeningEnabled: true })
+  automatic.setup(1, { requestId: randomUUID(), revision: callControls(1).revision })
+}
 function disableDefaults () {
   for (const item of templates().list(1)) if (defaultListeningTemplates.some(text => text === item.text)) templates().configure(1, item.id, { revision: item.revision, enabled: false })
 }
@@ -60,7 +64,7 @@ async function until (condition: () => boolean) {
   for (let count = 0; count < 120; count++) {
     automatic.reconcile()
     await worker.tick()
-    if (condition()) return
+    if (condition() && !db.get('SELECT id FROM karaokeCallJobs WHERE status IN (\'queued\',\'generating\',\'preparing\') LIMIT 1')) return
     await new Promise(resolve => setTimeout(resolve, 5))
   }
   throw new Error(JSON.stringify(templates().list(1)))
@@ -152,7 +156,7 @@ it('keeps failed new introductions out of rotation while usable alternatives exi
   await until(() => templates().list(1).every(item => item.audio !== null))
   generate.mockRejectedValueOnce(new GreetingVoiceError('Sin confirmación.', 'uncertain'))
   const failed = create()
-  await worker.tick()
+  await until(() => templates().list(1).find(item => item.id === failed.id)?.status === 'uncertain')
   expect(templates().list(1).find(item => item.id === failed.id)?.status).toBe('uncertain')
   const id = add()
   await until(() => !!automatic.preparation(1, id)?.assets.length)
@@ -161,12 +165,13 @@ it('keeps failed new introductions out of rotation while usable alternatives exi
 
 it('omits presentation with no active templates and retains attributed greetings', async () => {
   disableDefaults()
-  enable()
+  automatic.configure(1, { ...callControls(1), listeningEnabled: true })
   const id = add()
   automatic.reconcile()
   await worker.tick()
   expect(generate).not.toHaveBeenCalled()
   expect(automatic.preparation(1, id)).toBeNull()
+  automatic.setup(1, { requestId: randomUUID(), revision: callControls(1).revision })
   Greetings.attach({ roomId: 1, userId: 1 }, id, { message: 'Una noche especial.' }, {})
   Greetings.configurePlayback(1, { enabled: true, introClipId: null, ambienceEnabled: false }, 0)
   await until(() => automatic.preparation(1, id)?.assets.some(asset => asset.role === 'signature') === true)
@@ -174,6 +179,8 @@ it('omits presentation with no active templates and retains attributed greetings
 }, 15000)
 
 it('keeps an active greeting signature valid while a new template bank becomes ready', async () => {
+  disableDefaults()
+  automatic.setup(1, { requestId: randomUUID(), revision: callControls(1).revision })
   const id = add()
   Greetings.attach({ roomId: 1, userId: 1 }, id, { message: 'Una noche especial.' }, {})
   Greetings.configurePlayback(1, { enabled: true, introClipId: null, ambienceEnabled: false }, 0)
@@ -181,6 +188,7 @@ it('keeps an active greeting signature valid while a new template bank becomes r
   const prepared = automatic.preparation(1, id)!
   const context = { kind: 'signature' as const, ...prepared, partId: prepared.assets.find(asset => asset.role === 'signature')!.partId }
   automatic.started(1, context)
+  for (const item of templates().list(1)) templates().configure(1, item.id, { revision: item.revision, enabled: true })
   enable()
   await until(() => templates().list(1).every(item => item.audio !== null))
   expect(automatic.valid(1, context, true)).toBe(true)

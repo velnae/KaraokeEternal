@@ -78,6 +78,55 @@ events, history, library paths and the database itself are never transferred.
 
 ## Recovery and verification
 
+### Name pronunciations and listening introductions
+
+Use `npm run resources:promote:calls` for the global name bank and the room's
+“para escuchar” introductions. This companion uses the same session variables,
+plan/fingerprint/apply flow and bundle receipts. Deploy its backend before using
+the authenticated `/api/resource-promotion/calls/` endpoints.
+
+```json
+{
+  "source": { "baseUrl": "https://dev-karaoke.puyu.pe/", "roomId": 1 },
+  "target": { "baseUrl": "https://karaoke.puyu.pe/", "roomId": 1 },
+  "names": ["SOURCE_PRONUNCIATION_ID"],
+  "listeningIntros": "all"
+}
+```
+
+Use real IDs from the source snapshot, or `"all"` for all available selected
+names. Explicit selections contain pronunciation/template IDs, not audio-part IDs.
+For today's resources, filter source `part.createdAt` in `America/Lima` before
+building the selection; a name group's migration date is not its generation date.
+
+```sh
+mise exec node@24.22.2 -- npm run resources:promote:calls -- plan \
+  .atl/promotions/calls.json .atl/promotions/calls-batch-001
+mise exec node@24.22.2 -- npm run resources:promote:calls -- apply \
+  .atl/promotions/calls-batch-001/plan.json --confirm FINGERPRINT_FROM_PLAN
+```
+
+Both original WAV masters and playback MP3s are validated and copied byte for
+byte, preserving voice/profile metadata. No synthesis or transcoding is requested.
+Names become selected versions in the global bank; existing destination aliases
+are retained and conflicting aliases are rejected, not reassigned. Listening
+introductions retain their text and enabled state. Existing default templates
+are updated by identity, other templates by matching text; destination-only
+templates remain. Before publishing, inspect `replace-binding` actions, including
+any intentionally replaced destination text or selected voice.
+
+Listening audio retains its validated original profile independently of destination
+sound defaults. Name audio uses the destination call voice and the bank's existing
+compatibility rules, including normal/Lite compatibility. Changing participant
+greeting settings is not required for promotion.
+The importer does not alter room playback/automation controls, generate jobs or
+copy request/history/usage records. Names and enabled templates become available
+to the already-running automation. A per-binding comparison tag rejects edits
+made after planning; retries reconcile a completed matching import without
+changing its selection revision again.
+
+### General recovery
+
 - Keep `plan.json`, media files and `receipt.json`. Do not edit fingerprints or
   invent request IDs. Resume with the same `apply` after recovering connectivity
   or authentication.

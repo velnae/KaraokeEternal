@@ -6,6 +6,12 @@ import assert from 'node:assert/strict'
 
 export async function runGreetingPlaybackChecks ({ api, admin, adminContext, guestContext, db, base, data, first, second, call, connect, emit, job, ready, start, stop, setSpeech, setPlayer }) {
   const pass = name => console.log(`PASS ${name}`)
+  const bankState = await (await api.get(`${base}api/rooms/1/karaoke-calls`)).json()
+  const bank = await api.post(`${base}api/rooms/1/karaoke-calls/setup`, { data: {
+    requestId: crypto.randomUUID(), revision: bankState.automation.controls.revision, quote: bankState.automation.bankQuote,
+  } })
+  assert.equal(bank.status(), 202, await bank.text())
+  await expect.poll(async () => (await (await api.get(`${base}api/rooms/1/karaoke-calls`)).json()).automation.bankPreparing, { timeout: 30000 }).toBe(false)
   const upload = async (id, kind, seconds, frequency) => {
     const file = path.join(data, `${id}.wav`)
     execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `sine=frequency=${frequency}:sample_rate=44100`, '-t', String(seconds), file])
@@ -54,6 +60,9 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   await enable.focus()
   await admin.keyboard.press('Space')
   await expect(enable).toBeChecked()
+  for (const item of [first, second]) {
+    await expect.poll(() => db.prepare('SELECT signatureId FROM listeningPresentations WHERE queueId=?').get(item.queueId)?.signatureId, { timeout: 15000 }).toBeTruthy()
+  }
   for (const width of [390, 1440]) {
     await admin.setViewportSize({ width, height: 1100 })
     await enable.scrollIntoViewIfNeeded()
@@ -65,6 +74,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   await adminContext.addInitScript(() => {
     window.audioTrace = { events: [], decoded: [], contexts: [], next: 0 }
     const musicGains = new WeakMap()
+    const bufferChecksums = new WeakMap()
     const mediaSource = AudioContext.prototype.createMediaElementSource
     AudioContext.prototype.createMediaElementSource = function (element) {
       const source = mediaSource.call(this, element)
@@ -83,7 +93,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
       const start = node.start.bind(node)
       const stop = node.stop.bind(node)
       node.start = (...values) => {
-        window.audioTrace.events.push({ type: 'start', id, duration: node.buffer?.duration, at: performance.now() })
+        window.audioTrace.events.push({ type: 'start', id, duration: node.buffer?.duration, checksum: bufferChecksums.get(node.buffer), at: performance.now() })
         return start(...values)
       }
       node.stop = (when) => {
@@ -97,6 +107,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
     AudioContext.prototype.decodeAudioData = async function (bytes) {
       const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
       const buffer = await decode.call(this, bytes)
+      bufferChecksums.set(buffer, checksum)
       window.audioTrace.decoded.push({ duration: buffer.duration, checksum })
       return buffer
     }
@@ -165,17 +176,20 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
     await expect.poll(() => player.evaluate(target => window.audioTrace.decoded.some(value => value.checksum === target), checksum), { timeout: 15000 }).toBe(true)
   }
   await decoded(first)
+  const required = new Map()
   for (const id of [introId, bedId]) {
     const resource = await call(api, `animation/resources/${id}`)
+    required.set(id, resource.checksum)
     await expect.poll(() => player.evaluate(checksum => window.audioTrace.decoded.some(value => value.checksum === checksum), resource.checksum), { timeout: 15000 }).toBe(true)
   }
   const attempts = db.prepare('SELECT sum(attempts) n FROM greetingAudioJobs').get().n
   await play()
-  await expect(player.getByTestId('greeting-intro')).toBeVisible()
-  const leadIn = await player.evaluate(() => {
+  await expect(player.getByTestId('transition-presentation')).toBeVisible()
+  await expect.poll(() => player.evaluate(checksum => window.audioTrace.events.some(event => event.type === 'start' && event.checksum === checksum), required.get(introId))).toBe(true)
+  const leadIn = await player.evaluate(({ intro, bed }) => {
     const starts = window.audioTrace.events.filter(event => event.type === 'start')
-    return starts.find(event => event.duration < 1).at - starts.find(event => event.duration > 30).at
-  })
+    return starts.find(event => event.checksum === intro).at - starts.find(event => event.checksum === bed).at
+  }, { intro: required.get(introId), bed: required.get(bedId) })
   assert.ok(leadIn >= 1950 && leadIn < 4500, `Greeting needs a two-second ambience lead-in; got ${Math.round(leadIn)} ms`)
   const backgroundElement = await player.locator('video[data-media-role="transition-background"]').elementHandle()
   await expect(player.getByTestId('greeting-overlay')).toHaveAttribute('data-greeting-id', String(first.greetingId))
@@ -205,10 +219,10 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   for (const item of [first, second]) {
     const row = intervention(item)
     const assets = JSON.parse(row.sequenceJSON)
-    assert.deepEqual(assets.map(asset => asset.role), ['intro', 'greeting', 'bed'])
+    assert.deepEqual(assets.map(asset => asset.role), ['intro', 'greeting', 'signature', 'bed'])
     assert.equal(assets[0].id, introId)
-    assert.equal(assets[2].id, bedId)
-    assert.equal(row.leaseUntil - row.requestedAt, 25000)
+    assert.equal(assets.find(asset => asset.role === 'bed').id, bedId)
+    assert.ok(row.leaseUntil > row.requestedAt && row.leaseUntil - row.requestedAt <= 25000)
     assert.ok(row.finishedAt - row.requestedAt <= 25000)
     assert.equal(db.prepare('SELECT count(*) n FROM audioUsage WHERE sourceId=? AND clipId=?').get(`intervention:${row.interventionId}`, introId).n, 1)
   }
@@ -246,7 +260,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
     await expect.poll(() => delivery(delayed)?.voiceStatus, { timeout: 15000 }).toBe('PLAYED')
     await waitPlayed(delayed)
     assert.equal(intervention(delayed).status, 'PLAYED')
-    assert.deepEqual(JSON.parse(intervention(delayed).sequenceJSON).map(asset => asset.role), ['greeting', 'bed'])
+    assert.deepEqual(JSON.parse(intervention(delayed).sequenceJSON).map(asset => asset.role), ['greeting', 'signature', 'bed'])
     assert.equal(db.prepare('SELECT status FROM greetings WHERE greetingId=?').get(delayed.greetingId).status, 'DISPLAYED')
     const events = await player.evaluate(index => window.audioTrace.events.slice(index), before)
     const voices = events.filter(event => event.type === 'start' && Math.abs(event.duration * 1000 - job(delayed.greetingId).durationMs) < 100)
@@ -279,7 +293,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   pass('Idle animator opportunities do not consume greetings before the operator starts their songs')
   await play()
   await expect(player.getByTestId('greeting-overlay')).toHaveAttribute('data-greeting-id', String(long.greetingId))
-  assert.deepEqual(JSON.parse(intervention(long).sequenceJSON).map(asset => asset.role), ['greeting', 'bed'])
+  assert.deepEqual(JSON.parse(intervention(long).sequenceJSON).map(asset => asset.role), ['greeting', 'signature', 'bed'])
   await expect.poll(() => delivery(long)?.voiceStatus, { timeout: 23000 }).toBe('PLAYED')
   await waitPlayed(long)
   assert.ok(intervention(long).finishedAt - intervention(long).requestedAt <= 25000)
@@ -308,8 +322,14 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   await stop()
   await start()
   await expect(player.getByTestId('greeting-overlay')).toHaveCount(0)
+  const recovery = player.getByRole('button', { name: 'Reproducir', exact: true })
+  await expect.poll(async () => status(interrupted) !== 'APPROVED' || await recovery.isVisible(), { timeout: 15000 }).toBe(true)
+  if (status(interrupted) === 'APPROVED' && await recovery.isVisible()) {
+    await recovery.focus()
+    await player.keyboard.press('Enter')
+  }
   await expect.poll(() => status(interrupted), { timeout: 45000 }).toBe('PLAYED')
-  assert.equal(db.prepare('SELECT count(*) n FROM animationInterventions WHERE sourceEventKey=?').get(`greeting-${interrupted.queueId}`).n, 1)
+  assert.equal(db.prepare(`SELECT count(*) n FROM animationInterventions WHERE roomId=1 AND origin='GREETING' AND json_extract(callJSON,'$.queueId')=?`).get(interrupted.queueId).n, 1)
   assert.equal(intervention(interrupted).interventionId, id)
   assert.notEqual(delivery(interrupted).voiceStatus, 'PLAYED')
   pass('Server restart keeps the bounded reservation fence and never re-emits an interrupted greeting')

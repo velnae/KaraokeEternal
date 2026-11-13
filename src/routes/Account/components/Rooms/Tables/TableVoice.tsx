@@ -23,7 +23,7 @@ export default function TableVoice ({ roomId, tableId }: { roomId: number, table
     <section className={styles.panel} aria-label='Voz de la mesa'>
       <p className={styles.hint}>Prepare el fragmento de esta mesa para los llamados de karaoke.</p>
       {snapshot && <p>{`Voz actual: ${snapshot.voice.config.voice} · ${snapshot.voice.config.model}`}</p>}
-      <Link to='/admin/settings/animator?view=greeting-voice'>Ver perfil compartido de Gemini</Link>
+      <Link to='/admin/settings/audio-providers?use=calls'>Ver perfil compartido de llamados</Link>
       <form
         onSubmit={(event) => {
           event.preventDefault()

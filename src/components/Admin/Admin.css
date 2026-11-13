@@ -19,6 +19,9 @@
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--edge); padding-bottom: 12px; margin-bottom: 20px; }
 .tabs a { padding: 12px 16px; color: var(--secondary); text-decoration: none; border-radius: 8px; }
 .tabs a[aria-current='page'] { color: var(--cyan); background: var(--equipment); }
+.page:has(.tabs[data-compact='true']) .heading { margin-block: 12px 8px; }
+.tabs[data-compact='true'] { position: relative; flex-wrap: nowrap; overflow-x: auto; gap: 4px; padding-bottom: 6px; margin-bottom: 12px; }
+.tabs[data-compact='true'] a { white-space: nowrap; flex-shrink: 0; padding: 8px 12px; min-height: 44px; display: flex; align-items: center; }
 .checklist { padding: 20px; border: 1px solid var(--edge); border-radius: 12px; margin-bottom: 20px; }
 .checklist h2 { margin: 0 0 12px; font-size: 18px; }
 .checklist ol { display: flex; flex-wrap: wrap; gap: 16px 32px; padding-left: 24px; margin: 0; }

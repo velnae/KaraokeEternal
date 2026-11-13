@@ -4,7 +4,8 @@ import os from 'node:os'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { open, close, db } from '../lib/Database.js'
 import { createTransitionVideo, completeTransitionVideo, getTransitionVideo, saveTransitionVideoSettings, changeTransitionVideo } from './Store.js'
-import { captureTransitionBackground, leasedTransitionBackground, transitionVideoScene } from './Playback.js'
+import { captureTransitionBackground, leasedTransitionBackground, transitionVideoScene, leasedEventScene } from './Playback.js'
+import { defaultEventScene } from '../../shared/eventScenes.js'
 import { TransitionVideoService } from './Service.js'
 
 let directory: string
@@ -32,6 +33,17 @@ async function ready (requestId: string) {
   for (const extension of ['mp4', 'jpg']) await fs.writeFile(path.join(service.directory, `${row.id}.${extension}`), 'fixture')
   return completeTransitionVideo(1, row.id, { durationMs: 1000, width: 640, height: 360, frameRate: 30, size: 7, checksum: 'a'.repeat(64) })
 }
+it('captures the choreography with the existing scene lease and binds it to its owner and next request', () => {
+  const template = defaultEventScene('listen')
+  transitionVideoScene(1, 'template-snapshot', false, null, { template, nextQueueId: 42, ownerSocketId: 'owner' })
+  template.startOffsetMs = -9000
+  expect(leasedEventScene(1, 42, 'owner')?.startOffsetMs).toBe(0)
+  expect(leasedEventScene(1, 43, 'owner')).toBeUndefined()
+  expect(leasedEventScene(1, 42, 'other')).toBeUndefined()
+  expect(leasedEventScene(2, 42, 'owner')).toBeUndefined()
+  transitionVideoScene(1, 'template-snapshot', true)
+  expect(leasedEventScene(1, 42, 'owner')).toBeUndefined()
+})
 
 it('keeps a frozen grant background after settings replacement and database restart until lease expiry', async () => {
   const first = await ready('first')

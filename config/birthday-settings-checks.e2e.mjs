@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict'
 import { expect } from 'playwright/test'
+import { checkAudioProviderSettings } from './audio-provider-settings-checks.e2e.mjs'
 
 export async function checkBirthdaySettings ({ admin, api, base, calls, personalized, data }) {
+  await checkAudioProviderSettings({ admin, api, base, calls, data })
   const settings = admin.getByRole('region', { name: 'Ajustes de cumpleaños', exact: true })
   const initial = await (await api.get(`${base}api/birthdays/`)).json()
   const generated = () => calls.filter(call => call.body?.generationConfig?.responseModalities?.includes('AUDIO') || call.url.includes('/v1/text-to-speech/')).length
   await expect(settings.getByRole('button', { name: 'Guardar cambios', exact: true })).toHaveCount(0)
   await expect(settings.getByRole('button', { name: 'Escuchar introducción', exact: true })).toBeVisible()
-  await settings.getByText('Opciones avanzadas', { exact: true }).click()
-  await expect(settings.getByRole('textbox', { name: 'Modelo de texto Gemini', exact: true })).toHaveValue('test-text-model')
-  await settings.getByRole('button', { name: 'Consultar voces disponibles', exact: true }).click()
-  await expect(settings.getByRole('combobox', { name: 'Voz predeterminada', exact: true }).getByRole('option', { name: personalized ? 'Voz cálida' : 'Voz especial', exact: true })).toHaveCount(1)
-  await settings.getByText('Opciones avanzadas', { exact: true }).click()
+  await expect(settings.getByRole('textbox', { name: 'Modelo de texto Gemini', exact: true })).toHaveCount(0)
+  await expect(settings.getByRole('link', { name: 'Configurar proveedor y voz predeterminada' })).toBeVisible()
   const duration = settings.getByRole('spinbutton', { name: 'Duración objetivo (segundos)', exact: true })
   await duration.fill(String(initial.settings.targetSeconds + 1))
   await expect(settings.getByText('Cambios sin guardar', { exact: true })).toBeVisible()
@@ -98,13 +97,7 @@ export async function checkBirthdaySettings ({ admin, api, base, calls, personal
   await expect(settings.getByText('Sin seleccionar', { exact: true })).toHaveCount(0)
   assert.equal(generated(), count, 'Resource selection, preview and discard must not generate audio')
 
-  await settings.getByText('Opciones avanzadas', { exact: true }).click()
-  await settings.getByRole('textbox', { name: 'Interpretación predeterminada', exact: true }).fill('Celebración clara y natural.')
-  await settings.getByRole('button', { name: 'Cambiar introducción', exact: true }).click()
-  const intro = admin.getByRole('dialog', { name: 'Cambiar introducción', exact: true })
-  await expect(intro.getByRole('button', { name: 'Generar con la voz guardada', exact: true })).toBeDisabled()
-  await expect(intro.getByText('Guarde los cambios de voz antes de generar la introducción.', { exact: true })).toBeVisible()
-  await intro.getByRole('button', { name: 'Listo', exact: true }).click()
+  await duration.fill(String(initial.settings.targetSeconds + 1))
   await settings.getByRole('button', { name: 'Guardar cambios', exact: true }).focus()
   await admin.keyboard.press('Enter')
   await expect(settings.getByText('Ajustes guardados.', { exact: true })).toBeVisible()
@@ -119,5 +112,4 @@ export async function checkBirthdaySettings ({ admin, api, base, calls, personal
   await settings.getByRole('button', { name: 'Descartar y recargar configuración', exact: true }).click()
   await expect(duration).toHaveValue(String(current.settings.targetSeconds + 1))
   await expect(settings.getByRole('button', { name: 'Guardar cambios', exact: true })).toHaveCount(0)
-  await settings.getByText('Opciones avanzadas', { exact: true }).click()
 }

@@ -12,6 +12,7 @@ import { loadCatalog, catalogClips, saveCatalogRecord } from './catalog.js'
 import { audioUsage, backfillAudioUsage } from './usage.js'
 import { animationContext, ANIMATION_CONTROL, ANIMATION_SYNC, interventionPlayback, type AnimationClip } from '../../shared/animation.js'
 import NameBank from './Calls/NameBank.js'
+import { defaultEventScenes } from '../../shared/eventScenes.js'
 
 const identity = { roomId: 1, userId: 1, socketId: 'player-a' }
 const clip: AnimationClip = { id: 'welcome', title: 'Welcome', displayText: 'Hello', checksum: 'abc', durationMs: 4000, source: 'test', license: 'test' }
@@ -47,6 +48,22 @@ function reserve (overrides: Partial<Reservation> = {}, status = { queueId: -1 }
     sourceQueueId: null, expectedNextQueueId: null, boundary: 'idle', transitionId: 'transition-1', ...overrides,
   }, status)
 }
+
+it('includes a delayed template origin and first block in the finite scene start window', () => {
+  const settings = defaultEventScenes()
+  settings.selected.transition = 'transition'
+  const scene = settings.templates[0]
+  scene.startOffsetMs = 10000
+  Object.assign(scene.cues.find(cue => cue.id === 'text')!, { anchor: 'block', referenceId: 'announcement', referenceEdge: 'start' })
+  db.run('UPDATE rooms SET data=json_set(data,\'$.prefs.eventScenes\',json(?)) WHERE roomId=1', [JSON.stringify(settings)])
+  Animation.request(identity, 'delayed-scene', { ...clip, sceneCueId: 'announcement', sceneStartMs: 1000 })
+  const now = Date.now()
+  const grant = reserve()!
+  expect(grant.startBefore).toBe(now + 14000)
+  vi.setSystemTime(now + 11000)
+  expect(() => Animation.event(identity, grant.interventionId, grant.playerEpoch!, 'STARTED')).not.toThrow()
+  expect(grant.leaseUntil! - grant.startBefore!).toBeLessThanOrEqual(10000)
+})
 
 it.each([
   ['cancelled', 'El inicio fue cancelado'],

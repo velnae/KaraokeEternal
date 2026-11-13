@@ -48,7 +48,7 @@ export default {
         }
         if (operation === 'prepare') {
           getCallAutomation()?.prioritize(roomId, number('queueId'))
-          const preparation = await prepareGreetingTransition(roomId, number('queueId'))
+          const preparation = await prepareGreetingTransition(roomId, number('queueId'), sock.id)
           revalidate()
           return acknowledge({ preparation })
         }
@@ -57,7 +57,7 @@ export default {
           if (!Array.isArray(ready) || ready.length > 30 || ready.some(hash => typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash))) throw new Error('Preparación de audio no válida')
           const remainingMs = payload.remainingMs ?? 25000
           if (!Number.isFinite(remainingMs) || remainingMs < 0 || remainingMs > 25000) throw new Error('Tiempo de transición no válido')
-          const prepared = payload.audioReady === true && ready.length ? await prepareGreetingTransition(roomId, number('queueId')) : null
+          const prepared = payload.audioReady === true && ready.length ? await prepareGreetingTransition(roomId, number('queueId'), sock.id) : null
           revalidate()
           if (payload.audioReady === true) {
             const catalogHashes = new Set(catalogClips(roomId).map(clip => clip.checksum))
@@ -65,7 +65,7 @@ export default {
           }
           const animation = Animation.snapshot(roomId)
           const blocker = animation.microphoneOccupied ? 'Micrófono ocupado' : animation.active || animation.blockedUntil > Date.now() ? 'Intervención del operador en curso' : undefined
-          const grant = Greetings.reserve(roomId, sock.id, number('queueId'), sock._lastPlayerStatus ?? {}, blocker, prepared, ready, identity.userId, remainingMs)
+          const grant = Greetings.reserve(roomId, sock.id, number('queueId'), sock._lastPlayerStatus ?? {}, blocker, prepared, ready, identity.userId, remainingMs, payload.tail === true)
           Animation.publish(roomId)
           return acknowledge({ grant })
         }

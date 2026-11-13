@@ -55,3 +55,33 @@ it('completes natural playback once and applies live volume without restarting',
   expect(source.disconnect).toHaveBeenCalledOnce()
   expect(source.onended).toBeNull()
 })
+
+it('exposes the prepared decoded duration before playback and reuses that exact buffer', async () => {
+  const { audio, source, context, asset, abort } = await fixture()
+  expect(audio.durationMs(asset)).toBe(30000)
+  expect(context.decodeAudioData).toHaveBeenCalledOnce()
+  audio.permitFor(40000)
+  const started = vi.fn()
+  const playing = audio.play(asset, 0.5, abort.signal, started)
+  await vi.waitFor(() => expect(started).toHaveBeenCalledWith(30000))
+  expect(context.decodeAudioData).toHaveBeenCalledOnce()
+  source.onended!()
+  await playing
+})
+it('bounds concurrent birthday ambience by the same renewable permit and stops it on abort', async () => {
+  const { audio, source, context, gain, asset, abort } = await fixture()
+  audio.permitFor(10000)
+  await audio.playBackground(asset, 0.5, abort.signal, 60000, 0.2)
+  expect(source.start).toHaveBeenCalledOnce()
+  expect(source.stop).toHaveBeenLastCalledWith(10)
+  context.currentTime = 4
+  audio.permitFor(10000)
+  expect(source.stop).toHaveBeenLastCalledWith(14)
+  audio.volume(0.35)
+  expect(gain.gain.setValueAtTime).toHaveBeenCalledWith(0.35 * 0.2, 4)
+  abort.abort()
+  expect(source.disconnect).toHaveBeenCalledOnce()
+  expect(source.onended).toBeNull()
+  audio.stopBackground()
+  expect(source.disconnect).toHaveBeenCalledOnce()
+})

@@ -13,6 +13,10 @@ import { GREETING_START_MS, type Greeting, type GreetingAsset, type GreetingPrep
 import { heardAt, voiceBudget } from '../Animation/selection.js'
 import * as catalog from '../Animation/catalog.js'
 import * as audioRouter from './audioRouter.js'
+import * as callPlayback from '../Animation/Calls/Playback.js'
+import * as sessions from '../Animation/sessions.js'
+import { defaultEventScenes, sceneCue } from '../../shared/eventScenes.js'
+import { saveEventScenes } from '../Animation/Scenes/Store.js'
 
 let directory: string
 let socketId: string
@@ -52,6 +56,25 @@ const prepared = (item: Greeting, greetingMs = 3000, introMs = 2000): GreetingPr
   performer: { name: 'Ana', tableLabel: 'Mesa 4', requestIntent: 'SING', title: 'Song' },
 })
 
+it('authorizes only the configured tail and tolerates a real end before the start receipt', () => {
+  const source = request()
+  const incoming = request()
+  Queue.transition(1, source.queueId, 'PLAYING')
+  const settings = defaultEventScenes()
+  settings.selected.karaoke = 'karaoke'
+  settings.templates.find(scene => scene.id === 'karaoke')!.startOffsetMs = -2000
+  saveEventScenes(1, settings)
+  const status = { queueId: source.queueId, duration: 120, position: 110, isPlaying: true }
+  expect(() => Greetings.reserve(1, socketId, incoming.queueId, status, undefined, prepared(incoming.item), ready, 1, 25000, true)).toThrow('ocupa')
+  const grant = Greetings.reserve(1, socketId, incoming.queueId, { ...status, position: 118 }, undefined, prepared(incoming.item), ready, 1, 25000, true)!
+  expect(grant.transition).toBeTruthy()
+  expect(Queue.get(1).entities[source.queueId].status).toBe('PLAYING')
+  Queue.transition(1, source.queueId, 'PLAYED')
+  const intervention = grant.transition!.intervention
+  expect(() => Animation.event({ roomId: 1, userId: 1, socketId }, intervention.interventionId, intervention.playerEpoch!, 'STARTED')).not.toThrow()
+  expect(Animation.active(1)?.status).toBe('PLAYING')
+})
+
 it('keeps one introduction, complete greeting and optional bed inside the transition ceiling', () => {
   const { item } = request()
   const plan = planGreetingTransition(item, prepared(item, 19000, 8000), ready, 120000)!
@@ -66,6 +89,28 @@ it('keeps one introduction, complete greeting and optional bed inside the transi
   expect(planGreetingTransition(item, prepared(item, 19000, 3000), ready, 120000, 22500)?.assets.map(item => item.role)).toEqual(['greeting', 'bed'])
   expect(planGreetingTransition(item, prepared(item, 19000, 3000), ready, 120000, 18000)).toBeNull()
 })
+it('plays an explicit scene effect with a visual-only greeting without authorizing a spoken greeting', () => {
+  const { item, queueId } = request()
+  const effect = { ...asset('intro', 800), id: 'scene-effect', kind: 'effect' as const, checksum: 'e'.repeat(64) }
+  vi.spyOn(catalog, 'catalogClips').mockReturnValue([effect])
+  const scenes = defaultEventScenes()
+  scenes.selected.karaoke = 'karaoke'
+  scenes.templates.find(scene => scene.id === 'karaoke')!.cues.push({ ...sceneCue('announcement', 'voice', 'previous'), id: 'applause', binding: 'resource', resourceId: effect.id })
+  saveEventScenes(1, scenes)
+  Greetings.configurePlayback(1, { enabled: false, introClipId: null, ambienceEnabled: false }, 1)
+  Animation.control(1, 0, { enabled: true, automation: true })
+  Animation.session(1, 1, 'open')
+  const identity = { roomId: 1, userId: 1, socketId }
+  Animation.ready(identity, true, [effect.checksum])
+  const grant = Greetings.reserve(1, socketId, queueId, {}, undefined, null, [effect.checksum], 1)!
+  expect(grant.items.map(item => item.greetingId)).toEqual([item.greetingId])
+  expect(grant.transition?.sceneOnly).toBe(true)
+  expect(grant.transition?.assets.map(asset => asset.id)).toEqual([effect.id])
+  expect(Animation.greetingEnabled(1)).toBe(false)
+  const intervention = grant.transition!.intervention
+  expect(intervention.origin).toBe('AUTO')
+  expect(() => Animation.event(identity, intervention.interventionId, intervention.playerEpoch!, 'STARTED')).not.toThrow()
+})
 
 it('uses the room ambience selection for greeting beds without replacing unavailable sounds', async () => {
   const { queueId } = request()
@@ -79,6 +124,23 @@ it('uses the room ambience selection for greeting beds without replacing unavail
   expect((await prepareGreetingTransition(1, queueId))?.assets.map(asset => asset.id)).toEqual(['greeting'])
   Animation.control(1, 1, { ambienceClipId: null })
   expect((await prepareGreetingTransition(1, queueId))?.assets.map(asset => asset.id)).toEqual(['greeting', 'bed'])
+})
+
+it('retains the configured greeting introduction with a recorded sender signature, without duplicating a listening presentation intro', async () => {
+  const { queueId } = request()
+  const intro = { ...asset('intro', 800), approvedForAuto: true, modes: ['mixed' as const] }
+  const general = { ...intro, id: 'general', checksum: 'x'.repeat(64), family: 'turn' as const, displayText: 'General announcement' }
+  vi.spyOn(catalog, 'catalogClips').mockReturnValue([general, intro])
+  vi.spyOn(audioRouter, 'getGreetingAudioAsset').mockResolvedValue({ ...asset('greeting', 3000), senderIncluded: false })
+  Greetings.configurePlayback(1, { enabled: true, introClipId: intro.id, ambienceEnabled: false }, 1)
+  Animation.control(1, 0, { enabled: true, automation: true, profile: 'mixed' })
+  vi.spyOn(sessions, 'currentSession').mockReturnValue({ status: 'OPEN', sessionId: 'fixture' } as ReturnType<typeof sessions.currentSession>)
+  const signature = { ...asset('signature', 1000), role: 'signature' as const, partId: 'signature', identifiesSender: true }
+  const call = { kind: 'signature' as const, queueId, inputKey: 'signature', revision: 1, assets: [signature], reason: null }
+  const preparedCall = vi.spyOn(callPlayback, 'prepareCall').mockReturnValue(call)
+  expect((await prepareGreetingTransition(1, queueId))?.assets.map(item => item.role)).toEqual(['signature', 'greeting', 'intro'])
+  preparedCall.mockReturnValue({ ...call, kind: 'listening', assets: [{ ...signature, role: 'call' }] })
+  expect((await prepareGreetingTransition(1, queueId))?.assets.filter(item => item.role === 'intro').map(item => item.id)).toEqual(['general'])
 })
 
 it('allows a greeting over its own transition bed and leaves the bed alive for music loading', () => {

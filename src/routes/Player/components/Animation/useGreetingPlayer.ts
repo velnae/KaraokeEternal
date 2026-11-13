@@ -13,6 +13,9 @@ import GreetingCommitGate from './GreetingCommitGate'
 import type AnnouncementAudio from './AnnouncementAudio'
 import { ensureState } from 'redux-optimistic-ui'
 import { tracePlayback } from 'lib/playbackTrace'
+import type SceneRun from './SceneRun'
+import { sceneAudioPlan } from 'shared/sceneAudio'
+import { sceneHasReferences, sceneVoiceCue } from 'shared/eventScenes'
 
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, Math.max(0, ms)))
 function upcoming () {
@@ -83,7 +86,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       try {
         const { preparation } = await greetingRequest('prepare', { queueId: next })
         if (!alive || running.current || upcoming() !== next) return
-        await channel.prepareGreetingAssets(preparation?.assets ?? [], () => alive && upcoming() === next)
+        await channel.prepareGreetingAssets([...(preparation?.assets ?? []), ...Object.values(preparation?.fixed ?? {})], () => alive && upcoming() === next)
         if (alive) await refreshReadiness()
       } catch { /* Missing or late preparation falls back to visual delivery. */ } finally { loading = false }
     }
@@ -95,7 +98,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
     }
   }, [enabled, authority, roomId, queue, queueId, channel, refreshReadiness])
 
-  const attempt = useCallback(async (expectedQueueId: number, remainingMs = 25000): Promise<boolean> => {
+  const attempt = useCallback(async (expectedQueueId: number, remainingMs = 25000, tail = false, run?: SceneRun | null): Promise<boolean> => {
     if (running.current) return false
     const generation = version.current
     let grant: GreetingGrant | undefined
@@ -122,7 +125,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       const current = store.getState().animation.snapshot
       const intervention = grant?.transition?.intervention
       const call = grant?.transition?.call
-      let allowed = current?.greetingVoiceEnabled
+      let allowed = grant?.transition?.sceneOnly ? current?.prefs.enabled : current?.greetingVoiceEnabled
       if (call && !call.kind) allowed = current?.karaokeCallsEnabled && current.karaokeCallsRevision === call.revision
       if (call?.kind === 'listening') allowed = current?.prefs.enabled && (scheduled || (current.listeningPresentationsEnabled && current.karaokeCallsRevision === call.revision))
       if (grant?.transition?.assets.some(asset => asset.role === 'greeting')) allowed = allowed && current?.greetingVoiceEnabled
@@ -135,11 +138,21 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
     }
     let bedStarted = false
     const play = async (asset: GreetingAsset, first: boolean, onStarted?: () => Promise<void>) => {
+      const foreground = grant!.transition!.assets.filter(asset => asset.role !== 'bed')
+      const cue = run ? sceneVoiceCue(run.scene, asset.role, asset.sceneCueId) : undefined
+      const firstPart = !foreground.slice(0, foreground.indexOf(asset)).some(item => item.sceneCueId === asset.sceneCueId)
+      if (run && sceneHasReferences(run.scene) && firstPart) await run.wait(cue, undefined, voiceValid)
+      const waitUntil = performance.now() + (run && sceneHasReferences(run.scene) ? 0 : asset.sceneDelayMs ?? 0)
+      while (performance.now() < waitUntil) {
+        if (!voiceValid()) throw new Error('La coreografía fue cancelada.')
+        await delay(40)
+      }
       const duration = (channel.buffers.get(asset.checksum)?.duration ?? Infinity) * 1000
       if (!voiceValid() || duration + 250 > deadline - performance.now()) throw new Error('La voz no puede comenzar dentro de esta pausa')
       if (first && animationTime() >= grant!.transition!.intervention.startBefore!) throw new Error('La autorización de inicio venció')
       const current = store.getState().animation.snapshot!
-      const completion = channel.play(asset.checksum, current.prefs.volume)
+      const completion = channel.play(asset.checksum, current.prefs.volume, undefined, asset.sceneFadeMs ?? 0, asset.sceneVolume ?? 1)
+      run?.startAudio(asset, foreground, item => (channel.buffers.get(item.checksum)?.duration ?? item.durationMs / 1000) * 1000)
       scheduled = true
       const bed = grant!.transition!.assets.find(item => item.role === 'bed')
       if (first && bed && ownsBed) {
@@ -152,6 +165,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       if (first && bedStarted) await audioEvent('ASSET_STARTED', bed!.id)
       await onStarted?.()
       if (await completion !== 'ENDED') throw new Error('La voz fue interrumpida')
+      run?.endAudio(asset, foreground)
       if (asset.role === 'call' || asset.role === 'signature') void audioEvent('ASSET_ENDED', asset.id).catch(() => {})
     }
     const show = async (voiced: boolean) => {
@@ -187,7 +201,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       if (!valid()) return false
       // A completed server job is not proof that this browser has decoded it.
       // Join in-flight preloading before reserving, inside the existing deadline.
-      if (enabled && channel.ready) {
+      if ((enabled || run) && channel.ready) {
         const { preparation } = await greetingRequest('prepare', { queueId: expectedQueueId })
         if (!valid()) return false
         const voiceMs = preparation?.call?.assets.find(asset => asset.role === 'call')?.durationMs ?? 3000
@@ -196,7 +210,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
         let timer: ReturnType<typeof setTimeout> | undefined
         try {
           if (waitMs > 0) await Promise.race([
-            channel.prepareGreetingAssets(preparation?.assets ?? [], () => preparing && valid(), true),
+            channel.prepareGreetingAssets([...(preparation?.assets ?? []), ...Object.values(preparation?.fixed ?? {})], () => preparing && valid(), true),
             new Promise<void>((resolve) => { timer = setTimeout(resolve, waitMs) }),
           ])
         } finally {
@@ -204,9 +218,20 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
           clearTimeout(timer)
         }
         tracePlayback('turn-audio-prepared', { roomId, queueId: expectedQueueId, remainingMs: Math.max(0, deadline - performance.now()) })
+        if (run && preparation && !sceneHasReferences(run.scene)) {
+          const native = preparation.assets.filter(asset => asset.role !== 'bed' && channel.readyChecksums.includes(asset.checksum))
+          const snapshot = store.getState().animation.snapshot
+          const fixedAllowed = native.some(asset => ['call', 'greeting', 'signature'].includes(asset.role)) || (snapshot?.prefs.enabled && snapshot.prefs.automation && snapshot.session?.status === 'OPEN')
+          const sequence = sceneAudioPlan(run.scene, native, fixedAllowed ? preparation.fixed ?? {} : {})
+          const cue = run.scene.cues.find(cue => cue.id === sequence[0]?.sceneCueId)
+          await run.wait(cue, undefined, valid)
+          const fresh = store.getState()
+          store.dispatch(playerStatusCancel())
+          await animationRequest(PLAYER_EMIT_STATUS, { ...Object.fromEntries(Object.entries(fresh.player).filter(([key]) => !key.startsWith('_'))), visualizer: fresh.playerVisualizer }, 1500)
+        }
       }
       if (!valid()) return false
-      const reply = await greetingRequest('reserve', { queueId: expectedQueueId, audioReady: channel.ready, readyClips: channel.readyChecksums, remainingMs: Math.max(0, deadline - performance.now()) })
+      const reply = await greetingRequest('reserve', { queueId: expectedQueueId, audioReady: channel.ready, readyClips: channel.readyChecksums, remainingMs: Math.max(0, deadline - performance.now()), tail: tail && (!run || run.endedAt === null) })
       if (!reply.grant) return false
       grant = reply.grant
       setScene(grant)
@@ -242,6 +267,8 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
 
       if (grant.transition) {
         try {
+          run?.installAudio(grant.transition.assets.filter(asset => asset.role !== 'bed'), item => (channel.buffers.get(item.checksum)?.duration ?? item.durationMs / 1000) * 1000)
+          if (grant.transition.sceneOnly) await show(false)
           const intervention = grant.transition.intervention
           const key = `greeting-started:${intervention.interventionId}`
           if (sessionStorage.getItem(key)) throw new Error('Esta lectura ya se inició')
