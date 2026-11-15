@@ -47,6 +47,26 @@ npm run diagnostics -- run .diagnostics/voice-cut production
 Do not infer build freshness from the current Git revision. The runner records
 the scenario result, not a claim that a preexisting compiled build matches Git.
 
+## Reproduce late name and greeting receipts
+
+```sh
+mise exec node@24.22.2 -- env PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium \
+  KARAOKE_E2E_MODE=development KARAOKE_E2E_GREETING_PLAYBACK=1 \
+  KARAOKE_E2E_GREETING_RECEIPTS=1 node config/greeting-audio.e2e.mjs
+```
+
+This isolated scenario delays `STARTED` receipts by 3.5 seconds and
+`ASSET_STARTED` receipts by 1.8 seconds. It checks complete, exactly-once intro,
+greeting and name audio against native audio-clock duration, then verifies that
+an explicit server rejection still stops playback. No real provider is used.
+Use `KARAOKE_E2E_MODE=production` after rebuilding for the compiled variant;
+omit `KARAOKE_E2E_GREETING_RECEIPTS` for the full cancellation/restart suite.
+
+A ready greeting without its name attribution remains visual-only and reports
+`Falta la voz del nombre. Revise Animador → Nombres.` An uncertain first name
+generation requires explicit generation and selection in that panel; transitions
+do not silently retry paid synthesis. Once selected, the audio is reused.
+
 ## Capture the affected player
 
 The instrumented player retains its latest 300 technical events in memory.

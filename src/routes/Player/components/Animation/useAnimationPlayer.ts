@@ -17,7 +17,7 @@ import { hasLocalPlaybackProof } from './playbackFence'
 import { needsAnimationClock, ReadinessPublication } from './playerEfficiency'
 import { tracePlayback } from '../../../../lib/playbackTrace'
 
-const voiceRequested = (snapshot?: AnimationSnapshot | null) => !!snapshot && (snapshot.prefs.enabled || snapshot.greetingVoiceEnabled === true)
+const voiceRequested = (snapshot?: AnimationSnapshot | null) => !!snapshot && (snapshot.prefs.enabled || snapshot.greetingVoiceEnabled === true || snapshot.karaokeCallsEnabled === true || !!snapshot.karaokeTurn)
 
 function audioOwnerKey () {
   const state = store.getState()
@@ -154,9 +154,12 @@ export default function useAnimationPlayer () {
         || (player && !player.isAtQueueEnd && player.queueId !== -1)) ambientUse.current = null
       const grant = grantRef.current
       if (current) audio.current.volume(ambientRun.current ? current.prefs.ambienceVolume ?? 0.2 : current.prefs.volume)
-      if (current) audio.current.bedVolume(ambienceBedVolume(current.prefs))
+      if (current) {
+        const foregroundBed = current.active ? interventionPlayback(current.active).bed : undefined
+        audio.current.bedVolume(transitionGrant.current?.volume ?? foregroundBed?.volume ?? ambienceBedVolume(current.prefs))
+      }
       const transition = transitionGrant.current
-      if (transition && (!current || !current.prefs.ambienceEnabled || (!current.prefs.enabled && !current.greetingVoiceEnabled)
+      if (transition && (!current || (transition.karaoke ? !current.karaokeCallsEnabled && !current.karaokeTurn : !current.prefs.ambienceEnabled || !voiceRequested(current))
         || current.playerEpoch !== transition.playerEpoch || current.ambience?.id !== transition.id
         || player._authority !== 'GRANTED')) void audio.current.stopBed(30)
       if (grant && !current?.prefs.ambienceEnabled) void audio.current.stopBed(30)
@@ -246,7 +249,7 @@ export default function useAnimationPlayer () {
     return () => {
       alive = false
     }
-  }, [snapshot?.catalogVersion, snapshot?.active?.interventionId, snapshot?.ambience?.clip.id, lastFinishedAt, snapshot?.prefs.profile, snapshot?.prefs.ambienceClipId, snapshot?.prefs.ambienceEnabled, snapshot?.playerEpoch, needsVoice, authority, roomId, connected, preparationRetry, publishReadiness])
+  }, [snapshot?.catalogVersion, snapshot?.karaokeBackgroundRevision, snapshot?.active?.interventionId, snapshot?.ambience?.clip.id, lastFinishedAt, snapshot?.prefs.profile, snapshot?.prefs.ambienceClipId, snapshot?.prefs.ambienceEnabled, snapshot?.playerEpoch, needsVoice, authority, roomId, connected, preparationRetry, publishReadiness])
 
   useEffect(() => {
     if (needsVoice && authority === 'GRANTED' && connected) resumeAudio()
@@ -299,9 +302,11 @@ export default function useAnimationPlayer () {
   const startTransition = useCallback(async (sourceQueueId: number | null, expectedNextQueueId: number | null) => {
     const state = store.getState()
     const current = state.animation.snapshot
+    const item = expectedNextQueueId === null ? null : ensureState(state.queue).entities[expectedNextQueueId]
+    const karaoke = item?.isOptimistic !== true && item?.requestIntent === 'SING' && item?.origin !== 'HOUSE' && (current?.karaokeCallsEnabled || current?.karaokeTurn?.queueId === expectedNextQueueId)
     const generation = version.current
     if (!socket.connected || !audio.current.ready || audio.current.waitingForMusic || state.player._authority !== 'GRANTED'
-      || !current?.prefs.ambienceEnabled || (!current.prefs.enabled && !current.greetingVoiceEnabled)) return null
+      || !current || (!karaoke && !current.prefs.ambienceEnabled) || !voiceRequested(current)) return null
     let grant: AmbienceGrant | undefined
     try {
       await stopAmbience()
@@ -315,8 +320,8 @@ export default function useAnimationPlayer () {
       if (!grant) return null
       const fresh = store.getState()
       if (generation !== version.current || !mounted.current || fresh.player._authority !== 'GRANTED' || !socket.connected
-        || audio.current.waitingForMusic || !fresh.animation.snapshot?.prefs.ambienceEnabled) throw new Error('La transición cambió antes de iniciar')
-      const completion = audio.current.playBed(grant.clip.checksum, ambienceBedVolume(fresh.animation.snapshot.prefs), grant.until - animationTime() - 200, grant.clip.loop !== false)
+        || audio.current.waitingForMusic || (grant.karaoke ? !fresh.animation.snapshot?.karaokeCallsEnabled && !fresh.animation.snapshot?.karaokeTurn : !fresh.animation.snapshot?.prefs.ambienceEnabled)) throw new Error('La transición cambió antes de iniciar')
+      const completion = audio.current.playBed(grant.clip.checksum, grant.volume ?? ambienceBedVolume(fresh.animation.snapshot!.prefs), grant.until - animationTime() - 200, grant.clip.loop !== false)
       transitionGrant.current = grant
       const id = grant.id
       transitionCompletion.current = completion.then(async (): Promise<void> => {
@@ -336,6 +341,19 @@ export default function useAnimationPlayer () {
       return null
     }
   }, [stopAmbience, stopTransition])
+
+  const keepTransition = useCallback(async (sourceQueueId: number | null, queueId: number) => {
+    const grant = transitionGrant.current
+    if (!grant) {
+      if (!audio.current.hasBed) await startTransition(sourceQueueId, queueId)
+      return
+    }
+    if (!grant.karaoke || grant.until - animationTime() > 3500) return
+    const reply = await animationRequest(ANIMATION_AMBIENCE, { playerEpoch: grant.playerEpoch, renewId: grant.id }, ANIMATION_LIMITS.startMs)
+    if (transitionGrant.current !== grant) return
+    if (!reply.ambience || !audio.current.renewBed(reply.ambience.until - animationTime() - 200)) await stopTransition(30)
+    else transitionGrant.current = reply.ambience
+  }, [startTransition, stopTransition])
 
   const startAmbience = useCallback(async () => {
     const state = store.getState()
@@ -575,5 +593,5 @@ export default function useAnimationPlayer () {
     locallySettled.current.add(id)
   }, [])
   return { busy, blocked, text, scene, connected, error, unlocked, needsGesture, preparingAudio, unlock, attempt, abort, snapshot, stopAmbience, startAmbience, ambientPlaying, controlVersion: () => version.current,
-    idleTick, ambientTick, channel: audio.current, refreshReadiness: publishReadiness, markStopped, isBlocked, startTransition, stopTransition }
+    idleTick, ambientTick, channel: audio.current, refreshReadiness: publishReadiness, markStopped, isBlocked, startTransition, stopTransition, keepTransition }
 }

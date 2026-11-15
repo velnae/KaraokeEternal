@@ -3,6 +3,7 @@ import { catalogClips } from './catalog.js'
 import { animationPrefs, eligibleAmbience, interventionAssets, type AnimationClip } from '../../shared/animation.js'
 import { audioUsage } from './usage.js'
 import { effectCategoryValue } from '../../shared/effectCategories.js'
+import { karaokeBedClips } from './Calls/Backgrounds.js'
 
 // Balance kinds/event families and rotate toward least-recently used resources.
 // This is a preparation window, not the complete management inventory.
@@ -31,6 +32,7 @@ export function preparationClips (roomId: number) {
     }
   }
   const active = Animation.active(roomId)
+  for (const clip of karaokeBedClips(roomId)) add(clip)
   if (active) for (const clip of interventionAssets(active)) if (catalogIds.has(clip.id)) add(clip)
   const ambient = Animation.ambience(roomId)
   if (ambient) add(ambient.clip)

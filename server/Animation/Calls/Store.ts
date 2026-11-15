@@ -81,8 +81,8 @@ export interface RequestRow {
   updatedAt: number
 }
 export const callControls = (roomId: number): CallControls => {
-  const row = db.get<{ revision: number, preparing: number, enabled: number, listeningEnabled: number, introIdsJSON: string }>('SELECT * FROM karaokeCallControls WHERE roomId=?', [roomId])
-  return row ? { revision: row.revision, preparing: !!row.preparing, enabled: !!row.enabled, listeningEnabled: !!row.listeningEnabled, introIds: JSON.parse(row.introIdsJSON) } : { revision: 0, preparing: false, enabled: false, listeningEnabled: false, introIds: [] }
+  const row = db.get<{ revision: number, preparing: number, enabled: number, listeningEnabled: number, automaticStart: number, introIdsJSON: string }>('SELECT * FROM karaokeCallControls WHERE roomId=?', [roomId])
+  return row ? { revision: row.revision, preparing: !!row.preparing, enabled: !!row.enabled, listeningEnabled: !!row.listeningEnabled, automaticStart: !!row.automaticStart, introIds: JSON.parse(row.introIdsJSON) } : { revision: 0, preparing: false, enabled: false, listeningEnabled: false, automaticStart: false, introIds: [] }
 }
 export const requestCall = (roomId: number, queueId: number) => db.get<RequestRow>('SELECT * FROM karaokeCallRequests WHERE roomId=? AND queueId=?', [roomId, queueId])
 export const callSessionAllows = (roomId: number) => {

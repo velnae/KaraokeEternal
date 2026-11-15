@@ -1,0 +1,15 @@
+CREATE TABLE karaokePreviewDrafts (
+  userId INTEGER NOT NULL REFERENCES users(userId) ON DELETE CASCADE,
+  roomId INTEGER NOT NULL REFERENCES rooms(roomId) ON DELETE CASCADE,
+  revision INTEGER NOT NULL DEFAULT 0,
+  draftJSON TEXT NOT NULL,
+  PRIMARY KEY(userId,roomId)
+);
+CREATE TABLE karaokePreviewSamples (
+  userId INTEGER NOT NULL REFERENCES users(userId) ON DELETE CASCADE,
+  roomId INTEGER NOT NULL REFERENCES rooms(roomId) ON DELETE CASCADE,
+  cacheKey TEXT NOT NULL,
+  jobId TEXT NOT NULL REFERENCES karaokeCallJobs(id) ON DELETE CASCADE,
+  updatedAt INTEGER NOT NULL,
+  PRIMARY KEY(userId,roomId,cacheKey)
+);

@@ -107,6 +107,24 @@ it('preloads a private twenty-second greeting independently of catalog refresh',
   audio.close()
 })
 
+it.each([
+  [130, true, true], [130.1, true, false], [130, false, false],
+] as const)('validates a %ss bed with Karaoke scope=%s in both preparation paths', async (duration, scoped, allowed) => {
+  const checksum = createHash('sha256').update('long bed').digest('hex')
+  const clip = { id: 'bed', roomId: 1, source: 'Karaoke', kind: 'ambience' as const, title: 'Long bed', displayText: '', license: 'Fixture',
+    checksum, durationMs: duration * 1000, url: scoped ? 'api/rooms/1/karaoke-calls/backgrounds/assets/bed' : 'api/animation/assets/bed' }
+  vi.stubGlobal('document', { baseURI: 'http://localhost/karaoke/' })
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('long bed')))
+  for (const mode of ['catalog', 'turn']) {
+    const audio = new AnnouncementAudio()
+    audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration, length: Math.round(duration * 44100), numberOfChannels: 2 }) } as unknown as AudioContext
+    const result = mode === 'catalog' ? await audio.prepare([clip]) : await audio.prepareGreetingAssets([{ ...clip, role: 'bed' }])
+    expect(result).toEqual(allowed ? [checksum] : [])
+    expect(audio.decodedBytes).toBeLessThanOrEqual(audio.maxDecodedBytes)
+    audio.close()
+  }
+})
+
 it('mixes a separate quiet bed and stops both sources without extending the hard deadline', async () => {
   const audio = new AnnouncementAudio()
   const sources: Array<{ connect: ReturnType<typeof vi.fn>, disconnect: ReturnType<typeof vi.fn>, start: ReturnType<typeof vi.fn>, stop: ReturnType<typeof vi.fn>, onended: (() => void) | null }> = []
@@ -225,6 +243,27 @@ it('bounds a blocked resume attempt and can retry without replacing the context'
     audio.close()
     vi.useRealTimers()
   }
+})
+
+it('renews a waiting karaoke bed on one source and cannot revive it after stop or expiry', async () => {
+  const audio = new AnnouncementAudio()
+  const source = { connect: vi.fn(node => node), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null as (() => void) | null, loop: false }
+  const gain = { connect: vi.fn(), disconnect: vi.fn(), gain: { value: 0.2, cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() } }
+  const context = { state: 'running', currentTime: 0, destination: {}, createBufferSource: () => source, createGain: () => gain, addEventListener: vi.fn(), removeEventListener: vi.fn(), close: async () => {} }
+  audio.context = context as unknown as AudioContext
+  audio.buffers.set('bed', { duration: 2 } as AudioBuffer)
+  const playing = audio.playBed('bed', 0.2, 5000, true)
+  context.currentTime = 4
+  expect(audio.renewBed(10000)).toBe(true)
+  expect(source.start).toHaveBeenCalledTimes(1)
+  expect(source.stop).toHaveBeenLastCalledWith(14)
+  context.currentTime = 14
+  expect(audio.renewBed(10000)).toBe(false)
+  void audio.stopBed(0)
+  expect(audio.renewBed(10000)).toBe(false)
+  source.onended!()
+  await expect(playing).resolves.toBe('STOPPED')
+  audio.close()
 })
 
 it('renews one looping source without restarting it and cannot extend after stop or lease expiry', async () => {

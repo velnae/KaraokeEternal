@@ -13,8 +13,7 @@ export async function checkSingingHistory ({ page, uiBase, data, db, snapshot, f
   assert.ok(fallbackState.playedResult.text.includes('próximo cantante'))
   db.prepare('UPDATE karaokeCallParts SET retired=1 WHERE id=?').run(original.id)
   for (const file of [original.master, original.filename]) fs.rmSync(path.join(data, 'animation/calls', file))
-  await page.goto(uiBase + 'admin/settings/animator?view=calls')
-  await page.getByText(/Pedidos de karaoke \(/).click()
+  await page.goto(uiBase + 'admin/settings/karaoke?view=history')
   const history = page.getByRole('listitem').filter({ has: page.getByText('Rayando el sol', { exact: true }) })
   await expect(history.getByText('Anunciado', { exact: true })).toBeVisible()
   await history.getByRole('button', { name: 'Recuperar audio', exact: true }).focus()
@@ -39,7 +38,7 @@ export async function checkSingingHistory ({ page, uiBase, data, db, snapshot, f
   assert.equal(db.prepare('SELECT count(*) n FROM animationInterventions').get().n, interventionCount)
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
-    await page.getByText(/Pedidos de karaoke \(/).scrollIntoViewIfNeeded()
+    await page.getByRole('region', { name: 'Historial de llamados', exact: true }).scrollIntoViewIfNeeded()
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
     await page.screenshot({ path: path.join(data, `singing-history-${width}.png`), fullPage: true })
   }

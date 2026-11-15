@@ -1,6 +1,9 @@
 import { clipDurationLimit, TRANSITION_BED_MS, type AnimationClip } from '../../../../../shared/animation.js'
 import type { GreetingAsset } from '../../../../../shared/greetings.js'
 import { nextTraceIdentity, tracePlayback } from '../../../../lib/playbackTrace'
+import { KARAOKE_BACKGROUND_AUDIO_MS, isKaraokeBedClip } from '../../../../../shared/karaokeBackgrounds.js'
+
+const durationLimit = (clip: AnimationClip) => isKaraokeBedClip(clip) ? KARAOKE_BACKGROUND_AUDIO_MS : clipDurationLimit(clip.kind, clip.effectType)
 
 /** A finite, isolated voice channel. It never changes music gain or playback. */
 export default class AnnouncementAudio {
@@ -24,6 +27,7 @@ export default class AnnouncementAudio {
   private bedFinish: (() => void) | null = null
   private bedVolumeChange: ((volume: number) => void) | null = null
   private bedCompletion: Promise<'ENDED' | 'STOPPED'> | null = null
+  private bedRenew: ((durationMs: number) => boolean) | null = null
   private ambienceHeld = false
   readonly maxDecodedBytes = 64 * 1024 * 1024
   readonly preparationErrors = new Map<string, string>()
@@ -107,7 +111,7 @@ export default class AnnouncementAudio {
         }
         let stage = 'download'
         try {
-          const bytes = await this.download(`api/animation/assets/${encodeURIComponent(clip.id)}`)
+          const bytes = await this.download(clip.url ?? `api/animation/assets/${encodeURIComponent(clip.id)}`, isKaraokeBedClip(clip) ? 15000 : 4000)
           assertCurrent()
           stage = 'checksum'
           const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
@@ -117,7 +121,7 @@ export default class AnnouncementAudio {
           const buffer = await context.decodeAudioData(bytes)
           assertCurrent()
           stage = 'duration'
-          if (buffer.duration <= 0 || buffer.duration * 1000 > clipDurationLimit(clip.kind, clip.effectType) || Math.abs(buffer.duration * 1000 - clip.durationMs) > 100) throw new Error('La duración del clip no es válida')
+          if (buffer.duration <= 0 || buffer.duration * 1000 > durationLimit(clip) || Math.abs(buffer.duration * 1000 - clip.durationMs) > 100) throw new Error('La duración del clip no es válida')
           const size = buffer.length * buffer.numberOfChannels * 4
           stage = 'memory'
           if (size > this.maxDecodedBytes) throw new Error('El audio supera la memoria disponible para este canal.')
@@ -142,10 +146,10 @@ export default class AnnouncementAudio {
 
   get ready () { return this.context?.state === 'running' }
 
-  private async download (url: string) {
+  private async download (url: string, timeoutMs = 4000) {
     if (!url.startsWith('api/')) throw new Error('Ruta de audio no válida')
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 4000)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const response = await fetch(`${document.baseURI}${url}`, { signal: controller.signal })
       if (!response.ok) throw new Error('No se pudo descargar el clip')
@@ -175,7 +179,7 @@ export default class AnnouncementAudio {
         try {
           if (!current()) break
           if (!this.buffers.has(asset.checksum)) {
-            const bytes = await this.download(asset.url)
+            const bytes = await this.download(asset.url, isKaraokeBedClip(asset) ? 15000 : 4000)
             const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
             if (!current()) break
             stage = 'checksum'
@@ -183,7 +187,7 @@ export default class AnnouncementAudio {
             stage = 'decode'
             const buffer = await context.decodeAudioData(bytes)
             if (!current()) break
-            const limit = asset.role === 'greeting' ? 20000 : clipDurationLimit(asset.kind, asset.effectType)
+            const limit = asset.role === 'greeting' ? 20000 : durationLimit(asset)
             stage = 'duration'
             if (buffer.duration <= 0 || buffer.duration * 1000 > limit || Math.abs(buffer.duration * 1000 - asset.durationMs) > 100) throw new Error('duration')
             const size = buffer.length * buffer.numberOfChannels * 4
@@ -215,7 +219,7 @@ export default class AnnouncementAudio {
     const buffer = this.buffers.get(checksum)
     if (!context || context.state !== 'running' || !buffer || this.bedStop || this.ambienceHeld || durationMs <= 0) throw new Error('El fondo no está disponible')
     const duration = Math.min(TRANSITION_BED_MS / 1000, durationMs / 1000, loop ? Infinity : buffer.duration)
-    const until = context.currentTime + duration
+    let until = context.currentTime + duration
     this.bedChecksum = checksum
     this.bedCompletion = new Promise<'ENDED' | 'STOPPED'>((resolve) => {
       const source = context.createBufferSource()
@@ -229,7 +233,7 @@ export default class AnnouncementAudio {
       gain.gain.linearRampToValueAtTime(0, until)
       let settled = false
       let stopped = false
-      const timer = setTimeout(() => stop(0), duration * 1000 + 100)
+      let timer = setTimeout(() => stop(0), duration * 1000 + 100)
       const finish = () => {
         if (settled) return
         settled = true
@@ -243,6 +247,7 @@ export default class AnnouncementAudio {
         this.bedVolumeChange = null
         this.bedChecksum = null
         this.bedCompletion = null
+        this.bedRenew = null
         resolve(stopped ? 'STOPPED' : 'ENDED')
       }
       const stop = (fadeMs: number) => {
@@ -260,6 +265,18 @@ export default class AnnouncementAudio {
         if (context.state !== 'running') stop(0)
       }
       this.bedStop = stop
+      this.bedRenew = (durationMs) => {
+        if (!loop || stopped || settled || context.state !== 'running' || durationMs <= 0 || context.currentTime >= until - 0.25) return false
+        until = context.currentTime + Math.min(10000, durationMs) / 1000
+        clearTimeout(timer)
+        timer = setTimeout(() => stop(0), Math.min(10000, durationMs) + 100)
+        gain.gain.cancelScheduledValues(context.currentTime)
+        gain.gain.setValueAtTime(gain.gain.value, context.currentTime)
+        gain.gain.setValueAtTime(volume, Math.max(context.currentTime, until - 0.25))
+        gain.gain.linearRampToValueAtTime(0, until)
+        source.stop(until)
+        return true
+      }
       this.bedFinish = finish
       this.bedVolumeChange = (value) => {
         if (stopped || settled || context.currentTime >= until - 0.25) return
@@ -284,6 +301,7 @@ export default class AnnouncementAudio {
   }
 
   bedVolume (value: number) { this.bedVolumeChange?.(value) }
+  renewBed (durationMs: number) { return this.bedRenew?.(durationMs) ?? false }
 
   play (checksum: string, volume: number, segment?: { offsetMs: number, durationMs: number, renewable?: boolean, loop?: boolean }): Promise<'ENDED' | 'STOPPED'> {
     const context = this.context

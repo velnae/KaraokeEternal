@@ -18,6 +18,7 @@ import MusicBlockingPrefs from 'components/MusicBlocking/MusicBlockingPrefs'
 import PlayerDisplaySettings from 'components/PlayerDisplay/PlayerDisplaySettings'
 import BirthdayAdmin from 'components/Birthdays/BirthdayAdmin'
 import AudioProviderSettings from 'components/AudioProviders/AudioProviderSettings'
+import KaraokeCallPilot from 'components/Animation/KaraokeCallPilot'
 
 export default function AdminRoutes () {
   const user = useAppSelector(state => state.user)
@@ -50,6 +51,7 @@ export default function AdminRoutes () {
       />
       <Route path='settings/animator' element={<AdminPage title='Animador' description=''><AnimatorSettings /></AdminPage>} />
       <Route path='settings/birthdays' element={<AdminPage title='Cumpleaños' description=''><BirthdayAdmin key={roomId} /></AdminPage>} />
+      <Route path='settings/karaoke' element={<AdminPage title='Karaoke' description=''>{typeof roomId === 'number' ? <KaraokeCallPilot key={roomId} roomId={roomId} /> : <p role='status'>Ingrese a una sala para configurar los llamados.</p>}</AdminPage>} />
       <Route path='settings/audio-providers' element={<AdminPage title='Proveedores de audio' description=''><AudioProviderSettings key={roomId} /></AdminPage>} />
       <Route path='settings/playback' element={<AdminPage title='Reproducción' description='Ajuste el comportamiento del reproductor y el nivel de las canciones.'><PlayerPrefs /></AdminPage>} />
       <Route path='settings/display' element={<AdminPage title='Pantalla del reproductor' description='Todo el local · Referencia FHD (1920 × 1080)'><PlayerDisplaySettings /></AdminPage>} />

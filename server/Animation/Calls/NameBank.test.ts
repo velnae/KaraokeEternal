@@ -136,6 +136,28 @@ it('keeps the chosen version through regeneration and uncertainty and audits the
   expect(provider.generate).toHaveBeenCalledTimes(3)
 }, 10000)
 
+it('recovers a first uncertain name only after explicit generation and selection, then reuses it across requests', async () => {
+  vi.mocked(provider.generate).mockRejectedValueOnce(new GreetingVoiceError('Provider did not confirm the name', 'uncertain'))
+  NameBank.ensureAudio(worker, 1, 'Fixture name', voice.profile(), true)
+  await worker.tick()
+  const group = NameBank.find('Fixture name')!
+  expect(NameBank.latestJob(group.id, voice.profile())?.status).toBe('uncertain')
+  for (let index = 0; index < 3; index++) {
+    expect(NameBank.ensureAudio(worker, 2, 'Fixture name', voice.profile(), true)).toBeUndefined()
+    await worker.tick()
+  }
+  expect(provider.generate).toHaveBeenCalledTimes(1)
+  expect(NameBank.preparationIssue('Fixture name', voice.profile())).toContain('Animador → Nombres')
+  const recovery = worker.submit(1, 'source', { requestId: randomUUID(), sourceKind: 'name', nameId: group.id, text: group.spokenText, regenerate: true })
+  await worker.tick()
+  const result = job(1, recovery.id)!
+  expect(result.status).toBe('ready')
+  NameBank.choose(group.id, result.resultId!, group.revision)
+  expect(NameBank.preparationIssue('Fixture name', voice.profile())).toBeNull()
+  expect(NameBank.ensureAudio(worker, 2, 'Fixture name', voice.profile(), true)?.id).toBe(result.resultId)
+  expect(provider.generate).toHaveBeenCalledTimes(2)
+})
+
 it('reprocesses an existing version locally without consuming the provider', async () => {
   const original = await audio('Ana')
   const result = worker.submit(1, 'source', { requestId: randomUUID(), sourceKind: 'name', nameId: original.nameId, text: original.text,

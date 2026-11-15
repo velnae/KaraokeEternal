@@ -13,6 +13,7 @@ const settings = [
   ['/admin/settings/audio-providers', 'Proveedores de audio'],
   ['/admin/settings/display', 'Pantalla'],
   ['/admin/settings/birthdays', 'Cumpleaños'],
+  ['/admin/settings/karaoke', 'Karaoke'],
   ['/admin/settings/files', 'Archivos'], ['/admin/settings/branding', 'Marca del local'],
   ['/admin/settings/moderation', 'Moderación'],
   ['/admin/settings/music-blocking', 'Música bloqueada'],

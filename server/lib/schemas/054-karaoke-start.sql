@@ -1,0 +1,12 @@
+ALTER TABLE karaokeCallControls ADD COLUMN automaticStart INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE karaokeStartTurns (
+  roomId INTEGER PRIMARY KEY REFERENCES rooms(roomId) ON DELETE CASCADE,
+  queueId INTEGER NOT NULL REFERENCES queue(queueId) ON DELETE CASCADE,
+  runId TEXT NOT NULL,
+  ownerSocketId TEXT,
+  phase TEXT NOT NULL,
+  presented INTEGER NOT NULL DEFAULT 0,
+  revision INTEGER NOT NULL DEFAULT 0,
+  endsAt INTEGER,
+  heartbeatAt INTEGER NOT NULL
+);

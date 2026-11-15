@@ -4,8 +4,8 @@ import { useAppSelector } from 'store/hooks'
 import socket from 'lib/socket'
 import { greetingRequest } from 'components/Greetings/api'
 import { greetingDuration, type Greeting, type GreetingAsset, type GreetingGrant, type GreetingPerformer } from 'shared/greetings'
-import { ANIMATION_EVENT, ambienceBedVolume } from 'shared/animation'
-import { animationRequest, animationTime } from 'lib/animationApi'
+import { ANIMATION_EVENT, ANIMATION_LIMITS, ambienceBedVolume } from 'shared/animation'
+import { animationPlaybackEvent, animationRequest, animationTime } from 'lib/animationApi'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, PLAYER_EMIT_STATUS } from 'shared/actionTypes'
 import { playerStatusCancel } from '../../modules/player'
 import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
@@ -44,10 +44,10 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
   useEffect(() => {
     mounted.current = true
     const gate = commit.current
-    const stop = () => {
+    const stop = (reason: string) => {
       version.current++
       gate.cancel()
-      if (running.current) channel.stop()
+      if (running.current) channel.stop(reason)
       if (mounted.current) {
         setActive(null)
         setIntro('')
@@ -55,19 +55,21 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       }
     }
     const command = (action: { type: string }) => {
-      if ([PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY].includes(action.type)) stop()
+      if ([PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY].includes(action.type)) stop(action.type)
     }
     const unsubscribe = store.subscribe(() => checkActive.current?.())
-    socket.on('disconnect', stop)
+    const disconnected = () => stop('greeting-disconnected')
+    const hidden = () => stop('greeting-page-hidden')
+    socket.on('disconnect', disconnected)
     socket.on('action', command)
-    window.addEventListener('pagehide', stop)
+    window.addEventListener('pagehide', hidden)
     return () => {
       mounted.current = false
-      stop()
+      stop('greeting-unmounted')
       unsubscribe()
-      socket.off('disconnect', stop)
+      socket.off('disconnect', disconnected)
       socket.off('action', command)
-      window.removeEventListener('pagehide', stop)
+      window.removeEventListener('pagehide', hidden)
     }
   }, [channel])
 
@@ -131,7 +133,8 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
     }
     const audioEvent = (event: 'STARTED' | 'ASSET_STARTED' | 'ASSET_ENDED' | 'ENDED' | 'STOPPED' | 'NOT_STARTED', clipId?: string) => {
       const intervention = grant!.transition!.intervention
-      return animationRequest(ANIMATION_EVENT, { interventionId: intervention.interventionId, playerEpoch: intervention.playerEpoch, event, clipId }, 1000)
+      if (event === 'STARTED' || event === 'ASSET_STARTED') return animationPlaybackEvent(intervention, event, clipId)
+      return animationRequest(ANIMATION_EVENT, { interventionId: intervention.interventionId, playerEpoch: intervention.playerEpoch, event, clipId }, ANIMATION_LIMITS.startMs)
     }
     let bedStarted = false
     const play = async (asset: GreetingAsset, first: boolean, onStarted?: () => Promise<void>) => {
@@ -144,7 +147,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       const bed = grant!.transition!.assets.find(item => item.role === 'bed')
       if (first && bed && ownsBed) {
         try {
-          void channel.playBed(bed.checksum, ambienceBedVolume(current.prefs), deadline - performance.now() - 100, bed.loop !== false)
+          void channel.playBed(bed.checksum, bed.volume ?? ambienceBedVolume(current.prefs), deadline - performance.now() - 100, bed.loop !== false)
           bedStarted = true
         } catch { /* Voice remains usable without an optional background bed. */ }
       }
@@ -213,7 +216,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       deadline = Math.min(deadline, performance.now() + Math.max(0, Math.min(25000, grant.until - animationTime())))
       setPerformer(grant.performer)
       checkActive.current = () => {
-        if (!valid() || (scheduled && !voiceValid())) channel.stop()
+        if (!valid() || (scheduled && !voiceValid())) channel.stop('greeting-permission-changed')
       }
       const monitor = async () => {
         while (!done && valid()) {
@@ -225,17 +228,17 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
           const item = fresh.items.find(item => item.greetingId === grant!.items[0].greetingId)
           if (fresh.paused || !item || !['RESERVED', 'DISPLAYING'].includes(item.status)) {
             interrupted = true
-            channel.stop()
+            channel.stop('greeting-withdrawn')
             commit.current.cancel()
             break
           }
         }
-        if (!done && !valid()) channel.stop()
+        if (!done && !valid()) channel.stop('greeting-window-ended')
       }
       void monitor().catch(() => {
         if (!done) {
           interrupted = true
-          channel.stop()
+          channel.stop('greeting-monitor-failed')
           commit.current.cancel()
         }
       })
@@ -259,7 +262,9 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
           voiceCompleted = true
           if (greeting) void greetingRequest('audioEnded', { turnKey: grant.turnKey, greetingId: grant.items[0].greetingId }).catch(() => {})
         } catch (error) {
-          channel.stopForeground()
+          tracePlayback('greeting-playback-failed', { roomId, queueId: expectedQueueId, interventionId: grant.transition.intervention.interventionId,
+            reason: scheduled ? 'playback-or-receipt-failed' : 'not-started' })
+          channel.stopForeground('greeting-playback-failed')
           if (ownsBed) await channel.stopBed(30)
           if (!valid()) throw error
           if (grant.items.length) {
@@ -282,7 +287,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       checkActive.current = null
       commit.current.cancel()
       if (grant?.transition) {
-        channel.stopForeground()
+        channel.stopForeground('greeting-settled')
         if (ownsBed) await channel.stopBed(30)
         markStopped(grant.transition.intervention.interventionId)
         if (socket.connected) await audioEvent(valid() && voiceCompleted ? 'ENDED' : scheduled ? 'STOPPED' : 'NOT_STARTED').catch(() => {})

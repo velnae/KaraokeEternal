@@ -52,6 +52,7 @@ export const callStatusLabels: Record<CallStatus, string> = {
   failed: 'Error', uncertain: 'Sin confirmación', cancelled: 'Cancelado',
 }
 export interface CallControls {
+  automaticStart?: boolean
   revision: number
   preparing: boolean
   enabled: boolean
@@ -87,6 +88,7 @@ export const callPlaybackReasons = {
   'channel-occupied': 'Otra intervención ocupaba el canal de voz.',
 } as const
 export interface CallAutomationSnapshot {
+  listeningMessage?: string | null
   bankPreparing?: boolean
   bankPaused?: boolean
   bankQuote?: string

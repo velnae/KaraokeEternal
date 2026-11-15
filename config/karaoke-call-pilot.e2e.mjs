@@ -8,6 +8,8 @@ import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 import { checkAutomaticCalls } from './karaoke-call-playback-checks.e2e.mjs'
+import { checkKaraokeBackgrounds, checkKaraokePreview } from './karaoke-background-checks.e2e.mjs'
+import { checkKaraokePreviewDefaults, checkKaraokePreviewPersistence } from './karaoke-preview-persistence-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -77,7 +79,8 @@ const start = async () => {
     cwd: root, stdio: ['ignore', log, log], env: { ...process.env, NODE_ENV: development ? 'development' : 'production',
       KES_SCAN: '', KES_ROTATE_KEY: 'false', KES_ELEVENLABS_API_KEY: '', KES_GEMINI_API_KEY: 'fixture-only',
       KARAOKE_E2E_GEMINI_ORIGIN: `http://127.0.0.1:${providerPort}`,
-      NODE_OPTIONS: `--import=${pathToFileURL(path.join(root, 'config/fixtures/gemini-fetch.mjs')).href}` },
+      NODE_OPTIONS: [`--import=${pathToFileURL(path.join(root, 'config/fixtures/gemini-fetch.mjs')).href}`,
+        ...(development ? [`--import=${pathToFileURL(path.join(root, 'config/fixtures/karaoke-webpack.mjs')).href}`] : [])].join(' ') },
   })
   await expect.poll(async () => {
     if (server.exitCode !== null) throw new Error(`Server exited. Artifacts: ${data}`)
@@ -148,7 +151,9 @@ try {
   }
   await page.route(snapshotPattern, slowSnapshot)
   await page.goto(uiBase + 'admin/settings/animator?view=calls')
-  await expect(page.getByRole('heading', { name: 'Llamados de karaoke' })).toBeVisible()
+  await expect(page).toHaveURL(/\/admin\/settings\/karaoke\?view=settings$/)
+  await expect(page.getByRole('heading', { name: 'Karaoke', exact: true })).toBeVisible()
+  await expect(page.getByRole('switch', { name: 'Presentar pedidos para escuchar' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Generar introducción', exact: true })).toBeEnabled({ timeout: 12000 })
   await page.unroute(snapshotPattern, slowSnapshot)
   await page.getByLabel('Nombre de la introducción').fill('Intro de prueba')
@@ -159,6 +164,28 @@ try {
   await page.reload()
   await expect(page.getByRole('region', { name: 'Introducciones para cantar', exact: true }).getByRole('button', { name: 'Escuchar Intro de prueba', exact: true })).toBeVisible()
   assert.equal(providerRequests.length, 1)
+  await call('rooms/1/karaoke-calls/intros', { requestId: crypto.randomUUID(), title: 'Segunda introducción', text: '¡Recibamos al próximo cantante!' }).then(item => ready(item.id))
+  const secondIntro = (await snapshot()).intros.find(item => item.title === 'Segunda introducción')
+  await expect(page.getByRole('checkbox', { name: 'Usar Segunda introducción', exact: true })).toBeChecked()
+  const selection = page.getByRole('checkbox', { name: 'Usar Intro de prueba', exact: true })
+  await expect(selection).toBeChecked()
+  await selection.focus()
+  await page.keyboard.press('Space')
+  await expect.poll(async () => (await snapshot()).automation.controls.introIds).toEqual([secondIntro.variantId])
+  await page.reload()
+  await expect(selection).not.toBeChecked()
+  await page.getByRole('checkbox', { name: 'Usar Segunda introducción', exact: true }).click()
+  await expect(page.getByRole('alert')).toHaveText('Mantenga al menos una introducción activa.')
+  await page.getByRole('button', { name: 'Usar todas', exact: true }).click()
+  await expect.poll(async () => (await snapshot()).automation.controls.introIds).toEqual([])
+  await page.goto(uiBase + 'admin/settings/animator?view=listening')
+  await expect(page.getByRole('switch', { name: 'Llamados automáticos', exact: true })).toHaveCount(0)
+  await page.getByRole('switch', { name: 'Presentar pedidos para escuchar', exact: true }).click()
+  await expect.poll(async () => (await snapshot()).automation.controls.listeningEnabled).toBe(true)
+  assert.equal((await snapshot()).automation.controls.enabled, false)
+  await expect(page.getByRole('switch', { name: 'Presentar pedidos para escuchar', exact: true })).toBeChecked()
+  await page.getByRole('switch', { name: 'Presentar pedidos para escuchar', exact: true }).click()
+  await expect.poll(async () => (await snapshot()).automation.controls.listeningEnabled).toBe(false)
 
   await page.goto(uiBase + 'admin/rooms')
   await page.getByRole('button', { name: /^Ver mesas de/ }).first().click()
@@ -180,7 +207,21 @@ try {
   await expect.poll(() => page.evaluate(() => window.pilotAudio.paused)).toBe(true)
   assert.equal((await call(`rooms/1/tables/${first.tableId}/qr`)).invitation, qr.invitation)
 
+  const backgroundMedia = await checkKaraokeBackgrounds({ page, api, base, uiBase, data, db, call })
+
   await page.goto(uiBase + 'admin/settings/animator?view=calls')
+  await page.getByRole('button', { name: 'Previsualizar llamado', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  const preview = page.getByRole('dialog', { name: 'Previsualizar llamado', exact: true })
+  await expect(preview).toBeVisible()
+  await checkKaraokePreviewDefaults({ preview, db, tableId: first.tableId, introId: intro.id, media: backgroundMedia, providerRequests })
+  const beforeCountdownPreview = providerRequests.length
+  await preview.getByRole('button', { name: 'Probar cuenta regresiva', exact: true }).click()
+  await expect(preview.getByRole('status', { name: 'Cuenta regresiva de karaoke', exact: true })).toBeVisible()
+  assert.equal(providerRequests.length, beforeCountdownPreview, 'Previewing the countdown must not generate speech')
+  await preview.getByRole('button', { name: 'Cerrar', exact: true }).click()
+  await expect(preview).not.toBeVisible()
+  await page.getByRole('button', { name: 'Previsualizar llamado', exact: true }).click()
   await page.getByLabel('Introducción', { exact: true }).selectOption(intro.id)
   await page.getByLabel('Mesa', { exact: true }).selectOption(String(first.tableId))
   await page.getByLabel('Cantante', { exact: true }).fill('Ana')
@@ -188,11 +229,13 @@ try {
   await expect(page.getByRole('button', { name: 'Preparar prueba', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'Preparar prueba', exact: true }).click()
   await expect.poll(async () => (await snapshot()).jobs.find(item => item.operation === 'hybrid')?.status, { timeout: 15000 }).toBe('ready')
+  await checkKaraokePreview({ page, preview, data, db, media: backgroundMedia, providerRequests })
   await page.getByRole('button', { name: 'Escuchar llamado híbrido', exact: true }).first().click()
   await expect.poll(() => page.locator('audio').evaluate(audio => audio.readyState)).toBeGreaterThanOrEqual(2)
   await page.locator('audio').evaluate(audio => audio.play())
   await expect.poll(() => page.locator('audio').evaluate(audio => audio.ended)).toBe(true)
   await page.getByRole('button', { name: 'Cerrar escucha', exact: true }).click()
+  await preview.getByText('Más opciones', { exact: true }).click()
   await page.getByLabel('Tipo de prueba').selectOption('reference')
   await expect(page.getByRole('button', { name: 'Preparar prueba', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'Preparar prueba', exact: true }).click()
@@ -212,14 +255,27 @@ try {
   }
   await expect.poll(async () => (await snapshot()).jobs.filter(item => item.operation === 'reference' && item.status === 'ready').length).toBe(3)
 
+  await checkKaraokePreviewPersistence({ page, uiBase, db, call, providerRequests, restart: async () => {
+    await stop()
+    await start()
+    await call('login', { username: 'admin', password: 'call-pilot-test', roomId: 1 })
+  } })
+
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
-    await page.getByRole('heading', { name: 'Llamados de karaoke', exact: true }).scrollIntoViewIfNeeded()
-    await page.screenshot({ path: path.join(data, `pilot-top-${width}.png`), fullPage: true })
-    await page.getByRole('heading', { name: 'Probar llamado', exact: true }).scrollIntoViewIfNeeded()
-    await page.screenshot({ path: path.join(data, `pilot-${width}.png`), fullPage: true })
+    await preview.screenshot({ path: path.join(data, `pilot-${width}.png`) })
   }
+  await page.keyboard.press('Escape')
+  await expect(preview).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'Previsualizar llamado', exact: true })).toBeFocused()
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.screenshot({ path: path.join(data, `pilot-top-${width}.png`), fullPage: true })
+  }
+  await page.getByRole('link', { name: 'Historial', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Historial de llamados', exact: true })).toHaveText('Todavía no hay llamados para cantar.')
+  await expect(page.getByRole('region', { name: 'Pruebas recientes', exact: true })).toHaveCount(0)
   held = true
   const cancelled = await call('rooms/1/karaoke-calls/intros', { requestId: crypto.randomUUID(), title: 'Cancelled', text: 'Otra introducción.' })
   await expect.poll(async () => (await call(`rooms/1/karaoke-calls/jobs/${cancelled.id}`)).status).toBe('generating')
@@ -233,6 +289,7 @@ try {
   assert.equal(db.prepare('SELECT count(*) n FROM greetings').get().n, 0)
   if (automaticCalls) await checkAutomaticCalls({ page, context, browser, api, base, uiBase, data, db, call, snapshot,
     restart: async () => {
+      await page.goto('about:blank')
       await stop()
       await start()
       await call('login', { username: 'admin', password: 'call-pilot-test', roomId: 1 })
@@ -243,11 +300,11 @@ try {
   await start()
   await call('login', { username: 'admin', password: 'call-pilot-test', roomId: 1 })
   const persisted = await snapshot()
-  assert.equal(persisted.intros.length, 1)
+  assert.equal(persisted.intros.length, 2)
   assert.ok(persisted.jobs.some(item => item.operation === 'hybrid' && item.result))
   assert.equal(providerRequests.length, beforeRestart)
   assert.deepEqual(errors, [])
-  console.log(`Karaoke call pilot ${development ? 'development StrictMode' : 'production'}${httpsUi ? ' HTTPS UI + isolated API' : ''} E2E passed. Artifacts: ${data}`)
+  console.log(`Karaoke call pilot ${development ? 'development StrictMode' : 'production'}${httpsUi ? ' HTTPS UI + isolated API' : ''}${process.env.KARAOKE_E2E_CALLS_ONLY === '1' ? ' (calls/playback scope)' : ''} E2E passed. Artifacts: ${data}`)
 } catch (error) {
   console.error(`Pilot failed. Artifacts: ${data}`)
   if (page && !page.isClosed()) {

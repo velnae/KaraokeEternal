@@ -9,6 +9,13 @@ import Animation from '../Animation.js'
 import createNameVoiceRouter from './nameRouter.js'
 import { db } from '../../lib/Database.js'
 import { createCallPromotionRouter } from './promotionRouter.js'
+import path from 'node:path'
+import fs from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { koaBody } from 'koa-body'
+import { activateBackground, backgroundFile, backgroundOverview, saveBackgroundSettings, startKaraokeBackgrounds, uploadBackground } from './Backgrounds.js'
+import { recoverKaraokeTurns } from './Start.js'
+import { prepareKaraokePreview, readKaraokePreview, saveKaraokePreview } from './Preview.js'
 
 let worker: CallJobs | undefined
 export const callPromotionRouter = createCallPromotionRouter(() => worker)
@@ -17,12 +24,15 @@ export const nameVoiceRouter = createNameVoiceRouter(() => worker, getCallVoice,
   for (const { roomId } of db.all<{ roomId: number }>('SELECT roomId FROM rooms')) Animation.publish(roomId)
 })
 export async function startCallJobs (directory: string) {
+  recoverKaraokeTurns()
+  const stopBackgrounds = await startKaraokeBackgrounds(path.join(directory, 'backgrounds'))
   const instance = new CallJobs(directory, getCallVoice(), process.env.KES_FFMPEG_PATH || 'ffmpeg')
   await instance.start()
   worker = instance
   const automatic = new CallAutomation(instance, getCallVoice())
   automatic.start()
   return async () => {
+    stopBackgrounds()
     automatic.stop()
     await instance.stop()
     if (worker === instance) worker = undefined
@@ -35,7 +45,7 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
     // This router shares the rooms prefix with existing table routes.
     const suffix = ctx.path.slice(ctx.path.indexOf(`/rooms/${ctx.params.roomId}`) + `/rooms/${ctx.params.roomId}`.length)
     if (!callPaths.test(suffix)) return next()
-    if (!ctx.user?.isAdmin && !(canOperate(ctx.user) && ctx.method === 'GET' && Number(ctx.params.roomId) === ctx.user.roomId && /\/audio\/[\w-]+$/.test(ctx.path))) ctx.throw(403)
+    if (!ctx.user?.isAdmin && !(canOperate(ctx.user) && ['GET', 'HEAD'].includes(ctx.method) && Number(ctx.params.roomId) === ctx.user.roomId && /\/(?:audio|backgrounds\/assets)\/[\w-]+$/.test(ctx.path))) ctx.throw(403)
     ctx.set('Cache-Control', 'private, no-store')
     try {
       if (!Number.isSafeInteger(Number(ctx.params.roomId)) || Number(ctx.params.roomId) < 1) throw new CallError('Sala no válida.')
@@ -45,6 +55,44 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
     } catch (error) { ctx.throw((error as { status?: number }).status ?? 422, (error as Error).message) }
   })
   const body = (ctx): Record<string, unknown> => ctx.request.body || {}
+  router.get('/karaoke-calls/preview', async (ctx) => {
+    ctx.body = await readKaraokePreview(getWorker()!, ctx.user.userId, Number(ctx.params.roomId))
+  })
+  router.put('/karaoke-calls/preview', (ctx) => {
+    ctx.body = saveKaraokePreview(getWorker()!, ctx.user.userId, Number(ctx.params.roomId), body(ctx).draft, body(ctx).revision)
+  })
+  router.post('/karaoke-calls/preview', async (ctx) => {
+    ctx.body = await prepareKaraokePreview(getWorker()!, ctx.user.userId, Number(ctx.params.roomId), body(ctx))
+    ctx.status = 202
+  })
+  router.get('/karaoke-calls/backgrounds', (ctx) => {
+    ctx.body = backgroundOverview(Number(ctx.params.roomId))
+  })
+  router.put('/karaoke-calls/backgrounds', (ctx) => {
+    ctx.body = saveBackgroundSettings(Number(ctx.params.roomId), body(ctx))
+    Animation.publish(Number(ctx.params.roomId))
+  })
+  router.patch('/karaoke-calls/backgrounds/assets/:id', (ctx) => {
+    ctx.body = activateBackground(Number(ctx.params.roomId), ctx.params.id, body(ctx).active)
+    Animation.publish(Number(ctx.params.roomId))
+  })
+  router.post('/karaoke-calls/backgrounds/upload', koaBody({ multipart: true, formidable: { maxFileSize: 40 * 1024 * 1024, maxTotalFileSize: 40 * 1024 * 1024, maxFiles: 1, maxFields: 3, maxFieldsSize: 4096 } }), async (ctx) => {
+    const request = ctx.request as unknown as { body: { kind?: string, requestId?: string }, files?: Record<string, { filepath: string, originalFilename: string, size: number } | { filepath: string, originalFilename: string, size: number }[]> }
+    const files = Object.values(request.files ?? {}).flat()
+    try {
+      const { kind, requestId } = request.body
+      if (!['video', 'bed'].includes(kind ?? '') || typeof requestId !== 'string' || !/^[\w-]{8,100}$/.test(requestId) || files.length !== 1) ctx.throw(422, 'Seleccione un video MP4 o un audio MP3, WAV u OGG.')
+      if (files[0].size > (kind === 'video' ? 40 : 20) * 1024 * 1024) ctx.throw(422, 'El archivo supera el tamaño permitido.')
+      ctx.body = await uploadBackground(Number(ctx.params.roomId), kind as 'video' | 'bed', files[0].originalFilename || 'Fondo de karaoke', files[0].filepath, requestId!)
+      ctx.status = 202
+    } finally { await Promise.all(files.map(file => fs.rm(file.filepath, { force: true }))) }
+  })
+  router.get('/karaoke-calls/backgrounds/assets/:id', async (ctx) => {
+    const { asset, file } = backgroundFile(Number(ctx.params.roomId), ctx.params.id)
+    ctx.length = (await fs.stat(file)).size
+    ctx.type = asset.kind === 'video' ? 'video/mp4' : 'audio/mpeg'
+    ctx.body = createReadStream(file)
+  })
   router.get('/karaoke-calls', (ctx) => {
     const roomId = Number(ctx.params.roomId)
     ctx.body = { ...getWorker()!.snapshot(roomId), automation: getAutomation()?.snapshot(roomId) }

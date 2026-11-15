@@ -118,6 +118,8 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   const player = await adminContext.newPage()
   setPlayer(player)
   let networkDelayMs = 0
+  const lateReceipts = process.env.KARAOKE_E2E_GREETING_RECEIPTS === '1'
+  let rejectNextStart = false
   let holdIdleProbe = false
   let releaseIdleProbe
   const protocol = []
@@ -137,6 +139,11 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
       const packet = typeof message === 'string' && message.match(/^42(\d+)(\[.*)$/)
       if (packet) {
         const action = JSON.parse(packet[2])[1]
+        if (rejectNextStart && action?.type === 'server/ANIMATION_EVENT' && action.payload.event === 'STARTED') {
+          rejectNextStart = false
+          socket.send(`43${packet[1]}${JSON.stringify([{ error: 'Fixture start explicitly rejected' }])}`)
+          return
+        }
         actions.set(packet[1], action)
         if (networkDelayMs) protocol.push({ direction: 'request', at: Date.now(), action })
         if (holdIdleProbe && action?.type === 'server/ANIMATION_AUTO' && action.payload?.probeOnly) {
@@ -152,6 +159,14 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
       if (packet) {
         const action = actions.get(packet[1])
         actions.delete(packet[1])
+        if (lateReceipts && action?.type === 'server/ANIMATION_EVENT' && ['STARTED', 'ASSET_STARTED'].includes(action.payload.event)) {
+          const timer = setTimeout(() => {
+            timers.delete(timer)
+            socket.send(message)
+          }, action.payload.event === 'STARTED' ? 3500 : 1800)
+          timers.add(timer)
+          return
+        }
         if (networkDelayMs) protocol.push({ direction: 'reply', at: Date.now(), action, reply: JSON.parse(packet[2])[0] })
       }
       forward(socket, message)
@@ -227,6 +242,38 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
     assert.equal(db.prepare('SELECT count(*) n FROM audioUsage WHERE sourceId=? AND clipId=?').get(`intervention:${row.interventionId}`, introId).n, 1)
   }
   pass('Catalog intro → greeting → each own song, explicit sing/listen identity, one public reader and no synthesis at transitions')
+  if (lateReceipts) {
+    const trace = await player.evaluate(() => window.karaokePlaybackTrace.snapshot())
+    assert.ok(trace.events.some(event => event.event === 'playback-receipt-reconciled' && event.reason === 'STARTED'))
+    assert.ok(trace.events.some(event => event.event === 'playback-receipt-reconciled' && event.reason === 'ASSET_STARTED'))
+    for (const item of [first, second]) {
+      const row = intervention(item)
+      assert.equal(row.status, 'PLAYED')
+      for (const asset of JSON.parse(row.sequenceJSON).filter(asset => asset.role !== 'bed')) {
+        const events = trace.events.filter(event => event.checksum === asset.checksum && event.wallTime >= row.requestedAt - 100 && event.wallTime <= row.finishedAt + 100)
+        assert.equal(events.filter(event => event.event === 'audio-start').length, 1, `Schedule ${asset.role} exactly once`)
+        assert.ok(events.some(event => event.event === 'audio-finish' && event.state === 'ENDED'
+          && event.audioElapsedMs >= asset.durationMs - 120), `Complete ${asset.role} audio must survive late receipts`)
+      }
+    }
+    fs.writeFileSync(path.join(data, 'late-greeting-receipts.json'), JSON.stringify(trace, null, 2))
+    pass('Late STARTED and ASSET_STARTED receipts preserve complete greeting/name audio without replay or extra synthesis')
+    await emit(operator, 'server/PLAYER_REQ_PAUSE', {})
+    await configure(null)
+    setSpeech(6)
+    const rejected = await add('Este saludo se detiene si el servidor rechaza el inicio.')
+    await decoded(rejected)
+    rejectNextStart = true
+    await play(true)
+    await expect.poll(() => delivery(rejected)?.voiceStatus, { timeout: 15000 }).toBe('FAILED')
+    await waitPlayed(rejected)
+    assert.equal(rejectNextStart, false)
+    assert.notEqual(intervention(rejected).status, 'PLAYED')
+    const rejectedTrace = await player.evaluate(() => window.karaokePlaybackTrace.snapshot())
+    assert.ok(rejectedTrace.events.some(event => event.event === 'audio-stop-request' && event.reason === 'greeting-playback-failed'))
+    pass('Explicit server rejection still stops greeting audio and preserves screen delivery')
+    return
+  }
 
   // The remaining cases are independent requests. Preserve the request-time
   // greeting window instead of appending a greeting to an already-started turn.

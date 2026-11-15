@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { canOperate } from 'shared/permissions'
 import clsx from 'clsx'
 import { useAppDispatch, useAppSelector } from 'store/hooks'
@@ -26,6 +26,7 @@ import BirthdayQueueItem from 'components/Birthdays/BirthdayQueueItem'
 import useBirthdaySync from 'components/Birthdays/useBirthdaySync'
 import { selectBirthdays } from 'store/modules/birthdays'
 import { playbackSequence } from 'shared/playbackSequence'
+import { syncAnimation } from 'lib/animationApi'
 
 type QueueFilter = 'queue' | 'pending' | 'house'
 
@@ -56,6 +57,9 @@ const QueueList = () => {
   const starCounts = useAppSelector(state => state.starCounts)
   const user = useAppSelector(state => state.user)
   const isOperator = canOperate(user)
+  useEffect(() => {
+    if (isOperator) void syncAnimation().catch(() => {})
+  }, [isOperator, user.roomId])
   const greetings = useGreetings(!!user.roomId)
   const waits = useAppSelector(getWaits)
   const [params, setParams] = useSearchParams()

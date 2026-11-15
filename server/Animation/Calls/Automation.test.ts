@@ -408,17 +408,45 @@ it('shares one reservation with a greeting and keeps a long greeting visual inst
   expect(Greetings.items(1)[0].playback?.status).toBe('SCREEN')
 }, 30000)
 
-it('respects closing and finished jornadas without implicitly reopening public calls', async () => {
+it('keeps singing calls independent of animator sessions while listening still respects them', async () => {
   await bank()
   player()
+  automatic.configure(1, { ...callControls(1), listeningEnabled: true })
   Animation.session(1, 1, 'open')
   expect(Animation.snapshot(1).karaokeCallsEnabled).toBe(true)
+  expect(Animation.snapshot(1).listeningPresentationsEnabled).toBe(true)
   Animation.session(1, 1, 'close')
-  expect(Animation.snapshot(1).karaokeCallsEnabled).toBe(false)
+  expect(Animation.snapshot(1).karaokeCallsEnabled).toBe(true)
+  expect(Animation.snapshot(1).listeningPresentationsEnabled).toBe(false)
   Animation.session(1, 1, 'finish')
-  expect(Animation.snapshot(1).karaokeCallsEnabled).toBe(false)
+  expect(Animation.snapshot(1).karaokeCallsEnabled).toBe(true)
+  expect(Animation.snapshot(1).listeningPresentationsEnabled).toBe(false)
   Animation.session(1, 1, 'open')
   expect(Animation.snapshot(1).karaokeCallsEnabled).toBe(true)
+}, 30000)
+
+it('starts singing speech with animator off and preserves it when animator controls change', async () => {
+  await bank()
+  const identity = player()
+  Animation.control(1, Animation.state(1).controlVersion, { enabled: false, automation: false, events: { turn: false } })
+  const id = add()
+  await until(() => requestCall(1, id)?.status === 'ready')
+  expect(Animation.snapshot(1).karaokeCallsEnabled).toBe(true)
+  expect(automatic.snapshot(1).message).toBeNull()
+  const prepared = (await prepareGreetingTransition(1, id))!
+  expect(prepared?.call?.assets.length).toBeGreaterThan(0)
+  const grant = Greetings.reserve(1, identity.socketId, id, { queueId: -1 }, undefined, prepared, prepared.assets.map(asset => asset.checksum), 1)!
+  const intervention = grant.transition!.intervention
+  Animation.control(1, Animation.state(1).controlVersion, { enabled: false })
+  expect(Animation.active(1)?.stopRequestedAt).toBeNull()
+  Animation.event(identity, intervention.interventionId, intervention.playerEpoch!, 'STARTED')
+  Animation.control(1, Animation.state(1).controlVersion, { enabled: false, automation: false })
+  Animation.sweep()
+  expect(Animation.active(1)?.stopRequestedAt).toBeNull()
+  Animation.event(identity, intervention.interventionId, intervention.playerEpoch!, 'ENDED')
+  expect(automatic.snapshot(1).requests.find(item => item.queueId === id)?.playback).toBe('played')
+  automatic.configure(1, { ...callControls(1), enabled: false, preparing: false })
+  expect(Animation.snapshot(1).karaokeCallsEnabled).toBe(false)
 }, 30000)
 
 function enableListening () {

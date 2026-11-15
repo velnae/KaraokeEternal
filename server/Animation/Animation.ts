@@ -21,6 +21,8 @@ import type { CallContext } from '../../shared/karaokeCalls.js'
 import { birthdayOwnsAudio } from '../Birthdays/Store.js'
 import getLogger from '../lib/Log.js'
 import NameBank from './Calls/NameBank.js'
+import { backgroundSettings, currentKaraokeMedia, peekKaraokeMedia } from './Calls/Backgrounds.js'
+import { karaokeTurn, resetKaraokeTurn } from './Calls/Start.js'
 
 type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[], transitionBed: boolean }
 export interface AnimationIdentity { roomId: number, userId: number, socketId: string }
@@ -56,7 +58,9 @@ export default class Animation {
 
   static active (roomId: number) {
     const row = db.get<Intervention>(`SELECT * FROM animationInterventions WHERE roomId = ? AND status IN ${activeStatuses}`, [roomId])
-    return row ? { ...row, background: leasedTransitionBackground(`animation:${row.interventionId}`) } : null
+    if (!row) return null
+    const call = row.callJSON ? JSON.parse(row.callJSON) as CallContext : null
+    return { ...row, background: call && !call.kind ? currentKaraokeMedia(roomId, call.queueId)?.background ?? null : leasedTransitionBackground(`animation:${row.interventionId}`) }
   }
 
   static history (roomId: number) {
@@ -87,7 +91,7 @@ export default class Animation {
       history: Animation.history(roomId), playerPresent: !!owner, audioUnlocked: owner?.unlocked ?? false,
       readyClips: owner?.readyClips ?? [], serverTime: Date.now(), session: currentSession(roomId), ambience: Animation.ambience(roomId),
       catalogVersion: catalogVersion(), voiceBudgetRemainingMs: voiceBudget(Animation.selectionHistory(roomId), Date.now()), greetingVoiceEnabled: Animation.greetingEnabled(roomId),
-      karaokeCallsEnabled: callsEnabled(roomId), karaokeCallsRevision: callControls(roomId).revision, listeningPresentationsEnabled: listeningEnabled(roomId) }
+      karaokeTurn: karaokeTurn(roomId), karaokeCallsEnabled: callsEnabled(roomId), karaokeCallsRevision: callControls(roomId).revision, karaokeBackgroundRevision: backgroundSettings(roomId).revision, listeningPresentationsEnabled: listeningEnabled(roomId) }
   }
 
   static greetingEnabled (roomId: number) {
@@ -126,7 +130,7 @@ export default class Animation {
     if (call) db.run('UPDATE animationInterventions SET callJSON=? WHERE interventionId=?', [JSON.stringify(call), id])
     db.run('UPDATE animationInterventions SET sessionId=? WHERE interventionId=?', [currentSession(identity.roomId)?.sessionId ?? null, id])
     db.run('UPDATE animationRoomState SET blockedUntil=?,pendingEventJSON=NULL WHERE roomId=?', [until, identity.roomId])
-    captureTransitionBackground(identity.roomId, `animation:${id}`, until)
+    if (!call || call.kind) captureTransitionBackground(identity.roomId, `animation:${id}`, until)
     return Animation.active(identity.roomId)
   }
 
@@ -210,6 +214,7 @@ export default class Animation {
   static disconnect (roomId: number, socketId: string) {
     if (owners.get(roomId)?.socketId !== socketId) return
     owners.delete(roomId)
+    resetKaraokeTurn(roomId, socketId)
     const row = Animation.active(roomId)
     if (row) db.run('UPDATE animationInterventions SET status = ?, finishedAt = ?, reason = ? WHERE interventionId = ?',
       [row.status === 'PENDING' ? 'CANCELLED' : 'UNCERTAIN', Date.now(), 'Reproductor desconectado', row.interventionId])
@@ -278,10 +283,11 @@ export default class Animation {
       db.exec('RELEASE animation_control')
       throw error
     }
-    if ((!prefs.enabled && (Animation.active(roomId)?.origin !== 'GREETING' || Animation.active(roomId)?.callJSON)) || prefs.volume === 0) {
+    const active = Animation.active(roomId)
+    const singing = active?.callJSON && !(JSON.parse(active.callJSON) as CallContext).kind
+    if ((!prefs.enabled && !singing && (active?.origin !== 'GREETING' || active?.callJSON)) || prefs.volume === 0) {
       Animation.cancel(roomId, 'Animador bloqueado por el operador')
     }
-    const active = Animation.active(roomId)
     if (!prefs.automation && active?.origin === 'AUTO' && active.status !== 'PLAYING') Animation.cancel(roomId, 'Funcionamiento manual activado')
     Animation.publish(roomId)
   }
@@ -463,22 +469,25 @@ export default class Animation {
     const snapshot = Animation.snapshot(roomId)
     const owner = owners.get(roomId)
     const prefs = animationPrefs(snapshot.prefs)
+    const next = transition.expectedNextQueueId === null ? null : Queue.get(roomId).entities[transition.expectedNextQueueId]
+    const karaoke = !!next && (callsEnabled(roomId) || snapshot.karaokeTurn?.queueId === next.queueId) && next.origin !== 'HOUSE' && next.requestIntent === 'SING'
     if (owner?.socketId !== identity.socketId || owner.epoch !== epoch) throw new Error('Reproductor sin autoridad')
-    if ((!prefs.enabled && !Animation.greetingEnabled(roomId)) || !prefs.ambienceEnabled || prefs.ambienceVolume === 0
+    if ((!prefs.enabled && !Animation.greetingEnabled(roomId) && !karaoke) || (!karaoke && (!prefs.ambienceEnabled || prefs.ambienceVolume === 0))
       || Animation.room(roomId).status !== 'open' || !owner.unlocked || !owner.transitionBed || status.isErrored
       || snapshot.ambience || snapshot.blockedUntil > Date.now() || (snapshot.active && snapshot.active.status !== 'PENDING')) return null
     if (transition.sourceQueueId === null) {
-      if (!status.isAtQueueEnd && status.queueId !== -1) throw new Error('La canción todavía ocupa el reproductor')
+      if (!status.isAtQueueEnd && status.queueId !== -1 && !(karaoke && snapshot.karaokeTurn?.queueId === status.queueId && next?.status === 'APPROVED')) throw new Error('La canción todavía ocupa el reproductor')
     } else {
       const source = Queue.get(roomId).entities[transition.sourceQueueId]
       if (status.queueId !== transition.sourceQueueId || !source || !['PLAYING', 'PLAYED'].includes(source.status)) throw new Error('Cambió la canción actual')
     }
     if (transition.expectedNextQueueId !== null && Queue.get(roomId).entities[transition.expectedNextQueueId]?.status !== 'APPROVED') throw new Error('El siguiente turno cambió')
-    const clip = leastUsedAudio(roomId, eligibleAmbience(catalogClips(roomId), prefs).filter(clip => owner.readyClips.includes(clip.checksum)))
-    if (!clip) return null
+    const media = karaoke ? currentKaraokeMedia(roomId, next!.queueId) ?? peekKaraokeMedia(roomId) : null
+    const clip = karaoke ? media?.bed : leastUsedAudio(roomId, eligibleAmbience(catalogClips(roomId), prefs).filter(clip => owner.readyClips.includes(clip.checksum)))
+    if (!clip || !owner.readyClips.includes(clip.checksum) || (karaoke && !media?.volume)) return null
     const grant: AmbienceGrant = { id: randomUUID(), clip, transition, rotate: false, ownerSocketId: identity.socketId, playerEpoch: epoch,
-      until: Date.now() + TRANSITION_BED_MS, durationMs: TRANSITION_BED_MS, offsetMs: 0 }
-    grant.background = captureTransitionBackground(roomId, `ambience:${grant.id}`, grant.until)
+      until: Date.now() + TRANSITION_BED_MS, durationMs: TRANSITION_BED_MS, offsetMs: 0, ...(karaoke ? { karaoke: true, volume: media!.volume } : {}) }
+    grant.background = karaoke ? media!.background : captureTransitionBackground(roomId, `ambience:${grant.id}`, grant.until)
     db.run('UPDATE animationRoomState SET ambienceJSON=? WHERE roomId=?', [JSON.stringify(grant), roomId])
     Animation.publish(roomId)
     return grant
@@ -523,6 +532,13 @@ export default class Animation {
     const grant = snapshot.ambience
     const owner = owners.get(identity.roomId)
     if (owner?.socketId !== identity.socketId || owner.epoch !== epoch) throw new Error('Reproductor sin autoridad')
+    if (grant?.karaoke && grant.transition && grant.id === id && grant.ownerSocketId === identity.socketId && grant.playerEpoch === epoch && owner.unlocked
+      && snapshot.karaokeTurn?.playerPresent && snapshot.karaokeTurn.queueId === grant.transition.expectedNextQueueId && !status.isErrored && !birthdayOwnsAudio(identity.roomId)) {
+      const renewed = { ...grant, until: Date.now() + 10000 }
+      db.run('UPDATE animationRoomState SET ambienceJSON=? WHERE roomId=?', [JSON.stringify(renewed), identity.roomId])
+      Animation.publish(identity.roomId)
+      return renewed
+    }
     const prefs = snapshot.prefs
     if (!grant || grant.transition || grant.id !== id || grant.ownerSocketId !== identity.socketId || grant.playerEpoch !== epoch || !owner.unlocked
       || !prefs.enabled || !prefs.automation || !prefs.ambienceEnabled || !prefs.ambienceVolume
@@ -580,7 +596,7 @@ export default class Animation {
       const greeting = row.origin === 'GREETING' && (!call || interventionAssets(row).some(asset => (asset as AnimationClip & { role?: string }).role === 'greeting'))
       const control = greeting ? db.get<{ playbackVersion: number }>('SELECT playbackVersion FROM greetingControls WHERE roomId=?', [identity.roomId]) : null
       const delivery = greeting ? db.get<{ playbackVersion: number }>('SELECT playbackVersion FROM greetingTurns WHERE interventionId=?', [id]) : null
-      if (room.status !== 'open' || (greeting ? !Animation.greetingEnabled(identity.roomId) || control?.playbackVersion !== delivery?.playbackVersion : !state.prefs.enabled) || state.prefs.volume <= 0
+      if (room.status !== 'open' || (greeting ? !Animation.greetingEnabled(identity.roomId) || control?.playbackVersion !== delivery?.playbackVersion : !call && !state.prefs.enabled) || state.prefs.volume <= 0
         || animationContext(Queue.get(identity.roomId), room.prefs.queue) !== row.contextKey) {
         Animation.cancel(identity.roomId, 'El contexto cambió antes del inicio')
         throw new Error('El contexto cambió antes del inicio')

@@ -65,6 +65,8 @@ export const TRANSITION_BED_MS = 40000
 export const ambienceBedVolume = (prefs: AnimationPrefs) => prefs.ambienceVolume ?? 0.2
 
 export interface AnimationClip {
+  url?: string
+  volume?: number
   id: string
   title: string
   displayText: string
@@ -144,6 +146,8 @@ export interface AnimationSession {
   openedBy: number
 }
 export interface AmbienceGrant {
+  karaoke?: boolean
+  volume?: number
   transition?: { sourceQueueId: number | null, expectedNextQueueId: number | null }
   background?: TransitionVideoBackground | null
   rotate?: boolean
@@ -156,6 +160,8 @@ export interface AmbienceGrant {
   offsetMs: number
 }
 export interface AnimationSnapshot extends AnimationRoomState {
+  karaokeTurn?: import('./karaokeStart.js').KaraokeTurn | null
+  karaokeBackgroundRevision?: number
   listeningPresentationsEnabled?: boolean
   karaokeCallsEnabled?: boolean
   karaokeCallsRevision?: number

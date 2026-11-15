@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import { checkListeningPresentations } from './listening-presentation-checks.e2e.mjs'
 import { checkNameVoiceBank } from './name-voice-bank-checks.e2e.mjs'
 import { checkSingingHistory } from './singing-history-checks.e2e.mjs'
+import { checkManualKaraokeStart } from './karaoke-start-checks.e2e.mjs'
 
 export async function checkAutomaticCalls ({ page, context, browser, api, base, uiBase, data, db, call, snapshot, restart, fail }) {
   const sockets = []
@@ -58,7 +59,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     guests.push({ client, clientApi })
     if (uiBase !== base) await proxy(client, clientApi)
     const guest = await client.newPage()
-    await guest.goto(`${uiBase}join#${invitation}`)
+    await guest.goto(`${uiBase}join#${invitation}`, { waitUntil: 'domcontentloaded', timeout: 60000 })
     await guest.getByLabel('Tu nombre').fill(name)
     await guest.getByRole('button', { name: 'Entrar', exact: true }).click()
     await expect(guest.getByRole('heading', { name: '¿Qué quieres pedir?' })).toBeVisible()
@@ -138,7 +139,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     const afterBank = charged()
     await page.goto(uiBase + 'admin/settings/audio-providers?use=calls')
     await expect(callSettings.getByRole('combobox', { name: 'Modelo de nuevas plantillas', exact: true })).toHaveValue('gemini-3.8-flash-tts')
-    await expect(callSettings.getByRole('combobox', { name: 'Voz de nuevas plantillas', exact: true })).toHaveValue('Puck')
+    await expect(callSettings.getByRole('textbox', { name: 'Nombre exacto de la voz', exact: true })).toHaveValue('Puck')
     for (const width of [390, 1440]) {
       await page.setViewportSize({ width, height: 1000 })
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
@@ -154,6 +155,11 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     await automatic.getByRole('switch', { name: 'Llamados automáticos' }).focus()
     await page.keyboard.press('Space')
     await expect.poll(async () => (await snapshot()).automation.controls.enabled).toBe(true)
+    await expect(page.getByRole('switch', { name: 'Inicio automático de karaoke', exact: true })).not.toBeChecked()
+    await expect(page.getByRole('switch', { name: 'Inicio automático de karaoke', exact: true })).toBeEnabled()
+    await page.getByRole('switch', { name: 'Inicio automático de karaoke', exact: true }).focus()
+    await page.keyboard.press('Space')
+    await expect.poll(async () => (await snapshot()).automation.controls.automaticStart).toBe(true)
     for (const width of [390, 1440]) {
       await page.setViewportSize({ width, height: 1000 })
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
@@ -183,13 +189,14 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     assert.equal(db.prepare('SELECT count(*) n FROM karaokeCallRequests WHERE queueId IN (?,?)').get(listening, house).n, 0)
     await expect.poll(() => db.prepare('SELECT j.status FROM greetingAudioJobs j JOIN greetings g ON g.audioJobId=j.jobId WHERE g.queueId=?').get(second)?.status, { timeout: 15000 }).toBe('ready')
     const kinds = [[ordinary.checksum, 'ordinary'], [bed.checksum, 'bed'],
+      ...db.prepare(`SELECT checksum FROM karaokeBackgroundAssets WHERE kind='bed' AND state='ready'`).all().map(row => [row.checksum, 'karaoke-bed']),
       ...db.prepare(`SELECT checksum FROM karaokeCallParts WHERE kind='composition'`).all().map(row => [row.checksum, 'call']),
       ...db.prepare(`SELECT checksum FROM greetingAudioJobs WHERE status='ready'`).all().map(row => [row.checksum, 'greeting'])]
     await context.addInitScript((kinds) => {
       const labels = new Map(kinds)
       const hashes = new WeakMap()
       const active = new Map()
-      window.callTrace = { starts: [], decoded: [], sceneStarts: [], videoStarts: 0 }
+      window.callTrace = { starts: [], decoded: [], sceneStarts: [], videoStarts: 0, videoResources: [] }
       const decode = AudioContext.prototype.decodeAudioData
       AudioContext.prototype.decodeAudioData = async function (bytes) {
         const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
@@ -217,7 +224,10 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
         return node
       }
       document.addEventListener('playing', (event) => {
-        if (event.target?.dataset?.mediaRole === 'transition-background') window.callTrace.videoStarts++
+        if (event.target?.dataset?.mediaRole === 'transition-background') {
+          window.callTrace.videoStarts++
+          window.callTrace.videoResources.push(event.target.closest('[data-resource-id]')?.dataset.resourceId)
+        }
       }, true)
       new MutationObserver(() => {
         const scene = document.querySelector('[data-testid="transition-scene"]')
@@ -267,21 +277,50 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     assert.equal(db.prepare('SELECT voiceStatus FROM greetingTurns WHERE turnKey=?').get(second).voiceStatus, 'PLAYED')
     assert.ok(db.prepare('SELECT count(*) n FROM animationInterventions WHERE callJSON IS NULL AND startedAt IS NOT NULL').get().n >= 1)
     const trace = await player.evaluate(() => window.callTrace)
+    const ownVideos = new Set(db.prepare(`SELECT id FROM karaokeBackgroundAssets WHERE kind='video'`).all().map(row => row.id))
+    assert.ok(trace.videoResources.some(id => ownVideos.has(id)), 'Singing calls must render a Karaoke-owned video')
+    assert.ok(trace.starts.some(item => item.kind === 'karaoke-bed'), 'Singing calls must play their own accompaniment')
     fs.writeFileSync(path.join(data, 'automatic-playback-trace.json'), JSON.stringify({ trace, played }, null, 2))
     assert.equal(trace.starts.filter(item => item.kind === 'call').length, 3)
     assert.ok(trace.starts.filter(item => item.kind === 'call' || item.kind === 'greeting').every(item => !item.overlap.some(kind => kind === 'call' || kind === 'greeting' || kind === 'ordinary')))
     assert.ok(trace.starts.find(item => item.kind === 'call').at - trace.sceneStarts[0] >= 1800)
     await emit(operator, 'server/PLAYER_REQ_PAUSE')
+    // Let the old player acknowledge its bed stop before destroying its socket;
+    // a successor correctly respects an unconfirmed predecessor's finite lease.
+    await expect.poll(async () => (await emit(operator, 'server/ANIMATION_SYNC')).payload.ambience, { timeout: 15000 }).toBeNull()
+    await emit(operator, 'server/GREETINGS', { operation: 'prepareAudio', enabled: false })
+    await call('rooms/1/karaoke-calls/automation', { ...(await snapshot()).automation.controls, automaticStart: false }, 'PUT')
+    const independentState = (await emit(operator, 'server/ANIMATION_SYNC')).payload
+    await emit(operator, 'server/ANIMATION_CONTROL', { controlVersion: independentState.controlVersion, enabled: false, automation: false, events: { turn: false } })
+    await emit(operator, 'server/ANIMATION_SESSION', { operation: 'finish' })
+    assert.equal((await emit(operator, 'server/ANIMATION_SYNC')).payload.karaokeCallsEnabled, true)
+    await player.goto('about:blank')
+    // The HTTPS fixture bridges polling through APIRequestContext; unloading
+    // cannot close that remote transport synchronously like a real WebSocket.
+    await expect.poll(async () => (await emit(operator, 'server/ANIMATION_SYNC')).payload.playerPresent, { timeout: 60000 }).toBe(false)
+    await player.goto(uiBase + 'player', { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await expect.poll(async () => (await emit(operator, 'server/ANIMATION_SYNC')).payload.playerEpoch, { timeout: 20000 }).toBeGreaterThan(independentState.playerEpoch)
+    await player.locator('body').click({ position: { x: 10, y: 10 } })
+    await expect.poll(async () => (await emit(operator, 'server/ANIMATION_SYNC')).payload.audioUnlocked, { timeout: 20000 }).toBe(true)
     const interrupted = await add(ana, 6, 'SING')
     await expect.poll(() => db.prepare('SELECT status FROM karaokeCallRequests WHERE queueId=?').get(interrupted)?.status, { timeout: 15000 }).toBe('ready')
     await emit(operator, 'server/PLAYER_REQ_PLAY')
-    await expect(player.locator('[data-testid="transition-scene"]')).toBeVisible()
+    await expect(player.locator('[data-testid="transition-scene"]')).toBeVisible({ timeout: 15000 })
+    await expect.poll(() => db.prepare('SELECT queueId FROM karaokeBackgroundScenes WHERE roomId=1').get()?.queueId, { timeout: 15000 }).toBe(interrupted)
     await emit(operator, 'server/PLAYER_REQ_PAUSE')
     await player.waitForTimeout(2500)
     assert.equal(db.prepare('SELECT startedAt FROM karaokeCallRequests WHERE queueId=?').get(interrupted).startedAt, null)
     await emit(operator, 'server/PLAYER_REQ_PLAY')
-    await expect.poll(() => db.prepare('SELECT status FROM queue WHERE queueId=?').get(interrupted).status, { timeout: 20000 }).toBe('PLAYED')
+    await checkManualKaraokeStart({ page, player, operator, emit, db, call, snapshot, uiBase, data, queueId: interrupted })
     assert.equal(db.prepare('SELECT count(*) n FROM animationInterventions WHERE json_extract(callJSON,?)=? AND startedAt IS NOT NULL').get('$.queueId', interrupted).n, 1)
+    assert.equal(db.prepare(`SELECT status FROM animationInterventions WHERE json_extract(callJSON,'$.queueId')=? AND startedAt IS NOT NULL`).get(interrupted).status, 'PLAYED')
+    console.log('Independent karaoke: cold player, animator/automation/turn disabled, finished animator session, explicit pause/retry and animator control changes during speech passed.')
+    const restoreState = (await emit(operator, 'server/ANIMATION_SYNC')).payload
+    await emit(operator, 'server/ANIMATION_CONTROL', { controlVersion: restoreState.controlVersion, enabled: true, automation: true, events: { turn: true } })
+    await emit(operator, 'server/ANIMATION_SESSION', { operation: 'open' })
+    await emit(operator, 'server/GREETINGS', { operation: 'prepareAudio', enabled: true })
+    const greetingVersion = db.prepare('SELECT playbackVersion FROM greetingControls WHERE roomId=1').get().playbackVersion
+    await emit(operator, 'server/GREETINGS', { operation: 'playback', version: greetingVersion, settings: { enabled: true, introClipId: null, ambienceEnabled: true } })
     await checkSingingHistory({ page, uiBase, data, db, snapshot, first, fallback })
     await page.goto(uiBase + 'admin/settings/animator?view=calls')
     await page.getByRole('switch', { name: 'Llamados automáticos' }).focus()
@@ -291,7 +330,15 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     await emit(operator, 'server/PLAYER_REQ_PAUSE')
     console.log('Automatic calls: setup, queue preparation without admin, singing/listening/house playback, greeting coexistence, provider fallback and pause/restart passed.')
     await checkListeningPresentations({ page, player, operator, luis, join, add, emit, db, upload, snapshot, uiBase, data, fail })
-    await checkNameVoiceBank({ page, browser, api, base, uiBase, data, db, call, join, add, emit, connect, proxy, fail })
+    if (process.env.KARAOKE_E2E_CALLS_ONLY !== '1') await checkNameVoiceBank({ page, browser, api, base, uiBase, data, db, call, join, add, emit, connect, proxy, fail })
+  } catch (error) {
+    if (player && !player.isClosed()) {
+      const evidence = await player.evaluate(() => ({ url: location.href, text: document.body.innerText, trace: window.karaokePlaybackTrace?.snapshot() })).catch(() => null)
+      fs.writeFileSync(path.join(data, 'call-player-failure.json'), JSON.stringify(evidence, null, 2))
+      fs.writeFileSync(path.join(data, 'call-room-failure.json'), JSON.stringify({ state: db.prepare('SELECT * FROM animationRoomState').all(), scenes: db.prepare('SELECT * FROM karaokeBackgroundScenes').all(), interventions: db.prepare('SELECT status,reason,callJSON,startedAt,stopRequestedAt FROM animationInterventions').all() }, null, 2))
+      await player.screenshot({ path: path.join(data, 'call-player-failure.png') }).catch(() => {})
+    }
+    throw error
   } finally {
     fail('')
     await player?.close()

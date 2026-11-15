@@ -8,7 +8,7 @@ import CatalogProductionPanel from 'components/Animation/CatalogProductionPanel'
 import AnimationQuickControls from 'components/Animation/AnimationQuickControls'
 import OperationControls from 'components/Animation/OperationControls'
 import GreetingRoomSettings from 'components/Animation/GreetingRoomSettings'
-import KaraokeCallPilot from 'components/Animation/KaraokeCallPilot'
+import ListeningCallSettings from 'components/Animation/ListeningCallSettings'
 import NameVoicePanel from 'components/Animation/NameVoicePanel'
 import TransitionVideoSettings from 'components/Animation/TransitionVideoSettings'
 import { animationRequest } from 'lib/animationApi'
@@ -19,7 +19,7 @@ import audioStyles from 'components/Animation/AudioLibrary.css'
 export default function AnimatorSettings () {
   const isAdmin = useAppSelector(state => state.user.isAdmin)
   const [params, setParams] = useSearchParams()
-  const view = params.get('view') === 'names' ? 'names' : params.get('view') === 'calls' ? 'calls' : params.get('view') === 'background' ? 'background' : params.get('view') === 'greeting-voice' ? 'greeting-voice' : params.get('view') === 'audio' ? 'audio' : 'control'
+  const view = params.get('view') === 'names' ? 'names' : params.get('view') === 'listening' ? 'listening' : params.get('view') === 'background' ? 'background' : params.get('view') === 'greeting-voice' ? 'greeting-voice' : params.get('view') === 'audio' ? 'audio' : 'control'
   const liveView = view === 'control' || view === 'audio'
   const settings = params.get('panel') === 'settings' || params.get('view') === 'connection'
   const roomId = useAppSelector(state => state.user.roomId)
@@ -44,6 +44,7 @@ export default function AnimatorSettings () {
     setParams(next, { replace: true })
   }
   if (isAdmin && params.get('view') === 'connection') return <Navigate to='/admin/settings/audio-providers' replace />
+  if (isAdmin && params.get('view') === 'calls') return <Navigate to='/admin/settings/karaoke?view=settings' replace />
   if (!isAdmin) return (
     <>
       <Button variant='default' disabled={!current || !connected || busy} onClick={() => void toggle()}>{current?.prefs.enabled ? 'Desactivar animador' : 'Activar animador'}</Button>
@@ -80,14 +81,14 @@ export default function AnimatorSettings () {
       <nav className={styles.tabs} aria-label='Ajustes del animador'>
         <Link to='?view=control' aria-current={view === 'control' ? 'page' : undefined}>Control</Link>
         <Link to='?view=audio' aria-current={view === 'audio' ? 'page' : undefined}>Audios</Link>
-        <Link to='?view=calls' aria-current={view === 'calls' ? 'page' : undefined}>Llamados</Link>
+        <Link to='?view=listening' aria-current={view === 'listening' ? 'page' : undefined}>Para escuchar</Link>
         <Link to='?view=names' aria-current={view === 'names' ? 'page' : undefined}>Nombres</Link>
         <Link to='?view=greeting-voice' aria-current={view === 'greeting-voice' ? 'page' : undefined}>Saludos</Link>
         <Link to='?view=background' aria-current={view === 'background' ? 'page' : undefined}>Fondo</Link>
       </nav>
       <div hidden={view !== 'control'}><AnimationPanel /></div>
       <CatalogProductionPanel key={roomId} visible={view === 'audio'} />
-      {view === 'calls' && typeof roomId === 'number' && <KaraokeCallPilot key={`calls-${roomId}`} roomId={roomId} />}
+      {view === 'listening' && typeof roomId === 'number' && <ListeningCallSettings key={`listening-${roomId}`} roomId={roomId} />}
       {view === 'names' && <NameVoicePanel />}
       {view === 'greeting-voice' && <GreetingRoomSettings key={`greeting-voice-${roomId}`} />}
       {view === 'background' && (typeof roomId === 'number' ? <TransitionVideoSettings key={`background-${roomId}`} roomId={roomId} /> : <p role='status'>Ingrese a una sala para configurar su fondo.</p>)}

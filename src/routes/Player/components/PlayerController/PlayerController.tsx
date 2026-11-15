@@ -27,6 +27,10 @@ import type { QueueItem } from 'shared/types'
 import { TRANSITION_VIDEO_SCENE, type TransitionVideoBackground } from 'shared/transitionVideo'
 import { animationRequest } from 'lib/animationApi'
 import { ANIMATION_LIMITS, TRANSITION_INTRO_MS } from 'shared/animation'
+import useKaraokeStart from '../Animation/useKaraokeStart'
+import KaraokeCountdown from 'components/Animation/KaraokeCountdown'
+import { karaokeCountdownSeconds, type KaraokeTurn } from 'shared/karaokeStart'
+import { animationTime } from 'lib/animationApi'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
 import styles from './PlayerController.css'
 import {
@@ -45,7 +49,7 @@ interface PlayerControllerProps {
   height: number
 }
 
-type TransitionScene = { id: string, background: TransitionVideoBackground | null, phase: 'intro' | 'voice' | 'loading' | 'handoff' | 'exiting' }
+type TransitionScene = { id: string, background: TransitionVideoBackground | null, phase: 'intro' | 'voice' | 'waiting' | 'loading' | 'handoff' | 'exiting' }
 
 const PlayerController = (props: PlayerControllerProps) => {
   const queue = useAppSelector(getPlaybackQueue)
@@ -68,6 +72,16 @@ const PlayerController = (props: PlayerControllerProps) => {
   const mounted = useRef(true)
   const mediaPlayerRef = useRef<Player>(null)
   const animation = useAnimationPlayer()
+  const karaokeStart = useKaraokeStart()
+  const karaokeStartRef = useRef(karaokeStart)
+  karaokeStartRef.current = karaokeStart
+  const releasedKaraoke = useRef<KaraokeTurn | null>(null)
+  const [, tickCountdown] = useState(0)
+  useEffect(() => {
+    if (animation.snapshot?.karaokeTurn?.phase !== 'countdown') return
+    const timer = setInterval(() => tickCountdown(value => value + 1), 100)
+    return () => clearInterval(timer)
+  }, [animation.snapshot?.karaokeTurn?.phase])
   const birthday = useBirthdayPlayer(animation.channel)
   const birthdayRef = useRef(birthday)
   birthdayRef.current = birthday
@@ -101,6 +115,21 @@ const PlayerController = (props: PlayerControllerProps) => {
     if (transitionRef.current === scene) updateTransition(null)
   }, [updateTransition])
   const handlePlay = useCallback(() => {
+    const turn = releasedKaraoke.current
+    if (turn && turn.queueId === store.getState().player.queueId) {
+      releasedKaraoke.current = null
+      void karaokeStartRef.current.played(turn).then(async (): Promise<void> => {
+        await animationRef.current.stopTransition(250)
+        animationRef.current.channel.musicStarted()
+        const scene = transitionRef.current
+        if (scene) updateTransition({ ...scene, phase: 'exiting' })
+        dispatch(playerPlay())
+        return undefined
+      }).catch(() => {
+        dispatch(playerStatus({ isPlaying: false, _isBetweenTracks: true }))
+      })
+      return
+    }
     animationRef.current.channel.musicStarted()
     const scene = transitionRef.current
     const fadeVisuals = () => {
@@ -226,14 +255,20 @@ const PlayerController = (props: PlayerControllerProps) => {
         announce = true
         transitionStartedAt = performance.now()
       }
-      const upcoming = selection()
+      const held = store.getState().animation.snapshot?.karaokeTurn
+      const heldItem = held ? ensureState(store.getState().queue).entities[held.queueId] : null
+      const upcoming = heldItem?.isOptimistic !== true && heldItem?.status === 'APPROVED' ? heldItem : selection()
+      const manualTurn = upcoming?.requestIntent === 'SING' && upcoming.origin !== 'HOUSE'
+        ? await karaokeStartRef.current.begin(upcoming.queueId)
+        : null
+      if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       setPreparingQueueId(upcoming?.source === 'YOUTUBE' ? upcoming.queueId : null)
       const callRequested = (animationRef.current.snapshot?.karaokeCallsEnabled && upcoming?.origin !== 'HOUSE' && upcoming?.requestIntent === 'SING')
         || (animationRef.current.snapshot?.listeningPresentationsEnabled && upcoming?.origin === 'PARTICIPANT' && upcoming?.requestIntent === 'LISTEN')
-      const scene: TransitionScene | null = (announce || callRequested) && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
+      const scene: TransitionScene | null = (announce || callRequested || manualTurn) && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
         && (backgroundRef.current || store.getState().rooms.entities[store.getState().user.roomId]?.prefs?.transitionVideo?.mode === 'all'
-          || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled || callRequested)
-        ? { id: crypto.randomUUID(), background: backgroundRef.current ?? animationRef.current.snapshot?.ambience?.background ?? null, phase: 'intro' }
+          || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled || callRequested || manualTurn)
+        ? { id: crypto.randomUUID(), background: upcoming?.requestIntent === 'SING' && (callRequested || manualTurn) ? null : backgroundRef.current ?? animationRef.current.snapshot?.ambience?.background ?? null, phase: manualTurn?.presented ? 'waiting' : 'intro' }
         : null
       // Retain the current backdrop before releasing idle ambience or awaiting a new selection.
       if (scene) updateTransition(scene)
@@ -243,7 +278,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (scene) {
         // A scene owns one choice across intro, speech and loading. Preview and
         // audio-permit renewals must not consume another position in the rotation.
-        const visual = await animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: false }, ANIMATION_LIMITS.startMs).catch((): null => null)
+        const visual = await animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, queueId: upcoming?.queueId, finished: false }, ANIMATION_LIMITS.startMs).catch((): null => null)
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         scene.background = visual?.background ?? null
         updateTransition({ ...scene })
@@ -253,18 +288,45 @@ const PlayerController = (props: PlayerControllerProps) => {
           scene.background = grant.background
           updateTransition({ ...scene })
         }
-        const until = performance.now() + TRANSITION_INTRO_MS
+        const until = performance.now() + (manualTurn?.presented ? 0 : TRANSITION_INTRO_MS)
         while (performance.now() < until && mounted.current && controlVersion === animationRef.current.controlVersion() && transitionRef.current?.id === scene.id) {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         updateTransition({ ...scene, phase: 'voice' })
       }
-      const greeted = upcoming && controlVersion === animationRef.current.controlVersion()
+      const greeted = upcoming && !manualTurn?.presented && controlVersion === animationRef.current.controlVersion()
         ? await greetingsRef.current.attempt(upcoming.queueId, callRequested ? Math.max(0, 25000 - (performance.now() - transitionStartedAt)) : undefined)
         : false
-      if (!greeted && announce && controlVersion === animationRef.current.controlVersion()) {
+      if (!greeted && !manualTurn?.presented && announce && controlVersion === animationRef.current.controlVersion()) {
         await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null)
+      }
+      if (manualTurn && upcoming) {
+        if (transitionRef.current) updateTransition({ ...transitionRef.current, phase: 'waiting' })
+        const valid = () => {
+          const state = store.getState()
+          const item = ensureState(state.queue).entities[manualTurn.queueId]
+          return mounted.current && socket.connected && controlVersion === animationRef.current.controlVersion()
+            && state.player._authority === 'GRANTED' && (state.player.isPlaying || state.player._isPlayingNext)
+            && item?.isOptimistic !== true && item?.status === 'APPROVED' && !birthdayRef.current.pending
+            && state.rooms.entities[state.user.roomId]?.status !== 'closed'
+        }
+        const started = await karaokeStartRef.current.wait(manualTurn, valid, () => animationRef.current.keepTransition(before.queueId === -1 || before.queueId === upcoming.queueId ? null : before.queueId, upcoming.queueId)).catch(() => false)
+        if (!started) {
+          const pending = ensureState(store.getState().queue).entities[manualTurn.queueId]
+          if (birthdayRef.current.pending) {
+            await finishTransition()
+            retryAfterBirthday = true
+          } else if (mounted.current && socket.connected && controlVersion === animationRef.current.controlVersion()
+            && (!pending || (pending.isOptimistic !== true && pending.status !== 'APPROVED'))) {
+            await finishTransition()
+            retryHouseSelection = true
+          } else if (valid()) setTimeout(() => {
+            if (mounted.current) retryAdvance(value => value + 1)
+          }, 1000)
+          return
+        }
+        releasedKaraoke.current = manualTurn
       }
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       const current = store.getState().player
@@ -456,7 +518,10 @@ const PlayerController = (props: PlayerControllerProps) => {
         : animation.ambientPlaying ? animation.snapshot?.ambience?.background ?? selectedBackground : selectedBackground
   const sceneId = greetings.scene ? `greeting:${greetings.scene.turnKey}` : animation.scene?.interventionId ?? animation.snapshot?.ambience?.id ?? 'boundary'
   const handingOff = transition?.phase === 'handoff' || transition?.phase === 'exiting'
-  const presentedTracks = selectPresentation({ queue: rawQueue, player, preferences: roomPrefs?.queue, loading: transition?.phase === 'loading' || handingOff })
+  const selectedTracks = selectPresentation({ queue: rawQueue, player, preferences: roomPrefs?.queue, loading: transition?.phase === 'loading' || handingOff })
+  const startTurn = animation.snapshot?.karaokeTurn
+  const heldTrack = startTurn ? rawQueue.entities[startTurn.queueId] : null
+  const presentedTracks = heldTrack && heldTrack.isOptimistic !== true ? { ...selectedTracks, incoming: heldTrack } : selectedTracks
   const preparingItem = preparingQueueId === null ? undefined : rawQueue.entities[preparingQueueId]
   const preparedYouTube = preparingItem && preparingItem.isOptimistic !== true
     && preparingItem.source === 'YOUTUBE' && preparingItem.status === 'APPROVED' && preparingItem.externalId
@@ -466,12 +531,12 @@ const PlayerController = (props: PlayerControllerProps) => {
   if (player._authority === 'PENDING') phase = 'Conectando el reproductor…'
   else if (player._authority === 'DENIED') phase = 'Esperando a que se libere la sala.'
   else if (player.isErrored) phase = 'Error'
-  else if (transition) phase = { intro: 'Intro', voice: 'Voz', loading: 'Cargando', handoff: 'Iniciando canción', exiting: 'Fundido' }[transition.phase]
+  else if (transition) phase = { intro: 'Intro', voice: 'Voz', waiting: 'Esperando inicio de karaoke', loading: 'Cargando', handoff: 'Iniciando canción', exiting: 'Fundido' }[transition.phase]
   else if (greetings.scene || animation.scene) phase = 'Voz'
   else if (animation.blocked || animation.busy || player._isBetweenTracks) phase = 'Preparando'
   else if (player.isAtQueueEnd || !queueItem) phase = 'Ambiente / espera'
   else phase = player.isPlaying ? 'Canción' : 'Pausa'
-  const audioStatus = (animation.snapshot?.prefs.enabled || animation.snapshot?.greetingVoiceEnabled) && !animation.unlocked
+  const audioStatus = (animation.snapshot?.prefs.enabled || animation.snapshot?.greetingVoiceEnabled || !!startTurn) && !animation.unlocked
     ? animation.needsGesture ? 'Esperando permiso de sonido' : animation.preparingAudio ? 'Preparando audio…' : 'Conectando audio…'
     : ''
   usePlayerDiagnostic('phase', phase, 'info')
@@ -485,7 +550,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         phase={phase}
         diagnostics={[audioStatus, greetings.error, animation.error, uiError, player.isErrored && player.errorMessage].filter(Boolean) as string[]}
         canSeek={queueItem?.source === 'YOUTUBE' && !foregroundScene && !player.isAtQueueEnd && !player.isErrored}
-        isPlaying={player.isPlaying && !birthday.busy}
+        isPlaying={player.isPlaying && !birthday.busy && !(startTurn && startTurn.queueId === queueItem?.queueId && startTurn.phase !== 'released')}
         onSeek={target => mediaPlayerRef.current?.seekForDevelopment(target)}
       />
     </React.Suspense>
@@ -521,7 +586,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         ref={mediaPlayerRef}
         cdgAlpha={player.cdgAlpha}
         cdgSize={player.cdgSize}
-        isPlaying={player.isPlaying && !birthday.busy}
+        isPlaying={player.isPlaying && !birthday.busy && !(startTurn && startTurn.queueId === queueItem?.queueId && startTurn.phase !== 'released')}
         isVisible={!!queueItem && !player.isErrored && !player.isAtQueueEnd && !player._isBetweenTracks && !animation.busy && !animation.blocked
           && !(queueItem.source === 'YOUTUBE' && transition && !handingOff)}
         preparedYouTube={preparedYouTube}
@@ -563,7 +628,7 @@ const PlayerController = (props: PlayerControllerProps) => {
                   <p>Preparando la celebración…</p>
                 </div>
               )
-            : foregroundScene
+            : foregroundScene && startTurn?.phase !== 'countdown'
               ? (
                   <PlayerTransitionPresentation
                     {...presentedTracks}
@@ -575,7 +640,9 @@ const PlayerController = (props: PlayerControllerProps) => {
                     onGreetingMounted={greetings.confirmMounted}
                   />
                 )
-              : idleOverlay}
+              : startTurn?.phase === 'countdown' ? null : idleOverlay}
+          {transition?.phase === 'waiting' && startTurn?.phase === 'waiting' && <div className={styles.karaokeWaiting} role='status'>Prepárate para cantar</div>}
+          {startTurn?.phase === 'countdown' && startTurn.endsAt !== null && <KaraokeCountdown seconds={karaokeCountdownSeconds(startTurn.endsAt, animationTime())} />}
         </PlayerTransitionScene>
       )}
       {(birthday.needsSound || birthday.needsVolume || (audioStatus && (animation.needsGesture || animation.error))) && (

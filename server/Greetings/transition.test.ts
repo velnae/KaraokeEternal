@@ -69,6 +69,18 @@ it('keeps one introduction, complete greeting and optional bed inside the transi
   expect(planGreetingTransition(item, prepared(item, 19000, 3000), ready, 120000, 18000)).toBeNull()
 })
 
+it('distinguishes a missing recorded name from voice budget when a ready unsigned greeting falls back to screen', () => {
+  const { item, queueId } = request('LISTEN')
+  const unsigned = prepared(item)
+  unsigned.assets = [{ ...asset('greeting', 3000), senderIncluded: false }]
+  const grant = Greetings.reserve(1, socketId, queueId, { queueId: -1 }, undefined, unsigned, ready, 1)!
+  expect(grant.transition).toBeUndefined()
+  const row = db.get<{ voiceStatus: string, voiceReason: string }>('SELECT voiceStatus,voiceReason FROM greetingTurns WHERE turnKey=?', [queueId])!
+  expect(row.voiceStatus).toBe('SCREEN')
+  expect(row.voiceReason).toBe('Falta la voz del nombre. Revise Animador → Nombres.')
+  expect(planGreetingTransition(item, unsigned, ready, 120000)).toBeNull()
+})
+
 it('uses the room ambience selection for greeting beds without replacing unavailable sounds', async () => {
   const { queueId } = request()
   vi.spyOn(audioRouter, 'getGreetingAudioAsset').mockResolvedValue(asset('greeting', 3000))

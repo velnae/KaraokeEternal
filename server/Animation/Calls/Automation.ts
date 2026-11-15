@@ -99,11 +99,12 @@ export default class CallAutomation {
     const value = input as CallControls | null
     const current = callControls(roomId)
     if (!value || value.revision !== current.revision) throw new CallError('Los controles cambiaron. Actualice antes de guardar.', 409)
-    if (typeof value.enabled !== 'boolean' || (value.listeningEnabled !== undefined && typeof value.listeningEnabled !== 'boolean') || typeof value.preparing !== 'boolean' || !Array.isArray(value.introIds)
+    if (typeof value.enabled !== 'boolean' || (value.listeningEnabled !== undefined && typeof value.listeningEnabled !== 'boolean') || (value.automaticStart !== undefined && typeof value.automaticStart !== 'boolean') || typeof value.preparing !== 'boolean' || !Array.isArray(value.introIds)
       || value.introIds.length > 20 || value.introIds.some(id => typeof id !== 'string' || !intros(roomId).some(item => item.variantId === id))) throw new CallError('Revise la configuración de llamados.')
     db.run(`INSERT INTO karaokeCallControls(roomId,revision,preparing,enabled,introIdsJSON,listeningEnabled) VALUES(?,?,?,?,?,?)
       ON CONFLICT(roomId) DO UPDATE SET revision=excluded.revision,preparing=excluded.preparing,enabled=excluded.enabled,introIdsJSON=excluded.introIdsJSON,listeningEnabled=excluded.listeningEnabled`,
     [roomId, current.revision + 1, value.preparing || value.enabled ? 1 : 0, value.enabled ? 1 : 0, JSON.stringify([...new Set(value.introIds)]), (value.listeningEnabled ?? current.listeningEnabled) ? 1 : 0])
+    db.run('UPDATE karaokeCallControls SET automaticStart=? WHERE roomId=?', [(value.automaticStart ?? current.automaticStart) ? 1 : 0, roomId])
     if (!value.preparing && this.bankPending(roomId)) {
       const plan = JSON.parse(db.get<{ setupPlanJSON: string }>('SELECT setupPlanJSON FROM karaokeCallControls WHERE roomId=?', [roomId])!.setupPlanJSON) as BankPlan
       plan.paused = true
@@ -409,10 +410,13 @@ export default class CallAutomation {
     const retained = new Set(retainedSinging(roomId).map(row => row.queueId))
     let message: string | null = null
     if (!this.open(roomId)) message = 'Abra la sala para preparar y reproducir llamados automáticos.'
-    else if (!voice.config.enabled) message = 'Active la generación en Voz de saludos para preparar automáticamente. Los audios guardados siguen disponibles.'
+    else if (!voice.config.enabled) message = 'Active la generación de llamados en Proveedores de audio para preparar automáticamente. Los audios guardados siguen disponibles.'
     else if (!voice.configured || ['error', 'limited'].includes(voice.state)) message = voice.message
-    else if ((controls.enabled || controls.listeningEnabled) && (!prefs.enabled || !prefs.automation || !prefs.events.turn)) message = 'Active el animador automático y las presentaciones en Control para escuchar los llamados.'
-    else if ((controls.enabled || controls.listeningEnabled) && !callSessionAllows(roomId)) message = 'La jornada terminó. Inicie una nueva jornada en Control para escuchar los llamados.'
+    let listeningMessage: string | null = null
+    if (controls.listeningEnabled) {
+      if (!prefs.enabled || !prefs.automation || !prefs.events.turn) listeningMessage = 'Active el animador automático y las presentaciones en Control para presentar los pedidos para escuchar.'
+      else if (!callSessionAllows(roomId)) listeningMessage = 'Inicie una nueva jornada en Control para presentar los pedidos para escuchar.'
+    }
     if (!message) {
       const failure = db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='setup' AND status IN ('failed','uncertain') ORDER BY rowid DESC LIMIT 30`, [roomId]).find((row) => {
         const input: JobInput = JSON.parse(row.inputJSON)
@@ -427,7 +431,7 @@ export default class CallAutomation {
     const bankPaused = bankPending && !!db.get<{ paused: number }>('SELECT COALESCE(json_extract(setupPlanJSON,\'$.paused\'),0) paused FROM karaokeCallControls WHERE roomId=?', [roomId])?.paused
     const bankTasks = this.bankTasks(roomId)
     return { controls, bankQuote: key(bankTasks), bankPreparing: controls.preparing && bankPending && !bankPaused, bankPaused: bankPending && (!controls.preparing || bankPaused), missingBankParts: bankTasks.map(task => task.title), tablesTotal: tables.length, tablesReady: tables.filter(table => !!this.fallbackPart(roomId, `table-${table.tableId}`)).length,
-      fallbackReady: !!this.fallbackPart(roomId, 'room'), message,
+      fallbackReady: !!this.fallbackPart(roomId, 'room'), message, listeningMessage,
       listeningRequests: this.listening.states(roomId, queue.result.map(id => queue.entities[id]).filter(item => queueId === undefined || item.queueId === queueId)).reverse(),
       listeningTemplates: this.listening.templates.list(roomId),
       requests: db.all<RequestRow>(`SELECT * FROM karaokeCallRequests WHERE roomId=?${queueId === undefined ? '' : ' AND queueId=?'} ORDER BY queueId DESC`, queueId === undefined ? [roomId] : [roomId, queueId]).flatMap((row) => {

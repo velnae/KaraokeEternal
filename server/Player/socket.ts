@@ -7,6 +7,7 @@ import Playlists from '../Playlists/Playlists.js'
 import getLogger from '../lib/Log.js'
 import { db } from '../lib/Database.js'
 import { clearedQueuePlayback } from '../../shared/queueCleanup.js'
+import { discardKaraokeTurn, karaokeTurn, resetKaraokeTurn } from '../Animation/Calls/Start.js'
 import { PLAYER_WINDOW_REQUEST_MS, playerWindowResult, type PlayerWindowCommand, type PlayerWindowResult } from '../../shared/playerWindow.js'
 
 import {
@@ -72,7 +73,13 @@ const sendCommand = (sock, requestType, commandType, payload, acknowledge) => {
   if (!operatorOnly(sock, requestType, acknowledge)) return
 
   if ([PLAYER_REQ_NEXT, PLAYER_REQ_REPLAY, PLAYER_REQ_PAUSE, PLAYER_REQ_PLAY].includes(requestType)) {
+    const waitingKaraoke = karaokeTurn(sock.user.roomId)
     Animation.cancel(sock.user.roomId, 'Orden musical del operador')
+    if (requestType === PLAYER_REQ_NEXT) {
+      if (discardKaraokeTurn(sock.user.roomId, true)) sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', { type: QUEUE_PUSH, payload: Queue.get(sock.user.roomId) })
+    } else if (requestType === PLAYER_REQ_REPLAY) discardKaraokeTurn(sock.user.roomId)
+    else resetKaraokeTurn(sock.user.roomId)
+    if (waitingKaraoke) Animation.publish(sock.user.roomId)
   }
 
   sock.server.to(Rooms.prefix(sock.user.roomId)).emit('action', {
@@ -267,7 +274,9 @@ const ACTION_HANDLERS = {
 
     Animation.claim(sock.user.roomId, sock.id)
 
-    let changed = Queue.syncPlayerLifecycle(sock.user.roomId, payload)
+    const turn = karaokeTurn(sock.user.roomId)
+    const lifecycle = turn?.queueId === payload?.queueId ? { ...payload, queueId: -1 } : payload
+    let changed = Queue.syncPlayerLifecycle(sock.user.roomId, lifecycle)
     if (changed && reported?.status === 'APPROVED' && payload?.isPlaying === true && !payload.isErrored) recordCallOmission(sock.user.roomId, payload.queueId)
     try {
       changed = Playlists.reconcile(sock.user.roomId) || changed

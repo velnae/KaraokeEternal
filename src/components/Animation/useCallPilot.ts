@@ -72,7 +72,7 @@ export default function useCallPilot (roomId: number) {
     setError('')
     try {
       await api.put(`rooms/${roomId}/karaoke-calls/automation`, { body: controls })
-      if (alive.current) setNotice(controls.enabled ? 'Los llamados se prepararán y anunciarán automáticamente.' : 'Configuración de llamados guardada.')
+      if (alive.current) setNotice('Configuración guardada.')
       await refresh()
       return true
     } catch (err) {
@@ -87,7 +87,7 @@ export default function useCallPilot (roomId: number) {
   let unavailable = ''
   if (!snapshot) unavailable = 'Cargando el perfil de voz…'
   else if (snapshot.error) unavailable = snapshot.error
-  else if (!snapshot.voice.configured) unavailable = 'Configure Gemini en Voz de saludos antes de generar.'
+  else if (!snapshot.voice.configured) unavailable = 'Configure la voz de llamados en Proveedores de audio antes de generar.'
   else if (['limited', 'error', 'checking', 'generating'].includes(snapshot.voice.state)) unavailable = snapshot.voice.message
   return { snapshot, error, busy, notice, submit, cancel, configure, refresh, unavailable }
 }

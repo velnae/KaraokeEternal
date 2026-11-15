@@ -25,6 +25,7 @@ import { QUEUE_ADD } from 'shared/actionTypes'
 import { queuePush } from '../../modules/queue'
 import type { MusicBlockRule } from 'shared/musicBlocking'
 import QueueItemMenu, { type QueueMenuAction } from './QueueItemMenu'
+import KaraokeTurnControl from './KaraokeTurnControl'
 
 const LONG_PRESS_THRESHOLD_MS = 700
 
@@ -316,6 +317,7 @@ const QueueItem = ({
               </div>
             )}
           </div>
+          {isAdmin && requestIntent === 'SING' && <KaraokeTurnControl queueId={queueId} />}
         </div>
 
         <Buttons btnWidth={56} isExpanded={isExpanded} className={styles.btnContainer}>

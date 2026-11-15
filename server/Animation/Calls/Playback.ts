@@ -8,9 +8,8 @@ import Queue from '../../Queue/Queue.js'
 import getLogger from '../../lib/Log.js'
 
 export function callsEnabled (roomId: number) {
-  const room = db.get<{ data: string, status: string }>('SELECT data,status FROM rooms WHERE roomId=?', [roomId])
-  const prefs = animationPrefs(room ? JSON.parse(room.data).prefs?.animation : undefined)
-  return room?.status === 'open' && callControls(roomId).enabled && prefs.enabled && prefs.automation && prefs.events.turn && callSessionAllows(roomId)
+  const room = db.get<{ status: string }>('SELECT status FROM rooms WHERE roomId=?', [roomId])
+  return room?.status === 'open' && callControls(roomId).enabled
 }
 export function listeningEnabled (roomId: number) {
   const room = db.get<{ data: string, status: string }>('SELECT data,status FROM rooms WHERE roomId=?', [roomId])

@@ -419,7 +419,8 @@ export default class CallJobs {
       for (const item of intros(roomId)) keep.add(item.id)
       for (const row of db.all<{ partId: string }>('SELECT partId FROM tableCallVoices WHERE roomId=? AND partId IS NOT NULL', [roomId])) keep.add(row.partId)
       const recent = db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='preview' AND operation IN ('hybrid','reference') AND status='ready' ORDER BY rowid DESC LIMIT 10`, [roomId])
-      for (const row of [...recent, ...db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND status IN ${active}`, [roomId])]) {
+      const saved = db.all<JobRow>(`SELECT j.* FROM karaokeCallJobs j JOIN karaokePreviewSamples p ON p.jobId=j.id AND p.roomId=j.roomId WHERE p.roomId=?`, [roomId])
+      for (const row of [...saved, ...recent, ...db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND status IN ${active}`, [roomId])]) {
         if (row.resultId) keep.add(row.resultId)
         const input: JobInput = JSON.parse(row.inputJSON)
         if (input.introId) keep.add(input.introId)

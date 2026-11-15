@@ -9,7 +9,7 @@ import { greetingDuration, greetingMessageLimit, validateGreeting, type Greeting
 import { captureTransitionBackground } from '../TransitionVideo/Playback.js'
 import Animation from '../Animation/Animation.js'
 import { catalogClips } from '../Animation/catalog.js'
-import { greetingPlayback, planGreetingTransition } from './transition.js'
+import { greetingPlayback, missingGreetingAttribution, planGreetingTransition } from './transition.js'
 import { callTransitionFailure, planCallTransition, prepareCall } from '../Animation/Calls/Playback.js'
 import { isGreetingAllowed } from '../../shared/greetings.js'
 import { publicGuestName } from '../../shared/guestName.js'
@@ -227,11 +227,13 @@ export default class Greetings {
       }
       const voiceReason = !prepared?.assets.some(asset => asset.role === 'greeting')
         ? 'La voz todavía no estaba preparada. El saludo se mostró en pantalla.'
-        : callCandidate && !callCandidate.assets.some(asset => asset.role === 'greeting')
-          ? 'El llamado tiene prioridad; el saludo se muestra en pantalla dentro del tiempo disponible.'
-          : !candidate
-              ? 'El audio no estaba listo en el reproductor o se alcanzó el límite de voz. El saludo se mostró en pantalla.'
-              : 'El canal de voz no pudo reservarse. Revise el volumen de voz y la conexión del reproductor.'
+        : missingGreetingAttribution(prepared)
+          ? 'Falta la voz del nombre. Revise Animador → Nombres.'
+          : callCandidate && !callCandidate.assets.some(asset => asset.role === 'greeting')
+            ? 'El llamado tiene prioridad; el saludo se muestra en pantalla dentro del tiempo disponible.'
+            : !candidate
+                ? 'El audio no estaba listo en el reproductor o se alcanzó el límite de voz. El saludo se mostró en pantalla.'
+                : 'El canal de voz no pudo reservarse. Revise el volumen de voz y la conexión del reproductor.'
       db.run(`INSERT INTO greetingTurns(turnKey,roomId,ownerSocketId,untilAt,finished,displayMs,interventionId,playbackVersion,voiceStatus,voiceReason)
         VALUES(?,?,?,?,?,?,?,?,?,?)`, [turnKey, roomId, socketId, until, transition || (selected && !reason) ? 0 : 1, displayMs, transition?.intervention.interventionId ?? null,
         control.version, selected && !reason && control.prefs.enabled ? transition?.assets.some(asset => asset.role === 'greeting') ? 'SCHEDULED' : 'SCREEN' : null,

@@ -13,6 +13,7 @@ import {
 } from 'redux-persist'
 import { windowResize } from './modules/ui'
 import { birthdayPreviewMemory } from 'lib/birthdayPreviewMemory'
+import { karaokePreviewMemory } from 'lib/karaokePreviewMemory'
 
 // resize action
 window.addEventListener('resize', () => store.dispatch(windowResize({
@@ -50,10 +51,12 @@ const store = configureStore({
   }).concat(throttle, socketMiddleware),
 })
 
-// Clear local preview memory on account changes; durable drafts stay user-scoped.
+// Clear local preview caches on logout/account change; durable drafts remain scoped in SQLite.
 birthdayPreviewMemory.setUser(store.getState().user.userId)
+karaokePreviewMemory.setUser(store.getState().user.userId)
 store.subscribe(() => {
   birthdayPreviewMemory.setUser(store.getState().user.userId)
+  karaokePreviewMemory.setUser(store.getState().user.userId)
 })
 
 // @todo: this doesn't handle dynamically injected (lazy-loaded) reducers
