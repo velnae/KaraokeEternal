@@ -42,3 +42,19 @@ DROP TABLE dependent;
     fs.rmSync(directory, { recursive: true, force: true })
   }
 })
+
+it('refuses a missing schema on normal startup without executing destructive down SQL', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'migration-retention-'))
+  const database = new DatabaseWrapper(':memory:')
+  try {
+    fs.writeFileSync(path.join(directory, '001-persistent.sql'), '-- Up\nCREATE TABLE saved (text TEXT); INSERT INTO saved VALUES(\'Keep my audio\');\n-- Down\nDROP TABLE saved;')
+    database.migrate({ migrationsPath: directory })
+    fs.rmSync(path.join(directory, '001-persistent.sql'))
+    expect(() => database.migrate({ migrationsPath: directory })).toThrow('no downgrade was performed')
+    expect(database.all('SELECT * FROM saved')).toEqual([{ text: 'Keep my audio' }])
+    expect(database.all('SELECT id FROM migrations')).toEqual([{ id: 1 }])
+  } finally {
+    database.close()
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+})

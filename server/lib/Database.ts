@@ -106,10 +106,14 @@ export class DatabaseWrapper {
 
     const lastMigration = migrations[migrations.length - 1]
 
+    // A different checkout/build may lack newer schemas. Never turn a normal
+    // startup into an implicit downgrade of the user's persistent database.
+    const missing = dbMigrations.filter(applied => !migrations.some(file => file.id === applied.id))
+    if (missing.length) throw new Error(`Database has migrations missing from this build (${missing.map(row => row.id).join(', ')}). Restore the matching schema files; no downgrade was performed.`)
+
     for (const migration of [...dbMigrations].sort((a, b) => b.id - a.id)) {
       if (
-        !migrations.some(x => x.id === migration.id)
-        || (force && lastMigration && migration.id === lastMigration.id)
+        force && lastMigration && migration.id === lastMigration.id
       ) {
         log.info('Running down migration %s: %s', migration.id, migration.name)
         this.exec('BEGIN')
