@@ -106,6 +106,11 @@ it('uses either name model without changing greetings or bypassing the shared bu
   expect(provider.generate).toHaveBeenCalledTimes(3)
 })
 
+it('preserves an explicitly empty name style through speech generation', async () => {
+  await voice.generate('Ana', voice.profile(), signal(), false, 'name', '')
+  expect(provider.generate).toHaveBeenLastCalledWith('Ana', { ...voice.profile(), style: '' }, expect.any(AbortSignal))
+})
+
 it('rejects name model overrides for other purposes without provider consumption', async () => {
   await expect(voice.generate('Hola', voice.profile(), signal(), false, 'intro', undefined, 'gemini-3.8-flash-tts')).rejects.toMatchObject({ kind: 'invalid', attempted: false })
   expect(provider.generate).not.toHaveBeenCalled()

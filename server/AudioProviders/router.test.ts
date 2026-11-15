@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net'
 import { open, close, db } from '../lib/Database.js'
 import { defaultBirthdaySettings } from '../../shared/birthdays.js'
 import router from './router.js'
+import greetingRouter from '../Greetings/voiceRouter.js'
 import birthdayRouter from '../Birthdays/router.js'
 
 const production = vi.hoisted(() => ({
@@ -15,6 +16,7 @@ const production = vi.hoisted(() => ({
 vi.mock('../Animation/Production.js', () => ({ getProduction: () => production }))
 const originalFetch = globalThis.fetch
 const providerRequests: string[] = []
+const generatedProfiles: Record<string, unknown>[] = []
 const app = new Koa()
 app.use(async (ctx, next) => {
   ctx.user = { isAdmin: ctx.get('test-admin') === 'true', roomId: Number(ctx.get('test-room') || 1) } as typeof ctx.user
@@ -22,6 +24,7 @@ app.use(async (ctx, next) => {
 })
 app.use(koaBody())
 app.use(router.routes())
+app.use(greetingRouter.routes())
 app.use(birthdayRouter.routes())
 const server = createServer(app.callback())
 let base: string
@@ -37,6 +40,10 @@ beforeAll(async () => {
     const url = new URL(String(input))
     if (url.hostname !== 'generativelanguage.googleapis.com') return originalFetch(input, options)
     providerRequests.push(url.toString())
+    if (url.pathname.endsWith(':generateContent')) {
+      generatedProfiles.push(JSON.parse(options!.body as string))
+      return Response.json({ candidates: [{ content: { parts: [{ inlineData: { data: Buffer.from('524946462800000057415645666d74201000000001000100c05d000080bb000002001000646174610400000000000000', 'hex').toString('base64') } }] } }] })
+    }
     if (url.pathname.endsWith('/voices/voice_host')) return Response.json({ id: 'voice_host', display_name: 'Warm Host' })
     if (url.searchParams.get('search') === 'Warm Host') return Response.json({ voices: [{ id: 'voice_host', display_name: 'Warm Host' }] })
     if (url.pathname.endsWith('/voices')) return Response.json({ voices: [{ id: 'Sulafat', display_name: 'Sulafat' }] })
@@ -59,28 +66,13 @@ const call = (suffix = '', method = 'GET', body?: unknown, admin = true, room = 
   method, headers: { 'test-admin': String(admin), 'test-room': String(room), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
 })
 
-it('resolves a birthday voice name without synthesis and rejects an invalid audition without saving', async () => {
-  const sibling = (suffix: string, method = 'GET', body?: unknown) => originalFetch(base.replace('/audio-providers', '') + '/' + suffix, {
-    method, headers: { 'test-admin': 'true', 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const resolved = await call('/gemini/resolve-voice', 'POST', { model: 'gemini-3.8-flash-tts', voice: 'Orus' })
-  expect(await resolved.json()).toEqual({ voiceId: 'Orus', name: 'Orus' })
-  const initial = (await (await sibling('birthdays/')).json()).settings
-  const saved = await sibling('birthdays/settings', 'PUT', { ...initial, defaultVoiceId: 'Warm Host', speechStyle: '', rules: [{ id: 'all', sex: 'any', minAge: 0, maxAge: 120, voiceId: 'Orus' }] })
-  expect(saved.status).toBe(200)
-  const current = await saved.json()
-  expect(current).toMatchObject({ defaultVoiceId: 'voice_host', speechStyle: '', rules: [{ voiceId: 'voice_host', style: '', history: false }] })
-  expect((await sibling('birthdays/audition', 'POST', { config: { ...current, defaultVoiceId: 'Typo' } })).status).toBe(422)
-  expect((await (await sibling('birthdays/')).json()).settings).toEqual(current)
-  expect(providerRequests.every(url => !url.includes(':generateContent'))).toBe(true)
-})
-
 it('denies provider metadata, checks and voices to non-administrators', async () => {
   expect((await call('', 'GET', undefined, false)).status).toBe(403)
   expect((await call('/gemini/check', 'POST', { use: 'greetings' }, false)).status).toBe(403)
   expect((await call('/gemini/voices?use=greetings', 'GET', undefined, false)).status).toBe(403)
   expect((await call('/call-voice', 'PUT', {}, false)).status).toBe(403)
   expect((await call('/gemini/resolve-voice', 'POST', { model: 'gemini-3.8-flash-tts', voice: 'Orus' }, false)).status).toBe(403)
+  expect((await call('/gemini/preview', 'POST', {}, false)).status).toBe(403)
   expect(providerRequests).toEqual([])
 })
 
@@ -133,4 +125,56 @@ it('saves versioned call defaults independently without provider calls and rejec
   expect((await call('/call-voice', 'PUT', initial)).status).toBe(409)
   expect((await call('/call-voice', 'PUT', { ...initial, apiKey: 'secret' })).status).toBe(422)
   expect(providerRequests).toEqual([])
+})
+
+it('validates exact names without audio and prevents invalid call defaults from being saved', async () => {
+  const initial = await (await call('/call-voice')).json()
+  const resolved = await call('/gemini/resolve-voice', 'POST', { model: initial.model, voice: 'Orus' })
+  expect(await resolved.json()).toEqual({ voiceId: 'Orus', name: 'Orus' })
+  expect(providerRequests).toEqual([])
+  expect((await call('/call-voice', 'PUT', { ...initial, voice: 'Typo' })).status).toBe(422)
+  expect(await (await call('/call-voice')).json()).toEqual(initial)
+  const saved = await call('/call-voice', 'PUT', { ...initial, voice: 'Warm Host', style: '' })
+  expect(await saved.json()).toMatchObject({ voice: 'voice_host', style: '' })
+  expect(providerRequests.every(url => !url.includes(':generateContent'))).toBe(true)
+})
+
+const sibling = (suffix: string, method = 'GET', body?: unknown) => originalFetch(`${base.replace('/audio-providers', '')}/${suffix}`, {
+  method, headers: { 'test-admin': 'true', 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+})
+
+it('validates greeting and birthday names on save and preserves settings on an invalid audition', async () => {
+  const greeting = await (await sibling('prefs/greeting-voice')).json()
+  expect((await sibling('prefs/greeting-voice', 'PUT', { ...greeting.config, voice: 'Typo' })).status).toBe(422)
+  expect((await (await sibling('prefs/greeting-voice')).json()).config).toEqual(greeting.config)
+  const saved = await sibling('prefs/greeting-voice', 'PUT', { ...greeting.config, voice: 'Warm Host', style: '' })
+  expect((await saved.json()).config).toMatchObject({ voice: 'voice_host', style: '' })
+  const initial = (await (await sibling('birthdays/')).json()).settings
+  const config = { ...initial, defaultVoiceId: 'Warm Host', speechStyle: '', rules: [{ id: 'all', sex: 'any', minAge: 0, maxAge: 120, voiceId: 'Orus' }] }
+  const birthday = await sibling('birthdays/settings', 'PUT', config)
+  expect(birthday.status).toBe(200)
+  const current = await birthday.json()
+  expect(current).toMatchObject({ defaultVoiceId: 'voice_host', speechStyle: '', rules: [{ voiceId: 'voice_host', style: '', history: false }] })
+  expect((await sibling('birthdays/audition', 'POST', { config: { ...current, defaultVoiceId: 'Typo' } })).status).toBe(422)
+  expect((await (await sibling('birthdays/')).json()).settings).toEqual(current)
+  expect(providerRequests.every(url => !url.includes(':generateContent'))).toBe(true)
+})
+
+it('previews drafts without persisting them and accounts each generation against the shared budget', async () => {
+  const calls = await (await call('/call-voice')).json()
+  const greeting = await (await sibling('prefs/greeting-voice')).json()
+  const before = db.get<{ n: number }>('SELECT count(*) n FROM greetingVoiceRequests')!.n
+  const response = await call('/gemini/preview', 'POST', { use: 'calls', model: 'gemini-3.8-flash-lite-tts', voice: 'Orus', style: 'Warm and upbeat.' })
+  expect(response.status).toBe(200)
+  expect(response.headers.get('content-type')).toContain('audio/wav')
+  expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(44)
+  expect(generatedProfiles.at(-1)).toMatchObject({ contents: [{ parts: [{ speech_metadata: { style: 'Warm and upbeat.' } }] }], generationConfig: { speechConfig: { voiceConfig: { voice: 'Orus' } } } })
+  expect(await (await call('/call-voice')).json()).toEqual(calls)
+  expect((await (await sibling('prefs/greeting-voice')).json()).config).toEqual(greeting.config)
+  expect(db.get<{ n: number }>('SELECT count(*) n FROM greetingVoiceRequests')!.n).toBe(before + 1)
+  expect(db.get<{ n: number }>('SELECT count(*) n FROM animationInterventions')!.n).toBe(0)
+  for (let i = 0; i < 2; i++) expect((await call('/gemini/preview', 'POST', { use: 'names', model: 'gemini-3.8-flash-tts', voice: 'Kore', style: '' })).status).toBe(200)
+  expect(generatedProfiles.at(-1)).toMatchObject({ contents: [{ parts: [{ text: 'María', speech_metadata: { style: '' } }] }], generationConfig: { speechConfig: { voiceConfig: { voice: calls.voice } } } })
+  expect((await call('/gemini/preview', 'POST', { use: 'greetings', model: 'gemini-3.8-flash-tts', voice: 'Orus', style: '' })).status).toBe(422)
+  expect(db.get<{ n: number }>('SELECT count(*) n FROM greetingVoiceRequests')!.n).toBe(before + 3)
 })

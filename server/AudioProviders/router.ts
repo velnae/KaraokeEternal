@@ -10,6 +10,7 @@ import type { ManagedAudioProvider, ProviderUse } from '../../shared/audioProvid
 import type { AudioKind } from '../../shared/animation.js'
 import { getCallVoice } from '../Animation/Calls/CallVoice.js'
 import { resolveGeminiSelection } from './voiceSelection.js'
+import { greetingVoiceSample } from '../../shared/greetingVoice.js'
 
 const router = new Router({ prefix: '/api/audio-providers' })
 router.use(async (ctx, next) => {
@@ -52,12 +53,32 @@ router.get('/', (ctx) => {
 router.get('/call-voice', (ctx) => {
   ctx.body = getCallVoice().config()
 })
-router.put('/call-voice', (ctx) => {
-  ctx.body = getCallVoice().configure(ctx.request.body)
+router.put('/call-voice', async (ctx) => {
+  const input = ctx.request.body as Record<string, unknown>
+  const voice = await resolveGeminiSelection(input)
+  ctx.body = getCallVoice().configure({ ...input, voice: voice.voiceId })
 })
 
 router.post('/gemini/resolve-voice', async (ctx) => {
   ctx.body = await resolveGeminiSelection(ctx.request.body)
+})
+
+router.post('/gemini/preview', async (ctx) => {
+  const input = ctx.request.body as { model?: string, voice?: string, style?: string, use?: string }
+  if (!input || !['greetings', 'calls', 'names'].includes(input.use ?? '') || typeof input.style !== 'string' || input.style.length > (input.use === 'names' ? 2000 : 800)) ctx.throw(422, 'Revise el uso y el estilo de la prueba.')
+  const controller = new AbortController()
+  const abort = () => {
+    if (!ctx.res.writableEnded) controller.abort()
+  }
+  ctx.res.once('close', abort)
+  try {
+    const voice = await resolveGeminiSelection(input.use === 'names' ? { ...input, voice: getCallVoice().config().voice } : input)
+    if (ctx.res.destroyed) controller.abort()
+    // Private draft previews share the persistent generation gate, never defaults.
+    ctx.body = await getGreetingVoice().generate(input.use === 'names' ? 'María' : greetingVoiceSample,
+      { provider: 'gemini', model: input.model!, voice: voice.voiceId, style: input.style!, processingRevision: 1 }, controller.signal, true, undefined, undefined, undefined, 'calls')
+    ctx.type = 'audio/wav'
+  } finally { ctx.res.removeListener('close', abort) }
 })
 
 function selection (ctx, value: unknown) {

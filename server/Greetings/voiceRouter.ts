@@ -3,6 +3,7 @@ import { getGreetingVoice, GreetingVoiceSettingsError } from './GreetingVoice.js
 import { VoiceError as GreetingVoiceError } from '../AudioProviders/errors.js'
 import { AudioValidationError } from '../Animation/AudioPreparation.js'
 import { previewGreetingAudio } from './audioRouter.js'
+import { resolveGeminiSelection } from '../AudioProviders/voiceSelection.js'
 
 const router = new Router({ prefix: '/api/prefs/greeting-voice' })
 router.use(async (ctx, next) => {
@@ -24,8 +25,10 @@ router.use(async (ctx, next) => {
 router.get('/', (ctx) => {
   ctx.body = getGreetingVoice().snapshot()
 })
-router.put('/', (ctx) => {
-  ctx.body = getGreetingVoice().configure((ctx.request as unknown as { body: unknown }).body)
+router.put('/', async (ctx) => {
+  const input = ctx.request.body as Record<string, unknown>
+  const voice = await resolveGeminiSelection(input)
+  ctx.body = getGreetingVoice().configure({ ...input, voice: voice.voiceId })
 })
 router.post('/check', async (ctx) => {
   ctx.body = await getGreetingVoice().check()

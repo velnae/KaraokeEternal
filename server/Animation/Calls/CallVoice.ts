@@ -27,8 +27,8 @@ export class CallVoice {
   configure (input: unknown) {
     const value = input as CallVoiceConfig | null
     if (!value || Object.keys(value).some(key => !['model', 'voice', 'style', 'revision'].includes(key))
-      || !greetingVoiceModels.includes(value.model) || typeof value.voice !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{1,63}$/.test(value.voice)
-      || typeof value.style !== 'string' || !value.style.trim() || value.style.length > 800 || !Number.isSafeInteger(value.revision)) throw new GreetingVoiceSettingsError('Revise el modelo, la voz y el estilo de llamados.')
+      || !greetingVoiceModels.includes(value.model) || typeof value.voice !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{1,119}$/.test(value.voice)
+      || typeof value.style !== 'string' || value.style.length > 800 || !Number.isSafeInteger(value.revision)) throw new GreetingVoiceSettingsError('Revise el modelo, la voz y el estilo de llamados.')
     if (value.revision !== this.config().revision) throw new GreetingVoiceSettingsError('Los ajustes cambiaron en otra sesión. Recargue antes de guardar.', 409)
     const config = { ...value, style: value.style.trim(), revision: value.revision + 1 }
     if (!Prefs.set('callVoice', config)) throw new Error('Could not persist call voice settings')

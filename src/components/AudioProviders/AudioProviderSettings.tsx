@@ -9,6 +9,7 @@ import BirthdayVoiceSettings from './BirthdayVoiceSettings'
 import NameVoiceStyleEditor from '../Animation/NameVoiceStyleEditor'
 import styles from './Providers.css'
 import CallVoiceSettings from './CallVoiceSettings'
+import type { CallVoiceConfig } from 'shared/callVoice'
 
 const api = new HttpApi('audio-providers/')
 const names = new HttpApi('name-voices/')
@@ -78,6 +79,7 @@ function Connection ({ provider }: { provider: ManagedAudioProvider }) {
 
 function NameSettings () {
   const [settings, setSettings] = useState<NameVoiceStyleSettings | null>(null)
+  const [voice, setVoice] = useState('')
   const [error, setError] = useState('')
   const refresh = useCallback(async () => {
     const result = await names.get<NameVoiceStyleSettings>('style')
@@ -87,8 +89,11 @@ function NameSettings () {
   useEffect(() => {
     const controller = new AbortController()
     let active = true
-    void names.get<NameVoiceStyleSettings>('style', { signal: controller.signal }).then((value): void => {
-      if (active) setSettings(value)
+    void Promise.all([names.get<NameVoiceStyleSettings>('style', { signal: controller.signal }), api.get<CallVoiceConfig>('call-voice', { signal: controller.signal })]).then(([value, calls]): void => {
+      if (active) {
+        setSettings(value)
+        setVoice(calls.voice)
+      }
       return undefined
     }).catch((err) => { if (active) setError(err.message) })
     return () => {
@@ -108,8 +113,8 @@ function NameSettings () {
           <Button onClick={() => void refresh().catch(err => setError(err.message))}>Reintentar</Button>
         </div>
       )}
-      {settings ? <NameVoiceStyleEditor settings={settings} onSaved={refresh} /> : !error && <p role='status'>Cargando configuración…</p>}
-      <Link to='/admin/settings/audio-providers?use=calls'>Voz base de llamados</Link>
+      {settings ? <NameVoiceStyleEditor settings={settings} voice={voice} onSaved={refresh} /> : !error && <p role='status'>Cargando configuración…</p>}
+      <Link to='/admin/settings/audio-providers?use=calls'>Cambiar voz de llamados</Link>
     </section>
   )
 }

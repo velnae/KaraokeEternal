@@ -21,7 +21,6 @@ it('starts with the exact existing name style and persists an independent global
 })
 
 it.each([
-  { style: '   ', revision: 0 },
   { style: 'a'.repeat(nameVoiceStyleLimit + 1), revision: 0 },
   { style: 'Name\u0000style', revision: 0 },
   { style: 'Valid', revision: -1 },
@@ -36,8 +35,13 @@ it.each([
 it('rejects stale editors and validates direct preference persistence too', () => {
   const saved = saveNameVoiceStyle({ style: 'First administrator.', revision: 0 }, profile)
   expect(() => saveNameVoiceStyle({ style: 'Stale administrator.', revision: 0 }, profile)).toThrow('otra sesión')
-  expect(() => Prefs.set('nameVoiceStyle', { style: '', revision: 1 })).toThrow()
+  expect(() => Prefs.set('nameVoiceStyle', { style: 123, revision: 1 })).toThrow()
   expect(getNameVoiceStyle(profile)).toEqual(saved)
+})
+
+it('accepts an empty style for natural delivery without changing the inherited voice', () => {
+  expect(saveNameVoiceStyle({ style: '  ', revision: 0 }, profile)).toMatchObject({ style: '', revision: 1 })
+  expect(getNameVoiceStyle(profile).style).toBe('')
 })
 
 it('loads legacy style settings and saves an independent name model with revision protection', () => {

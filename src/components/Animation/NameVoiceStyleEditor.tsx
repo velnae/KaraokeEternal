@@ -4,6 +4,7 @@ import HttpApi from 'lib/HttpApi'
 import { nameVoiceStyleLimit, type NameVoiceModel, type NameVoiceStyleSettings } from 'shared/nameVoices'
 import styles from './NameVoicePanel.css'
 import formStyles from './KaraokeCallPilot.css'
+import GeminiVoicePreview from '../AudioProviders/GeminiVoicePreview'
 
 const api = new HttpApi('name-voices/')
 const errorMessage = (error: unknown) => {
@@ -14,7 +15,7 @@ const errorMessage = (error: unknown) => {
   } catch { return message }
 }
 
-export default function NameVoiceStyleEditor ({ settings, onSaved }: { settings: NameVoiceStyleSettings, onSaved: () => Promise<void> }) {
+export default function NameVoiceStyleEditor ({ settings, voice, onSaved }: { settings: NameVoiceStyleSettings, voice?: string, onSaved: () => Promise<void> }) {
   const styleId = useId()
   const [base, setBase] = useState(settings)
   const [draft, setDraft] = useState(settings.style)
@@ -47,10 +48,6 @@ export default function NameVoiceStyleEditor ({ settings, onSaved }: { settings:
     setError('')
     setNotice('')
     setConflict(false)
-    if (!draft.trim()) {
-      setError('Ingrese el estilo de pronunciación.')
-      return
-    }
     if (!dirty && base.revision > 0) {
       setNotice('La configuración ya está guardada.')
       return
@@ -99,6 +96,12 @@ export default function NameVoiceStyleEditor ({ settings, onSaved }: { settings:
           void save()
         }}
       >
+        {voice && (
+          <label className={formStyles.field}>
+            Voz compartida con llamados
+            <input type='text' value={voice} readOnly />
+          </label>
+        )}
         <label className={formStyles.field}>
           Modelo para nuevas generaciones
           <select
@@ -119,7 +122,6 @@ export default function NameVoiceStyleEditor ({ settings, onSaved }: { settings:
             id={styleId}
             rows={7}
             maxLength={nameVoiceStyleLimit}
-            required
             spellCheck={false}
             value={draft}
             disabled={saving}
@@ -159,6 +161,7 @@ export default function NameVoiceStyleEditor ({ settings, onSaved }: { settings:
         </div>
         {(notice || saving) && <p role='status' className={formStyles.notice}>{saving ? 'Guardando configuración…' : notice}</p>}
       </form>
+      {voice && <GeminiVoicePreview model={model} voice={voice} style={draft} use='names' />}
     </details>
   )
 }

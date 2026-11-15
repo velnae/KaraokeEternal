@@ -2,8 +2,7 @@ import React, { useEffect, useId, useRef, useState } from 'react'
 import Button from 'components/Button/Button'
 import HttpApi from 'lib/HttpApi'
 import { defaultGreetingVoiceConfig, greetingVoiceModels, greetingVoiceSample, greetingVoiceStateLabels, type GreetingVoiceConfig, type GreetingVoiceSnapshot } from 'shared/greetingVoice'
-import VoiceSelect from './VoiceSelect'
-import useProviderVoices from './useProviderVoices'
+import GeminiVoiceInput from './GeminiVoiceInput'
 import styles from '../Animation/GreetingVoiceSettings.css'
 
 const api = new HttpApi('prefs/greeting-voice')
@@ -24,7 +23,6 @@ export default function GreetingVoiceSettings () {
   const [previewError, setPreviewError] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const catalogue = useProviderVoices({ providerId: 'gemini', use: 'greetings', model: draft.model, enabled: !!snapshot?.configured })
 
   useEffect(() => {
     mounted.current = true
@@ -59,6 +57,7 @@ export default function GreetingVoiceSettings () {
     edited.current = true
     setDirty(true)
     setNotice('')
+    setPreview('')
     setDraft(value => ({ ...value, ...patch }))
   }
   const execute = async (action: 'save' | 'check' | 'reload' | 'preview') => {
@@ -76,7 +75,7 @@ export default function GreetingVoiceSettings () {
         URL.revokeObjectURL(previewURL.current)
         previewURL.current = ''
         setPreview('')
-        const response = await api.post<Response>('/preview', { signal: controller.signal })
+        const response = await new HttpApi('audio-providers/').post<Response>('gemini/preview', { body: { model: draft.model, voice: draft.voice, style: draft.style, use: 'greetings' }, signal: controller.signal })
         const blob = await response.blob()
         if (!mounted.current) return
         URL.revokeObjectURL(previewURL.current)
@@ -121,13 +120,12 @@ export default function GreetingVoiceSettings () {
   if (!snapshot) help = 'Cargando ajustes. Si la conexión falla, pulse Recargar ajustes.'
   else if (busy) help = 'Esperando la respuesta del servidor…'
   else if (changedElsewhere) help = 'Los ajustes cambiaron en otra sesión. Recargue antes de guardar.'
-  else if (dirty) help = 'Guarde los cambios antes de comprobar la conexión o generar una prueba.'
+  else if (dirty) help = 'Hay cambios sin guardar.'
   let previewHelp = ''
   if (!snapshot) previewHelp = 'Cargando ajustes. Si la conexión falla, pulse Recargar ajustes.'
   else if (pendingAction === 'preview') previewHelp = 'Preparando el audio de prueba…'
   else if (busy) previewHelp = 'Espere a que termine la operación actual.'
   else if (changedElsewhere) previewHelp = 'Los ajustes cambiaron en otra sesión. Pulse Recargar ajustes.'
-  else if (dirty) previewHelp = 'Pulse Guardar ajustes para probar la voz con sus cambios.'
   else if (!snapshot.configured) previewHelp = 'Configure KES_GEMINI_API_KEY en el servidor para generar la prueba.'
   else if (snapshot.state === 'limited' || snapshot.state === 'error') previewHelp = snapshot.message
   else if (processing) previewHelp = 'Gemini está ocupado. La prueba se habilitará al terminar la operación actual.'
@@ -167,19 +165,12 @@ export default function GreetingVoiceSettings () {
           </select>
         </label>
         <label className={styles.field}>
-          Voz de Gemini
-          <VoiceSelect id={draft.voice} voices={catalogue.voices} required disabled={!snapshot || busy} onChange={voice => change({ voice })} />
+          Nombre exacto de la voz
+          <GeminiVoiceInput value={draft.voice} model={draft.model} disabled={!snapshot || busy} onChange={voice => change({ voice })} />
         </label>
-        {catalogue.loading && <p role='status'>Consultando voces…</p>}
-        {catalogue.error && (
-          <div role='alert'>
-            <p>{catalogue.error}</p>
-            <Button onClick={catalogue.retry}>Reintentar voces</Button>
-          </div>
-        )}
         <label className={styles.field}>
           Estilo y acento
-          <textarea value={draft.style} maxLength={800} rows={4} required disabled={!snapshot || busy} onChange={event => change({ style: event.target.value })} />
+          <textarea value={draft.style} maxLength={800} rows={4} disabled={!snapshot || busy} onChange={event => change({ style: event.target.value })} />
         </label>
         <div className={styles.actions}>
           <Button type='submit' variant='primary' disabled={!snapshot || busy || changedElsewhere} aria-describedby={`${id}-help`}>Guardar ajustes</Button>
@@ -192,7 +183,7 @@ export default function GreetingVoiceSettings () {
         <section className={styles.preview} aria-labelledby={`${id}-preview-title`} aria-busy={pendingAction === 'preview'}>
           <h3 id={`${id}-preview-title`}>Probar voz</h3>
           <p>{greetingVoiceSample}</p>
-          <Button variant='primary' disabled={!snapshot?.configured || busy || dirty || processing || ['limited', 'error'].includes(snapshot.state)} aria-describedby={`${id}-preview-help`} onClick={() => void execute('preview')}>
+          <Button variant='primary' disabled={!snapshot?.configured || busy || processing || ['limited', 'error'].includes(snapshot.state)} aria-describedby={`${id}-preview-help`} onClick={() => void execute('preview')}>
             {pendingAction === 'preview' ? 'Generando…' : preview ? 'Generar otra prueba' : 'Generar audio de prueba'}
           </Button>
           <p className={styles.hint}>Se escucha solo en este navegador. Generar consume una solicitud.</p>

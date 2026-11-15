@@ -3,8 +3,8 @@ import Button from 'components/Button/Button'
 import HttpApi from 'lib/HttpApi'
 import type { CallVoiceConfig } from 'shared/callVoice'
 import { greetingVoiceModels } from 'shared/greetingVoice'
-import useProviderVoices from './useProviderVoices'
-import VoiceSelect from './VoiceSelect'
+import GeminiVoiceInput from './GeminiVoiceInput'
+import GeminiVoicePreview from './GeminiVoicePreview'
 import styles from './Providers.css'
 import { Link } from 'react-router'
 
@@ -16,7 +16,6 @@ export default function CallVoiceSettings () {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [reload, setReload] = useState(0)
-  const catalogue = useProviderVoices({ providerId: 'gemini', use: 'calls', model: config?.model ?? '', enabled: !!config })
   useEffect(() => {
     let active = true
     const controller = new AbortController()
@@ -74,25 +73,23 @@ export default function CallVoiceSettings () {
             </select>
           </label>
           <label>
-            Voz de nuevas plantillas
-            <VoiceSelect id={config.voice} voices={catalogue.voices} required onChange={voice => setConfig({ ...config, voice })} />
+            Nombre exacto de la voz
+            <GeminiVoiceInput value={config.voice} model={config.model} onChange={voice => setConfig({ ...config, voice })} />
           </label>
           <label className={styles.full}>
             Estilo de nuevas plantillas
-            <textarea rows={4} required maxLength={800} value={config.style} onChange={event => setConfig({ ...config, style: event.target.value })} />
+            <textarea rows={4} maxLength={800} value={config.style} onChange={event => setConfig({ ...config, style: event.target.value })} />
           </label>
         </fieldset>
-        {catalogue.loading && <p role='status'>Consultando voces…</p>}
-        {catalogue.error && <p role='alert'>{catalogue.error}</p>}
         {error && <p role='alert'>{error}</p>}
         {notice && <p role='status'>{notice}</p>}
         <div className={styles.actions}>
           <Button type='submit' variant='primary' disabled={busy}>{busy ? 'Guardando…' : 'Guardar configuración'}</Button>
           <Button variant='default' disabled={busy} onClick={() => setConfig(saved)}>Descartar cambios</Button>
           {error && <Button onClick={() => setReload(value => value + 1)}>Recargar configuración</Button>}
-          {catalogue.error && <Button onClick={catalogue.retry}>Reintentar voces</Button>}
         </div>
       </form>
+      <GeminiVoicePreview model={config.model} voice={config.voice} style={config.style} use='calls' />
       <Link to='/admin/settings/audio-providers?use=greetings'>Habilitación y límites compartidos de generación</Link>
       <Link to='/admin/settings/animator?view=calls'>Preparar y gestionar plantillas</Link>
     </section>

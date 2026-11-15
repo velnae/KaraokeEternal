@@ -75,8 +75,8 @@ export default class GreetingVoice {
     const current = this.config()
     if (!value || Object.keys(value).some(key => !(key in defaultGreetingVoiceConfig))
       || typeof value.enabled !== 'boolean' || !greetingVoiceModels.includes(value.model)
-      || typeof value.voice !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{1,63}$/.test(value.voice)
-      || typeof value.style !== 'string' || !value.style.trim() || value.style.length > 800
+      || typeof value.voice !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{1,119}$/.test(value.voice)
+      || typeof value.style !== 'string' || value.style.length > 800
       || !Number.isSafeInteger(value.requestsPerMinute) || value.requestsPerMinute < 1 || value.requestsPerMinute > 1000
       || !Number.isSafeInteger(value.requestsPerDay) || value.requestsPerDay < 1 || value.requestsPerDay > 100000
       || !Number.isSafeInteger(value.revision)) throw new GreetingVoiceSettingsError('Revise el modelo, la voz, el estilo y los límites de generación.')
@@ -115,7 +115,7 @@ export default class GreetingVoice {
       if (purpose !== 'name' || !nameVoiceModels.includes(nameModel)) throw new GreetingVoiceError('Modelo de pronunciación no válido.', 'invalid', 0, false)
       effectiveProfile.model = nameModel
     }
-    if (purpose === 'name' && nameStyle) effectiveProfile.style = nameStyle
+    if (purpose === 'name' && nameStyle !== undefined) effectiveProfile.style = nameStyle
     this.working = true
     try {
       // Reserve before sending. Interrupted/failed requests conservatively consume
