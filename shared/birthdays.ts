@@ -1,10 +1,12 @@
 import { hasInvisibleCharacters, hasOffensiveText } from './textModeration.js'
+import { birthdayVideoGroups, validateBirthdayVideoGroups, type BirthdayVideoGroups, type BirthdayVideoSelection } from './birthdayVideos.js'
 
 export const BIRTHDAY_SYNC = 'server/BIRTHDAY_SYNC'
 export const BIRTHDAY_PLAYER = 'server/BIRTHDAY_PLAYER'
 export const BIRTHDAY_STATE = 'birthday/STATE'
 export const birthdayIntroText = 'Hoy celebramos un cumpleaños muy especial. Gracias por compartir este momento con nosotros. Tenemos un presente para ti de parte de la casa; esperamos que te guste. Y ahora, un saludo preparado especialmente para ti.'
-export const birthdayLimits = { script: 1500, voiceMs: 60000, introMs: 60000, musicMs: 300000 }
+export const birthdayLimits = { script: 1500, voiceMs: 60000, introMs: 60000, musicMs: 300000, videoMs: 130000, bedMs: 130000, applauseMs: 10000 }
+export const birthdayTiming = { preludeMs: 2000, bridgeMs: 2500 }
 export type BirthdaySex = 'female' | 'male' | 'unspecified'
 export type BirthdayApproach = 'musical' | 'emotional' | 'humor'
 export const birthdayApproaches: BirthdayApproach[] = ['musical', 'emotional', 'humor']
@@ -51,31 +53,47 @@ export interface BirthdaySettings {
   speechStyle?: string
   historyEvery?: number
   introIds?: string[]
+  videoBackgrounds?: BirthdayVideoGroups
+  bedId?: string | null
+  bedVolume?: number
+  applauseId?: string | null
+  choreographyVersion?: 1
 }
 export const defaultBirthdaySettings: BirthdaySettings = {
   revision: 0, textModel: 'gemini-3.8-flash', targetSeconds: 25, maxVoiceSeconds: 60, defaultVoiceId: '', rules: [], introId: null, musicId: null, videoId: null,
-  speechProvider: 'gemini', speechModel: 'gemini-3.8-flash-tts', speechStyle: 'Voz cálida y alegre, ritmo moderado, pronunciación clara, sin gritar.', historyEvery: 4,
+  speechProvider: 'gemini', speechModel: 'gemini-3.8-flash-tts', speechStyle: 'Voz cálida y alegre, ritmo moderado, pronunciación clara, sin gritar. Cuando el saludo comience con un nombre, pronúncialo con claridad, haz una pausa breve y continúa con calidez.', historyEvery: 0,
 }
 export type BirthdayPreparation = 'queued' | 'writing' | 'voicing' | 'preparing' | 'ready' | 'failed'
 export type BirthdayPlayback = 'held' | 'scheduled' | 'playing' | 'completed' | 'cancelled' | 'interrupted'
-export type BirthdayPhase = 'intro' | 'greeting' | 'music'
-export interface BirthdayAsset { id: string, kind: 'intro' | 'music' | 'greeting' | 'video', title: string, durationMs: number, url: string, checksum: string, script?: string | null }
+export type BirthdayPhase = 'prelude' | 'intro' | 'greeting' | 'bridge' | 'music' | 'applause'
+export interface BirthdayAsset { id: string, kind: 'intro' | 'music' | 'greeting' | 'video' | 'bed' | 'applause', title: string, durationMs: number, url: string, checksum: string, script?: string | null }
 export interface BirthdaySceneSelection {
   dayKey: string
   automaticIntroId: string
   automaticVideoId: string
   defaultVideoId?: string | null
+  automaticVideoSource?: BirthdayVideoSelection
   introMode: 'auto' | 'manual'
   videoMode: 'auto' | 'manual'
 }
-export interface BirthdaySceneInput { revision: number, introId?: string, videoId?: string, automatic?: boolean }
-export const birthdayPhases: BirthdayPhase[] = ['intro', 'greeting', 'music']
+export interface BirthdaySceneInput { revision: number, introId?: string, videoId?: string, automatic?: boolean, bedId?: string | null, bedVolume?: number }
+export const birthdayPhases = ['intro', 'greeting', 'music'] as const
 export function birthdaySequence (assets: BirthdayAsset[]): BirthdayAsset[] {
   return birthdayPhases.map((phase) => {
     const asset = assets.find(item => item.kind === phase)
     if (!asset) throw new Error('Falta un audio de la celebración.')
     return asset
   })
+}
+export interface BirthdayStep { phase: BirthdayPhase, durationMs: number, asset?: BirthdayAsset }
+export function birthdayTimeline (assets: BirthdayAsset[], version?: 1): BirthdayStep[] {
+  const [intro, greeting, music] = birthdaySequence(assets)
+  const step = (asset: BirthdayAsset): BirthdayStep => ({ phase: asset.kind as BirthdayPhase, durationMs: asset.durationMs, asset })
+  if (!version) return [intro, greeting, music].map(step)
+  const applause = assets.find(asset => asset.kind === 'applause')
+  return [{ phase: 'prelude', durationMs: birthdayTiming.preludeMs }, step(intro), step(greeting),
+    { phase: 'bridge', durationMs: birthdayTiming.bridgeMs }, step(music),
+    { phase: 'applause', durationMs: applause?.durationMs ?? 0, asset: applause }]
 }
 export interface PublicBirthday {
   id: string
@@ -95,10 +113,11 @@ export interface BirthdayEvent extends PublicBirthday, BirthdayInput {
   assets: BirthdayAsset[]
   personalization?: BirthdayPersonalization | null
   scene?: BirthdaySceneSelection | null
+  bedVolume?: number
 }
 export interface BirthdaySnapshot { roomId: number, events: PublicBirthday[] }
 export interface BirthdayOverview { settings: BirthdaySettings, events: BirthdayEvent[], assets: BirthdayAsset[], configured: { text: boolean, voice: boolean } }
-export interface BirthdayGrant { event: PublicBirthday, assets: BirthdayAsset[], token: string, remainingMs: number }
+export interface BirthdayGrant { event: PublicBirthday, assets: BirthdayAsset[], token: string, remainingMs: number, bedVolume?: number, warning?: string, choreographyVersion?: 1 }
 
 export const celebrationYear = (now = new Date()) => Number(new Intl.DateTimeFormat('en', { timeZone: 'America/Lima', year: 'numeric' }).format(now))
 export function validateBirthdayInput (value: unknown, year = celebrationYear()): BirthdayInput {
@@ -118,11 +137,14 @@ export function validateBirthdayInput (value: unknown, year = celebrationYear())
 export function validateBirthdaySettings (value: unknown): BirthdaySettings {
   const input = value as BirthdaySettings
   const voice = (id: unknown) => typeof id === 'string' && /^[\w-]{1,120}$/.test(id)
+  const speechVoice = (id: unknown) => input?.speechProvider === 'gemini'
+    ? typeof id === 'string' && !!id.trim() && id.length <= 120 && !/[\x00-\x1f\x7f]/.test(id) // eslint-disable-line no-control-regex
+    : voice(id)
   if (!input || !Number.isInteger(input.revision) || typeof input.textModel !== 'string' || !/^[\w.-]{1,100}$/.test(input.textModel)
-    || !voice(input.defaultVoiceId) || !Array.isArray(input.rules) || input.rules.length > 30) throw new Error('Configure el modelo de texto y una voz predeterminada válida.')
+    || !speechVoice(input.defaultVoiceId) || !Array.isArray(input.rules) || input.rules.length > 30) throw new Error('Configure el modelo de texto y una voz predeterminada válida.')
   for (const rule of input.rules) {
     if (!rule || !['female', 'male', 'unspecified', 'any'].includes(rule.sex) || !Number.isInteger(rule.minAge) || !Number.isInteger(rule.maxAge)
-      || rule.minAge < 0 || rule.maxAge > 120 || rule.maxAge < rule.minAge || !voice(rule.voiceId)) throw new Error('Revise los rangos de edad y las voces.')
+      || rule.minAge < 0 || rule.maxAge > 120 || rule.maxAge < rule.minAge) throw new Error('Revise los rangos de edad.')
     if ((rule.id !== undefined && (typeof rule.id !== 'string' || !/^[\w-]{1,80}$/.test(rule.id)))
       || (rule.title !== undefined && (typeof rule.title !== 'string' || rule.title.length > 80))
       || (rule.writing !== undefined && (typeof rule.writing !== 'string' || rule.writing.length > 500))
@@ -136,19 +158,20 @@ export function validateBirthdaySettings (value: unknown): BirthdaySettings {
   const speechProvider = input.speechProvider ?? 'elevenlabs'
   const speechModel = input.speechModel ?? (speechProvider === 'gemini' ? 'gemini-3.8-flash-tts' : 'eleven_v4')
   const speechStyle = input.speechStyle ?? defaultBirthdaySettings.speechStyle!
-  const historyEvery = input.historyEvery ?? 4
-  if (!['gemini', 'elevenlabs'].includes(speechProvider) || !/^[\w.-]{1,100}$/.test(speechModel) || typeof speechStyle !== 'string' || !speechStyle.trim() || speechStyle.length > 400
-    || !Number.isInteger(historyEvery) || historyEvery < 0 || historyEvery > 20) throw new Error('Revise el proveedor, modelo, interpretación y frecuencia histórica.')
+  if (!['gemini', 'elevenlabs'].includes(speechProvider) || !/^[\w.-]{1,100}$/.test(speechModel) || typeof speechStyle !== 'string' || (speechProvider !== 'gemini' && !speechStyle.trim()) || speechStyle.length > 400) throw new Error('Revise el proveedor, modelo y la interpretación.')
   if (input.rules.some((a, i) => input.rules.slice(i + 1).some(b => a.sex === b.sex && a.minAge <= b.maxAge && b.minAge <= a.maxAge))) throw new Error('Los rangos de voz del mismo sexo no pueden superponerse.')
   const targetSeconds = input.targetSeconds ?? 40
   const maxVoiceSeconds = input.maxVoiceSeconds ?? 60
   if (!Number.isInteger(targetSeconds) || !Number.isInteger(maxVoiceSeconds) || targetSeconds < 15 || targetSeconds > maxVoiceSeconds || maxVoiceSeconds > 60) throw new Error('Use una duración objetivo de al menos 15 segundos y un máximo de hasta 60 segundos.')
   for (const id of [input.introId, input.musicId, input.videoId]) if (id !== null && !voice(id)) throw new Error('Seleccione recursos válidos.')
   if (input.introIds !== undefined && (!Array.isArray(input.introIds) || input.introIds.length > 30 || input.introIds.some(id => !voice(id)) || new Set(input.introIds).size !== input.introIds.length)) throw new Error('Seleccione hasta 30 introducciones diferentes.')
+  const videoBackgrounds = validateBirthdayVideoGroups(birthdayVideoGroups(input))
+  if ((input.bedId !== undefined && input.bedId !== null && !voice(input.bedId)) || (input.bedVolume !== undefined && (!Number.isFinite(input.bedVolume) || input.bedVolume < 0 || input.bedVolume > 1))) throw new Error('Seleccione un audio de fondo y un volumen entre 0 y 100 %.')
+  if (input.applauseId !== undefined && input.applauseId !== null && !voice(input.applauseId)) throw new Error('Seleccione un aplauso válido.')
   return { revision: input.revision, textModel: input.textModel, targetSeconds, maxVoiceSeconds, defaultVoiceId: input.defaultVoiceId,
-    speechProvider, speechModel, speechStyle, historyEvery,
+    speechProvider, speechModel, speechStyle, historyEvery: 0, videoBackgrounds, bedId: input.bedId ?? null, bedVolume: input.bedVolume ?? 0.2, applauseId: input.applauseId ?? null,
     ...(input.introIds !== undefined ? { introIds: [...input.introIds] } : {}),
-    rules: input.rules.map(({ sex, minAge, maxAge, voiceId, id, title, writing, style, approaches, history, videoId }) => ({ sex, minAge, maxAge, voiceId, id, title, writing, style, approaches, history, videoId })), introId: input.introId, musicId: input.musicId, videoId: input.videoId }
+    rules: input.rules.map(({ sex, minAge, maxAge, id, title, writing, approaches, videoId }) => ({ sex, minAge, maxAge, voiceId: input.defaultVoiceId, id, title, writing, style: speechStyle, approaches, history: false, videoId })), introId: input.introId, musicId: input.musicId, videoId: input.videoId }
 }
 export function selectBirthdayProfile (settings: BirthdaySettings, input: BirthdayInput, year: number): BirthdayVoiceRule {
   if (input.profileId) {
@@ -162,7 +185,10 @@ export function selectBirthdayProfile (settings: BirthdaySettings, input: Birthd
     writing: 'Mensaje cercano, alegre y apropiado para la edad, sin estereotipos.', style: settings.speechStyle,
   }
 }
-export const selectBirthdayVoice = (settings: BirthdaySettings, input: BirthdayInput, year: number) => selectBirthdayProfile(settings, input, year).voiceId
+export const selectBirthdayVoice = (settings: BirthdaySettings, input: BirthdayInput, year: number) => {
+  selectBirthdayProfile(settings, input, year)
+  return settings.defaultVoiceId
+}
 
 export function initialBirthdayProfiles (voiceId: string): BirthdayVoiceRule[] {
   return [
@@ -171,7 +197,7 @@ export function initialBirthdayProfiles (voiceId: string): BirthdayVoiceRule[] {
     [25, 44, 'Cercano y festivo', 'Cercanía y humor ligero, sin bromas personales.', 'Festiva, cercana y natural.', 'Achird'],
     [45, 64, 'Reconocimiento cálido', 'Reconocimiento cálido y deseos significativos.', 'Expresiva y cercana, con ritmo moderado.', 'Sulafat'],
     [65, 120, 'Homenaje alegre', 'Homenaje afectuoso y alegre; nunca infantilizar.', 'Clara, cálida y respetuosa.', 'Gacrux'],
-  ].map(([minAge, maxAge, title, writing, style, candidate], index) => ({ id: `age-${index}`, sex: 'any', minAge: Number(minAge), maxAge: Number(maxAge), title: String(title), writing: String(writing), style: String(style), voiceId: voiceId || String(candidate), approaches: [...birthdayApproaches], history: true }))
+  ].map(([minAge, maxAge, title, writing, style, candidate], index) => ({ id: `age-${index}`, sex: 'any', minAge: Number(minAge), maxAge: Number(maxAge), title: String(title), writing: String(writing), style: String(style), voiceId: voiceId || String(candidate), approaches: [...birthdayApproaches], history: false }))
 }
 
 // Demographics inform tone, never the public narrative. Reject both numeric and
@@ -192,6 +218,7 @@ export const publicBirthday = (event: PublicBirthday): PublicBirthday => ({
   phase: event.phase, durationMs: event.durationMs, startedAt: event.startedAt,
 })
 export const birthdayLabels: Record<BirthdayPreparation | BirthdayPlayback | BirthdayPhase, string> = {
+  prelude: 'Entrada musical', bridge: 'Puente musical', applause: 'Aplauso de cierre',
   queued: 'Preparando', writing: 'Creando saludo', voicing: 'Generando voz', preparing: 'Preparando audio', ready: 'Listo', failed: 'Error de preparación',
   held: 'En espera', scheduled: 'Programado: siguiente en la cola', playing: 'En reproducción', completed: 'Completado', cancelled: 'Cancelado', interrupted: 'Interrumpido',
   intro: 'Introducción', greeting: 'Saludo', music: 'Canción de cumpleaños',

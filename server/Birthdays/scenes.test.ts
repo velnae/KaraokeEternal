@@ -16,7 +16,7 @@ beforeEach(async () => {
   for (const [id, kind] of [['intro-a', 'intro'], ['intro-b', 'intro'], ['video', 'video'], ['profile-video', 'video'], ['music', 'music']]) {
     db.run('INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES(?,1,?,?,?,1000,?)', [id, kind, id, id, id])
   }
-  saveSettings(1, { ...settings(1), defaultVoiceId: 'voice', introId: 'intro-a', introIds: ['intro-a', 'intro-b'], videoId: 'video', musicId: 'music',
+  saveSettings(1, { ...settings(1), videoBackgrounds: undefined, defaultVoiceId: 'voice', introId: 'intro-a', introIds: ['intro-a', 'intro-b'], videoId: 'video', musicId: 'music',
     rules: [{ id: 'specific', sex: 'female', minAge: 0, maxAge: 120, voiceId: 'voice', videoId: 'profile-video' }, { id: 'general', sex: 'any', minAge: 0, maxAge: 120, voiceId: 'voice' }] })
 })
 afterEach(async () => {
@@ -56,11 +56,11 @@ it('freezes profile video and restores the automatic proposal without touching g
   expect(() => changeScene(getBirthday(1, row.id), { revision: next.revision + 1, videoId: 'video' })).toThrow('programación')
 })
 
-it('falls back to the frozen general video when switching to a profile without its own video', () => {
+it('does not change the background when selecting another voice profile', () => {
   const row = create('scene-profile')
   db.run('UPDATE birthdays SET preparation=\'ready\' WHERE id=?', [row.id])
   const next = changeBirthday(1, row.id, row.revision, 'edit', { ...input, profileId: 'general' })
-  expect(eventDTO(next).assets.find(asset => asset.kind === 'video')!.id).toBe('video')
+  expect(eventDTO(next).assets.find(asset => asset.kind === 'video')!.id).toBe('profile-video')
 })
 
 it('keeps the event background frozen when voice settings change or the greeting is regenerated', () => {
@@ -112,4 +112,48 @@ it('rejects duplicate audio and foreign resources, while a missing pending intro
   expect(() => create('scene-recovery')).not.toThrow()
   db.run('INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES(\'foreign\',2,\'video\',\'foreign\',\'foreign\',1000,\'foreign\')')
   expect(() => changeScene(getBirthday(1, row.id), { revision: row.revision, videoId: 'foreign' })).toThrow('sala')
+})
+
+it('changes only the event bed selection and volume while keeping generation and duration intact', () => {
+  db.run('INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES(\'bed\',1,\'bed\',\'Bed\',\'bed\',10000,\'bed\')')
+  const row = create('scene-bed')
+  changeScene(row, { revision: row.revision, bedId: 'bed', bedVolume: 0.4 })
+  const next = getBirthday(1, row.id)
+  expect(next.durationMs).toBe(row.durationMs)
+  expect(next.generationRevision).toBe(row.generationRevision)
+  expect(eventDTO(next).bedVolume).toBe(0.4)
+  expect(eventDTO(next).assets.find(asset => asset.kind === 'bed')?.id).toBe('bed')
+  expect(() => changeScene(next, { revision: next.revision, bedId: 'video' })).toThrow('audio de fondo')
+  expect(() => saveSettings(1, { ...settings(1), bedId: 'video' })).toThrow('recursos')
+  expect(() => changeScene(next, { revision: next.revision, bedVolume: 1.1 })).toThrow('volumen')
+  changeScene(next, { revision: next.revision, bedId: null })
+  expect(eventDTO(getBirthday(1, row.id)).assets.some(asset => asset.kind === 'bed')).toBe(false)
+})
+
+it('freezes the hierarchy, updates demographics independently of voice, and preserves a manual override', () => {
+  saveSettings(1, { ...settings(1), videoBackgrounds: {
+    female: { videoId: 'profile-video', ranges: [] }, male: { videoId: null, ranges: [] },
+  } })
+  const row = create('hierarchy-event')
+  expect(readScene(row)?.automaticVideoSource).toMatchObject({ level: 'sex', sex: 'female' })
+  saveSettings(1, { ...settings(1), videoId: 'profile-video', videoBackgrounds: { male: { videoId: 'profile-video', ranges: [] } } })
+  changeScene(row, { revision: row.revision, videoId: 'profile-video' })
+  db.run('UPDATE birthdays SET preparation=\'ready\' WHERE id=?', [row.id])
+  const current = getBirthday(1, row.id)
+  const changed = changeBirthday(1, row.id, current.revision, 'edit', { ...input, sex: 'male' })
+  expect(eventDTO(changed).assets.find(asset => asset.kind === 'video')!.id).toBe('profile-video')
+  expect(readScene(changed)).toMatchObject({ videoMode: 'manual', automaticVideoId: 'video', automaticVideoSource: { level: 'default' } })
+  changeScene(changed, { revision: changed.revision, automatic: true })
+  expect(eventDTO(getBirthday(1, row.id)).assets.find(asset => asset.kind === 'video')!.id).toBe('video')
+})
+
+it('rejects foreign videos at every hierarchy level and persists independently of voice profiles', () => {
+  db.run('INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES(\'foreign\',2,\'video\',\'Foreign\',\'foreign\',1000,\'foreign\')')
+  expect(() => saveSettings(1, { ...settings(1), videoBackgrounds: { female: { videoId: 'foreign', ranges: [] } } })).toThrow('sala')
+  expect(() => saveSettings(1, { ...settings(1), videoBackgrounds: { female: { videoId: null, ranges: [{ id: 'range', minAge: 0, maxAge: 12, videoId: 'foreign' }] } } })).toThrow('sala')
+  const saved = saveSettings(1, { ...settings(1), videoBackgrounds: { female: { videoId: 'profile-video', ranges: [] } }, rules: [] })
+  close()
+  open({ file: path.join(directory, 'database.sqlite'), ro: false })
+  expect(settings(1).videoBackgrounds).toEqual(saved.videoBackgrounds)
+  expect(eventDTO(create('no-voice-profile')).assets.find(asset => asset.kind === 'video')!.id).toBe('profile-video')
 })

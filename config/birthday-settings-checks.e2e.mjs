@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { expect } from 'playwright/test'
 import { checkAudioProviderSettings } from './audio-provider-settings-checks.e2e.mjs'
+import { checkBirthdayVideoSettings } from './birthday-video-settings-checks.e2e.mjs'
 
-export async function checkBirthdaySettings ({ admin, api, base, calls, personalized, data }) {
-  await checkAudioProviderSettings({ admin, api, base, calls, data })
+export async function checkBirthdaySettings ({ admin, api, base, uiBase, calls, personalized, data }) {
+  await checkAudioProviderSettings({ admin, api, base, uiBase, calls, data })
+  await checkBirthdayVideoSettings({ admin, api, base, calls, data })
   const settings = admin.getByRole('region', { name: 'Ajustes de cumpleaños', exact: true })
   const initial = await (await api.get(`${base}api/birthdays/`)).json()
   const generated = () => calls.filter(call => call.body?.generationConfig?.responseModalities?.includes('AUDIO') || call.url.includes('/v1/text-to-speech/')).length
@@ -26,14 +29,14 @@ export async function checkBirthdaySettings ({ admin, api, base, calls, personal
   if (personalized) {
     const profile = settings.getByRole('article', { name: 'Reconocimiento cálido', exact: true })
     const before = generated()
-    await profile.getByRole('button', { name: 'Generar prueba', exact: true }).click()
-    const preview = admin.getByRole('dialog', { name: 'Reconocimiento cálido', exact: true })
+    await settings.getByRole('button', { name: 'Generar prueba', exact: true }).click()
+    const preview = admin.getByRole('dialog', { name: 'Prueba de voz', exact: true })
     await expect(preview.getByText('Prueba en este dispositivo', { exact: true })).toBeVisible()
     assert.equal(generated(), before + 1)
     const element = await preview.locator('audio').elementHandle()
     await preview.getByRole('button', { name: 'Cerrar prueba', exact: true }).click()
     assert.equal(await element.evaluate(audio => audio.paused), true)
-    await profile.getByRole('button', { name: 'Escuchar prueba', exact: true }).click()
+    await settings.getByRole('button', { name: 'Escuchar prueba', exact: true }).click()
     await expect(preview).toBeVisible()
     assert.equal(generated(), before + 1, 'Listening to a prepared sample must not synthesize again')
     await preview.locator('audio').evaluate(audio => audio.dispatchEvent(new Event('error')))
@@ -45,8 +48,10 @@ export async function checkBirthdaySettings ({ admin, api, base, calls, personal
     await profile.getByRole('button', { name: 'Editar Reconocimiento cálido', exact: true }).focus()
     await admin.keyboard.press('Enter')
     const editor = admin.getByRole('dialog', { name: 'Editar perfil', exact: true })
-    await editor.getByRole('combobox', { name: 'Video del cumpleaños', exact: true }).selectOption(initial.settings.videoId)
-    await editor.getByRole('textbox', { name: 'Interpretación de voz', exact: true }).fill('Más alegre, clara y natural.')
+    await expect(editor.getByRole('combobox', { name: 'Video del cumpleaños', exact: true })).toHaveCount(0)
+    await expect(editor.getByRole('textbox', { name: 'Interpretación de voz', exact: true })).toHaveCount(0)
+    await expect(editor.getByRole('checkbox', { name: 'Permitir referencia histórica', exact: true })).toHaveCount(0)
+    await editor.getByRole('textbox', { name: 'Indicaciones del saludo', exact: true }).fill('Más alegre, clara y natural.')
     for (const width of [390, 1440]) {
       await admin.setViewportSize({ width, height: 900 })
       assert.ok(await editor.evaluate(element => element.scrollWidth <= element.clientWidth + 2))
@@ -55,14 +60,14 @@ export async function checkBirthdaySettings ({ admin, api, base, calls, personal
     await editor.getByRole('button', { name: 'Aplicar perfil', exact: true }).focus()
     await admin.keyboard.press('Enter')
     await expect(editor).toHaveCount(0)
-    await profile.getByRole('button', { name: 'Generar prueba', exact: true }).click()
+    await settings.getByRole('button', { name: 'Escuchar prueba', exact: true }).click()
     await expect(preview).toBeVisible()
-    assert.equal(generated(), before + 2, 'A changed interpretation must get a new sample')
+    assert.equal(generated(), before + 1, 'Writing profiles share the tested default voice and style')
     await preview.getByRole('button', { name: 'Cerrar prueba', exact: true }).click()
     await settings.getByRole('button', { name: 'Descartar', exact: true }).click()
-    await profile.getByRole('button', { name: 'Escuchar prueba', exact: true }).click()
+    await settings.getByRole('button', { name: 'Escuchar prueba', exact: true }).click()
     await expect(preview).toBeVisible()
-    assert.equal(generated(), before + 2, 'Discard must recover the matching older sample')
+    assert.equal(generated(), before + 1, 'Discard preserves the same matching voice sample')
     await preview.getByRole('button', { name: 'Cerrar prueba', exact: true }).click()
 
     await settings.getByRole('button', { name: 'Agregar perfil', exact: true }).click()
@@ -71,10 +76,48 @@ export async function checkBirthdaySettings ({ admin, api, base, calls, personal
     await newProfile.getByRole('button', { name: 'Aplicar perfil', exact: true }).click()
     await expect(newProfile.getByRole('alert')).toContainText('superponerse')
     await newProfile.getByRole('button', { name: 'Cancelar', exact: true }).click()
+    await expect(newProfile).toHaveCount(0)
+    await expect(settings.getByRole('button', { name: 'Agregar perfil', exact: true })).toBeFocused()
     await expect(settings.getByRole('button', { name: 'Guardar cambios', exact: true })).toHaveCount(0)
   }
 
   const count = generated()
+  await settings.getByRole('button', { name: 'Cambiar aplauso de cierre', exact: true }).focus()
+  await admin.keyboard.press('Enter')
+  const applause = admin.getByRole('dialog', { name: 'Cambiar aplauso de cierre', exact: true })
+  await expect(applause.getByRole('combobox', { name: 'Aplauso de cierre', exact: true })).toHaveValue(initial.settings.applauseId)
+  // Preserve file bytes across the HTTPS-to-isolated-API fixture bridge.
+  const uploadPattern = '**/api/birthdays/upload'
+  const forwardApplause = async (route) => {
+    const response = await api.post(`${base}api/birthdays/upload`, { multipart: { kind: 'applause', file: { name: 'applause.wav', mimeType: 'audio/wav', buffer: fs.readFileSync(`${data}/applause.wav`) } } })
+    await route.fulfill({ response })
+  }
+  if (new URL(admin.url()).origin !== new URL(base).origin) await admin.route(uploadPattern, forwardApplause)
+  await applause.getByLabel('Subir aplauso (hasta 10 s)', { exact: true }).setInputFiles(`${data}/applause.wav`)
+  await expect(applause).toHaveCount(0)
+  await admin.unroute(uploadPattern, forwardApplause)
+  await expect(settings.getByRole('button', { name: 'Escuchar aplauso', exact: true })).toBeVisible()
+  await settings.getByRole('button', { name: 'Escuchar aplauso', exact: true }).click()
+  const applausePreview = admin.getByRole('dialog', { name: 'Aplauso de cierre', exact: true })
+  await expect.poll(() => applausePreview.locator('audio').evaluate(audio => audio.readyState)).toBeGreaterThan(0)
+  await applausePreview.getByRole('button', { name: 'Cerrar prueba', exact: true }).click()
+  await settings.getByRole('button', { name: 'Descartar', exact: true }).click()
+  const bedVolume = settings.getByRole('spinbutton', { name: 'Volumen del fondo (%)', exact: true })
+  await expect(bedVolume).toHaveValue('20')
+  await bedVolume.fill('35')
+  await settings.getByRole('button', { name: 'Descartar', exact: true }).click()
+  await expect(bedVolume).toHaveValue('20')
+  await settings.getByRole('button', { name: 'Cambiar audio de fondo', exact: true }).click()
+  const bed = admin.getByRole('dialog', { name: 'Cambiar audio de fondo', exact: true })
+  await bed.getByRole('combobox', { name: 'Audio de fondo', exact: true }).selectOption('')
+  await bed.getByRole('button', { name: 'Listo', exact: true }).click()
+  await expect(settings.locator('p').filter({ hasText: /^Sin fondo$/ })).toBeVisible()
+  await settings.getByRole('button', { name: 'Descartar', exact: true }).click()
+  for (const width of [390, 1440]) {
+    await admin.setViewportSize({ width, height: 900 })
+    await bedVolume.scrollIntoViewIfNeeded()
+    await admin.screenshot({ path: `${data}/birthday-bed-settings-${width}.png` })
+  }
   await settings.getByRole('button', { name: 'Cambiar introducción', exact: true }).click()
   const bank = admin.getByRole('dialog', { name: 'Cambiar introducción', exact: true })
   const selectedIntros = bank.getByRole('checkbox', { checked: true })
@@ -92,9 +135,9 @@ export async function checkBirthdaySettings ({ admin, api, base, calls, personal
   const music = admin.getByRole('dialog', { name: 'Cambiar música de cumpleaños', exact: true })
   await music.getByRole('combobox', { name: 'Música de cumpleaños', exact: true }).selectOption('')
   await music.getByRole('button', { name: 'Listo', exact: true }).click()
-  await expect(settings.getByText('Sin seleccionar', { exact: true })).toBeVisible()
+  await expect(settings.locator('p').filter({ hasText: /^Sin seleccionar$/ })).toBeVisible()
   await settings.getByRole('button', { name: 'Descartar', exact: true }).click()
-  await expect(settings.getByText('Sin seleccionar', { exact: true })).toHaveCount(0)
+  await expect(settings.locator('p').filter({ hasText: /^Sin seleccionar$/ })).toHaveCount(0)
   assert.equal(generated(), count, 'Resource selection, preview and discard must not generate audio')
 
   await duration.fill(String(initial.settings.targetSeconds + 1))

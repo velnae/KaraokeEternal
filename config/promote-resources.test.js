@@ -18,13 +18,19 @@ describe('promotion boundaries', () => {
     expect(digest(manifest)).not.toBe(digest({ ...manifest, birthdays: true }))
   })
   it('includes bank and profile dependencies and refuses dangling settings', () => {
-    const settings = { introId: 'intro', introIds: ['intro', 'bank'], musicId: 'music', videoId: 'video', rules: [{ videoId: 'profile' }, {}] }
-    expect(birthdayDependencies(settings)).toEqual(['intro', 'music', 'video', 'bank', 'profile'])
+    const settings = { introId: 'intro', introIds: ['intro', 'bank'], musicId: 'music', videoId: 'video', bedId: 'bed', bedVolume: 0.2, applauseId: 'applause', rules: [{ videoId: 'profile' }, {}],
+      videoBackgrounds: { female: { videoId: 'female', ranges: [{ id: 'young', minAge: 0, maxAge: 12, videoId: 'young' }, { id: 'inherit', minAge: 13, maxAge: 24, videoId: null }] } } }
+    expect(birthdayDependencies(settings)).toEqual(['intro', 'music', 'video', 'bed', 'applause', 'bank', 'profile', 'female', 'young'])
     const items = birthdayDependencies(settings).map(sourceId => ({ type: 'birthday', sourceId, key: sourceId, targetId: `prod-${sourceId}` }))
     const result = mappedSettings('birthday', settings, items, { resources: { intro: { id: 'receipt-intro' } } })
     expect(result.introId).toBe('receipt-intro')
     expect(result.introIds).toEqual(['receipt-intro', 'prod-bank'])
     expect(result.rules[0].videoId).toBe('prod-profile')
+    expect(result.bedId).toBe('prod-bed')
+    expect(result.applauseId).toBe('prod-applause')
+    expect(result.bedVolume).toBe(0.2)
+    expect(result.videoBackgrounds.female.videoId).toBe('prod-female')
+    expect(result.videoBackgrounds.female.ranges.map(range => range.videoId)).toEqual(['prod-young', null])
     expect(settings.introId).toBe('intro')
     expect(() => mappedSettings('birthday', settings, [], { resources: {} })).toThrow('dependency')
   })

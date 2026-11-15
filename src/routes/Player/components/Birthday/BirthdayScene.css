@@ -6,9 +6,27 @@
   background: var(--panel-bg-color);
   display: grid;
   place-items: center;
+  container-type: size;
 }
-.scene video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.recognition { position: relative; max-width: 85%; text-align: center; padding: 2rem; border-radius: var(--border-radius); background: rgb(0 0 0 / 65%); color: white; }
-.recognition p { margin: 0; font-size: clamp(1.5rem, 4vw, 4rem); }
-.recognition h1 { margin: .25em 0 0; font-size: clamp(2rem, 8vw, 8rem); overflow-wrap: anywhere; line-height: 1.1; }
-@media (prefers-reduced-motion: reduce) { .scene video { visibility: hidden; } }
+.composition {
+  position: relative;
+  width: min(100cqi, calc(100cqb * var(--birthday-video-ratio)));
+  height: min(100cqb, calc(100cqi / var(--birthday-video-ratio)));
+  container-type: inline-size;
+}
+.scene video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.recognition {
+  position: absolute;
+  inset-inline: 5%;
+  bottom: max(6%, env(safe-area-inset-bottom));
+  text-align: center;
+  color: #ffd54f;
+  pointer-events: none;
+}
+.recognition h1, .recognition p {
+  -webkit-text-stroke: .015em rgb(0 0 0 / 85%);
+  paint-order: stroke fill;
+  text-shadow: 0 .035em .07em rgb(0 0 0 / 95%), 0 0 .18em rgb(0 0 0 / 65%);
+}
+.recognition p { margin: 0 0 .25em; font-size: clamp(.85rem, 3.5cqi, 3rem); font-weight: 700; line-height: 1.1; }
+.recognition h1 { margin: 0; font-size: clamp(1rem, 6cqi, 6rem); font-weight: 700; overflow-wrap: anywhere; line-height: 1.08; }

@@ -61,6 +61,13 @@ it('creates silent compatible background video but preserves library audio', asy
   expect((await probe(video.file)).streams.map(stream => stream.codec_name)).toEqual(['h264', 'aac'])
 })
 
+it('prepares a video-only source as a standalone MP4 without requiring an audio track', async () => {
+  const silent = path.join(directory, 'video-only.mp4')
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', source, '-map', '0:v:0', '-c:v', 'copy', '-an', silent])
+  const prepared = await prepare(manifest({ sourceFile: silent, destination: 'file', format: 'mp4' }), directory)
+  expect((await probe(prepared.file)).streams.map(stream => stream.codec_type)).toEqual(['video'])
+})
+
 it('rejects out-of-source ranges and tampered prepared files', async () => {
   await expect(prepare(manifest({ start: 3.5, end: 4 }), directory)).rejects.toThrow('outside')
   const prepared = await prepare(manifest({ title: 'Tamper check' }), directory)

@@ -8,13 +8,15 @@ import HttpApi from 'lib/HttpApi'
 import { birthdayApi, birthdayUrl } from './api'
 import useBirthdayOverview from './useBirthdayOverview'
 import BirthdayProfileEditor from './BirthdayProfileEditor'
-import { birthdayProfileAges, birthdayProfileTitle, birthdaySampleKey, birthdayVoiceName } from './settingsHelpers'
+import BirthdayVideoSettings from './BirthdayVideoSettings'
+import BirthdayCelebrationPreview from './BirthdayCelebrationPreview'
+import { birthdayProfileAges, birthdayProfileTitle, birthdaySampleKey } from './settingsHelpers'
 import useProviderVoices from 'components/AudioProviders/useProviderVoices'
 import styles from './BirthdaySettings.css'
 
-type ResourceKind = 'intro' | 'music' | 'video'
+type ResourceKind = 'intro' | 'music' | 'video' | 'bed' | 'applause'
 type Preview = { asset: BirthdayAsset, title: string, sample?: { config: Settings, voiceId: string, style?: string } }
-const resourceLabels = { intro: 'Introducción', music: 'Música de cumpleaños', video: 'Fondo del cumpleaños' }
+const resourceLabels = { intro: 'Introducción', music: 'Música de cumpleaños', video: 'Fondo del cumpleaños', bed: 'Audio de fondo', applause: 'Aplauso de cierre' }
 
 export default function BirthdaySettings () {
   const { overview, error: loadError, refresh } = useBirthdayOverview()
@@ -36,13 +38,13 @@ export default function BirthdaySettings () {
   const [preview, setPreview] = useState<Preview | null>(null)
   const [previewError, setPreviewError] = useState('')
   const [samples, setSamples] = useState<Record<string, BirthdayAsset>>({})
+  const [celebrationPreview, setCelebrationPreview] = useState(false)
   const errorRef = useRef<HTMLDivElement>(null)
   const opener = useRef<HTMLButtonElement | null>(null)
   const addProfile = useRef<HTMLDivElement>(null)
   const media = useRef<HTMLMediaElement>(null)
   const selectedLanguage = config?.defaultVoiceId.toLowerCase().startsWith('es-419-') ? 'es-419' : 'es-PE'
   const catalogue = useProviderVoices({ providerId: config?.speechProvider ?? 'elevenlabs', use: 'birthdays', model: config?.speechModel ?? '', language: selectedLanguage, enabled: !!config })
-  const voices = catalogue.voices
   useEffect(() => {
     if (overview) {
       setConfig(previous => previous ?? overview.settings)
@@ -91,7 +93,7 @@ export default function BirthdaySettings () {
     setPreviewError('')
     setPreview(value)
   }
-  const upload = (kind: 'intro' | 'music', file?: File) => {
+  const upload = (kind: 'intro' | 'music' | 'bed' | 'applause', file?: File) => {
     if (!file) return
     void action('Preparando audio…', async () => {
       const body = new FormData()
@@ -100,6 +102,16 @@ export default function BirthdaySettings () {
       attach(await birthdayApi.post<BirthdayAsset>('upload', { body }))
       setResource(null)
       setNotice('Audio preparado. Guarde los cambios para utilizarlo.')
+    })
+  }
+  const uploadVideo = (file?: File) => {
+    if (!file) return
+    void action('Preparando video…', async () => {
+      const body = new FormData()
+      body.append('file', file)
+      attach(await birthdayApi.post<BirthdayAsset>('video/upload', { body }))
+      setResource(null)
+      setNotice('Video preparado. Guarde los cambios para utilizarlo.')
     })
   }
   const audition = async (snapshot: Settings, voiceId: string, style?: string, regenerate = false, title = 'Prueba de voz') => {
@@ -137,8 +149,8 @@ export default function BirthdaySettings () {
   const dirty = JSON.stringify(config) !== JSON.stringify(saved)
   const assets = [...new Map([...overview.assets, ...localAssets].map(asset => [asset.id, asset])).values()]
   const activeIntroCount = (config.introIds ?? (config.introId ? [config.introId] : [])).length
-  const voicePreview = (rule?: BirthdayVoiceRule) => {
-    const key = birthdaySampleKey(config, rule?.voiceId ?? config.defaultVoiceId, rule?.style || config.speechStyle)
+  const voicePreview = () => {
+    const key = birthdaySampleKey(config)
     return samples[key] ? 'Escuchar prueba' : 'Generar prueba'
   }
   const sameSavedVoice = birthdaySampleKey(config) === birthdaySampleKey(saved)
@@ -154,6 +166,8 @@ export default function BirthdaySettings () {
   }
   return (
     <section className={styles.settings} aria-label='Ajustes de cumpleaños'>
+      <div><Button onClick={() => setCelebrationPreview(true)}>Previsualizar cumpleaños</Button></div>
+      {celebrationPreview && <BirthdayCelebrationPreview config={config} assets={assets} onClose={() => setCelebrationPreview(false)} />}
       {(error || loadError) && (
         <div ref={errorRef} tabIndex={-1} className={styles.error} role='alert'>
           <p>{error || loadError}</p>
@@ -175,20 +189,14 @@ export default function BirthdaySettings () {
         <legend>Saludo predeterminado</legend>
         <div className={styles.defaults}>
           <Link to='/admin/settings/audio-providers?use=birthdays'>Configurar proveedor y voz predeterminada</Link>
+          <Button onClick={() => void audition(config, config.defaultVoiceId, config.speechStyle)}>{voicePreview()}</Button>
           <label>
             Duración objetivo (segundos)
             <input type='number' min={15} max={60} value={Number.isFinite(config.targetSeconds) ? config.targetSeconds : ''} onChange={event => setConfig({ ...config, targetSeconds: event.target.valueAsNumber })} />
           </label>
-          <label>
-            Referencia histórica cada
-            <select value={config.historyEvery ?? 4} onChange={event => setConfig({ ...config, historyEvery: Number(event.target.value) })}>
-              <option value={0}>Desactivada</option>
-              {Array.from({ length: 20 }, (_, index) => index + 1).map(number => <option key={number} value={number}>{number === 1 ? 'Cada cumpleaños elegible' : `${number} cumpleaños elegibles`}</option>)}
-            </select>
-          </label>
         </div>
         {catalogue.loading && <p role='status' className={styles.muted}>Consultando voces…</p>}
-        {!catalogue.loading && (catalogue.error || !voices.length) && (
+        {!catalogue.loading && (catalogue.error || !catalogue.voices.length) && (
           <div role='status' className={styles.catalogue}>
             <p>{catalogue.error || 'No hay voces disponibles para esta configuración.'}</p>
             <Button onClick={catalogue.retry}>Reintentar voces</Button>
@@ -221,9 +229,7 @@ export default function BirthdaySettings () {
                   {rule.sex !== 'any' && ` · ${{ female: 'Femenino', male: 'Masculino', unspecified: 'Sin especificar' }[rule.sex]}`}
                 </p>
               </div>
-              <span className={styles.voiceName}>{birthdayVoiceName(rule.voiceId, voices)}</span>
               <div className={styles.actions}>
-                <Button onClick={() => void audition(config, rule.voiceId, rule.style || config.speechStyle, false, rule.title || 'Prueba del perfil')}>{voicePreview(rule)}</Button>
                 <Button aria-label={`Editar ${rule.title || `perfil ${index + 1}`}`} onClick={event => openEditor(index, event.currentTarget)}>Editar</Button>
               </div>
             </article>
@@ -233,22 +239,29 @@ export default function BirthdaySettings () {
       </fieldset>
       <fieldset disabled={!!busy} className={styles.section}>
         <legend>Escena del cumpleaños</legend>
-        {(['intro', 'music', 'video'] as const).map((kind) => {
+        {(['intro', 'music', 'bed', 'applause'] as const).map((kind) => {
           const asset = assets.find(value => value.id === config[`${kind}Id`])
           return (
             <div key={kind} className={styles.resource}>
               <div>
                 <h3>{resourceLabels[kind]}</h3>
-                <p>{kind === 'intro' ? activeIntroCount === 1 ? '1 introducción activa' : `${activeIntroCount} introducciones activas` : asset ? `${asset.title} · ${Math.round(asset.durationMs / 1000)} s` : 'Sin seleccionar'}</p>
+                <p>{kind === 'intro' ? activeIntroCount === 1 ? '1 introducción activa' : `${activeIntroCount} introducciones activas` : asset ? `${asset.title} · ${Math.round(asset.durationMs / 1000)} s` : kind === 'bed' ? 'Sin fondo' : 'Sin seleccionar'}</p>
+                {kind === 'bed' && (
+                  <label>
+                    Volumen del fondo (%)
+                    <input type='number' min={0} max={100} step={1} value={Math.round((config.bedVolume ?? 0.2) * 100)} onChange={event => setConfig({ ...config, bedVolume: event.target.valueAsNumber / 100 })} />
+                  </label>
+                )}
               </div>
               <div className={styles.actions}>
-                {asset && <Button onClick={() => openPreview({ asset, title: resourceLabels[kind] })}>{kind === 'video' ? 'Ver fondo' : kind === 'intro' ? 'Escuchar introducción' : 'Escuchar música'}</Button>}
+                {asset && <Button onClick={() => openPreview({ asset, title: resourceLabels[kind] })}>{kind === 'intro' ? 'Escuchar introducción' : kind === 'bed' ? 'Escuchar fondo' : kind === 'applause' ? 'Escuchar aplauso' : 'Escuchar música'}</Button>}
                 <Button aria-label={`Cambiar ${resourceLabels[kind].toLowerCase()}`} onClick={() => setResource(kind)}>Cambiar</Button>
               </div>
             </div>
           )
         })}
       </fieldset>
+      <BirthdayVideoSettings config={config} assets={assets} disabled={!!busy} onChange={setConfig} onManage={() => setResource('video')} onPreview={asset => openPreview({ asset, title: resourceLabels.video })} />
       {dirty && (
         <div className={styles.saveBar}>
           <strong>Cambios sin guardar</strong>
@@ -275,8 +288,6 @@ export default function BirthdaySettings () {
           config={config}
           index={editor.index}
           initial={editor.rule}
-          voices={voices}
-          videos={assets.filter(asset => asset.kind === 'video')}
           onClose={closeEditor}
           onApply={(rule) => {
             const rules = [...config.rules]
@@ -323,7 +334,7 @@ export default function BirthdaySettings () {
                   <label>
                     {resourceLabels[resource]}
                     <select value={config[`${resource}Id`] ?? ''} onChange={event => setConfig({ ...config, [`${resource}Id`]: event.target.value || null })}>
-                      <option value=''>Sin seleccionar</option>
+                      <option value=''>{resource === 'bed' ? 'Sin fondo' : 'Sin seleccionar'}</option>
                       {assets.filter(asset => asset.kind === resource).map(asset => <option key={asset.id} value={asset.id}>{asset.title}</option>)}
                     </select>
                   </label>
@@ -332,7 +343,7 @@ export default function BirthdaySettings () {
               ? (
                   <>
                     <label>
-                      {resource === 'intro' ? 'Subir introducción' : 'Subir música'}
+                      {resource === 'intro' ? 'Subir introducción' : resource === 'bed' ? 'Subir audio de fondo' : resource === 'applause' ? 'Subir aplauso (hasta 10 s)' : 'Subir música'}
                       <input type='file' accept='audio/mpeg,audio/wav,audio/ogg' onChange={event => upload(resource, event.target.files?.[0])} />
                     </label>
                     {resource === 'intro' && (
@@ -362,6 +373,11 @@ export default function BirthdaySettings () {
                 )
               : (
                   <>
+                    <label>
+                      Subir video de cumpleaños
+                      <input type='file' accept='video/mp4' onChange={event => uploadVideo(event.target.files?.[0])} />
+                    </label>
+                    <p className={styles.muted}>MP4 H.264, hasta 2 min 10 s y 40 MiB.</p>
                     {videoError && <p role='alert'>{videoError}</p>}
                     <label>
                       Copiar de los fondos guardados

@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { prepareTransitionVideo } from './Preparation.js'
 import { copyVideoFixture, videoFixture } from './fixtures.js'
+import { birthdayLimits } from '../../shared/birthdays.js'
 
 let directory: string
 let source: string
@@ -75,3 +76,19 @@ it('checks size before probing and honors cancellation', async () => {
   await fs.copyFile(source, path.join(work, 'source.mp4'))
   await expect(prepareTransitionVideo(work, tools, AbortSignal.abort())).rejects.toThrow()
 })
+
+it('accepts the 130-second birthday boundary without relaxing the general video limit', async () => {
+  const input = await videoFixture(directory, 'birthday-boundary.mp4', ['-an', '-t', '130'])
+  const work = path.join(directory, 'birthday-boundary')
+  await copyVideoFixture(input, work)
+  await expect(prepareTransitionVideo(work, tools, AbortSignal.timeout(20000))).rejects.toThrow('el máximo es 30 s')
+  const prepared = await prepareTransitionVideo(work, tools, AbortSignal.timeout(20000), birthdayLimits.videoMs)
+  expect(prepared.durationMs).toBe(130000)
+}, 30000)
+
+it('rejects a one-frame birthday overrun without silently trimming it', async () => {
+  const input = await videoFixture(directory, 'birthday-over.mp4', ['-an', '-t', '130.1'])
+  const work = path.join(directory, 'birthday-over')
+  await copyVideoFixture(input, work)
+  await expect(prepareTransitionVideo(work, tools, AbortSignal.timeout(10000), birthdayLimits.videoMs)).rejects.toThrow('el máximo es 130 s')
+}, 20000)

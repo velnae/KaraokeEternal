@@ -36,6 +36,11 @@
 .catalogue { display: flex; align-items: center; gap: var(--space-m); flex-wrap: wrap; }
 .catalogue p { margin: var(--space-s) 0; }
 .error { border-left: 3px solid var(--btn-danger-bg-color); padding-left: var(--space-m); }
+.videoGroup { border-top: 1px solid var(--color-gray-3); padding-block: var(--space-s); }
+.videoGroup summary { cursor: pointer; padding-block: var(--space-s); font-weight: var(--font-weight-bold); }
+.videoGroupBody { display: grid; gap: var(--space-m); padding: var(--space-m) 0 var(--space-m) var(--space-m); min-width: 0; }
+.videoRange { display: grid; grid-template-columns: 5rem 5rem minmax(0, 1fr) auto; gap: var(--space-s); align-items: end; }
+.videoRange button { padding: .5rem .75rem; }
 @media (max-width: 900px) { .defaults { grid-template-columns: 1fr 1fr; } .defaults > label:first-child { grid-column: 1 / -1; } .profile { grid-template-columns: 1fr auto; } .voiceName { grid-column: 1; } .profile > .actions { grid-column: 2; grid-row: 1 / span 2; } }
 @media (max-width: 640px) {
   .defaults, .advancedFields, .fields { grid-template-columns: 1fr; }
@@ -43,5 +48,8 @@
   .profile { grid-template-columns: 1fr; gap: var(--space-s); }
   .profile > .actions { grid-column: auto; grid-row: auto; }
   .resource { align-items: start; flex-direction: column; }
+  .videoRange { grid-template-columns: 1fr 1fr; }
+  .videoRange > label:nth-child(3) { grid-column: 1 / -1; }
+  .videoRange > button { justify-self: start; }
   .saveBar .actions { width: 100%; justify-content: flex-end; }
 }

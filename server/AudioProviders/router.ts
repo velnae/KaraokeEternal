@@ -9,6 +9,7 @@ import { speechProfile } from '../Birthdays/personalization.js'
 import type { ManagedAudioProvider, ProviderUse } from '../../shared/audioProviders.js'
 import type { AudioKind } from '../../shared/animation.js'
 import { getCallVoice } from '../Animation/Calls/CallVoice.js'
+import { resolveGeminiSelection } from './voiceSelection.js'
 
 const router = new Router({ prefix: '/api/audio-providers' })
 router.use(async (ctx, next) => {
@@ -53,6 +54,10 @@ router.get('/call-voice', (ctx) => {
 })
 router.put('/call-voice', (ctx) => {
   ctx.body = getCallVoice().configure(ctx.request.body)
+})
+
+router.post('/gemini/resolve-voice', async (ctx) => {
+  ctx.body = await resolveGeminiSelection(ctx.request.body)
 })
 
 function selection (ctx, value: unknown) {

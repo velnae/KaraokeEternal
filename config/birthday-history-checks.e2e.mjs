@@ -6,7 +6,7 @@ export async function checkBirthdayHistory ({ admin, api, base, uiBase, db, birt
   const response = await api.get(`${base}api/birthdays/history`)
   assert.equal(response.status(), 200)
   const overview = await response.json()
-  assert.equal(overview.total, 2)
+  assert.equal(overview.total, 3)
   const original = db.prepare('SELECT * FROM birthdays WHERE id=?').get(birthday.id)
   for (let i = 0; i < 24; i++) {
     db.prepare(`INSERT INTO birthdays(id,roomId,requestId,name,sex,birthYear,celebrationYear,voiceId,settingsJSON,createdAt,preparation,playback,script,greetingId,durationMs,personalizationJSON)

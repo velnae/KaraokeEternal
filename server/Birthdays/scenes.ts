@@ -1,6 +1,7 @@
 import { db } from '../lib/Database.js'
 import { businessDate } from '../Animation/sessions.js'
-import { selectBirthdayProfile, type BirthdayInput, type BirthdaySceneInput, type BirthdaySceneSelection, type BirthdaySettings } from '../../shared/birthdays.js'
+import { birthdayTiming, type BirthdayInput, type BirthdaySceneInput, type BirthdaySceneSelection, type BirthdaySettings } from '../../shared/birthdays.js'
+import { selectBirthdayVideo } from '../../shared/birthdayVideos.js'
 import type { AssetRow, BirthdayRow } from './Store.js'
 
 export const introBank = (config: BirthdaySettings) => config.introIds ?? (config.introId ? [config.introId] : [])
@@ -32,10 +33,10 @@ export function selectBirthdayScene (roomId: number, config: BirthdaySettings, i
   const counts = (hash: string) => uses.filter(row => row.checksum === hash).length + pending.filter(value => value === hash).length
   const pool = candidates.some(row => row.checksum !== last) ? candidates.filter(row => row.checksum !== last) : candidates
   const chosen = [...pool].sort((a, b) => counts(a.checksum) - counts(b.checksum) || candidates.indexOf(a) - candidates.indexOf(b))[0]
-  const profile = selectBirthdayProfile(config, input, year)
-  const videoId = sceneAsset(roomId, profile.videoId || config.videoId, 'video').id
+  const automaticVideoSource = selectBirthdayVideo(config, input, year)
+  const videoId = sceneAsset(roomId, automaticVideoSource.videoId, 'video').id
   sceneAsset(roomId, config.musicId, 'music')
-  const scene: BirthdaySceneSelection = { dayKey, automaticIntroId: chosen.id, automaticVideoId: videoId, defaultVideoId: config.videoId, introMode: 'auto', videoMode: 'auto' }
+  const scene: BirthdaySceneSelection = { dayKey, automaticIntroId: chosen.id, automaticVideoId: videoId, defaultVideoId: config.videoId, automaticVideoSource, introMode: 'auto', videoMode: 'auto' }
   return { config: { ...config, introId: chosen.id, videoId }, scene }
 }
 export function changeScene (row: BirthdayRow, input: BirthdaySceneInput) {
@@ -50,12 +51,22 @@ export function changeScene (row: BirthdayRow, input: BirthdaySceneInput) {
   const intro = sceneAsset(row.roomId, introId, 'intro')
   sceneAsset(row.roomId, videoId, 'video')
   const next = { ...original, introId, videoId }
+  if (input.bedId !== undefined) {
+    if (input.bedId !== null && (typeof input.bedId !== 'string' || !/^[\w-]{1,120}$/.test(input.bedId) || !db.get('SELECT 1 FROM birthdayAssets WHERE roomId=? AND id=? AND kind=\'bed\'', [row.roomId, input.bedId]))) throw new Error('Seleccione un audio de fondo de esta sala.')
+    next.bedId = input.bedId
+  }
+  if (input.bedVolume !== undefined) {
+    if (!Number.isFinite(input.bedVolume) || input.bedVolume < 0 || input.bedVolume > 1) throw new Error('Use un volumen de fondo entre 0 y 100 %.')
+    next.bedVolume = input.bedVolume
+  }
   const selected: BirthdaySceneSelection = { ...scene,
     introMode: input.automatic ? 'auto' : input.introId !== undefined ? 'manual' : scene.introMode,
     videoMode: input.automatic ? 'auto' : input.videoId !== undefined ? 'manual' : scene.videoMode }
   const greeting = row.greetingId && db.get<{ durationMs: number }>('SELECT durationMs FROM birthdayAssets WHERE roomId=? AND id=?', [row.roomId, row.greetingId])
   const music = sceneAsset(row.roomId, original.musicId, 'music')
-  db.run('UPDATE birthdays SET settingsJSON=?,sceneJSON=?,durationMs=?,revision=revision+1 WHERE id=? AND roomId=?', [JSON.stringify(next), JSON.stringify(selected), intro.durationMs + music.durationMs + (greeting ? greeting.durationMs : original.targetSeconds * 1000), row.id, row.roomId])
+  const applause = original.applauseId && db.get<{ durationMs: number }>('SELECT durationMs FROM birthdayAssets WHERE roomId=? AND id=? AND kind=\'applause\'', [row.roomId, original.applauseId])
+  const extra = original.choreographyVersion ? birthdayTiming.preludeMs + birthdayTiming.bridgeMs + (applause ? applause.durationMs : 0) : 0
+  db.run('UPDATE birthdays SET settingsJSON=?,sceneJSON=?,durationMs=?,revision=revision+1 WHERE id=? AND roomId=?', [JSON.stringify(next), JSON.stringify(selected), intro.durationMs + music.durationMs + (greeting ? greeting.durationMs : original.targetSeconds * 1000) + extra, row.id, row.roomId])
 }
 export function recordBirthdayIntro (row: BirthdayRow) {
   const config: BirthdaySettings = JSON.parse(row.settingsJSON)

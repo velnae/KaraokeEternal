@@ -1,17 +1,13 @@
 import React, { useState } from 'react'
 import Modal from 'components/Modal/Modal'
 import Button from 'components/Button/Button'
-import { approachLabels, birthdayApproaches, validateBirthdaySettings, type BirthdayAsset, type BirthdaySettings, type BirthdayVoiceRule } from 'shared/birthdays'
-import BirthdayVoiceSelect from './BirthdayVoiceSelect'
-import type { BirthdayVoiceOption } from './settingsHelpers'
+import { approachLabels, birthdayApproaches, validateBirthdaySettings, type BirthdaySettings, type BirthdayVoiceRule } from 'shared/birthdays'
 import styles from './BirthdaySettings.css'
 
-export default function BirthdayProfileEditor ({ config, index, initial, voices, videos, onApply, onRemove, onClose }: {
+export default function BirthdayProfileEditor ({ config, index, initial, onApply, onRemove, onClose }: {
   config: BirthdaySettings
   index: number
   initial: BirthdayVoiceRule
-  voices: BirthdayVoiceOption[]
-  videos: BirthdayAsset[]
   onApply(rule: BirthdayVoiceRule): void
   onRemove?(): void
   onClose(): void
@@ -25,7 +21,7 @@ export default function BirthdayProfileEditor ({ config, index, initial, voices,
       const rules = [...config.rules]
       rules[index] = rule
       // The profile can be edited before the global default voice is selected.
-      validateBirthdaySettings({ ...config, textModel: config.textModel || 'draft', defaultVoiceId: config.defaultVoiceId || rule.voiceId, rules })
+      validateBirthdaySettings({ ...config, textModel: config.textModel || 'draft', defaultVoiceId: config.defaultVoiceId || 'draft', rules })
       onApply(rule)
     } catch (failure) { setError((failure as Error).message) }
   }
@@ -56,23 +52,8 @@ export default function BirthdayProfileEditor ({ config, index, initial, voices,
           </label>
         </div>
         <label>
-          Voz
-          <BirthdayVoiceSelect id={rule.voiceId} voices={voices} onChange={voiceId => update({ voiceId })} />
-        </label>
-        <label>
-          Video del cumpleaños
-          <select value={rule.videoId ?? ''} onChange={event => update({ videoId: event.target.value || null })}>
-            <option value=''>Usar fondo general</option>
-            {videos.map(video => <option key={video.id} value={video.id}>{video.title}</option>)}
-          </select>
-        </label>
-        <label>
           Indicaciones del saludo
           <textarea rows={3} maxLength={500} value={rule.writing ?? ''} onChange={event => update({ writing: event.target.value })} />
-        </label>
-        <label>
-          Interpretación de voz
-          <textarea rows={3} maxLength={400} value={rule.style ?? ''} onChange={event => update({ style: event.target.value })} />
         </label>
         <fieldset className={styles.approaches}>
           <legend>Enfoques creativos</legend>
@@ -83,10 +64,6 @@ export default function BirthdayProfileEditor ({ config, index, initial, voices,
             </label>
           ))}
         </fieldset>
-        <label className={styles.check}>
-          <input type='checkbox' checked={rule.history !== false} onChange={event => update({ history: event.target.checked })} />
-          Permitir referencia histórica
-        </label>
         {error && <p role='alert'>{error}</p>}
         <div className={styles.editorActions}>
           {onRemove && <Button type='button' onClick={onRemove}>Quitar perfil</Button>}

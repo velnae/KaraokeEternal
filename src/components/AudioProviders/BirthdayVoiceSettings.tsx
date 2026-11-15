@@ -8,13 +8,13 @@ import VoiceSelect from './VoiceSelect'
 import useProviderVoices from './useProviderVoices'
 import { changeBirthdayProvider } from './birthdayVoice'
 import styles from './Providers.css'
+import GeminiVoiceInput from './GeminiVoiceInput'
 
 export default function BirthdayVoiceSettings ({ onSaved }: { onSaved: () => void }) {
   const roomId = useAppSelector(state => state.user.roomId)
   const roomName = useAppSelector(state => state.rooms.entities[state.user.roomId]?.name)
   const [config, setConfig] = useState<BirthdaySettings | null>(null)
   const [saved, setSaved] = useState<BirthdaySettings | null>(null)
-  const [language, setLanguage] = useState('es-419')
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState(false)
   const [notice, setNotice] = useState('')
@@ -41,7 +41,7 @@ export default function BirthdayVoiceSettings ({ onSaved }: { onSaved: () => voi
     }
   }, [roomId, reload])
   const provider = config?.speechProvider ?? 'elevenlabs'
-  const catalogue = useProviderVoices({ providerId: provider, use: 'birthdays', model: config?.speechModel ?? '', language, enabled: !!config })
+  const catalogue = useProviderVoices({ providerId: provider, use: 'birthdays', model: config?.speechModel ?? '', enabled: !!config && provider !== 'gemini' })
   const changedProvider = !!saved && (saved.speechProvider ?? 'elevenlabs') !== provider
   const dirty = !!config && JSON.stringify(config) !== JSON.stringify(saved)
   const change = (patch: Partial<BirthdaySettings>) => {
@@ -58,8 +58,7 @@ export default function BirthdayVoiceSettings ({ onSaved }: { onSaved: () => voi
     setConflict(false)
     try {
       const validated = validateBirthdaySettings(config)
-      if (changedProvider && (!catalogue.voices.some(voice => voice.voiceId === config.defaultVoiceId)
-        || config.rules.some(rule => !catalogue.voices.some(voice => voice.voiceId === rule.voiceId)))) throw new Error('Seleccione una voz del nuevo proveedor para cada perfil y para la voz predeterminada.')
+      if (changedProvider && provider !== 'gemini' && !catalogue.voices.some(voice => voice.voiceId === config.defaultVoiceId)) throw new Error('Seleccione una voz del nuevo proveedor.')
       if (operation === 'save') {
         const result = await birthdayApi.put<BirthdaySettings>('settings', { body: validated })
         setConfig(result)
@@ -115,22 +114,14 @@ export default function BirthdayVoiceSettings ({ onSaved }: { onSaved: () => voi
             <input type='text' value={config.speechModel ?? ''} required onChange={event => change({ speechModel: event.target.value })} />
           </label>
           <label>
-            Voz predeterminada
-            <VoiceSelect id={config.defaultVoiceId} voices={catalogue.voices} required onChange={defaultVoiceId => change({ defaultVoiceId })} />
+            {provider === 'gemini' ? 'Nombre exacto de la voz' : 'Voz predeterminada'}
+            {provider === 'gemini'
+              ? <GeminiVoiceInput value={config.defaultVoiceId} model={config.speechModel ?? ''} onChange={defaultVoiceId => change({ defaultVoiceId })} />
+              : <VoiceSelect id={config.defaultVoiceId} voices={catalogue.voices} required onChange={defaultVoiceId => change({ defaultVoiceId })} />}
           </label>
-          {provider === 'gemini' && (
-            <label>
-              Idioma del catálogo
-              <select value={language} onChange={event => setLanguage(event.target.value)}>
-                <option value='es-419'>Español latinoamericano</option>
-                <option value='es-PE'>Español de Perú</option>
-                <option value='es'>Español</option>
-              </select>
-            </label>
-          )}
           <label className={styles.full}>
             Interpretación predeterminada
-            <textarea rows={3} maxLength={400} required value={config.speechStyle ?? ''} onChange={event => change({ speechStyle: event.target.value })} />
+            <textarea rows={3} maxLength={400} required={provider !== 'gemini'} value={config.speechStyle ?? ''} onChange={event => change({ speechStyle: event.target.value })} />
           </label>
         </fieldset>
         {catalogue.loading && <p role='status'>Consultando voces…</p>}
@@ -139,17 +130,6 @@ export default function BirthdayVoiceSettings ({ onSaved }: { onSaved: () => voi
             <p>{catalogue.error}</p>
             <Button onClick={catalogue.retry}>Reintentar voces</Button>
           </div>
-        )}
-        {changedProvider && !!config.rules.length && (
-          <fieldset disabled={busy} className={styles.fields}>
-            <legend>Reasignar voces de los perfiles</legend>
-            {config.rules.map((rule, index) => (
-              <label key={rule.id ?? index}>
-                {rule.title || `Perfil ${index + 1}`}
-                <VoiceSelect id={rule.voiceId} voices={catalogue.voices} required onChange={voiceId => change({ rules: config.rules.map((value, position) => position === index ? { ...value, voiceId } : value) })} />
-              </label>
-            ))}
-          </fieldset>
         )}
         <details>
           <summary>Más opciones</summary>
@@ -187,6 +167,7 @@ export default function BirthdayVoiceSettings ({ onSaved }: { onSaved: () => voi
           )}
         </div>
       </form>
+      <p>La prueba se escucha en este navegador y consume una generación.</p>
       {preview && <audio aria-label='Prueba de voz de cumpleaños' controls src={birthdayUrl(preview.url)} />}
       <Link to='/admin/settings/birthdays?view=settings'>Perfiles y recursos de cumpleaños</Link>
     </section>

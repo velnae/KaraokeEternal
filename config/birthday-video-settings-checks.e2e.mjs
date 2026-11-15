@@ -1,0 +1,66 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import { expect } from 'playwright/test'
+
+export async function checkBirthdayVideoSettings ({ admin, api, base, calls, data }) {
+  const read = async (route) => {
+    const response = await api.get(`${base}api/${route}`)
+    assert.ok(response.ok())
+    return response.json()
+  }
+  const initial = await read('birthdays/')
+  const general = await read('animation/background/')
+  const invalid = await api.post(`${base}api/birthdays/video/upload`, { multipart: { file: { name: 'invalid.mp4', mimeType: 'video/mp4', buffer: Buffer.from('not a video') } } })
+  assert.equal(invalid.status(), 422)
+  assert.deepEqual((await read('birthdays/')).assets.map(asset => asset.id), initial.assets.map(asset => asset.id))
+  const providerCount = calls.length
+  const settings = admin.getByRole('region', { name: 'Ajustes de cumpleaños', exact: true })
+  await settings.getByRole('button', { name: 'Cambiar fondo del cumpleaños', exact: true }).click()
+  const library = admin.getByRole('dialog', { name: 'Cambiar fondo del cumpleaños', exact: true })
+  await library.getByLabel('Subir video de cumpleaños', { exact: true }).setInputFiles({ name: 'birthday-exclusive.mp4', mimeType: 'video/mp4', buffer: fs.readFileSync(`${data}/song.mp4`) })
+  await expect(library).toHaveCount(0, { timeout: 20000 })
+  const uploaded = (await read('birthdays/')).assets.find(asset => !initial.assets.some(old => old.id === asset.id))
+  assert.equal(uploaded.kind, 'video')
+  const unchangedGeneral = await read('animation/background/')
+  assert.deepEqual(unchangedGeneral.videos.map(video => video.id), general.videos.map(video => video.id))
+  assert.deepEqual(unchangedGeneral.settings, general.settings)
+  await settings.getByRole('combobox', { name: 'Fondo predeterminado', exact: true }).selectOption(initial.settings.videoId)
+  await settings.getByText('Femenino', { exact: true }).click()
+  const female = settings.locator('details').filter({ has: admin.locator('summary', { hasText: /^Femenino$/ }) })
+  await female.getByRole('combobox', { name: 'Fondo femenino', exact: true }).selectOption(uploaded.id)
+  await female.getByRole('button', { name: 'Agregar rango de edad', exact: true }).focus()
+  await admin.keyboard.press('Enter')
+  const range = female.getByRole('group', { name: 'Rango 1 femenino', exact: true })
+  await range.getByRole('spinbutton', { name: 'Hasta', exact: true }).fill('12')
+  await expect(range.getByRole('combobox', { name: 'Video del rango', exact: true })).toHaveValue('')
+  await expect(range.getByRole('combobox', { name: 'Video del rango', exact: true }).locator('option:checked')).toContainText('birthday-exclusive.mp4 · Femenino')
+  await range.getByRole('combobox', { name: 'Video del rango', exact: true }).selectOption(initial.settings.videoId)
+  for (const width of [390, 1440]) {
+    await admin.setViewportSize({ width, height: 900 })
+    await range.scrollIntoViewIfNeeded()
+    assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    await admin.screenshot({ path: `${data}/birthday-video-inheritance-${width}.png`, fullPage: true })
+  }
+  await settings.getByRole('button', { name: 'Guardar cambios', exact: true }).click()
+  await expect(settings.getByRole('button', { name: 'Guardar cambios', exact: true })).toHaveCount(0)
+  const saved = await read('birthdays/')
+  assert.equal(saved.settings.videoBackgrounds.female.videoId, uploaded.id)
+  assert.equal(saved.settings.videoBackgrounds.female.ranges[0].videoId, initial.settings.videoId)
+  await admin.reload()
+  await settings.getByText('Femenino', { exact: true }).click()
+  await expect(female.getByRole('combobox', { name: 'Fondo femenino', exact: true })).toHaveValue(uploaded.id)
+  await female.getByRole('button', { name: 'Agregar rango de edad', exact: true }).click()
+  const overlap = female.getByRole('group', { name: 'Rango 2 femenino', exact: true })
+  await overlap.getByRole('spinbutton', { name: 'Desde', exact: true }).fill('12')
+  await settings.getByRole('button', { name: 'Guardar cambios', exact: true }).click()
+  await expect(settings.getByRole('alert')).toContainText('superponerse')
+  await overlap.getByRole('button', { name: 'Quitar rango', exact: true }).click()
+  await range.getByRole('combobox', { name: 'Video del rango', exact: true }).selectOption('')
+  await female.getByRole('combobox', { name: 'Fondo femenino', exact: true }).selectOption('')
+  await expect(range.getByRole('combobox', { name: 'Video del rango', exact: true }).locator('option:checked')).toContainText('Predeterminado')
+  assert.equal(calls.length, providerCount, 'Background uploads, inheritance and drafts never synthesize speech')
+  // Restore isolated fixture choices before the existing playback scenarios.
+  const response = await api.put(`${base}api/birthdays/settings`, { data: { ...initial.settings, revision: saved.settings.revision } })
+  assert.ok(response.ok())
+  await admin.reload()
+}

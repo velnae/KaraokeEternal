@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { db } from '../lib/Database.js'
 import {
-  celebrationYear, defaultBirthdaySettings, publicBirthday, validateBirthdayInput, validateBirthdaySettings,
+  birthdayTiming, celebrationYear, defaultBirthdaySettings, publicBirthday, validateBirthdayInput, validateBirthdaySettings,
   type BirthdayAsset, type BirthdayEvent, type BirthdayInput, type BirthdaySettings, type PublicBirthday,
 } from '../../shared/birthdays.js'
-import { contextInput, historicalReferences, inputIdentity, readPersonalization, selectPersonalization, speechProfile } from './personalization.js'
+import { contextInput, inputIdentity, readPersonalization, selectPersonalization, speechProfile } from './personalization.js'
 import { introBank, readScene, sceneAsset, selectBirthdayScene } from './scenes.js'
+import { selectBirthdayVideo, birthdayVideoGroups } from '../../shared/birthdayVideos.js'
 
 export interface AssetRow extends Omit<BirthdayAsset, 'url'> { roomId: number, filename: string }
 export interface BirthdayRow extends Omit<BirthdayEvent, 'assets'> {
@@ -28,7 +29,8 @@ export function assertRoom (roomId: number) {
 export const settings = (roomId: number): BirthdaySettings => {
   const row = db.get<{ data: string }>('SELECT data FROM birthdaySettings WHERE roomId=?', [roomId])
   // Old IDs belong to ElevenLabs, even when new installations default to Gemini.
-  return row ? { ...defaultBirthdaySettings, speechProvider: 'elevenlabs', speechModel: 'eleven_v4', ...JSON.parse(row.data) } : { ...defaultBirthdaySettings, rules: [] }
+  const config: BirthdaySettings = row ? { ...defaultBirthdaySettings, speechProvider: 'elevenlabs', speechModel: 'eleven_v4', ...JSON.parse(row.data) } : { ...defaultBirthdaySettings, rules: [] }
+  return { ...config, historyEvery: 0, rules: config.rules.map(rule => ({ ...rule, voiceId: config.defaultVoiceId, style: config.speechStyle, history: false })), videoBackgrounds: birthdayVideoGroups(config) }
 }
 export const asset = (roomId: number, id: string) => db.get<AssetRow>('SELECT * FROM birthdayAssets WHERE roomId=? AND id=?', [roomId, id])
 export const assetDTO = (row: AssetRow): BirthdayAsset => ({ id: row.id, kind: row.kind, title: row.title, checksum: row.checksum, durationMs: row.durationMs, url: `api/birthdays/assets/${row.id}`, ...(row.script ? { script: row.script } : {}) })
@@ -42,7 +44,7 @@ export const publicEvents = (roomId: number): PublicBirthday[] => rows(roomId).f
 export const birthdayOwnsAudio = (roomId: number) => !!db.get('SELECT 1 FROM birthdays WHERE roomId=? AND playback=\'playing\'', [roomId])
 export function eventAssets (row: BirthdayRow): AssetRow[] {
   const config: BirthdaySettings = JSON.parse(row.settingsJSON)
-  return [config.introId, row.greetingId, config.musicId, config.videoId].flatMap((id) => {
+  return [config.introId, row.greetingId, config.musicId, config.videoId, config.bedId, config.applauseId].flatMap((id) => {
     const value = id ? asset(row.roomId, id) : undefined
     return value ? [value] : []
   })
@@ -50,18 +52,21 @@ export function eventAssets (row: BirthdayRow): AssetRow[] {
 export function eventDTO (row: BirthdayRow): BirthdayEvent {
   return { ...publicBirthday(row), sex: row.sex, birthYear: row.birthYear, celebrationYear: row.celebrationYear,
     revision: row.revision, script: row.script, voiceId: row.voiceId, error: row.error, assets: eventAssets(row).map(assetDTO),
-    personalization: readPersonalization(row), scene: readScene(row) }
+    personalization: readPersonalization(row), scene: readScene(row), bedVolume: JSON.parse(row.settingsJSON).bedVolume ?? 0.2 }
 }
 export function saveSettings (roomId: number, value: unknown) {
   assertRoom(roomId)
   const next = validateBirthdaySettings(value)
   if (next.revision !== settings(roomId).revision) throw Object.assign(new Error('Los ajustes cambiaron. Recargue antes de guardar.'), { status: 409 })
-  for (const [kind, id] of [['intro', next.introId], ['music', next.musicId], ['video', next.videoId]]) {
+  for (const [kind, id] of [['intro', next.introId], ['music', next.musicId], ['video', next.videoId], ['bed', next.bedId], ['applause', next.applauseId]]) {
     if (id && asset(roomId, id)?.kind !== kind) throw new Error('Seleccione recursos de cumpleaños de esta sala.')
   }
   const introductions = introBank(next).map(id => sceneAsset(roomId, id, 'intro'))
   if (new Set(introductions.map(row => row.checksum)).size !== introductions.length) throw new Error('El banco contiene copias del mismo audio de introducción.')
-  for (const profile of next.rules) if (profile.videoId) sceneAsset(roomId, profile.videoId, 'video')
+  for (const group of Object.values(next.videoBackgrounds ?? {})) {
+    if (group.videoId) sceneAsset(roomId, group.videoId, 'video')
+    for (const range of group.ranges) if (range.videoId) sceneAsset(roomId, range.videoId, 'video')
+  }
   next.revision++
   db.run('INSERT INTO birthdaySettings(roomId,data) VALUES(?,?) ON CONFLICT(roomId) DO UPDATE SET data=excluded.data', [roomId, JSON.stringify(next)])
   return next
@@ -77,8 +82,9 @@ export function createBirthday (roomId: number, requestId: string, value: unknow
     return existing
   }
   const { config, scene } = selectBirthdayScene(roomId, validateBirthdaySettings(settings(roomId)), input, year)
+  config.choreographyVersion = 1
   const id = randomUUID()
-  const duration = [config.introId, config.musicId].reduce((sum, assetId) => sum + (asset(roomId, assetId)?.durationMs ?? 0), config.targetSeconds * 1000)
+  const duration = [config.introId, config.musicId, config.applauseId].reduce((sum, assetId) => sum + (assetId ? asset(roomId, assetId)?.durationMs ?? 0 : 0), config.targetSeconds * 1000 + birthdayTiming.preludeMs + birthdayTiming.bridgeMs)
   const personalization = resolvePersonalization(roomId, config, input, year)
   db.run(`INSERT INTO birthdays(id,roomId,requestId,name,sex,birthYear,celebrationYear,voiceId,settingsJSON,createdAt,durationMs,personalizationJSON,sceneJSON) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [id, roomId, requestId, input.name, input.sex, input.birthYear, year, personalization.speech.voice, JSON.stringify(config), Date.now(), duration, JSON.stringify(personalization), JSON.stringify(scene)])
@@ -105,7 +111,7 @@ export function changeBirthday (roomId: number, id: string, revision: number, op
     const retry = operation === 'retry'
     const frozen: BirthdaySettings = JSON.parse(row.settingsJSON)
     const scene = readScene(row)
-    const config: BirthdaySettings = retry ? frozen : { ...settings(roomId), introId: frozen.introId, musicId: frozen.musicId, videoId: frozen.videoId }
+    const config: BirthdaySettings = retry ? frozen : { ...settings(roomId), introId: frozen.introId, musicId: frozen.musicId, videoId: frozen.videoId, bedId: frozen.bedId, bedVolume: frozen.bedVolume, applauseId: frozen.applauseId, choreographyVersion: frozen.choreographyVersion }
     const oldInput = contextInput(row, previous)
     // Selecting another voice profile does not itself rewrite the approved text.
     const sameContent = inputIdentity({ ...oldInput, profileId: '' }) === inputIdentity({ ...next, profileId: '' })
@@ -123,6 +129,7 @@ export function changeBirthday (roomId: number, id: string, revision: number, op
       // Upgrading a legacy voice never retroactively adds a historical sentence
       // to an already prepared transcript.
       personalization.reference = null
+      personalization.version = 1
     }
     if (operation === 'lite') {
       if (personalization?.speech.provider !== 'gemini') throw new Error('Seleccione Gemini en los ajustes para utilizar Flash-Lite.')
@@ -132,12 +139,13 @@ export function changeBirthday (roomId: number, id: string, revision: number, op
     const newSpeech = personalization?.speech ?? oldSpeech
     const changedSpeech = JSON.stringify(oldSpeech) !== JSON.stringify(newSpeech)
     const clearAudio = regenerate || changedSpeech || operation === 'revoice' || operation === 'lite'
-    const profileKey = (profile: typeof previous) => profile && JSON.stringify([profile.profile.id, profile.profile.sex, profile.profile.minAge, profile.profile.maxAge])
-    if (operation === 'edit' && profileKey(personalization) !== profileKey(previous) && scene?.videoMode === 'auto') {
+    if (operation === 'edit' && (next.sex !== row.sex || next.birthYear !== row.birthYear) && scene) {
       const fallbackVideoId = scene.defaultVideoId === undefined ? frozen.videoId : scene.defaultVideoId
-      scene.automaticVideoId = sceneAsset(roomId, personalization?.profile.videoId || fallbackVideoId, 'video').id
-      config.videoId = scene.automaticVideoId
+      scene.automaticVideoSource = selectBirthdayVideo({ ...frozen, videoId: fallbackVideoId }, next, row.celebrationYear)
+      scene.automaticVideoId = sceneAsset(roomId, scene.automaticVideoSource.videoId, 'video').id
+      if (scene.videoMode === 'auto') config.videoId = scene.automaticVideoId
     }
+    config.videoBackgrounds = birthdayVideoGroups(frozen)
     db.run(`UPDATE birthdays SET name=?,sex=?,birthYear=?,voiceId=?,settingsJSON=?,personalizationJSON=?,script=?,greetingId=?,preparation='queued',playback='held',error=NULL,revision=revision+1,generationRevision=generationRevision+1 WHERE id=?`,
       [next.name, next.sex, next.birthYear, newSpeech.voice, JSON.stringify(config), personalization ? JSON.stringify(personalization) : null, regenerate ? null : row.script, clearAudio ? null : row.greetingId, id])
     if (scene) db.run('UPDATE birthdays SET sceneJSON=? WHERE id=?', [JSON.stringify(scene), id])
@@ -153,7 +161,5 @@ function resolvePersonalization (roomId: number, config: BirthdaySettings, input
     const suffix = [previous?.reference?.phrase, previous?.dedication].filter(Boolean).join(' ')
     return { name: row.name, script: suffix && row.script?.endsWith(suffix) ? row.script.slice(0, -(suffix.length + 1)) : row.script }
   }))
-  const eligible = recent.filter(row => historicalReferences.some(ref => row.birthYear >= ref.fromYear && row.birthYear <= ref.toYear)).length
-  context.reference = selectPersonalization(config, input, year, eligible, []).reference
   return context
 }

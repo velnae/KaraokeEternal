@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import Modal from 'components/Modal/Modal'
 import Button from 'components/Button/Button'
 import { approachLabels } from 'shared/birthdays'
+import { birthdayVideoOrigin } from 'shared/birthdayVideos'
 import { birthdayOutcome, birthdayOutcomeLabels, type BirthdayHistoryDetail as Detail } from 'shared/birthdayHistory'
 import { birthdayApi, birthdayUrl } from './api'
 import { birthdayDate, birthdayDuration } from './historyFormatting'
@@ -129,8 +130,14 @@ export default function BirthdayHistoryDetail ({ id, listen, onClose }: { id: st
               <dd>{detail.scene ? detail.scene.introMode === 'auto' ? 'Automática' : 'Manual' : 'No registrada'}</dd>
               <dt>Selección de video</dt>
               <dd>{detail.scene ? detail.scene.videoMode === 'auto' ? 'Automática' : 'Manual' : 'No registrada'}</dd>
+              {detail.scene?.videoMode === 'auto' && detail.scene.automaticVideoSource && (
+                <>
+                  <dt>Origen del fondo</dt>
+                  <dd>{birthdayVideoOrigin(detail.scene.automaticVideoSource)}</dd>
+                </>
+              )}
             </dl>
-            <ul>{detail.assets.map(asset => <li key={asset.id}>{`${{ intro: 'Introducción', greeting: 'Saludo', music: 'Música', video: 'Video' }[asset.kind]}: ${asset.title} · ${birthdayDuration(asset.durationMs)}`}</li>)}</ul>
+            <ul>{detail.assets.map(asset => <li key={asset.id}>{`${{ intro: 'Introducción', greeting: 'Saludo', music: 'Música', video: 'Video', bed: 'Audio de fondo', applause: 'Aplauso de cierre' }[asset.kind]}: ${asset.title} · ${birthdayDuration(asset.durationMs)}`}</li>)}</ul>
           </details>
         </div>
       )}

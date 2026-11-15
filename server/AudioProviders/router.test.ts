@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net'
 import { open, close, db } from '../lib/Database.js'
 import { defaultBirthdaySettings } from '../../shared/birthdays.js'
 import router from './router.js'
+import birthdayRouter from '../Birthdays/router.js'
 
 const production = vi.hoisted(() => ({
   capabilities: () => ({ providers: [{ id: 'elevenlabs', models: { voice: 'eleven_v4', effect: 'effect-model' } }] }),
@@ -21,6 +22,7 @@ app.use(async (ctx, next) => {
 })
 app.use(koaBody())
 app.use(router.routes())
+app.use(birthdayRouter.routes())
 const server = createServer(app.callback())
 let base: string
 beforeAll(async () => {
@@ -35,6 +37,8 @@ beforeAll(async () => {
     const url = new URL(String(input))
     if (url.hostname !== 'generativelanguage.googleapis.com') return originalFetch(input, options)
     providerRequests.push(url.toString())
+    if (url.pathname.endsWith('/voices/voice_host')) return Response.json({ id: 'voice_host', display_name: 'Warm Host' })
+    if (url.searchParams.get('search') === 'Warm Host') return Response.json({ voices: [{ id: 'voice_host', display_name: 'Warm Host' }] })
     if (url.pathname.endsWith('/voices')) return Response.json({ voices: [{ id: 'Sulafat', display_name: 'Sulafat' }] })
     return Response.json({ name: `models/${url.pathname.split('/').at(-1)}`, supportedGenerationMethods: ['generateContent'] })
   })
@@ -55,11 +59,28 @@ const call = (suffix = '', method = 'GET', body?: unknown, admin = true, room = 
   method, headers: { 'test-admin': String(admin), 'test-room': String(room), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
 })
 
+it('resolves a birthday voice name without synthesis and rejects an invalid audition without saving', async () => {
+  const sibling = (suffix: string, method = 'GET', body?: unknown) => originalFetch(base.replace('/audio-providers', '') + '/' + suffix, {
+    method, headers: { 'test-admin': 'true', 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const resolved = await call('/gemini/resolve-voice', 'POST', { model: 'gemini-3.8-flash-tts', voice: 'Orus' })
+  expect(await resolved.json()).toEqual({ voiceId: 'Orus', name: 'Orus' })
+  const initial = (await (await sibling('birthdays/')).json()).settings
+  const saved = await sibling('birthdays/settings', 'PUT', { ...initial, defaultVoiceId: 'Warm Host', speechStyle: '', rules: [{ id: 'all', sex: 'any', minAge: 0, maxAge: 120, voiceId: 'Orus' }] })
+  expect(saved.status).toBe(200)
+  const current = await saved.json()
+  expect(current).toMatchObject({ defaultVoiceId: 'voice_host', speechStyle: '', rules: [{ voiceId: 'voice_host', style: '', history: false }] })
+  expect((await sibling('birthdays/audition', 'POST', { config: { ...current, defaultVoiceId: 'Typo' } })).status).toBe(422)
+  expect((await (await sibling('birthdays/')).json()).settings).toEqual(current)
+  expect(providerRequests.every(url => !url.includes(':generateContent'))).toBe(true)
+})
+
 it('denies provider metadata, checks and voices to non-administrators', async () => {
   expect((await call('', 'GET', undefined, false)).status).toBe(403)
   expect((await call('/gemini/check', 'POST', { use: 'greetings' }, false)).status).toBe(403)
   expect((await call('/gemini/voices?use=greetings', 'GET', undefined, false)).status).toBe(403)
   expect((await call('/call-voice', 'PUT', {}, false)).status).toBe(403)
+  expect((await call('/gemini/resolve-voice', 'POST', { model: 'gemini-3.8-flash-tts', voice: 'Orus' }, false)).status).toBe(403)
   expect(providerRequests).toEqual([])
 })
 

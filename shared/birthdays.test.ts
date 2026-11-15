@@ -15,7 +15,7 @@ describe('birthday private context and presets', () => {
     const config = validateBirthdaySettings({ ...defaultBirthdaySettings, textModel: 'text-model', defaultVoiceId: 'default', rules: [
       { sex: 'female', minAge: 18, maxAge: 30, voiceId: 'special' },
     ] })
-    expect(selectBirthdayVoice(config, { name: 'María', sex: 'female', birthYear: 2000 }, 2026)).toBe('special')
+    expect(selectBirthdayVoice(config, { name: 'María', sex: 'female', birthYear: 2000 }, 2026)).toBe('default')
     expect(selectBirthdayVoice(config, { name: 'María', sex: 'female', birthYear: 1990 }, 2026)).toBe('default')
     expect(() => validateBirthdaySettings({ ...config, rules: [...config.rules, { sex: 'female', minAge: 30, maxAge: 40, voiceId: 'other' }] })).toThrow('superponerse')
   })

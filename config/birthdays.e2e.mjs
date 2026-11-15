@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import { checkBirthdayHistory } from './birthday-history-checks.e2e.mjs'
 import { checkBirthdaySettings } from './birthday-settings-checks.e2e.mjs'
 import { checkBirthdayScene } from './birthday-scene-checks.e2e.mjs'
+import { checkBirthdayPreview } from './birthday-preview-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -32,7 +33,7 @@ const calls = []
 let server, browser, socket, db, player
 const errors = []
 let lastStatus
-for (const [name, seconds, hz] of [['intro', 1, 330], ['greeting', 12, 440], ['music', 15, 550]]) {
+for (const [name, seconds, hz] of [['intro', 1, 330], ['greeting', 12, 440], ['music', 15, 550], ['bed', 2, 220], ['applause', 3, 660]]) {
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `sine=frequency=${hz}:sample_rate=24000`, '-t', String(seconds), path.join(data, `${name}.wav`)])
 }
 execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=purple:s=320x180:r=10', '-f', 'lavfi', '-i', 'sine=frequency=220', '-t', '5', '-c:v', 'libx264', '-threads', '2', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(data, 'song.mp4')])
@@ -51,8 +52,12 @@ const provider = createServer(async (req, res) => {
     }
     const input = JSON.parse(body.contents[0].parts[0].text)
     res.setHeader('Content-Type', 'application/json')
-    const opening = calls.filter(call => call.body?.generationConfig?.responseSchema).length % 2 ? 'hoy la música nos reúne para celebrar contigo' : 'que cada melodía te regale una sonrisa'
-    return res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ script: `${input.name}, ${opening}. Que esta noche esté llena de sonrisas y canciones memorables. Gracias por elegirnos para compartir este momento tan especial. ¡Feliz cumpleaños!` }) }] } }] }))
+    const openings = ['hoy la música nos reúne para celebrar contigo', 'que cada melodía te regale una sonrisa', 'esta celebración merece un aplauso lleno de cariño', 'la alegría de esta noche tiene tu nombre', 'brindamos por tus sueños y por muchas canciones', 'que los buenos momentos sigan llegando a tu vida']
+    const offset = (calls.filter(call => call.body?.generationConfig?.responseSchema).length - 1) % openings.length
+    const ordered = [...openings.slice(offset), ...openings.slice(0, offset)]
+    const opening = ordered.find(candidate => !(input.recentOpenings ?? []).some(recent => recent.includes(candidate))) ?? ordered[0]
+    const detail = input.dedication || 'Que esta noche esté llena de sonrisas y momentos memorables'
+    return res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ script: `${input.name}… ${opening}. ${detail}. La pizzería Il Gatto se suma con alegría. ¡feliz cumpleaños, ${input.name}!` }) }] } }] }))
   }
   res.setHeader('Content-Type', 'audio/wav')
   res.end(fs.readFileSync(path.join(data, 'greeting.wav')))
@@ -95,10 +100,13 @@ try {
   db.exec('INSERT INTO artists(artistId,name,nameNorm) VALUES(1,\'Fixture\',\'fixture\'); INSERT INTO songs(songId,artistId,title,titleNorm) VALUES(1,1,\'Fixture song\',\'fixture song\');')
   db.prepare('INSERT INTO paths(pathId,path,priority,data) VALUES(1,?,1,?)').run(data, '{"prefs":{"isWatching":false}}')
   db.exec('INSERT INTO media(mediaId,songId,pathId,relPath,duration,isPreferred) VALUES(1,1,1,\'song.mp4\',5,1)')
+  const roomData = JSON.parse(db.prepare('SELECT data FROM rooms WHERE roomId=1').get().data)
+  roomData.prefs = { ...roomData.prefs, transitionVideo: { ...roomData.prefs?.transitionVideo, mode: 'all' } }
+  db.prepare('UPDATE rooms SET data=? WHERE roomId=1').run(JSON.stringify(roomData))
   await start()
   await call('login', { username: 'admin', password: 'birthday-test', roomId: 1 })
   const resources = {}
-  for (const kind of ['intro', 'music']) {
+  for (const kind of ['intro', 'music', 'bed', 'applause']) {
     const response = await api.post(`${base}api/birthdays/upload`, { multipart: { kind, file: { name: `${kind}.wav`, mimeType: 'audio/wav', buffer: fs.readFileSync(path.join(data, `${kind}.wav`)) } } })
     assert.equal(response.status(), 200, await response.text())
     resources[kind] = await response.json()
@@ -111,7 +119,7 @@ try {
   await call('birthdays/settings', { revision: 0, textModel: 'test-text-model', defaultVoiceId: personalized ? 'Sulafat' : 'testvoice',
     ...(personalized ? { speechProvider: 'gemini', speechModel: 'gemini-3.8-flash-tts', targetSeconds: 25, historyEvery: 1 } : {}),
     rules: personalized ? [{ id: 'warm', title: 'Reconocimiento cálido', sex: 'any', minAge: 0, maxAge: 120, voiceId: 'Sulafat', writing: 'Cercano y celebratorio.', style: 'Cálida y alegre.' }] : [],
-    introId: resources.intro.id, musicId: resources.music.id, videoId: resources.video.id }, 'PUT')
+    introId: resources.intro.id, musicId: resources.music.id, videoId: resources.video.id, bedId: resources.bed.id, bedVolume: 0.2, applauseId: resources.applause.id }, 'PUT')
   const unauthenticated = await request.newContext()
   assert.equal((await unauthenticated.get(`${base}api/birthdays/`)).status(), 403)
   assert.equal((await unauthenticated.get(`${base}api/birthdays/assets/${resources.intro.id}`)).status(), 403)
@@ -183,7 +191,7 @@ try {
     await dialog.getByLabel('Dedicatoria (opcional)', { exact: true }).fill('Con cariño, de tus amigos de la mesa 05')
     await dialog.getByText('Opciones del saludo', { exact: true }).click()
     await dialog.getByRole('combobox', { name: 'Enfoque creativo', exact: true }).selectOption('humor')
-    await dialog.getByRole('combobox', { name: 'Perfil de voz', exact: true }).selectOption('warm')
+    await dialog.getByRole('combobox', { name: 'Perfil de redacción', exact: true }).selectOption('warm')
   }
   await dialog.getByRole('button', { name: 'Preparar saludo', exact: true }).focus()
   await admin.keyboard.press('Enter')
@@ -198,28 +206,35 @@ try {
   assert.equal(prompt.birthYear, undefined)
   assert.equal(prompt.sex, undefined)
   if (personalized) {
-    assert.equal(birthday.personalization.reference.id, 'apollo-1969')
+    assert.equal(birthday.personalization.reference, null)
+    assert.equal(prompt.reference, undefined)
+    assert.ok(birthday.script.split(/\s+/).length <= 45)
+    assert.ok(birthday.script.endsWith('¡feliz cumpleaños, María!'))
+    assert.ok(birthday.script.startsWith('María… '))
     assert.equal(birthday.personalization.approach, 'humor')
     assert.ok(birthday.script.includes('mesa 05'))
-    assert.ok(birthday.script.includes('El año en que naciste'))
+    assert.ok(!birthday.script.includes('El año en que naciste'))
     const speech = calls.find(item => item.body?.generationConfig?.responseModalities?.includes('AUDIO'))
     assert.equal(speech.body.contents[0].parts[0].text, birthday.script)
-    assert.equal(speech.body.contents[0].parts[0].speech_metadata.style, 'Cálida y alegre.')
+    const global = (await call('birthdays/')).settings
+    assert.equal(speech.body.contents[0].parts[0].speech_metadata.style, global.speechStyle)
+    assert.ok(global.speechStyle.includes('pausa breve'))
+    assert.equal(speech.body.generationConfig.speechConfig.voiceConfig.voice, global.defaultVoiceId)
   }
   await admin.reload()
   await expect(admin.getByRole('article', { name: 'Cumpleaños de María', exact: true })).toBeVisible()
-  await admin.getByRole('button', { name: 'Escuchar prueba', exact: true }).click()
-  await expect(admin.getByText('Prueba en este dispositivo', { exact: true })).toBeVisible()
+  await expect(admin.getByRole('button', { name: 'Escuchar prueba', exact: true })).toHaveCount(0)
   assert.equal((await event(birthday.id)).playback, 'held')
-  await admin.getByRole('button', { name: 'Cerrar prueba', exact: true }).click()
   await checkBirthdayScene({ admin, api, base, calls, birthday, data, event, call })
   for (const width of [390, 1440]) {
     await admin.setViewportSize({ width, height: 900 })
+    assert.ok(await admin.getByRole('article', { name: 'Cumpleaños de María', exact: true }).evaluate(card => [...card.querySelectorAll('button')].every(button => button.getBoundingClientRect().height >= 44)), 'Birthday actions retain accessible touch targets')
     assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
     await admin.screenshot({ path: path.join(data, `queue-${width}.png`), fullPage: true })
   }
   await admin.goto(`${uiBase}admin/settings/birthdays?view=settings`)
-  await checkBirthdaySettings({ admin, api, base, calls, personalized, data })
+  await checkBirthdaySettings({ admin, api, base, uiBase, calls, personalized, data })
+  await checkBirthdayPreview({ admin, api, base, calls, data })
   for (const width of [390, 1440]) {
     await admin.setViewportSize({ width, height: 900 })
     await admin.getByRole('heading', { name: 'Cumpleaños', exact: true }).scrollIntoViewIfNeeded()
@@ -228,15 +243,20 @@ try {
   }
   await admin.goto(`${uiBase}queue`)
   if (personalized) {
+    const textRequestsBeforeRevoice = calls.filter(item => item.body?.generationConfig?.responseSchema).length
     const card = admin.getByRole('article', { name: 'Cumpleaños de María', exact: true })
-    await card.getByText('Más acciones', { exact: true }).click()
-    await card.getByRole('button', { name: 'Actualizar solo la voz', exact: true }).click()
+    await card.getByRole('button', { name: 'Más opciones de cumpleaños de María', exact: true }).click()
+    const detail = admin.getByRole('dialog', { name: 'Cumpleaños de María', exact: true })
+    await detail.getByText('Opciones avanzadas', { exact: true }).click()
+    await detail.getByRole('button', { name: 'Actualizar solo la voz', exact: true }).click()
     await expect.poll(async () => (await event(birthday.id)).assets.find(asset => asset.kind === 'greeting')?.id, { timeout: 20000 }).not.toBe(birthday.assets.find(asset => asset.kind === 'greeting').id)
     await expect.poll(async () => (await event(birthday.id)).preparation, { timeout: 20000 }).toBe('ready')
     assert.equal((await event(birthday.id)).script, birthday.script)
-    assert.equal(calls.filter(item => item.body?.generationConfig?.responseSchema).length, 1)
+    assert.equal(calls.filter(item => item.body?.generationConfig?.responseSchema).length, textRequestsBeforeRevoice)
     // Use the current revision after an explicit regeneration.
     birthday.revision = (await event(birthday.id)).revision
+    await admin.keyboard.press('Escape')
+    await expect(detail).toHaveCount(0)
   }
   await context.addInitScript(() => {
     window.birthdayTrace = []
@@ -251,7 +271,17 @@ try {
       }
       node.start = (...args) => {
         window.birthdayGain = node.birthdayGain
-        window.birthdayTrace.push({ duration: node.buffer?.duration, at: performance.now() })
+        const started = this.currentTime
+        const trace = { duration: node.buffer?.duration, at: performance.now(), loop: node.loop, gain: node.birthdayGain?.gain.value ?? 1,
+          silent: !node.buffer?.getChannelData(0).some(sample => Math.abs(sample) > 1e-8), samples: [], disconnectedAt: null }
+        const sampling = setInterval(() => trace.samples.push({ elapsed: this.currentTime - started, gain: node.birthdayGain?.gain.value ?? 1 }), 100)
+        const disconnect = node.disconnect.bind(node)
+        node.disconnect = (...args) => {
+          trace.disconnectedAt = performance.now()
+          clearInterval(sampling)
+          return disconnect(...args)
+        }
+        window.birthdayTrace.push(trace)
         return start(...args)
       }
       return node
@@ -260,7 +290,7 @@ try {
   player = await context.newPage()
   player.on('pageerror', error => errors.push(error.message))
   await player.goto(`${uiBase}player`)
-  for (let i = 0; i < 2; i++) await emit('server/QUEUE_ADD', { songId: 1, origin: 'OPERATOR', requestId: crypto.randomUUID() })
+  for (let i = 0; i < 2; i++) await emit('server/QUEUE_ADD', { songId: 1, origin: 'OPERATOR', requestIntent: 'LISTEN', requestId: crypto.randomUUID() })
   await player.getByRole('button', { name: 'Reproducir', exact: true }).last().click()
   await expect.poll(() => db.prepare('SELECT count(*) n FROM queue WHERE status=\'PLAYING\'').get().n, { timeout: 15000 }).toBe(1)
   const current = db.prepare('SELECT queueId FROM queue WHERE status=\'PLAYING\'').get().queueId
@@ -272,7 +302,7 @@ try {
   const publicState = await emit('server/BIRTHDAY_SYNC')
   for (const field of ['sex', 'birthYear', 'celebrationYear', 'script', 'voiceId']) assert.equal(publicState.events[0][field], undefined)
   await expect(admin.locator('[data-birthday-id]')).toContainText('Cumpleaños de María')
-  await admin.getByRole('button', { name: 'Retirar programación', exact: true }).focus()
+  await admin.getByRole('button', { name: 'Retirar', exact: true }).focus()
   await admin.keyboard.press('Enter')
   await expect.poll(async () => (await event(birthday.id)).playback).toBe('held')
   const held = await event(birthday.id)
@@ -283,14 +313,28 @@ try {
   await unlock.click()
   await expect.poll(async () => (await event(birthday.id)).playback, { timeout: 20000 }).toBe('playing')
   assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(current).status, 'PLAYED')
+  const birthdayStage = player.locator('section[aria-label="Cumpleaños de María"]')
+  await expect(birthdayStage).toHaveAttribute('data-phase', 'intro')
+  await expect(birthdayStage.locator('p')).toContainText('¡Feliz cumpleaños!')
+  await expect(birthdayStage.locator('h1')).toBeHidden()
+  await expect(birthdayStage).toHaveAttribute('data-phase', 'greeting')
   await expect(player.getByRole('heading', { name: 'María', exact: true })).toBeVisible()
+  assert.equal(await birthdayStage.locator('h1').evaluate(title => getComputedStyle(title.parentElement).backgroundColor), 'rgba(0, 0, 0, 0)')
   assert.equal(await player.locator('section[aria-label="Cumpleaños de María"] video').evaluate(video => video.muted), true)
   await player.screenshot({ path: path.join(data, 'birthday-player.png') })
   await player.setViewportSize({ width: 390, height: 900 })
   await expect(player.getByRole('heading', { name: 'María', exact: true })).toBeInViewport({ ratio: 1 })
+  assert.equal(await birthdayStage.evaluate((stage) => {
+    const title = stage.querySelector('h1').getBoundingClientRect()
+    const video = stage.querySelector('video').getBoundingClientRect()
+    return title.top >= video.top && title.bottom <= video.bottom
+  }), true, 'The dedication stays over the video in portrait layouts')
   await player.screenshot({ path: path.join(data, 'birthday-player-mobile.png') })
   await player.setViewportSize({ width: 1440, height: 1000 })
   await expect.poll(async () => (await event(birthday.id)).phase, { timeout: 20000 }).toBe('music')
+  await expect(birthdayStage).toHaveAttribute('data-phase', 'music')
+  await expect(birthdayStage.locator('p')).toContainText('🎂 ¡Feliz cumpleaños!')
+  await expect(player.getByRole('heading', { name: 'María', exact: true })).toBeVisible()
   await emit('server/PLAYER_REQ_VOLUME', 0.35)
   await expect.poll(() => player.evaluate(() => Math.round(window.birthdayGain.gain.value * 100))).toBe(35)
   const eventVideo = player.locator('section[aria-label="Cumpleaños de María"] video')
@@ -300,22 +344,68 @@ try {
   await expect(player.getByRole('heading', { name: 'María', exact: true })).toBeVisible()
   await expect.poll(async () => (await event(birthday.id)).playback, { timeout: 45000 }).toBe('completed')
   assert.equal(db.prepare('SELECT count(*) n FROM birthdayIntroUses WHERE birthdayId=?').get(birthday.id).n, 1)
-  const trace = await player.evaluate(() => window.birthdayTrace)
-  assert.equal(trace.length, 3, JSON.stringify(trace))
+  const allAudio = await player.evaluate(() => window.birthdayTrace)
+  const bed = allAudio.find(trace => trace.loop)
+  const trace = allAudio.filter(trace => !trace.loop && !trace.silent).slice(0, 4)
+  assert.ok(bed)
+  assert.ok(trace[0].at - bed.at >= 1900, 'The bed starts two seconds before the introduction')
+  assert.ok(bed.disconnectedAt <= trace[2].at, 'The bed must be disconnected before birthday music')
+  assert.equal(trace.length, 4, JSON.stringify(trace))
   assert.ok(trace[0].duration >= 1 && trace[0].duration < 1.2)
   assert.ok(trace[1].duration >= 12 && trace[1].duration < 12.2)
   assert.ok(trace[2].duration >= 15 && trace[2].duration < 15.2)
+  assert.ok(trace[3].duration >= 3 && trace[3].duration < 3.2)
   assert.ok(trace[1].at - trace[0].at >= 900)
-  assert.ok(trace[2].at - trace[1].at >= 11900)
+  assert.ok(trace[2].at - trace[1].at >= trace[1].duration * 1000 + 2400, 'The complete greeting precedes the 2.5-second bridge')
+  assert.ok(trace[3].at - trace[2].at >= trace[2].duration * 1000 - 100, 'Applause starts only after the complete song')
+  const bedAge = (bed.disconnectedAt - bed.at) / 1000
+  assert.ok(bed.samples.some(sample => bedAge - sample.elapsed > 0.6 && bedAge - sample.elapsed < 1.2 && sample.gain > 0 && sample.gain < 0.19), 'The background fades gradually during its last 1.5 seconds')
+  assert.ok(trace[2].samples.some(sample => sample.elapsed > 0 && sample.elapsed < 0.8 && sample.gain > 0 && sample.gain < 0.33), 'Music fades in rather than starting at full level')
+  assert.ok(trace[2].samples.some(sample => trace[2].duration - sample.elapsed < 0.5 && sample.gain < 0.2), 'The complete song fades out before applause')
+  assert.ok(trace[3].samples.some(sample => sample.elapsed > 0 && sample.elapsed < 0.45 && sample.gain > 0 && sample.gain < 0.33), 'Applause fades in over half a second')
+  fs.writeFileSync(path.join(data, 'birthday-choreography.json'), JSON.stringify({ bed, phases: trace, preludeMs: trace[0].at - bed.at, bridgeMs: trace[2].at - trace[1].at - trace[1].duration * 1000 }, null, 2))
+  await expect(player.getByTestId('transition-scene')).toBeVisible()
+  await expect.poll(() => db.prepare('SELECT requestIntent FROM queue WHERE status=\'PLAYING\'').get()?.requestIntent, { timeout: 10000 }).toBe('LISTEN')
+  assert.ok(await player.evaluate(() => performance.now()) - trace[3].at >= trace[3].duration * 1000 + 1800, 'A fresh normal transition follows the closing applause')
   await expect.poll(() => db.prepare('SELECT count(*) n FROM queue WHERE status=\'PLAYED\'').get().n, { timeout: 12000 }).toBe(2)
   const idle = await call('birthdays/events', { name: 'José', sex: 'male', birthYear: 1990, requestId: crypto.randomUUID() })
   await expect.poll(async () => (await event(idle.id)).preparation, { timeout: 20000 }).toBe('ready')
   await call(`birthdays/events/${idle.id}`, { operation: 'schedule', revision: idle.revision })
   await expect.poll(async () => (await event(idle.id)).playback).toBe('playing')
+  await emit('server/QUEUE_ADD', { songId: 1, origin: 'OPERATOR', requestIntent: 'SING', requestId: crypto.randomUUID() })
+  assert.equal(db.prepare('SELECT count(*) n FROM queue WHERE status=\'PLAYING\'').get().n, 0, 'A new turn cannot start during the idle birthday')
+  await expect.poll(async () => (await event(idle.id)).playback, { timeout: 50000 }).toBe('completed')
+  await expect(player.getByTestId('transition-scene')).toBeVisible()
+  assert.equal(db.prepare('SELECT count(*) n FROM queue WHERE status=\'PLAYING\'').get().n, 0, 'An idle birthday also runs the full normal transition before its pending turn')
+  const startKaraoke = admin.getByRole('button', { name: 'Iniciar karaoke', exact: true })
+  await expect.poll(async () => await startKaraoke.isVisible() || db.prepare('SELECT requestIntent FROM queue WHERE status=\'PLAYING\'').get()?.requestIntent === 'SING', { timeout: 12000 }).toBe(true)
+  if (await startKaraoke.isVisible()) {
+    assert.equal(db.prepare('SELECT count(*) n FROM queue WHERE status=\'PLAYING\'').get().n, 0, 'Birthday continuation preserves the configured manual karaoke start')
+    await startKaraoke.focus()
+    await admin.keyboard.press('Enter')
+  }
+  await expect.poll(() => db.prepare('SELECT requestIntent FROM queue WHERE status=\'PLAYING\'').get()?.requestIntent, { timeout: 12000 }).toBe('SING')
+  const interrupted = await call('birthdays/events', { name: 'Ana', sex: 'female', birthYear: 1990, requestId: crypto.randomUUID() })
+  await expect.poll(async () => (await event(interrupted.id)).preparation, { timeout: 20000 }).toBe('ready')
+  await call(`birthdays/events/${interrupted.id}`, { operation: 'schedule', revision: interrupted.revision })
+  await expect.poll(async () => (await event(interrupted.id)).playback, { timeout: 15000 }).toBe('playing')
   await emit('server/PLAYER_REQ_PAUSE')
-  await expect.poll(async () => (await event(idle.id)).playback).toBe('interrupted')
+  await expect.poll(async () => (await event(interrupted.id)).playback).toBe('interrupted')
   await player.reload()
-  assert.equal((await event(idle.id)).playback, 'interrupted')
+  assert.equal((await event(interrupted.id)).playback, 'interrupted')
+  const cancelledBefore = await event(interrupted.id)
+  const callsBeforeCancel = calls.length
+  const interruptedCard = admin.getByRole('article', { name: 'Cumpleaños de Ana', exact: true })
+  await interruptedCard.getByRole('button', { name: 'Más opciones de cumpleaños de Ana', exact: true }).click()
+  const cancelDetail = admin.getByRole('dialog', { name: 'Cumpleaños de Ana', exact: true })
+  await cancelDetail.getByRole('button', { name: 'Cancelar cumpleaños', exact: true }).click()
+  await expect(cancelDetail).toHaveCount(0)
+  await expect(interruptedCard).toHaveCount(0)
+  const cancelledAfter = await event(interrupted.id)
+  assert.equal(cancelledAfter.playback, 'cancelled')
+  assert.deepEqual(cancelledAfter.assets, cancelledBefore.assets)
+  assert.equal(cancelledAfter.script, cancelledBefore.script)
+  assert.equal(calls.length, callsBeforeCancel, 'Cancelling a pending birthday preserves media and never generates audio')
   await checkBirthdayHistory({ admin, api, base, uiBase, db, birthday, data, calls })
   assert.deepEqual(errors, [])
   console.log(JSON.stringify({ mode: development ? 'development' : 'production', httpsUi, assertions: 'private context; real generation pipeline with fixture providers; >25s event; held/reload/preview; keyboard/mobile; paused song and withdrawal; queued next without interruption; exclusive intro/greeting/full music; video failure keeps name and audio; resumes next song; idle start; interrupted no replay', artifacts: data }, null, 2))

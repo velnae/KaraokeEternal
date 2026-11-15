@@ -10,6 +10,8 @@ import { validateBirthdaySettings, type BirthdayInput, type BirthdaySettings, ty
 import { changeScene } from './scenes.js'
 import { listBirthdayVoices } from './gemini.js'
 import { speechProfile } from './personalization.js'
+import { readPreview, recordPreviewSample, savePreviewDraft } from './preview.js'
+import { validateBirthdaySample } from '../../shared/birthdayPreview.js'
 import { birthdayHistory, birthdayHistoryDetail } from './history.js'
 import { birthdayService } from './Service.js'
 import { importBirthdayAsset, type BirthdayImport } from './import.js'
@@ -31,8 +33,16 @@ router.get('/', (ctx) => {
     assets: db.all<AssetRow>('SELECT * FROM birthdayAssets WHERE roomId=? AND kind!=\'greeting\'', [ctx.user.roomId]).map(assetDTO),
     configured: { text: createGemini().configured, voice: settings(ctx.user.roomId).speechProvider === 'gemini' ? createGemini().configured : createElevenLabs().capabilities.configured } }
 })
-router.put('/settings', (ctx) => {
-  ctx.body = saveSettings(ctx.user.roomId, ctx.request.body)
+async function resolveBirthdayVoices (config: BirthdaySettings) {
+  if (config.speechProvider !== 'gemini') return config
+  const provider = createGemini()
+  const voices = new Map<string, string>()
+  for (const name of new Set([config.defaultVoiceId, ...config.rules.map(rule => rule.voiceId)])) voices.set(name, (await provider.resolveVoice(name)).voiceId)
+  return { ...config, defaultVoiceId: voices.get(config.defaultVoiceId)!, rules: config.rules.map(rule => ({ ...rule, voiceId: voices.get(rule.voiceId)! })) }
+}
+router.put('/settings', async (ctx) => {
+  const config = validateBirthdaySettings(ctx.request.body)
+  ctx.body = saveSettings(ctx.user.roomId, await resolveBirthdayVoices(config))
 })
 router.get('/history', (ctx) => {
   ctx.body = birthdayHistory(ctx.user.roomId, ctx.query)
@@ -51,11 +61,27 @@ router.post('/voices', async (ctx) => {
 })
 router.post('/audition', async (ctx) => {
   assertRoom(ctx.user.roomId)
-  const input = ctx.request.body as unknown as { config: BirthdaySettings, voiceId?: string, style?: string }
+  const input = ctx.request.body as unknown as { config: BirthdaySettings, voiceId?: string, style?: string, sample?: unknown, previewRevision?: number, previewScript?: string, previewRoomId?: number }
+  if (input.previewRoomId !== undefined && input.previewRoomId !== ctx.user.roomId) ctx.throw(409, 'La sala cambió. Vuelva a abrir la previsualización.')
   const config = validateBirthdaySettings(input?.config)
   const selected = { ...config, defaultVoiceId: input.voiceId ?? config.defaultVoiceId, speechStyle: input.style ?? config.speechStyle }
   validateBirthdaySettings(selected)
-  ctx.body = assetDTO(await birthdayService().audition(ctx.user.roomId, speechProfile(selected)))
+  const resolved = await resolveBirthdayVoices(selected)
+  const media = assetDTO(await birthdayService().audition(ctx.user.roomId, speechProfile(resolved), input.sample, resolved))
+  ctx.body = input.sample === undefined
+    ? media
+    : recordPreviewSample(ctx.user.userId, ctx.user.roomId, selected, {
+        ...validateBirthdaySample(input.sample), script: input.previewScript ?? (input.sample as { script?: string }).script ?? '',
+      }, media, input.previewRevision)
+})
+router.get('/preview/:roomId', async (ctx) => {
+  if (Number(ctx.params.roomId) !== ctx.user.roomId) ctx.throw(409, 'La sala cambió. Vuelva a abrir la previsualización.')
+  ctx.body = await readPreview(birthdayService().directory, ctx.user.userId, ctx.user.roomId)
+})
+router.put('/preview/:roomId', (ctx) => {
+  if (Number(ctx.params.roomId) !== ctx.user.roomId) ctx.throw(409, 'La sala cambió. Vuelva a abrir la previsualización.')
+  const input = ctx.request.body as { draft?: unknown, revision?: number }
+  ctx.body = savePreviewDraft(ctx.user.userId, ctx.user.roomId, input?.draft, input?.revision as number)
 })
 router.post('/events', (ctx) => {
   const input = ctx.request.body as unknown as BirthdayInput & { requestId: string }
@@ -92,8 +118,17 @@ router.post('/upload', async (ctx) => {
   const files = Object.values(request.files ?? {}).flat()
   try {
     assertRoom(ctx.user.roomId)
-    if (!['intro', 'music'].includes(request.body?.kind) || files.length !== 1 || files[0].size > 20 * 1024 * 1024) ctx.throw(422, 'Seleccione un audio de hasta 20 MB.')
-    ctx.body = assetDTO(await birthdayService().upload(ctx.user.roomId, request.body.kind as 'intro' | 'music', files[0].originalFilename || 'Audio de cumpleaños', await fs.readFile(files[0].filepath)))
+    if (!['intro', 'music', 'bed', 'applause'].includes(request.body?.kind) || files.length !== 1 || files[0].size > 20 * 1024 * 1024) ctx.throw(422, 'Seleccione un audio de hasta 20 MB.')
+    ctx.body = assetDTO(await birthdayService().upload(ctx.user.roomId, request.body.kind as 'intro' | 'music' | 'bed' | 'applause', files[0].originalFilename || 'Audio de cumpleaños', await fs.readFile(files[0].filepath)))
+  } finally { await Promise.all(files.map(file => fs.rm(file.filepath, { force: true }))) }
+})
+router.post('/video/upload', async (ctx) => {
+  const request = ctx.request as unknown as { files?: Record<string, { filepath: string, originalFilename: string, size: number } | { filepath: string, originalFilename: string, size: number }[]> }
+  const files = Object.values(request.files ?? {}).flat()
+  try {
+    assertRoom(ctx.user.roomId)
+    if (files.length !== 1 || files[0].size > 40 * 1024 * 1024) ctx.throw(422, 'Seleccione un video MP4 de hasta 40 MiB y 2 min 10 s.')
+    ctx.body = assetDTO(await birthdayService().uploadVideo(ctx.user.roomId, files[0].originalFilename || 'Fondo de cumpleaños', files[0].filepath))
   } finally { await Promise.all(files.map(file => fs.rm(file.filepath, { force: true }))) }
 })
 router.post('/import', async (ctx) => {

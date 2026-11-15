@@ -105,8 +105,9 @@ function select (items, selection, ready) {
   return [...new Map(selected.map(item => [item.id, item])).values()]
 }
 
-export const birthdayDependencies = settings => [...new Set([settings.introId, settings.musicId, settings.videoId,
-  ...(settings.introIds ?? []), ...settings.rules.map(rule => rule.videoId)].filter(Boolean))]
+export const birthdayDependencies = settings => [...new Set([settings.introId, settings.musicId, settings.videoId, settings.bedId, settings.applauseId,
+  ...(settings.introIds ?? []), ...settings.rules.map(rule => rule.videoId),
+  ...Object.values(settings.videoBackgrounds ?? {}).flatMap(group => [group.videoId, ...group.ranges.map(range => range.videoId)])].filter(Boolean))]
 
 const mediaRoute = (type, id) => type === 'audio'
   ? `animation/resources/${id}/audio`
@@ -184,9 +185,12 @@ export function mappedSettings (type, value, items, receipt) {
   const settings = structuredClone(value)
   if (type === 'background') settings.videoId = map('background', settings.videoId)
   else {
-    for (const key of ['introId', 'musicId', 'videoId']) settings[key] = map('birthday', settings[key])
+    for (const key of ['introId', 'musicId', 'videoId', 'bedId', 'applauseId']) if (key in settings) settings[key] = map('birthday', settings[key])
     if (settings.introIds) settings.introIds = settings.introIds.map(id => map('birthday', id))
     settings.rules = settings.rules.map(rule => ({ ...rule, ...(rule.videoId ? { videoId: map('birthday', rule.videoId) } : {}) }))
+    if (settings.videoBackgrounds) settings.videoBackgrounds = Object.fromEntries(Object.entries(settings.videoBackgrounds).map(([sex, group]) => [sex, {
+      videoId: map('birthday', group.videoId), ranges: group.ranges.map(range => ({ ...range, videoId: map('birthday', range.videoId) })),
+    }]))
   }
   return settings
 }

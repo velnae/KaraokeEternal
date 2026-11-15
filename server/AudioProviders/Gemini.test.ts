@@ -29,6 +29,63 @@ describe('Gemini greeting provider', () => {
     expect(request.mock.calls[0][1]?.body).toBeUndefined()
   })
 
+  it('validates exact studio names without listing a catalog or generating speech', async () => {
+    const request = vi.fn<typeof fetch>()
+    const provider = new GeminiGreetingTts('', request)
+    expect(await provider.resolveVoice(' Orus ')).toEqual({ voiceId: 'Orus', name: 'Orus' })
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('resolves an exact extended name across pages and rejects partial matches', async () => {
+    const request = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const query = new URL(String(url)).searchParams
+      expect(query.get('search')).toBe('Warm Host')
+      expect(query.has('language_code')).toBe(false)
+      return Response.json(query.has('page_token')
+        ? { voices: [{ id: 'voice_host', display_name: 'Warm Host' }] }
+        : { voices: [{ id: 'voice_other', display_name: 'Warm Host Extra' }], next_page_token: 'second' })
+    })
+    expect(await new GeminiGreetingTts('key', request).resolveVoice('Warm Host')).toEqual({ voiceId: 'voice_host', name: 'Warm Host' })
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects duplicate display names rather than selecting the first result', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ voices: [{ id: 'voice_a', display_name: 'Host' }, { id: 'voice_b', display_name: 'Host' }] }))
+    await expect(new GeminiGreetingTts('key', request).resolveVoice('Host')).rejects.toThrow('varias voces')
+  })
+
+  it('retrieves a stored identifier without generating audio', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ id: 'voice_host', display_name: 'Host' }))
+    expect(await new GeminiGreetingTts('key', request).resolveVoice('voice_host')).toEqual({ voiceId: 'voice_host', name: 'Host' })
+    expect(String(request.mock.calls[0][0]).endsWith('/v1beta/voices/voice_host')).toBe(true)
+  })
+
+  it('preserves regional library identifiers already stored by the old selector', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ voices: [{ id: 'es-419-commercial-1', display_name: 'Commercial Voiceover 1' }] }))
+    expect(await new GeminiGreetingTts('key', request).resolveVoice('es-419-commercial-1')).toEqual({ voiceId: 'es-419-commercial-1', name: 'Commercial Voiceover 1' })
+    const query = new URL(String(request.mock.calls[0][0])).searchParams
+    expect(query.get('language_code')).toBe('es-419')
+    expect(query.has('search')).toBe(false)
+  })
+
+  it('searches hyphenated display names after a direct identifier lookup returns 404', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('', { status: 404 })).mockResolvedValueOnce(Response.json({ voices: [{ id: 'voice_host', display_name: 'Warm-Host' }] }))
+    expect(await new GeminiGreetingTts('key', request).resolveVoice('Warm-Host')).toEqual({ voiceId: 'voice_host', name: 'Warm-Host' })
+  })
+
+  it('distinguishes an unknown name from an unavailable validation service', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ voices: [{ id: 'voice_orus', display_name: 'Orus Extra' }] })).mockRejectedValueOnce(new Error('private-key'))
+    const provider = new GeminiGreetingTts('key', request)
+    await expect(provider.resolveVoice('Or')).rejects.toThrow('No se encontró esa voz')
+    await expect(provider.resolveVoice('Other')).rejects.toThrow('No se pudo validar')
+  })
+
+  it('does not declare a voice missing when the bounded search is incomplete', async () => {
+    const request = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ voices: [], next_page_token: 'more' }))
+    await expect(new GeminiGreetingTts('key', request).resolveVoice('Unknown')).rejects.toThrow('No se pudo validar')
+    expect(request).toHaveBeenCalledTimes(10)
+  })
+
   it.each([
     [401, { message: 'private-key private greeting' }, 'auth'],
     [403, {}, 'auth'],

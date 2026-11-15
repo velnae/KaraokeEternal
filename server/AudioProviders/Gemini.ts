@@ -1,6 +1,9 @@
 import type { SpeechProfile, SpeechProvider } from './types.js'
 import { VoiceError as GreetingVoiceError } from './errors.js'
 
+// The featured studio voices are stable names, not Extended Library IDs.
+const studioVoices = new Set('Zephyr Puck Charon Kore Fenrir Leda Orus Aoede Callirrhoe Autonoe Enceladus Iapetus Umbriel Algieba Despina Erinome Algenib Rasalgethi Laomedeia Achernar Alnilam Schedar Gacrux Pulcherrima Achird Zubenelgenubi Vindemiatrix Sadachbia Sadaltager Sulafat'.split(' '))
+
 async function boundedJSON (response: Response, limit: number) {
   const reader = response.body?.getReader()
   if (!reader) throw new GreetingVoiceError('Gemini no devolvió audio.', 'uncertain')
@@ -97,6 +100,51 @@ export default class Gemini implements SpeechProvider {
       if (!page) break
     }
     return voices
+  }
+
+  async resolveVoice (input: unknown) {
+    if (typeof input !== 'string' || !input.trim() || input.trim().length > 120 || /[\x00-\x1f\x7f]/.test(input)) { // eslint-disable-line no-control-regex
+      throw new GreetingVoiceError('Escriba el nombre exacto de la voz o su identificador de Gemini.', 'invalid', 0, false)
+    }
+    const name = input.trim()
+    if (studioVoices.has(name)) return { voiceId: name, name }
+    const missing = () => new GreetingVoiceError('No se encontró esa voz. Copie el nombre exacto desde AI Studio.', 'invalid', 0, false)
+    if (!this.configured) throw new GreetingVoiceError('Configure KES_GEMINI_API_KEY en el servidor para validar la voz.', 'auth', 0, false)
+    try {
+      // Regional prebuilt IDs are listed, but GetVoice only resolves stored voices.
+      const language = /^([a-z]{2,3}-(?:[A-Z]{2}|\d{3}))-/.exec(name)?.[1]
+      if (!language && /^[A-Za-z][\w-]{1,119}$/.test(name) && /[_-]/.test(name)) {
+        const response = await this.request(`${this.base}/v1beta/voices/${encodeURIComponent(name)}`, { headers: { 'x-goog-api-key': this.key }, signal: AbortSignal.timeout(10000) })
+        if (response.status !== 404) {
+          if (!response.ok) throw await rejection(response)
+          const voice = await boundedJSON(response, 4 * 1024 * 1024)
+          if (voice.id !== name || typeof voice.display_name !== 'string') throw new Error('Invalid voice metadata')
+          return { voiceId: voice.id as string, name: voice.display_name as string }
+        }
+      }
+      const matches = new Map<string, string>()
+      let page = ''
+      for (let i = 0; i < 10; i++) {
+        const query = new URLSearchParams({ ...(language ? { language_code: language } : { search: name }), page_size: '100', ...(page ? { page_token: page } : {}) })
+        const response = await this.request(`${this.base}/v1beta/voices?${query}`, { headers: { 'x-goog-api-key': this.key }, signal: AbortSignal.timeout(10000) })
+        if (!response.ok) throw await rejection(response)
+        const body = await boundedJSON(response, 256000)
+        for (const voice of body.voices ?? []) {
+          if ((voice.display_name === name || voice.id === name) && typeof voice.display_name === 'string' && typeof voice.id === 'string' && /^[A-Za-z][\w-]{1,119}$/.test(voice.id)) matches.set(voice.id, voice.display_name)
+        }
+        if (matches.size > 1) throw new GreetingVoiceError('Hay varias voces con ese nombre. Pegue el identificador de la voz desde AI Studio.', 'invalid', 0, false)
+        page = body.next_page_token
+        if (!page) {
+          const match = [...matches][0]
+          if (!match) throw missing()
+          return { voiceId: match[0], name: match[1] }
+        }
+      }
+      throw new Error('Incomplete voice search')
+    } catch (error) {
+      if (error instanceof GreetingVoiceError) throw error
+      throw new GreetingVoiceError('No se pudo validar la voz con Gemini. Vuelva a intentarlo.', 'invalid', 0, false)
+    }
   }
 
   async generateText (model: string, input: Record<string, unknown>, signal: AbortSignal) {

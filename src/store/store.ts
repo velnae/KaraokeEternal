@@ -12,6 +12,7 @@ import {
   REGISTER,
 } from 'redux-persist'
 import { windowResize } from './modules/ui'
+import { birthdayPreviewMemory } from 'lib/birthdayPreviewMemory'
 
 // resize action
 window.addEventListener('resize', () => store.dispatch(windowResize({
@@ -47,6 +48,12 @@ const store = configureStore({
       ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
     },
   }).concat(throttle, socketMiddleware),
+})
+
+// Clear local preview memory on account changes; durable drafts stay user-scoped.
+birthdayPreviewMemory.setUser(store.getState().user.userId)
+store.subscribe(() => {
+  birthdayPreviewMemory.setUser(store.getState().user.userId)
 })
 
 // @todo: this doesn't handle dynamically injected (lazy-loaded) reducers

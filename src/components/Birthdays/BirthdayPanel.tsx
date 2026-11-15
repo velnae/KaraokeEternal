@@ -1,128 +1,96 @@
-import React, { useState } from 'react'
-import { Link } from 'react-router'
+import React, { useRef, useState } from 'react'
 import Button from 'components/Button/Button'
-import { approachLabels, birthdayLabels, type BirthdayEvent, type BirthdayAsset } from 'shared/birthdays'
+import { birthdayLabels, type BirthdayEvent } from 'shared/birthdays'
 import { useAppSelector } from 'store/hooks'
-import { birthdayApi, birthdayUrl } from './api'
+import { selectBirthdays } from 'store/modules/birthdays'
+import { birthdayApi } from './api'
 import useBirthdayOverview from './useBirthdayOverview'
 import BirthdayForm from './BirthdayForm'
-import BirthdayEventSceneEditor from './BirthdayEventSceneEditor'
-import BirthdayCelebrationPreview from './BirthdayCelebrationPreview'
+import BirthdayEventDetails from './BirthdayEventDetails'
 import styles from './Birthdays.css'
 
-export default function BirthdayPanel () {
+export default function BirthdayPanel ({ onScheduled }: { onScheduled?(): void }) {
   const { overview, error: loadError, refresh } = useBirthdayOverview()
-  const status = useAppSelector(state => state.status)
-  const [form, setForm] = useState<BirthdayEvent | 'new' | null>(null)
-  const [preview, setPreview] = useState<BirthdayAsset | null>(null)
-  const [sceneEditor, setSceneEditor] = useState<BirthdayEvent | null>(null)
-  const [celebrationPreview, setCelebrationPreview] = useState<BirthdayEvent | null>(null)
+  const queued = useAppSelector(selectBirthdays)
+  const [form, setForm] = useState(false)
+  const [details, setDetails] = useState<{ event: BirthdayEvent, listen: boolean, opener: HTMLButtonElement } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const working = useRef(false)
+  const panel = useRef<HTMLElement>(null)
+  const focusPrepare = () => panel.current?.querySelector<HTMLButtonElement>('[data-birthday-prepare]')?.focus({ preventScroll: true })
   const execute = async (event: BirthdayEvent, operation: string) => {
-    if (busy) return
+    if (working.current) return
+    working.current = true
     setBusy(event.id)
     setError('')
-    setPreview(null)
     try {
       await birthdayApi.post(`events/${event.id}`, { body: { operation, revision: event.revision } })
+      if (operation === 'schedule') onScheduled?.()
       refresh()
+      requestAnimationFrame(focusPrepare)
     } catch (failure) {
       setError((failure as Error).message)
-    } finally { setBusy(null) }
+      refresh()
+    } finally {
+      working.current = false
+      setBusy(null)
+    }
   }
-  const events = overview?.events.filter(event => !['completed', 'cancelled'].includes(event.playback)) ?? []
+  const events = overview?.events.filter(event => ['held', 'interrupted'].includes(event.playback) && !queued.some(active => active.id === event.id)) ?? []
   return (
-    <section className={styles.panel} aria-label='Cumpleaños preparados'>
+    <section ref={panel} className={styles.panel} aria-label='Cumpleaños preparados'>
       <div className={styles.heading}>
         <h2>Cumpleaños</h2>
-        <Button onClick={() => setForm('new')}>Preparar cumpleaños</Button>
-        <Link to='/admin/settings/birthdays?view=history'>Ver historial</Link>
-        <Link to='/admin/settings/birthdays?view=settings'>Ajustes</Link>
+        <Button variant='default' aria-label='Preparar cumpleaños' data-birthday-prepare onClick={() => setForm(true)}>+ Preparar</Button>
       </div>
       {(error || loadError) && <p role='alert'>{error || loadError}</p>}
-      {events.map((event) => {
-        const editable = ['held', 'interrupted'].includes(event.playback) && ['ready', 'failed'].includes(event.preparation)
-        const greeting = event.assets.find(asset => asset.kind === 'greeting')
-        return (
-          <article key={event.id} className={styles.card} aria-label={`Cumpleaños de ${event.name}`}>
-            <div className={styles.identity}>
-              <h3>{event.name}</h3>
-              <p role='status'>{birthdayLabels[event.playback === 'held' ? event.preparation : event.phase && event.playback === 'playing' ? event.phase : event.playback]}</p>
-              {event.error && <p role='alert'>{event.error}</p>}
-              {event.playback === 'held' && <p>{status.queueId >= 0 && !status.isAtQueueEnd ? 'Al finalizar el tema actual.' : 'Al aprobar, comenzará cuando el reproductor esté disponible.'}</p>}
-              {event.playback === 'scheduled' && event.preparation !== 'ready' && <p>Preparando el saludo antes de iniciar.</p>}
-              <p>{`Introducción: ${event.assets.find(asset => asset.kind === 'intro')?.title || 'No disponible'} · ${event.scene?.introMode === 'manual' ? 'Manual' : 'Automática'}`}</p>
-              <p>{`Video: ${event.assets.find(asset => asset.kind === 'video')?.title || 'No disponible'} · ${event.scene?.videoMode === 'manual' ? 'Manual' : 'Automático'}`}</p>
-            </div>
-            <div className={styles.actions}>
-              {greeting && <Button onClick={() => setPreview(greeting)}>Escuchar prueba</Button>}
-              {event.preparation === 'ready' && ['held', 'interrupted'].includes(event.playback) && (
-                <Button onClick={() => {
-                  setPreview(null)
-                  setCelebrationPreview(event)
-                }}
-                >
-                  Previsualizar celebración
-                </Button>
-              )}
-              {['held', 'interrupted'].includes(event.playback) && event.assets.some(asset => asset.kind === 'intro') && event.assets.some(asset => asset.kind === 'video') && (
-                <Button onClick={() => {
-                  setPreview(null)
-                  setSceneEditor(event)
-                }}
-                >
-                  Configurar celebración
-                </Button>
-              )}
-              {['held', 'interrupted'].includes(event.playback) && event.preparation !== 'failed' && <Button variant='primary' disabled={busy === event.id} onClick={() => void execute(event, 'schedule')}>Reproducir</Button>}
-              {event.playback === 'scheduled' && <Button disabled={busy === event.id} onClick={() => void execute(event, 'unschedule')}>Retirar programación</Button>}
-              {event.preparation === 'failed' && editable && <Button disabled={busy === event.id} onClick={() => void execute(event, 'retry')}>Reintentar preparación</Button>}
-              {busy === event.id && <span role='status'>Guardando…</span>}
-              {event.playback !== 'playing' && (
-                <details>
-                  <summary>Más acciones</summary>
-                  <div className={styles.actions}>
-                    {editable && <Button onClick={() => setForm(event)}>Editar datos</Button>}
-                    {editable && <Button disabled={busy === event.id} onClick={() => void execute(event, 'regenerate')}>Generar otro saludo</Button>}
-                    {editable && <Button disabled={busy === event.id} onClick={() => void execute(event, 'revoice')}>Actualizar solo la voz</Button>}
-                    {editable && event.personalization?.speech.provider === 'gemini' && <Button disabled={busy === event.id} onClick={() => void execute(event, 'lite')}>Probar voz Flash-Lite</Button>}
-                    <Button disabled={busy === event.id} onClick={() => void execute(event, 'cancel')}>Cancelar cumpleaños</Button>
-                  </div>
-                </details>
-              )}
-            </div>
-            {event.script && (
-              <details className={styles.script}>
-                <summary>Ver saludo</summary>
-                <p>{event.script}</p>
-                {event.personalization && <p>{`${event.personalization.profile.title || 'Perfil predeterminado'} · ${approachLabels[event.personalization.approach]} · ${event.personalization.speech.voice}`}</p>}
-                {event.personalization?.reference && <a href={event.personalization.reference.source} target='_blank' rel='noreferrer'>Fuente de la referencia histórica</a>}
-              </details>
-            )}
-          </article>
-        )
-      })}
-      {preview && (
-        <div className={styles.preview}>
-          <strong>Prueba en este dispositivo</strong>
-          <audio key={preview.id} autoPlay controls src={birthdayUrl(preview.url)} />
-          <Button onClick={() => setPreview(null)}>Cerrar prueba</Button>
-        </div>
-      )}
+      {busy && <p role='status'>Guardando cumpleaños…</p>}
+      {events.map(event => (
+        <article key={event.id} className={styles.card} aria-label={`Cumpleaños de ${event.name}`}>
+          <div className={styles.identity}>
+            <h3>{`🎂 ${event.name}`}</h3>
+            <p className={styles.status} role='status'>{birthdayLabels[event.playback === 'interrupted' ? 'interrupted' : event.preparation]}</p>
+            {event.error && <p role='alert'>{event.error}</p>}
+          </div>
+          <div className={styles.actions}>
+            {event.assets.some(asset => asset.kind === 'greeting') && <Button variant='default' aria-label={`Escuchar saludo de ${event.name}`} onClick={click => setDetails({ event, listen: true, opener: click.currentTarget })}>Escuchar</Button>}
+            <Button variant='primary' disabled={!!busy} onClick={() => void execute(event, event.preparation === 'failed' ? 'retry' : 'schedule')}>{event.preparation === 'failed' ? 'Reintentar' : 'Programar'}</Button>
+            <Button variant='default' className={styles.more} aria-label={`Más opciones de cumpleaños de ${event.name}`} onClick={click => setDetails({ event, listen: false, opener: click.currentTarget })}>⋯</Button>
+          </div>
+        </article>
+      ))}
       {form && (
         <BirthdayForm
-          event={form === 'new' ? undefined : form}
           profiles={overview?.settings.rules}
-          onClose={() => setForm(null)}
+          onClose={() => {
+            setForm(false)
+            requestAnimationFrame(focusPrepare)
+          }}
           onSaved={() => {
-            setForm(null)
+            setForm(false)
             refresh()
+            requestAnimationFrame(focusPrepare)
           }}
         />
       )}
-      {sceneEditor && <BirthdayEventSceneEditor event={sceneEditor} assets={overview?.assets ?? []} onClose={() => setSceneEditor(null)} onSaved={refresh} />}
-      {celebrationPreview && <BirthdayCelebrationPreview event={celebrationPreview} currentRevision={overview?.events.find(event => event.id === celebrationPreview.id)?.revision} currentPlayback={overview?.events.find(event => event.id === celebrationPreview.id)?.playback} onClose={() => setCelebrationPreview(null)} />}
+      {details && (
+        <BirthdayEventDetails
+          id={details.event.id}
+          initial={details.event}
+          listen={details.listen}
+          onChanged={refresh}
+          onScheduled={onScheduled}
+          onClose={(removed) => {
+            const opener = details.opener
+            setDetails(null)
+            requestAnimationFrame(() => {
+              if (!removed && opener.isConnected) opener.focus({ preventScroll: true })
+              else focusPrepare()
+            })
+          }}
+        />
+      )}
     </section>
   )
 }

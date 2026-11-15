@@ -4,7 +4,7 @@ import store from 'store/store'
 import socket from 'lib/socket'
 import { selectBirthdays } from 'store/modules/birthdays'
 import { nextBirthday } from 'shared/playbackSequence'
-import { birthdaySequence, type BirthdayGrant, type BirthdayPhase } from 'shared/birthdays'
+import { birthdayTimeline, type BirthdayGrant, type BirthdayPhase } from 'shared/birthdays'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
 import useBirthdaySync from 'components/Birthdays/useBirthdaySync'
 import { birthdayPlayerRequest } from 'components/Birthdays/api'
@@ -21,6 +21,7 @@ export default function useBirthdayPlayer (channel: AnnouncementAudio) {
   const [scene, setScene] = useState<{ grant: BirthdayGrant, phase: BirthdayPhase } | null>(null)
   const [error, setError] = useState('')
   const [soundReady, setSoundReady] = useState(channel.ready)
+  const [busy, setBusy] = useState(false)
   const abort = useRef<AbortController | null>(null)
   const activeAudio = useRef<BirthdayAudio | null>(null)
   const live = useRef(true)
@@ -75,8 +76,9 @@ export default function useBirthdayPlayer (channel: AnnouncementAudio) {
       if ('waiting' in response) return 'waiting'
       if (!('token' in response)) throw new Error('Reserva inválida.')
       grant = response
+      if (live.current) setBusy(true)
       const progress = (operation: string, phase?: BirthdayPhase) => birthdayPlayerRequest({ operation, id: grant!.event.id, token: grant!.token, phase })
-      const audio = new BirthdayAudio(channel.context!)
+      const audio = new BirthdayAudio(channel.context!, false, grant.choreographyVersion)
       audio.permitFor(response.remainingMs - (performance.now() - requestedAt) - 100)
       activeAudio.current = audio
       heartbeat = setInterval(() => {
@@ -91,22 +93,32 @@ export default function useBirthdayPlayer (channel: AnnouncementAudio) {
       controller.signal.throwIfAborted()
       channel.stop()
       store.dispatch(playerStatus({ isAtQueueEnd: true }))
-      if (live.current) {
-        setError('')
-        setScene({ grant, phase: 'intro' })
-      }
-      await audio.prepare(grant.assets, controller.signal)
-      for (const asset of birthdaySequence(grant.assets)) {
-        const phase = asset.kind as BirthdayPhase
+      await audio.prepare(grant.assets, controller.signal, grant.bedVolume)
+      if (live.current) setError(grant.warning || audio.warning)
+      const steps = birthdayTimeline(grant.assets, grant.choreographyVersion)
+      for (const [index, step] of steps.entries()) {
+        const { phase, asset } = step
         controller.signal.throwIfAborted()
-        if (phase !== 'intro') await progress('phase', phase)
-        if (live.current) setScene({ grant, phase })
+        if (index > 0) await progress('phase', phase)
+        if (!asset && phase !== 'prelude' && live.current) setScene({ grant, phase })
         const volume = store.getState().player.volume
-        await audio.play(asset, volume, controller.signal, phase === 'intro'
-          ? () => {
-              void progress('introStarted').catch(() => controller.abort())
-            }
-          : undefined)
+        if (!asset) {
+          audio.backgroundPhase(phase, volume, step.durationMs, controller.signal)
+          if (phase === 'applause') {
+            await progress(grant.warning?.includes('aplauso') ? 'skipApplause' : 'finish')
+            return 'finished'
+          }
+          await audio.wait(step.durationMs, controller.signal)
+          continue
+        }
+        if (phase === 'applause' && !audio.available(asset)) {
+          await progress('skipApplause')
+          return 'finished'
+        }
+        await audio.play(asset, volume, controller.signal, () => {
+          if (live.current) setScene({ grant: grant!, phase })
+          if (phase === 'intro') void progress('introStarted').catch(() => controller.abort())
+        })
       }
       await progress('finish')
       return 'finished'
@@ -116,10 +128,14 @@ export default function useBirthdayPlayer (channel: AnnouncementAudio) {
       return 'interrupted'
     } finally {
       clearInterval(heartbeat)
+      activeAudio.current?.stop()
       activeAudio.current = null
       if (abort.current === controller) abort.current = null
-      if (live.current) setScene(null)
+      if (live.current) {
+        setScene(null)
+        setBusy(false)
+      }
     }
   }, [channel])
-  return { attempt, scene, error, unlock, pendingEvent: candidate, pending: !!candidate, needsSound: !!candidate && !soundReady, needsVolume: candidate?.playback === 'scheduled' && volume <= 0, busy: !!scene }
+  return { attempt, scene, error, unlock, pendingEvent: candidate, pending: !!candidate, needsSound: !!candidate && !soundReady, needsVolume: candidate?.playback === 'scheduled' && volume <= 0, busy }
 }

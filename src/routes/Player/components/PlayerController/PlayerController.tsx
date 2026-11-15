@@ -202,8 +202,9 @@ const PlayerController = (props: PlayerControllerProps) => {
     advancing.current = true
     const controlVersion = animationRef.current.controlVersion()
     const before = store.getState().player
-    const transitionStartedAt = performance.now()
+    let transitionStartedAt = performance.now()
     let retryHouseSelection = false
+    let retryAfterBirthday = false
     const sourceId = before.queueId
     const historyJSON = appendCompletedToHistory(before.historyJSON, includeCurrentInHistory && sourceId >= 0 ? sourceId : undefined)
     // Replay suppresses announcements for that playback, not the incoming turn.
@@ -219,14 +220,19 @@ const PlayerController = (props: PlayerControllerProps) => {
       const celebration = await birthdayRef.current.attempt(boundary, sourceId)
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       if (celebration === 'waiting') return
-      if (celebration === 'finished') dispatch(playerStatus({ isPlaying: true }))
+      if (celebration === 'finished') {
+        dispatch(playerStatus({ isPlaying: true }))
+        boundary = 'start'
+        announce = true
+        transitionStartedAt = performance.now()
+      }
       const upcoming = selection()
       setPreparingQueueId(upcoming?.source === 'YOUTUBE' ? upcoming.queueId : null)
       const callRequested = (animationRef.current.snapshot?.karaokeCallsEnabled && upcoming?.origin !== 'HOUSE' && upcoming?.requestIntent === 'SING')
         || (animationRef.current.snapshot?.listeningPresentationsEnabled && upcoming?.origin === 'PARTICIPANT' && upcoming?.requestIntent === 'LISTEN')
       const scene: TransitionScene | null = (announce || callRequested) && boundary !== 'idle' && (upcoming || animationRef.current.snapshot?.prefs.enabled)
         && (backgroundRef.current || store.getState().rooms.entities[store.getState().user.roomId]?.prefs?.transitionVideo?.mode === 'all'
-          || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled)
+          || animationRef.current.snapshot?.prefs.enabled || animationRef.current.snapshot?.greetingVoiceEnabled || callRequested)
         ? { id: crypto.randomUUID(), background: backgroundRef.current ?? animationRef.current.snapshot?.ambience?.background ?? null, phase: 'intro' }
         : null
       // Retain the current backdrop before releasing idle ambience or awaiting a new selection.
@@ -270,6 +276,11 @@ const PlayerController = (props: PlayerControllerProps) => {
         await finishTransition()
         const celebration = await birthdayRef.current.attempt(boundary, sourceId)
         if (celebration === 'waiting' || !mounted.current || controlVersion !== animationRef.current.controlVersion()) return
+        if (celebration === 'finished') {
+          dispatch(playerStatus({ isPlaying: true }))
+          retryAfterBirthday = true
+          return
+        }
       }
       // Keep the song whose transition just ran, unless it was cancelled.
       const reserved = upcoming && ensureState(store.getState().queue).entities[upcoming.queueId]
@@ -303,7 +314,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       advancing.current = false
       // A command received during an idle probe must get a fresh transition,
       // including its greeting, after the previous async owner releases it.
-      if (mounted.current && (retryHouseSelection || controlVersion !== animationRef.current.controlVersion())) retryAdvance(value => value + 1)
+      if (mounted.current && (retryHouseSelection || retryAfterBirthday || controlVersion !== animationRef.current.controlVersion())) retryAdvance(value => value + 1)
     }
   }, [dispatch, finishTransition, updateTransition])
 
@@ -536,7 +547,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         width={props.width}
         height={props.height}
       />
-      {birthday.scene && <BirthdayScene key={birthday.scene.grant.event.id} grant={birthday.scene.grant} />}
+      {birthday.scene && <BirthdayScene key={birthday.scene.grant.event.id} grant={birthday.scene.grant} phase={birthday.scene.phase} />}
       {showScene && !birthday.scene && (
         <PlayerTransitionScene
           background={background}

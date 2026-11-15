@@ -7,6 +7,8 @@ import { BirthdayService } from './Service.js'
 import { createBirthday, changeBirthday, eventDTO, getBirthday, publicEvents, saveSettings, settings } from './Store.js'
 import { birthdayIntroText } from '../../shared/birthdays.js'
 import { changeScene } from './scenes.js'
+import { speechProfile } from './personalization.js'
+import { birthdayPreviewName, birthdayPreviewScript } from '../../shared/birthdayPreview.js'
 import Animation, { type Reservation } from '../Animation/Animation.js'
 
 function wave (seconds = 12) {
@@ -29,7 +31,7 @@ function wave (seconds = 12) {
 }
 let directory: string
 let service: BirthdayService
-const script = 'María, hoy la música nos reúne para celebrar contigo. Gracias por compartir este momento con nosotros. Que esta noche esté llena de sonrisas y canciones memorables. ¡Feliz cumpleaños!'
+const script = 'María… hoy la música nos reúne para celebrar contigo. Que esta noche esté llena de sonrisas y momentos memorables. La pizzería Il Gatto se suma con alegría. ¡feliz cumpleaños, María!'
 const write = vi.fn(async () => script)
 const speak = vi.fn(async () => wave())
 const input = { name: 'María', sex: 'female', birthYear: 2000 }
@@ -60,6 +62,96 @@ const prepared = async () => {
   await service.drain()
   return getBirthday(1, row.id)
 }
+
+it('synthesizes a preview of at most45 words without creating an event or changing settings', async () => {
+  const config = settings(1)
+  const text = birthdayPreviewScript(birthdayPreviewName)
+  expect(text.split(/\s+/).length).toBeLessThanOrEqual(45)
+  const resource = await service.audition(1, speechProfile(config), { name: birthdayPreviewName, script: text }, config)
+  expect(resource.script).toBe(text)
+  expect(resource.kind).toBe('greeting')
+  expect(speak).toHaveBeenCalledWith(text, config.defaultVoiceId, expect.any(AbortSignal), speechProfile(config))
+  expect(write).not.toHaveBeenCalled()
+  expect(db.all('SELECT * FROM birthdays')).toEqual([])
+  expect(db.all('SELECT * FROM birthdayIntroUses')).toEqual([])
+  expect(settings(1)).toEqual(config)
+})
+
+it('regenerates only an explicitly requested preview and voices the returned script', async () => {
+  const config = settings(1)
+  const resource = await service.audition(1, speechProfile(config), { name: 'María', regenerate: true }, config)
+  expect(resource.script).toBe(script)
+  expect(write).toHaveBeenCalledWith(expect.objectContaining({ name: 'María', personalizationJSON: expect.any(String) }), expect.objectContaining({ targetSeconds: 22.5 }), expect.any(AbortSignal))
+  expect(speak).toHaveBeenCalledWith(script, config.defaultVoiceId, expect.any(AbortSignal), speechProfile(config))
+  expect(db.all('SELECT * FROM birthdays')).toEqual([])
+})
+
+it('rejects invalid samples before synthesis and rejects invalid generated scripts', async () => {
+  const config = settings(1)
+  const profile = speechProfile(config)
+  await expect(service.audition(1, profile, { name: '', script })).rejects.toThrow()
+  await expect(service.audition(1, profile, { name: 'Carlos', script })).rejects.toThrow()
+  await expect(service.audition(1, profile, { name: 'María', regenerate: 'true' })).rejects.toThrow()
+  expect(write).not.toHaveBeenCalled()
+  expect(speak).not.toHaveBeenCalled()
+  write.mockResolvedValueOnce('Un saludo sin el nombre solicitado.')
+  await expect(service.audition(1, profile, { name: 'María', regenerate: true })).rejects.toThrow()
+  expect(speak).not.toHaveBeenCalled()
+})
+
+it.each([
+  `María… ${'Cariño '.repeat(34)}La pizzería Il Gatto se suma con alegría. ¡feliz cumpleaños, María!`,
+  'María… te deseamos alegría. La pizzería Il Gatto se suma con alegría. ¡Feliz cumpleaños!',
+  'María… te deseamos alegría. La pizzería Il Gatto se suma con alegría. ¡feliz cumpleaños, María! Un abrazo.',
+  'María, te deseamos alegría. La pizzería Il Gatto se suma con alegría. ¡feliz cumpleaños, María!',
+])('rejects a nonconforming generated greeting before spending a speech call', async (text) => {
+  write.mockResolvedValueOnce(text)
+  const row = await prepared()
+  expect(row.preparation).toBe('failed')
+  expect(row.script).toBeNull()
+  expect(speak).not.toHaveBeenCalled()
+})
+
+it('integrates a dedication before the ending without appending it again or selecting history', async () => {
+  const dedication = 'Con cariño, de tus amigos de la mesa 05'
+  const text = `María… hoy celebramos contigo. ${dedication}. La pizzería Il Gatto se suma con alegría. ¡feliz cumpleaños, María!`
+  write.mockResolvedValueOnce(text)
+  const row = createBirthday(1, 'with-dedication', { ...input, birthYear: 1969, dedication })
+  await service.drain()
+  const ready = getBirthday(1, row.id)
+  expect(ready.script).toBe(text)
+  expect(eventDTO(ready).personalization?.reference).toBeNull()
+  expect(eventDTO(ready).personalization?.speech).toEqual(speechProfile(settings(1)))
+  expect(speak).toHaveBeenCalledWith(text, settings(1).defaultVoiceId, expect.any(AbortSignal), speechProfile(settings(1)))
+})
+
+it('rejects impossible full-name budgets before asking either provider to generate', async () => {
+  const row = createBirthday(1, 'impossible-name-budget', { ...input, name: Array(21).fill('A').join(' ') })
+  await service.drain()
+  expect(getBirthday(1, row.id).error).toContain('nombre completo')
+  expect(write).not.toHaveBeenCalled()
+  expect(speak).not.toHaveBeenCalled()
+})
+
+it('keeps old prepared audio but requires the new text contract before explicitly revoicing it', async () => {
+  const row = await prepared()
+  const old = eventDTO(row).assets.find(asset => asset.kind === 'greeting')!
+  const context = { ...eventDTO(row).personalization!, version: 1 }
+  db.run('UPDATE birthdays SET script=?,personalizationJSON=? WHERE id=?', ['María, celebramos contigo esta noche. ¡Feliz cumpleaños!', JSON.stringify(context), row.id])
+  speak.mockClear()
+  const updated = changeBirthday(1, row.id, row.revision, 'revoice')
+  await service.drain()
+  expect(getBirthday(1, updated.id).preparation).toBe('failed')
+  expect(speak).not.toHaveBeenCalled()
+  expect(db.get('SELECT id FROM birthdayAssets WHERE id=?', [old.id])).toEqual({ id: old.id })
+})
+
+it('preserves the existing voice-only audition contract', async () => {
+  const resource = await service.audition(1, speechProfile(settings(1)))
+  expect(resource.script).toContain('¡feliz cumpleaños, Carlos!')
+  expect(write).not.toHaveBeenCalled()
+  expect(speak).toHaveBeenCalledOnce()
+})
 it('persists a held event with no public exposure and deduplicates creation', () => {
   const row = create()
   expect(create().id).toBe(row.id)
@@ -67,6 +159,40 @@ it('persists a held event with no public exposure and deduplicates creation', ()
   expect(publicEvents(1)).toEqual([])
   expect(() => getBirthday(2, row.id)).toThrow('sala')
   expect(() => createBirthday(1, 'birthday-test', { ...input, name: 'Otro' })).toThrow('otros datos')
+})
+
+it('adds an optional bed without regenerating speech or extending the event and keeps its snapshot on revoice', async () => {
+  await fs.writeFile(path.join(directory, 'bed'), 'fixture')
+  db.run('INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES(\'bed\',1,\'bed\',\'Bed\',\'bed\',10000,\'bed-checksum\')')
+  saveSettings(1, { ...settings(1), bedId: 'bed', bedVolume: 0.3 })
+  const row = await prepared()
+  const greetingDuration = eventDTO(row).assets.find(asset => asset.kind === 'greeting')!.durationMs
+  expect(row.durationMs).toBe(greetingDuration + 2000 + 4500)
+  expect(eventDTO(row).bedVolume).toBe(0.3)
+  saveSettings(1, { ...settings(1), bedId: null, bedVolume: 0.8 })
+  const revoiced = changeBirthday(1, row.id, row.revision, 'revoice')
+  expect(JSON.parse(revoiced.settingsJSON)).toMatchObject({ bedId: 'bed', bedVolume: 0.3 })
+  await service.drain()
+  const ready = getBirthday(1, row.id)
+  changeBirthday(1, row.id, ready.revision, 'schedule')
+  const grant = await service.reserve(1, 'player')
+  expect(grant).toMatchObject({ bedVolume: 0.3 })
+  if (!grant || !('assets' in grant)) throw new Error('Missing grant')
+  expect(grant.assets.filter(asset => asset.kind === 'bed')).toHaveLength(1)
+  expect(write).toHaveBeenCalledOnce()
+})
+
+it('continues preparation and playback when only the configured bed file is missing', async () => {
+  db.run('INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES(\'missing-bed\',1,\'bed\',\'Bed\',\'missing-bed\',10000,\'bed-checksum\')')
+  saveSettings(1, { ...settings(1), bedId: 'missing-bed' })
+  const row = await prepared()
+  expect(row.preparation).toBe('ready')
+  changeBirthday(1, row.id, row.revision, 'schedule')
+  const grant = await service.reserve(1, 'player')
+  expect(grant).toMatchObject({ warning: expect.stringContaining('sin acompañamiento') })
+  if (!grant || !('assets' in grant)) throw new Error('Missing grant')
+  expect(grant.assets.filter(asset => asset.kind === 'bed')).toEqual([])
+  expect(getBirthday(1, row.id).playback).toBe('playing')
 })
 
 it('reports stale settings as an HTTP conflict without overwriting the newer configuration', () => {
@@ -109,7 +235,7 @@ it('keeps scene adjustments made while text is being generated without restartin
   expect(ready.preparation).toBe('ready')
   expect(ready.generationRevision).toBe(row.generationRevision)
   expect(eventDTO(ready).assets.find(asset => asset.kind === 'intro')!.id).toBe('alternate')
-  expect(ready.durationMs).toBe(3500 + eventDTO(ready).assets.find(asset => asset.kind === 'greeting')!.durationMs)
+  expect(ready.durationMs).toBe(3500 + 4500 + eventDTO(ready).assets.find(asset => asset.kind === 'greeting')!.durationMs)
   expect(write).toHaveBeenCalledOnce()
   expect(speak).toHaveBeenCalledOnce()
 })
@@ -165,10 +291,17 @@ it('requires complete resources, preserves snapshot choices, and supports withdr
   expect(() => create('missing-media')).toThrow('Seleccione la música')
 })
 it('grants exclusive playback, enforces the full phase order and settles only once', async () => {
+  await fs.writeFile(path.join(directory, 'applause'), 'fixture')
+  db.run(`INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES('applause',1,'applause','Aplauso','applause',3000,'checksum')`)
+  saveSettings(1, { ...settings(1), applauseId: 'applause' })
   const row = await prepared()
+  expect(JSON.parse(row.settingsJSON).applauseId).toBe('applause')
+  expect(row.durationMs).toBe(eventDTO(row).assets.find(asset => asset.kind === 'greeting')!.durationMs + 2000 + 4500 + 3000)
   changeBirthday(1, row.id, row.revision, 'schedule')
   const grant = await service.reserve(1, 'player')
   if (!grant || !('token' in grant)) throw new Error('Missing grant')
+  expect(grant.event.phase).toBe('prelude')
+  expect(() => service.progress(1, 'player', row.id, grant.token, 'phase', 'intro')).toThrow('todavía no terminó')
   const identity = { roomId: 1, userId: 1, socketId: 'player' }
   expect(Animation.reserveGreeting(identity, 7, [], 1000, 1000, 'Otro anuncio')).toBeNull()
   expect(Animation.reserveAmbience(identity, 1, { isAtQueueEnd: true })).toBeNull()
@@ -176,15 +309,50 @@ it('grants exclusive playback, enforces the full phase order and settles only on
   expect(() => Animation.reserve(identity, {} as Reservation, {})).toThrow('cumpleaños')
   await expect(service.reserve(1, 'second-player')).rejects.toThrow('Otro reproductor')
   expect(() => service.progress(1, 'player', row.id, grant.token, 'finish')).toThrow()
-  for (const phase of ['greeting', 'music'] as const) {
+  for (const phase of ['intro', 'greeting', 'bridge', 'music', 'applause'] as const) {
     db.run('UPDATE birthdays SET phaseStartedAt=? WHERE id=?', [Date.now() - 60000, row.id])
     service.progress(1, 'player', row.id, grant.token, 'phase', phase)
   }
+  expect(() => service.progress(1, 'player', row.id, grant.token, 'finish')).toThrow('todavía no terminó')
   db.run('UPDATE birthdays SET phaseStartedAt=? WHERE id=?', [Date.now() - 60000, row.id])
   service.progress(1, 'player', row.id, grant.token, 'finish')
   service.progress(1, 'player', row.id, grant.token, 'finish')
   expect(getBirthday(1, row.id).playback).toBe('completed')
   expect(publicEvents(1)).toEqual([])
+})
+it('finishes without blocking the queue when optional applause is unavailable', async () => {
+  db.run(`INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES('missing-applause',1,'applause','Missing applause','missing.mp3',3000,'checksum')`)
+  saveSettings(1, { ...settings(1), applauseId: 'missing-applause' })
+  const row = await prepared()
+  changeBirthday(1, row.id, row.revision, 'schedule')
+  const grant = await service.reserve(1, 'player')
+  if (!grant || !('token' in grant)) throw new Error('Missing grant')
+  expect(grant.warning).toContain('aplauso')
+  expect(grant.assets.some(asset => asset.kind === 'applause')).toBe(false)
+  expect(() => service.progress(1, 'player', row.id, grant.token, 'skipApplause')).toThrow()
+  for (const phase of ['intro', 'greeting', 'bridge', 'music', 'applause'] as const) {
+    db.run('UPDATE birthdays SET phaseStartedAt=? WHERE id=?', [Date.now() - 60000, row.id])
+    service.progress(1, 'player', row.id, grant.token, 'phase', phase)
+  }
+  service.progress(1, 'player', row.id, grant.token, 'skipApplause')
+  expect(getBirthday(1, row.id).playback).toBe('completed')
+})
+it('limits dedicated applause to ten seconds without borrowing animator resources', async () => {
+  await expect(service.upload(1, 'applause', 'Too long', wave(11))).rejects.toThrow()
+  const media = await service.upload(1, 'applause', 'Birthday applause', wave(3))
+  expect(media.kind).toBe('applause')
+  expect(media.durationMs).toBeLessThanOrEqual(3100)
+})
+it('reserves older snapshots on their original three-stage choreography', async () => {
+  const row = await prepared()
+  const snapshot = JSON.parse(row.settingsJSON)
+  delete snapshot.choreographyVersion
+  db.run('UPDATE birthdays SET settingsJSON=?,durationMs=durationMs-4500 WHERE id=?', [JSON.stringify(snapshot), row.id])
+  changeBirthday(1, row.id, row.revision, 'schedule')
+  const grant = await service.reserve(1, 'player')
+  if (!grant || !('token' in grant)) throw new Error('Missing grant')
+  expect(grant.choreographyVersion).toBeUndefined()
+  expect(grant.event.phase).toBe('intro')
 })
 it('missing media releases the scheduled slot with a visible recoverable error', async () => {
   const row = await prepared()

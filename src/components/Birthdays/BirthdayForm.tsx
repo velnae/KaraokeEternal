@@ -46,7 +46,7 @@ export default function BirthdayForm ({ event, profiles = [], onClose, onSaved }
             </select>
           </label>
           <label>
-            Perfil de voz
+            Perfil de redacción
             <select value={input.profileId ?? ''} onChange={e => setInput({ ...input, profileId: e.target.value })}>
               <option value=''>Automático según la persona</option>
               {profiles.filter(profile => profile.id).map(profile => <option key={profile.id} value={profile.id}>{profile.title || profile.id}</option>)}

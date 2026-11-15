@@ -10,6 +10,8 @@ export default function BirthdayEventSceneEditor ({ event, assets, onClose, onSa
   const video = event.assets.find(asset => asset.kind === 'video')!
   const [introId, setIntroId] = useState(intro.id)
   const [videoId, setVideoId] = useState(video.id)
+  const [bedId, setBedId] = useState(event.assets.find(asset => asset.kind === 'bed')?.id ?? '')
+  const [bedVolume, setBedVolume] = useState(event.bedVolume ?? 0.2)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const options = [...new Map([...event.assets, ...assets].map(asset => [asset.id, asset])).values()]
@@ -18,7 +20,7 @@ export default function BirthdayEventSceneEditor ({ event, assets, onClose, onSa
     setBusy(true)
     setError('')
     try {
-      await birthdayApi.put(`events/${event.id}/scene`, { body: { revision: event.revision, ...(automatic ? { automatic: true } : { ...(introId !== intro.id ? { introId } : {}), ...(videoId !== video.id ? { videoId } : {}) }) } })
+      await birthdayApi.put(`events/${event.id}/scene`, { body: { revision: event.revision, ...(automatic ? { automatic: true } : { ...(introId !== intro.id ? { introId } : {}), ...(videoId !== video.id ? { videoId } : {}), bedId: bedId || null, bedVolume }) } })
       onSaved()
       onClose()
     } catch (failure) {
@@ -37,6 +39,17 @@ export default function BirthdayEventSceneEditor ({ event, assets, onClose, onSa
         <label>
           Introducción
           <select value={introId} disabled={busy} onChange={change => setIntroId(change.target.value)}>{options.filter(asset => asset.kind === 'intro').map(asset => <option key={asset.id} value={asset.id}>{asset.title}</option>)}</select>
+        </label>
+        <label>
+          Audio de fondo
+          <select value={bedId} disabled={busy} onChange={change => setBedId(change.target.value)}>
+            <option value=''>Sin fondo</option>
+            {options.filter(asset => asset.kind === 'bed').map(asset => <option key={asset.id} value={asset.id}>{asset.title}</option>)}
+          </select>
+        </label>
+        <label>
+          Volumen del fondo (%)
+          <input type='number' min={0} max={100} value={Math.round(bedVolume * 100)} disabled={busy} onChange={change => setBedVolume(change.target.valueAsNumber / 100)} />
         </label>
         <label>
           Video

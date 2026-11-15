@@ -8,18 +8,22 @@ import { createElevenLabs, createGemini } from '../AudioProviders/index.js'
 import { elevenLabsConfig } from '../AudioProviders/config.js'
 import { prepareAudio } from '../Animation/AudioPreparation.js'
 import { getTransitionVideoService } from '../TransitionVideo/Service.js'
+import { prepareTransitionVideo } from '../TransitionVideo/Preparation.js'
 import Prefs from '../Prefs/Prefs.js'
-import { birthdayPrompt, completeBirthdayScript, readPersonalization, speechProfile, validateCompleteScript } from './personalization.js'
+import { birthdayPrompt, completeBirthdayScript, contextInput, readPersonalization, selectPersonalization, speechProfile, validateCompleteScript } from './personalization.js'
 import { speakGeminiBirthday } from './gemini.js'
 import { recordBirthdayIntro } from './scenes.js'
+import { validateBirthdaySample } from '../../shared/birthdayPreview.js'
+import { birthdayPreviewName, birthdayPreviewScript } from '../../shared/birthdayPreview.js'
+import { validateBirthdayGreeting, validateBirthdayNameBudget } from '../../shared/birthdayGreeting.js'
 import {
-  BIRTHDAY_STATE, birthdayIntroText, birthdayLimits, birthdayPhases, publicBirthday,
+  BIRTHDAY_STATE, birthdayIntroText, birthdayLimits, birthdayTimeline, celebrationYear, publicBirthday,
   type BirthdayGrant, type BirthdaySettings, type BirthdayPhase, type BirthdaySpeech,
 } from '../../shared/birthdays.js'
 import { asset, assetDTO, eventAssets, getBirthday, publicEvents, settings, type BirthdayRow } from './Store.js'
 
 export interface BirthdayProviders {
-  write(row: BirthdayRow, config: BirthdaySettings, signal: AbortSignal): Promise<string>
+  write(row: Pick<BirthdayRow, 'name' | 'birthYear' | 'celebrationYear' | 'personalizationJSON'>, config: BirthdaySettings, signal: AbortSignal): Promise<string>
   speak(text: string, voiceId: string, signal: AbortSignal, profile?: BirthdaySpeech): Promise<Buffer>
 }
 export function birthdayProviders (): BirthdayProviders {
@@ -31,7 +35,7 @@ export function birthdayProviders (): BirthdayProviders {
       const text = await createGemini().generateText(config.textModel, {
         systemInstruction: { parts: [{ text: birthdayPrompt(context, config.targetSeconds ?? 25, Prefs.get().branding.name || 'Il Gatto') }] },
         contents: [{ role: 'user', parts: [{ text: JSON.stringify({ name: row.name, age: row.celebrationYear - row.birthYear, targetSeconds: config.targetSeconds ?? 25,
-          dedication: context?.dedication, reference: context?.reference, recentOpenings: context?.recentOpenings }) }] }],
+          dedication: context?.dedication, recentOpenings: context?.recentOpenings }) }] }],
         generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'OBJECT', properties: { script: { type: 'STRING' } }, required: ['script'] } },
       }, signal)
       return JSON.parse(text || '{}').script
@@ -106,9 +110,15 @@ export class BirthdayService {
       }
       try {
         const config: BirthdaySettings = JSON.parse(current.settingsJSON)
-        const context = readPersonalization(current)
+        let context = readPersonalization(current)
         let script = current.script
         if (!script) {
+          validateBirthdayNameBudget(current.name)
+          if (context?.version !== 3) {
+            context = { ...selectPersonalization(config, contextInput(current, context), current.celebrationYear, current.generationRevision, []), speech: context?.speech ?? speechProfile({ ...config, speechProvider: 'elevenlabs' }, current.voiceId) }
+            current.personalizationJSON = JSON.stringify(context)
+            if (!update('personalizationJSON=?', [current.personalizationJSON])) continue
+          }
           update('preparation=\'writing\'')
           this.publish(current.roomId)
           script = completeBirthdayScript(await this.providers.write(current, config, this.abort.signal), current.name, context)
@@ -117,6 +127,7 @@ export class BirthdayService {
         validateCompleteScript(script, current.name, context)
         let greeting = current.greetingId && asset(current.roomId, current.greetingId)
         if (!greeting) {
+          validateBirthdayGreeting(script, current.name, context?.dedication)
           update('preparation=\'voicing\'')
           this.publish(current.roomId)
           const profile = context?.speech ?? speechProfile({ ...config, speechProvider: 'elevenlabs' }, current.voiceId)
@@ -127,11 +138,12 @@ export class BirthdayService {
           greeting = await this.upload(current.roomId, 'greeting', `Saludo de ${current.name}`, bytes, (config.maxVoiceSeconds ?? 60) * 1000)
           if (!update('greetingId=?', [greeting.id])) continue
         }
-        const assets = eventAssets(getBirthday(current.roomId, current.id))
+        const allAssets = eventAssets(getBirthday(current.roomId, current.id))
+        const assets = allAssets.filter(item => !['bed', 'applause'].includes(item.kind))
         if (assets.length !== 4) throw new Error('Complete los recursos en Ajustes → Cumpleaños y reintente.')
         if (greeting.durationMs > (config.maxVoiceSeconds ?? 60) * 1000) throw new Error('El saludo supera la duración configurada. Genere otra versión.')
         await Promise.all(assets.map(item => fs.access(path.join(this.directory, item.filename))))
-        update('preparation=\'ready\',durationMs=?,error=NULL', [assets.filter(item => item.kind !== 'video').reduce((sum, item) => sum + item.durationMs, 0)])
+        update('preparation=\'ready\',durationMs=?,error=NULL', [birthdayTimeline(allAssets.map(assetDTO), config.choreographyVersion).reduce((sum, step) => sum + step.durationMs, 0)])
       } catch (error) {
         const message = error instanceof Error && !['SyntaxError', 'TypeError', 'AbortError'].includes(error.name) ? error.message : 'No se pudo confirmar la preparación. Revise y reintente.'
         update('preparation=\'failed\',playback=CASE WHEN playback=\'scheduled\' THEN \'held\' ELSE playback END,error=?', [message])
@@ -140,11 +152,11 @@ export class BirthdayService {
     }
   }
 
-  async upload (roomId: number, kind: 'intro' | 'music' | 'greeting', title: string, bytes: Buffer, greetingLimit = birthdayLimits.voiceMs) {
+  async upload (roomId: number, kind: 'intro' | 'music' | 'greeting' | 'bed' | 'applause', title: string, bytes: Buffer, greetingLimit = birthdayLimits.voiceMs) {
     const id = randomUUID()
     const media = await prepareAudio(this.directory, id, 'voice', bytes,
       process.env.KES_FFMPEG_PATH || 'ffmpeg', this.abort.signal, undefined,
-      { durationMs: kind === 'music' ? birthdayLimits.musicMs : kind === 'intro' ? birthdayLimits.introMs : Math.min(greetingLimit, birthdayLimits.voiceMs) })
+      { durationMs: kind === 'music' ? birthdayLimits.musicMs : kind === 'intro' ? birthdayLimits.introMs : kind === 'bed' ? birthdayLimits.bedMs : kind === 'applause' ? birthdayLimits.applauseMs : Math.min(greetingLimit, birthdayLimits.voiceMs) })
     this.abort.signal.throwIfAborted()
     db.run('INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES(?,?,?,?,?,?,?)', [id, roomId, kind, title.slice(0, 100), media.filename, media.durationMs, media.checksum])
     return asset(roomId, id)!
@@ -158,9 +170,22 @@ export class BirthdayService {
     return asset(roomId, resource.id)!
   }
 
-  async audition (roomId: number, profile: BirthdaySpeech) {
-    const text = '¡Feliz cumpleaños! Que esta noche en Il Gatto esté llena de música, sonrisas y momentos para recordar.'
-    return this.upload(roomId, 'greeting', 'Prueba de voz', await this.providers.speak(text, profile.voice, this.abort.signal, profile))
+  async audition (roomId: number, profile: BirthdaySpeech, sample?: unknown, config = settings(roomId)) {
+    let name = birthdayPreviewName
+    let text = birthdayPreviewScript(birthdayPreviewName)
+    if (sample !== undefined) {
+      const input = validateBirthdaySample(sample)
+      name = input.name
+      const year = celebrationYear()
+      const context = selectPersonalization(config, { name: input.name, sex: 'unspecified', birthYear: year - 30, profileId: input.profileId }, year, 0, [])
+      text = input.regenerate
+        ? completeBirthdayScript(await this.providers.write({ name: input.name, birthYear: year - 30, celebrationYear: year, personalizationJSON: JSON.stringify(context) }, { ...config, targetSeconds: 22.5 }, this.abort.signal), input.name, context)
+        : input.script
+    }
+    validateBirthdayGreeting(text, name)
+    const resource = await this.upload(roomId, 'greeting', 'Prueba de voz', await this.providers.speak(text, profile.voice, this.abort.signal, profile), config.maxVoiceSeconds * 1000)
+    db.run('UPDATE birthdayAssets SET script=? WHERE id=?', [text, resource.id])
+    return asset(roomId, resource.id)!
   }
 
   async copyVideo (roomId: number, id: string) {
@@ -176,15 +201,35 @@ export class BirthdayService {
     } finally { lease.release() }
   }
 
+  async uploadVideo (roomId: number, title: string, source: string) {
+    const id = randomUUID()
+    const staging = await fs.mkdtemp(path.join(this.directory, '.video-'))
+    const filename = `${id}.mp4`
+    const destination = path.join(this.directory, filename)
+    try {
+      await fs.copyFile(source, path.join(staging, 'source.mp4'))
+      const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(180000)])
+      const media = await prepareTransitionVideo(staging, { ffmpeg: process.env.KES_FFMPEG_PATH || 'ffmpeg', ffprobe: process.env.KES_FFPROBE_PATH || 'ffprobe' }, signal, birthdayLimits.videoMs)
+      signal.throwIfAborted()
+      await fs.rename(path.join(staging, 'video.mp4'), destination)
+      db.run('INSERT INTO birthdayAssets(id,roomId,kind,title,filename,durationMs,checksum) VALUES(?,?,\'video\',?,?,?,?)', [id, roomId, title.slice(0, 100), filename, media.durationMs, media.checksum])
+      return asset(roomId, id)!
+    } catch (error) {
+      await fs.rm(destination, { force: true })
+      throw error
+    } finally { await fs.rm(staging, { recursive: true, force: true }) }
+  }
+
   async reserve (roomId: number, ownerSocketId: string): Promise<BirthdayGrant | { waiting: true } | null> {
     const row = db.get<BirthdayRow>('SELECT * FROM birthdays WHERE roomId=? AND playback IN (\'scheduled\',\'playing\')', [roomId])
     if (!row) return null
     if (row.playback === 'playing') {
       if (row.ownerSocketId !== ownerSocketId) throw new Error('Otro reproductor tiene el cumpleaños reservado.')
-      return { event: publicBirthday(row), assets: eventAssets(row).map(assetDTO), token: row.token!, remainingMs: Math.max(0, row.leaseUntil! - Date.now()) }
+      return { event: publicBirthday(row), ...await this.playbackAssets(row), token: row.token!, remainingMs: Math.max(0, row.leaseUntil! - Date.now()) }
     }
     if (row.preparation !== 'ready') return { waiting: true }
-    const assets = eventAssets(row)
+    const media = await this.playbackAssets(row)
+    const assets = eventAssets(row).filter(item => !['bed', 'applause'].includes(item.kind))
     try {
       if (assets.length !== 4) throw new Error('Missing assets')
       await Promise.all(assets.map(item => fs.access(path.join(this.directory, item.filename))))
@@ -195,14 +240,34 @@ export class BirthdayService {
     }
     const token = randomUUID()
     const now = Date.now()
-    const changed = db.run('UPDATE birthdays SET playback=\'playing\',phase=\'intro\',startedAt=?,phaseStartedAt=?,token=?,ownerSocketId=?,leaseUntil=?,error=NULL,revision=revision+1 WHERE id=? AND playback=\'scheduled\' AND revision=?',
-      [now, now, token, ownerSocketId, now + 15000, row.id, row.revision]).changes
+    const firstPhase = JSON.parse(row.settingsJSON).choreographyVersion ? 'prelude' : 'intro'
+    const changed = db.run('UPDATE birthdays SET playback=\'playing\',phase=?,startedAt=?,phaseStartedAt=?,token=?,ownerSocketId=?,leaseUntil=?,error=NULL,revision=revision+1 WHERE id=? AND playback=\'scheduled\' AND revision=?',
+      [firstPhase, now, now, token, ownerSocketId, now + 15000, row.id, row.revision]).changes
     if (!changed) return null
     this.publish(roomId)
-    return { event: publicBirthday(getBirthday(roomId, row.id)), assets: assets.map(assetDTO), token, remainingMs: Math.max(0, now + 15000 - Date.now()) }
+    return { event: publicBirthday(getBirthday(roomId, row.id)), ...media, token, remainingMs: Math.max(0, now + 15000 - Date.now()) }
   }
 
-  progress (roomId: number, owner: string, id: string, token: string, operation: 'heartbeat' | 'phase' | 'finish' | 'interrupt' | 'introStarted', phase?: BirthdayPhase) {
+  private async playbackAssets (row: BirthdayRow) {
+    const config: BirthdaySettings = JSON.parse(row.settingsJSON)
+    const assets = eventAssets(row)
+    const unavailable = new Set<string>()
+    const warnings: string[] = []
+    for (const [kind, id] of [['bed', config.bedId], ['applause', config.applauseId]] as const) {
+      if (!id) continue
+      try {
+        const media = assets.find(item => item.kind === kind)
+        if (!media) throw new Error('Missing optional asset')
+        await fs.access(path.join(this.directory, media.filename))
+      } catch {
+        unavailable.add(kind)
+        warnings.push(kind === 'bed' ? 'El audio de fondo no está disponible. La celebración continúa sin acompañamiento.' : 'El aplauso no está disponible. La celebración continúa sin ese efecto.')
+      }
+    }
+    return { assets: assets.filter(item => !unavailable.has(item.kind)).map(assetDTO), bedVolume: config.bedVolume ?? 0.2, choreographyVersion: config.choreographyVersion, ...(warnings.length ? { warning: warnings.join(' ') } : {}) }
+  }
+
+  progress (roomId: number, owner: string, id: string, token: string, operation: 'heartbeat' | 'phase' | 'finish' | 'interrupt' | 'introStarted' | 'skipApplause', phase?: BirthdayPhase) {
     const row = getBirthday(roomId, id)
     if (row.token !== token || row.ownerSocketId !== owner) throw new Error('La reserva del cumpleaños ya no es válida.')
     if (operation === 'introStarted') {
@@ -218,10 +283,16 @@ export class BirthdayService {
       return
     }
     if (operation === 'phase' && phase === row.phase) return
-    const order = birthdayPhases
-    const duration = eventAssets(row).find(item => item.kind === row.phase)?.durationMs ?? 0
+    if (operation === 'skipApplause' && row.phase === 'applause') {
+      db.run('UPDATE birthdays SET playback=\'completed\',phase=NULL,leaseUntil=NULL,error=\'El aplauso no pudo reproducirse. La celebración finalizó.\',revision=revision+1 WHERE id=?', [id])
+      this.publish(roomId)
+      return
+    }
+    const steps = birthdayTimeline(eventAssets(row).map(assetDTO), JSON.parse(row.settingsJSON).choreographyVersion)
+    const order = steps.map(step => step.phase)
+    const duration = steps.find(step => step.phase === row.phase)?.durationMs ?? 0
     if (Date.now() - row.phaseStartedAt! < duration - 500) throw new Error('El audio de esta etapa todavía no terminó.')
-    if (operation === 'finish' && row.phase === 'music') db.run('UPDATE birthdays SET playback=\'completed\',phase=NULL,leaseUntil=NULL,revision=revision+1 WHERE id=?', [id])
+    if (operation === 'finish' && row.phase === order.at(-1)) db.run('UPDATE birthdays SET playback=\'completed\',phase=NULL,leaseUntil=NULL,revision=revision+1 WHERE id=?', [id])
     else if (operation === 'phase' && phase === order[order.indexOf(row.phase!) + 1]) db.run('UPDATE birthdays SET phase=?,phaseStartedAt=? WHERE id=?', [phase, Date.now(), id])
     else throw new Error('La secuencia del cumpleaños no es válida.')
     this.publish(roomId)

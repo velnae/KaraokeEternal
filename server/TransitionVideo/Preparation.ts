@@ -10,7 +10,7 @@ import type { PreparedTransitionVideo } from './Store.js'
 const run = promisify(execFile)
 export interface VideoTools { ffmpeg: string, ffprobe: string }
 export class VideoPreparationError extends Error {}
-const exportGuidance = 'Exporte un MP4 H.264 de 8 bits (yuv420p), hasta 1080p, 30 fps y 30 segundos.'
+const exportGuidance = (durationMs: number) => `Exporte un MP4 H.264 de 8 bits (yuv420p), hasta 1080p, 30 fps y ${durationMs / 1000} segundos.`
 const inputOptions = ['-protocol_whitelist', 'file,pipe', '-f', 'mov', '-enable_drefs', '0', '-use_absolute_path', '0']
 interface Probe {
   format?: { format_name?: string, duration?: string, tags?: { major_brand?: string } }
@@ -39,40 +39,40 @@ async function probeVideo (file: string, tools: VideoTools, signal: AbortSignal)
   return JSON.parse(result.stdout)
 }
 
-function validateVideo (probe: Probe) {
+function validateVideo (probe: Probe, maxDurationMs: number) {
   const video = probe.streams?.find(stream => stream.codec_type === 'video')
   const brand = probe.format?.tags?.major_brand?.trim()
   if (!probe.format?.format_name?.split(',').includes('mp4') || !brand || !['isom', 'iso2', 'iso3', 'iso4', 'iso5', 'iso6', 'iso7', 'iso8', 'iso9', 'mp41', 'mp42', 'avc1', 'M4V'].includes(brand)
     || !video || video.codec_name !== 'h264' || video.pix_fmt !== 'yuv420p' || video.disposition?.attached_pic
     || !['Baseline', 'Constrained Baseline', 'Main', 'High'].includes(video.profile ?? '')
-    || !Number.isFinite(video.level) || video.level! <= 0 || video.level! > 41) throw new VideoPreparationError(exportGuidance)
+    || !Number.isFinite(video.level) || video.level! <= 0 || video.level! > 41) throw new VideoPreparationError(exportGuidance(maxDurationMs))
   const duration = Math.max(Number(probe.format.duration), Number(video.duration ?? probe.format.duration))
   const fps = Math.max(frameRate(video.avg_frame_rate), frameRate(video.r_frame_rate))
-  if (Number.isFinite(duration) && duration > limits.durationMs / 1000) {
-    throw new VideoPreparationError(`El video dura ${duration.toFixed(3)} s; el máximo es ${limits.durationMs / 1000} s. Recorte el archivo antes de subirlo.`)
+  if (Number.isFinite(duration) && duration > maxDurationMs / 1000) {
+    throw new VideoPreparationError(`El video dura ${duration.toFixed(3)} s; el máximo es ${maxDurationMs / 1000} s. Recorte el archivo antes de subirlo.`)
   }
   if (!Number.isFinite(duration) || duration <= 0
     || !Number.isInteger(video.width) || video.width! <= 0 || video.width! > limits.width
     || !Number.isInteger(video.height) || video.height! <= 0 || video.height! > limits.height
-    || !Number.isFinite(fps) || fps <= 0 || fps > limits.frameRate) throw new VideoPreparationError(exportGuidance)
+    || !Number.isFinite(fps) || fps <= 0 || fps > limits.frameRate) throw new VideoPreparationError(exportGuidance(maxDurationMs))
   return { durationMs: Math.ceil(duration * 1000), width: video.width!, height: video.height!, frameRate: fps }
 }
 
 // All work stays in a per-attempt staging directory. The service publishes both
 // outputs before changing readiness; remuxing never silently trims or transcodes.
-export async function prepareTransitionVideo (directory: string, tools: VideoTools, signal: AbortSignal): Promise<PreparedTransitionVideo> {
+export async function prepareTransitionVideo (directory: string, tools: VideoTools, signal: AbortSignal, maxDurationMs: number = limits.durationMs): Promise<PreparedTransitionVideo> {
   const source = path.join(directory, 'source.mp4')
   const output = path.join(directory, 'video.mp4')
   const poster = path.join(directory, 'poster.jpg')
   const sourceSize = (await fs.stat(source)).size
   if (!sourceSize || sourceSize > limits.size) throw new VideoPreparationError('Seleccione un video de hasta 40 MiB.')
   try {
-    validateVideo(await probeVideo(source, tools, signal))
-    const options = { signal, timeout: 30_000, killSignal: 'SIGKILL' as const, maxBuffer: 256 * 1024 }
+    validateVideo(await probeVideo(source, tools, signal), maxDurationMs)
+    const options = { signal, timeout: Math.max(30_000, maxDurationMs), killSignal: 'SIGKILL' as const, maxBuffer: 256 * 1024 }
     await run(tools.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', ...inputOptions, '-i', source,
       '-map', '0:v:0', '-c:v', 'copy', '-tag:v', 'avc1', '-an', '-sn', '-dn', '-map_metadata', '-1', '-map_chapters', '-1', '-movflags', '+faststart', output], options)
     const prepared = await probeVideo(output, tools, signal)
-    const media = validateVideo(prepared)
+    const media = validateVideo(prepared, maxDurationMs)
     if (prepared.streams?.length !== 1) throw new VideoPreparationError('No se pudo retirar el sonido del video.')
     const size = (await fs.stat(output)).size
     if (!size || size > limits.size) throw new VideoPreparationError('El video preparado supera los 40 MiB.')
@@ -80,7 +80,7 @@ export async function prepareTransitionVideo (directory: string, tools: VideoToo
     const decoded = await run(tools.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-xerror', '-err_detect', 'explode',
       ...inputOptions, '-threads', '2', '-i', output, '-map', '0:v:0', '-an', '-sn', '-dn', '-progress', 'pipe:1', '-nostats', '-f', 'null', '-'], options)
     const times = [...decoded.stdout.matchAll(/^out_time_us=(\d+)/gm)].map(match => Number(match[1]))
-    if (!times.length || Math.max(...times) <= 0 || Math.max(...times) > limits.durationMs * 1000) throw new VideoPreparationError(exportGuidance)
+    if (!times.length || Math.max(...times) <= 0 || Math.max(...times) > maxDurationMs * 1000) throw new VideoPreparationError(exportGuidance(maxDurationMs))
     await run(tools.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', ...inputOptions, '-threads', '2', '-i', output,
       '-frames:v', '1', '-vf', 'scale=640:360:force_original_aspect_ratio=decrease', '-threads', '2', '-q:v', '3', '-update', '1', poster], options)
     const image = await fs.readFile(poster)
@@ -90,6 +90,6 @@ export async function prepareTransitionVideo (directory: string, tools: VideoToo
     return { ...media, size, checksum: hash.digest('hex') }
   } catch (error) {
     if (signal.aborted || error instanceof VideoPreparationError) throw error
-    throw new VideoPreparationError(`No se pudo leer o decodificar el video. ${exportGuidance}`)
+    throw new VideoPreparationError(`No se pudo leer o decodificar el video. ${exportGuidance(maxDurationMs)}`)
   }
 }
