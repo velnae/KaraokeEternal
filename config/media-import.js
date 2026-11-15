@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { youtubeVideoId } from '../shared/youtubeSearch.ts'
 import { clipDurationLimit, normalizeEffectType } from '../shared/animation.ts'
 import { TRANSITION_VIDEO_LIMITS } from '../shared/transitionVideo.ts'
+import { KARAOKE_BACKGROUND_AUDIO_MS, KARAOKE_BACKGROUND_VIDEO_MS } from '../shared/karaokeBackgrounds.ts'
 
 const exec = promisify(execFile)
 export const root = path.resolve(import.meta.dirname, '../.atl/media-imports')
@@ -58,16 +59,16 @@ export function normalizeManifest (input) {
     if (!id) throw new Error('Use a YouTube video URL, not a playlist or another host.')
     value.url = `https://www.youtube.com/watch?v=${id}`
   } else value.sourceFile = path.resolve(input.sourceFile)
-  if (!['file', 'audio', 'background', 'library'].includes(value.destination)) throw new Error('Choose file, audio, background or library.')
+  if (!['file', 'audio', 'background', 'karaoke-background', 'karaoke-audio', 'library'].includes(value.destination)) throw new Error('Choose file, audio, background, karaoke-background, karaoke-audio or library.')
   if (typeof value.title !== 'string' || !value.title.trim() || value.title.length > 120) throw new Error('Provide a title of up to 120 characters.')
   if (input.end !== undefined) {
     value.end = seconds(input.end)
     if (value.end <= value.start) throw new Error('End must be greater than start.')
   }
   if (!value.metadata || typeof value.metadata !== 'object' || Array.isArray(value.metadata)) throw new Error('Metadata must be an object.')
-  value.format = input.format ?? (value.destination === 'audio' ? 'mp3' : 'mp4')
-  if (!['mp3', 'mp4'].includes(value.format) || (value.destination === 'audio' && value.format !== 'mp3')
-    || (['background', 'library'].includes(value.destination) && value.format !== 'mp4')) throw new Error('Use MP3 for audio and MP4 for backgrounds/library (standalone MP3 needs CDG in the library).')
+  value.format = input.format ?? (['audio', 'karaoke-audio'].includes(value.destination) ? 'mp3' : 'mp4')
+  if (!['mp3', 'mp4'].includes(value.format) || (['audio', 'karaoke-audio'].includes(value.destination) && value.format !== 'mp3')
+    || (['background', 'karaoke-background', 'library'].includes(value.destination) && value.format !== 'mp4')) throw new Error('Use MP3 for audio and MP4 for backgrounds/library (standalone MP3 needs CDG in the library).')
   if (value.destination === 'audio') {
     if (!['voice', 'effect', 'ambience'].includes(value.kind)) throw new Error('Choose voice, effect or ambience.')
     normalizeEffectType(value.kind, value.metadata.effectType)
@@ -91,6 +92,8 @@ export function normalizeManifest (input) {
 function durationLimit (manifest) {
   if (manifest.destination === 'audio') return clipDurationLimit(manifest.kind, manifest.metadata.effectType) / 1000
   if (manifest.destination === 'background') return TRANSITION_VIDEO_LIMITS.durationMs / 1000
+  if (manifest.destination === 'karaoke-background') return KARAOKE_BACKGROUND_VIDEO_MS / 1000
+  if (manifest.destination === 'karaoke-audio') return KARAOKE_BACKGROUND_AUDIO_MS / 1000
   return 7200
 }
 
@@ -162,7 +165,12 @@ export async function prepare (input, directory = root) {
     if (manifest.format === 'mp3') args.push('-map', '0:a:0', '-vn', '-c:a', 'libmp3lame', '-b:a', '192k')
     else {
       args.push('-map', '0:v:0', '-vf', 'scale=w=\'min(1920,iw)\':h=\'min(1080,ih)\':force_original_aspect_ratio=decrease:force_divisible_by=2', '-r', '30', '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2')
-      if (manifest.destination === 'background') args.push('-an')
+      if (manifest.destination === 'karaoke-background') {
+        // Preserve the requested interval while budgeting for the 40 MiB cap.
+        const bitrate = Math.min(2500, Math.floor(TRANSITION_VIDEO_LIMITS.size * 8 * 0.9 / duration / 1000))
+        args.push('-maxrate', `${bitrate}k`, '-bufsize', `${bitrate * 2}k`)
+      }
+      if (['background', 'karaoke-background'].includes(manifest.destination)) args.push('-an')
       else args.push('-map', '0:a:0?', '-c:a', 'aac', '-b:a', '192k')
       args.push('-movflags', '+faststart')
     }
@@ -172,7 +180,7 @@ export async function prepare (input, directory = root) {
     try {
       await run(process.env.KES_FFMPEG_PATH || 'ffmpeg', args)
       const info = await probe(temporary)
-      const sizeLimit = manifest.destination === 'audio' ? 20 * 1024 * 1024 : manifest.destination === 'background' ? TRANSITION_VIDEO_LIMITS.size : 2 * 1024 ** 3
+      const sizeLimit = ['audio', 'karaoke-audio'].includes(manifest.destination) ? 20 * 1024 * 1024 : ['background', 'karaoke-background'].includes(manifest.destination) ? TRANSITION_VIDEO_LIMITS.size : 2 * 1024 ** 3
       if (info.duration > durationLimit(manifest) || Math.abs(info.duration - duration) > 0.2 || info.size > sizeLimit) throw new Error('Encoded media exceeds the duration/size limit; choose a shorter range (leave room for encoder padding).')
       await fs.rename(temporary, file)
       const receipt = { version: 1, id, manifest, source: downloaded.source, file, checksum: await checksum(file), duration: info.duration, size: info.size, status: 'prepared' }

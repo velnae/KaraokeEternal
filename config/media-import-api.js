@@ -61,8 +61,16 @@ export async function upload (receiptPath, { storageState = process.env.KARAOKE_
       }
 
       const audio = manifest.destination === 'audio'
+      const karaokeAudio = manifest.destination === 'karaoke-audio'
+      const karaoke = manifest.destination === 'karaoke-background' || karaokeAudio
       const requestId = `youtube-${receipt.id}`
-      const route = audio ? 'animation/resources' : 'animation/background'
+      const route = karaoke ? `rooms/${manifest.roomId}/karaoke-calls/backgrounds` : audio ? 'animation/resources' : 'animation/background'
+      const karaokeResource = async () => {
+        const overview = await call(route)
+        const resource = overview.assets.find(asset => asset.id === receipt.resourceId)
+        if (!resource) throw new Error('The saved Karaoke resource is no longer available. Inspect the receipt before retrying.')
+        return resource
+      }
       let resource
       if (audio) {
         try {
@@ -70,13 +78,14 @@ export async function upload (receiptPath, { storageState = process.env.KARAOKE_
         } catch (error) {
           if (error.status !== 404) throw error
         }
-      } else if (receipt.resourceId) resource = await call(`${route}/videos/${receipt.resourceId}`)
+      } else if (receipt.resourceId) resource = karaoke ? await karaokeResource() : await call(`${route}/videos/${receipt.resourceId}`)
       if (!resource) {
         await save({ status: 'uploading', requestId })
         resource = await call(`${route}/upload`, { method: 'POST', headers: { 'X-Upload-Request-Id': requestId }, multipart: {
           requestId, title: manifest.title,
           ...(audio ? { kind: manifest.kind, metadata: JSON.stringify(manifest.metadata) } : {}),
-          file: { name: path.basename(receipt.file), mimeType: audio ? 'audio/mpeg' : 'video/mp4', buffer: await fs.readFile(receipt.file) },
+          ...(karaoke ? { kind: karaokeAudio ? 'bed' : 'video' } : {}),
+          file: { name: karaoke ? `${manifest.title.replace(/[\\/]/g, '-')}.${karaokeAudio ? 'mp3' : 'mp4'}` : path.basename(receipt.file), mimeType: audio || karaokeAudio ? 'audio/mpeg' : 'video/mp4', buffer: await fs.readFile(receipt.file) },
         } })
       }
       if (resource.roomId !== manifest.roomId) throw new Error('Resource belongs to a different room.')
@@ -85,11 +94,11 @@ export async function upload (receiptPath, { storageState = process.env.KARAOKE_
       const deadline = Date.now() + timeout
       while (status() === 'preparing' && Date.now() < deadline) {
         await sleep(500)
-        resource = await call(`${route}/${audio ? '' : 'videos/'}${resource.id}`)
+        resource = karaoke ? await karaokeResource() : await call(`${route}/${audio ? '' : 'videos/'}${resource.id}`)
       }
       await save({ status: status(), resource })
       if (status() !== 'ready') throw new Error(`Resource ${resource.id}: ${status()}. ${resource.error || resource.reason || 'Resume this receipt to check again.'}`)
-      const suffix = audio ? `${route}/${resource.id}/audio` : `${route}/videos/${resource.id}/video`
+      const suffix = karaoke ? `${route}/assets/${resource.id}` : audio ? `${route}/${resource.id}/audio` : `${route}/videos/${resource.id}/video`
       const response = await api.get(new URL(`api/${suffix}`, manifest.baseUrl).href)
       if (!response.ok()) throw new Error(`Prepared resource download: HTTP ${response.status()}`)
       const bytes = await response.body()

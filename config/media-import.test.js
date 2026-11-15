@@ -43,6 +43,20 @@ it('canonicalizes a single YouTube video and rejects arbitrary URLs/playlists', 
   }
 })
 
+it('accepts 130 seconds for Karaoke backgrounds without relaxing Animator limits', () => {
+  expect(normalizeManifest(manifest({ destination: 'karaoke-background', start: 0, end: 130 })).end).toBe(130)
+  expect(() => normalizeManifest(manifest({ destination: 'karaoke-background', start: 0, end: 130.001 }))).toThrow('130 seconds')
+  expect(() => normalizeManifest(manifest({ destination: 'background', start: 0, end: 31 }))).toThrow('30 seconds')
+  expect(() => normalizeManifest(manifest({ destination: 'karaoke-background', format: 'mp3' }))).toThrow('MP4')
+})
+
+it('accepts up to 130 seconds of Karaoke accompaniment while retaining other audio limits', () => {
+  expect(normalizeManifest(manifest({ destination: 'karaoke-audio', start: 0, end: 130 }))).toMatchObject({ format: 'mp3', end: 130 })
+  expect(() => normalizeManifest(manifest({ destination: 'karaoke-audio', start: 0, end: 130.1 }))).toThrow('130 seconds')
+  expect(() => normalizeManifest(manifest({ destination: 'karaoke-audio', format: 'mp4' }))).toThrow('MP3')
+  expect(() => normalizeManifest(manifest({ destination: 'audio', kind: 'ambience', start: 0, end: 36 }))).toThrow('35 seconds')
+})
+
 it('encodes the requested audio range and reuses a receipt without rewriting bytes', async () => {
   const first = await prepare(manifest(), directory)
   const info = await probe(first.file)
@@ -57,6 +71,8 @@ it('encodes the requested audio range and reuses a receipt without rewriting byt
 it('creates silent compatible background video but preserves library audio', async () => {
   const background = await prepare(manifest({ destination: 'background' }), directory)
   expect((await probe(background.file)).streams.map(stream => stream.codec_type)).toEqual(['video'])
+  const karaoke = await prepare(manifest({ destination: 'karaoke-background' }), directory)
+  expect((await probe(karaoke.file)).streams.map(stream => stream.codec_type)).toEqual(['video'])
   const video = await prepare(manifest({ destination: 'file', format: 'mp4' }), directory)
   expect((await probe(video.file)).streams.map(stream => stream.codec_name)).toEqual(['h264', 'aac'])
 })
