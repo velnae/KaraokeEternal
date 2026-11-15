@@ -16,6 +16,8 @@ export interface KaraokePreviewState {
   recipeRevision: number
   draft: KaraokePreviewDraft
   samples: Record<string, CallJob>
+  savedDrafts?: Record<string, KaraokePreviewDraft>
+  pending?: boolean
 }
 export function validateKaraokePreviewDraft (value: unknown): KaraokePreviewDraft {
   const draft = value as KaraokePreviewDraft | null

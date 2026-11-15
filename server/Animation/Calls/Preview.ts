@@ -29,7 +29,7 @@ function initialDraft (worker: CallJobs, roomId: number): KaraokePreviewDraft {
 }
 function validateSelections (worker: CallJobs, roomId: number, draft: KaraokePreviewDraft) {
   const snapshot = worker.snapshot(roomId)
-  if (draft.introId && !snapshot.intros.some(value => value.id === draft.introId)) throw new Error('Seleccione una introducción disponible de esta sala.')
+  if (draft.introId && part(roomId, draft.introId)?.kind !== 'intro') throw new Error('Seleccione una introducción disponible de esta sala.')
   if (draft.tableId && !snapshot.tables.some(value => String(value.tableId) === draft.tableId)) throw new Error('Seleccione una mesa activa de esta sala.')
   const backgrounds = backgroundOverview(roomId)
   for (const kind of ['video', 'bed'] as const) {
@@ -51,22 +51,31 @@ export async function readKaraokePreview (worker: CallJobs, userId: number, room
   Tables.room(roomId)
   const current = draftRow(userId, roomId)
   const samples: Record<string, CallJob> = {}
-  for (const saved of db.all<{ cacheKey: string, jobId: string }>('SELECT cacheKey,jobId FROM karaokePreviewSamples WHERE userId=? AND roomId=? ORDER BY updatedAt,rowid', [userId, roomId])) {
+  const savedDrafts: Record<string, KaraokePreviewDraft> = {}
+  for (const saved of db.all<{ cacheKey: string, jobId: string, draftJSON: string | null }>('SELECT cacheKey,jobId,draftJSON FROM karaokePreviewSamples WHERE userId=? AND roomId=? ORDER BY updatedAt,rowid', [userId, roomId])) {
     const row = job(roomId, saved.jobId)
     if (!row || row.purpose !== 'preview' || !['hybrid', 'reference'].includes(row.operation)) continue
     const value = jobDTO(row, JSON.parse(row.profileJSON))
+    // Saved private audio is immutable. Live table/intro revisions do not make
+    // its historical bytes unsuitable for private playback.
+    value.outdated = false
+    if (saved.draftJSON) savedDrafts[saved.cacheKey] = validateKaraokePreviewDraft(JSON.parse(saved.draftJSON))
+    else {
+      const [performer, song, mode, introId, , tableId] = JSON.parse(saved.cacheKey)
+      savedDrafts[saved.cacheKey] = validateKaraokePreviewDraft({ ...(current ? JSON.parse(current.draftJSON) : initialDraft(worker, roomId)), performer, song, mode, introId, tableId: String(tableId) })
+    }
     if (value.result) {
       try {
         await worker.bytes(roomId, value.result.id)
       } catch {
         value.result = null
-        value.error = 'El audio guardado no está disponible. Revise los recursos y prepare otra prueba.'
+        value.error = 'No se pudo abrir el audio guardado. Vuelva a abrir la prueba para reintentar.'
       }
     }
     samples[saved.cacheKey] = value
   }
   return { revision: current?.revision ?? 0, persisted: !!current, recipeRevision: compositionRevision,
-    draft: current ? validateKaraokePreviewDraft(JSON.parse(current.draftJSON)) : initialDraft(worker, roomId), samples }
+    draft: current ? validateKaraokePreviewDraft(JSON.parse(current.draftJSON)) : initialDraft(worker, roomId), samples, savedDrafts }
 }
 export async function prepareKaraokePreview (worker: CallJobs, userId: number, roomId: number, input: { revision?: unknown, requestId?: unknown, retry?: unknown }) {
   const current = draftRow(userId, roomId)
@@ -89,9 +98,7 @@ export async function prepareKaraokePreview (worker: CallJobs, userId: number, r
   }
   if (draftRow(userId, roomId)?.revision !== input.revision) throw conflict()
   const submitted = worker.submit(roomId, draft.mode, { requestId: input.requestId, introId: draft.introId, tableId: Number(draft.tableId), performer: draft.performer, song: draft.song })
-  db.run(`INSERT INTO karaokePreviewSamples(userId,roomId,cacheKey,jobId,updatedAt) VALUES(?,?,?,?,?)
-    ON CONFLICT(userId,roomId,cacheKey) DO UPDATE SET jobId=excluded.jobId,updatedAt=excluded.updatedAt`, [userId, roomId, key, submitted.id, Date.now()])
-  db.run(`DELETE FROM karaokePreviewSamples WHERE userId=? AND roomId=? AND rowid NOT IN
-    (SELECT rowid FROM karaokePreviewSamples WHERE userId=? AND roomId=? ORDER BY updatedAt DESC,rowid DESC LIMIT 10)`, [userId, roomId, userId, roomId])
+  db.run(`INSERT INTO karaokePreviewSamples(userId,roomId,cacheKey,jobId,updatedAt,draftJSON) VALUES(?,?,?,?,?,?)
+    ON CONFLICT(userId,roomId,cacheKey) DO UPDATE SET jobId=excluded.jobId,updatedAt=excluded.updatedAt,draftJSON=excluded.draftJSON`, [userId, roomId, key, submitted.id, Date.now(), JSON.stringify(draft)])
   return { key, job: submitted }
 }

@@ -68,18 +68,28 @@ local audio/video. Reloading the page clears this client-side sample cache.
 The full birthday preview automatically saves its latest edited name, script,
 writing profile and media choices in SQLite, separately for each user and room.
 Closing/reopening, refreshing the browser or restarting the server restores the
-saved draft and matching prepared audio files. **Generar audio**
-reuses an identical sample; **Generar otro saludo** explicitly generates a new
-variant. Editing name/text or speech identity requires matching audio before
-playback, while changing visual/background resources does not invalidate it.
+saved draft and matching prepared audio files. **Pruebas guardadas** restores a
+sample's text and media choices. **Generar audio** reuses an identical sample;
+**Generar otro saludo** explicitly generates a new variant. Editing name/text
+requires matching audio before playback. Changing global voice settings keeps
+the existing recording playable with an earlier-voice notice; **Generar con voz
+actual** explicitly synthesizes the same text with the new settings.
 An in-flight generation remains shared when the modal closes. The server records
 its completed audio even if the browser disconnects; late results do not replace
-newer saved edits. Wait for **Guardando previsualización…** to finish before
-refreshing after an edit. Conflicting writes from another window require a reload
-instead of silently overwriting its draft. Logout clears browser memory, not the
-saved state. Up to 20 sample references are retained per user/room; audio remains
-in the birthday media directory, never in localStorage. Missing or corrupted audio
-requires explicit generation; loading a draft never calls a speech provider.
+newer saved edits. A user/room-scoped browser outbox retains unacknowledged edits
+across refresh or logout, then submits them to SQLite with revision checks. It
+never overwrites a different newer server draft. Logout clears runtime memory,
+not saved trials or pending edits. Audio stays in the server media directory;
+the browser outbox stores only draft fields and is cleared after acknowledgment.
+
+Birthday and Karaoke saved trials have no automatic count-based eviction. New
+samples retain their original draft selections; legacy samples recover known
+text/voice/table identity and use current visual choices where no historical
+snapshot exists. Unavailable audio is reported without deleting its association;
+reopening retries storage access without synthesis. Saved Karaoke samples retain
+their composition dependencies even after table voices change. Database startup
+refuses missing applied migration files instead of automatically downgrading and
+dropping persistent tables. Loading or restoring a trial never calls a provider.
 
 - New `personalizationJSON` snapshots use version 3 and freeze the writing profile,
   approach, shared speech identity and anonymized recent openings.

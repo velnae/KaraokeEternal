@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import { checkAutomaticCalls } from './karaoke-call-playback-checks.e2e.mjs'
 import { checkKaraokeBackgrounds, checkKaraokePreview } from './karaoke-background-checks.e2e.mjs'
 import { checkKaraokePreviewDefaults, checkKaraokePreviewPersistence } from './karaoke-preview-persistence-checks.e2e.mjs'
+import { checkPreviewRetention } from './preview-retention-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -294,6 +295,7 @@ try {
       await start()
       await call('login', { username: 'admin', password: 'call-pilot-test', roomId: 1 })
     }, fail: (text) => { failText = text } })
+  await checkPreviewRetention({ page, api, base, uiBase, data, call, providerRequests })
   const beforeRestart = providerRequests.length
   await page.close()
   await stop()

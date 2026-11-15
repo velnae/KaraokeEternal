@@ -63,6 +63,8 @@ router.post('/audition', async (ctx) => {
   assertRoom(ctx.user.roomId)
   const input = ctx.request.body as unknown as { config: BirthdaySettings, voiceId?: string, style?: string, sample?: unknown, previewRevision?: number, previewScript?: string, previewRoomId?: number }
   if (input.previewRoomId !== undefined && input.previewRoomId !== ctx.user.roomId) ctx.throw(409, 'La sala cambió. Vuelva a abrir la previsualización.')
+  const preview = input.previewRevision === undefined ? undefined : db.get<{ revision: number, draftJSON: string }>('SELECT revision,draftJSON FROM birthdayPreviewDrafts WHERE userId=? AND roomId=?', [ctx.user.userId, ctx.user.roomId])
+  if (input.previewRevision !== undefined && preview?.revision !== input.previewRevision) ctx.throw(409, 'La previsualización cambió. Recargue antes de generar.')
   const config = validateBirthdaySettings(input?.config)
   const selected = { ...config, defaultVoiceId: input.voiceId ?? config.defaultVoiceId, speechStyle: input.style ?? config.speechStyle }
   validateBirthdaySettings(selected)
@@ -72,7 +74,7 @@ router.post('/audition', async (ctx) => {
     ? media
     : recordPreviewSample(ctx.user.userId, ctx.user.roomId, selected, {
         ...validateBirthdaySample(input.sample), script: input.previewScript ?? (input.sample as { script?: string }).script ?? '',
-      }, media, input.previewRevision)
+      }, media, input.previewRevision, preview && JSON.parse(preview.draftJSON))
 })
 router.get('/preview/:roomId', async (ctx) => {
   if (Number(ctx.params.roomId) !== ctx.user.roomId) ctx.throw(409, 'La sala cambió. Vuelva a abrir la previsualización.')

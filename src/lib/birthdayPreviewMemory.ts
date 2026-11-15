@@ -1,14 +1,18 @@
-import { birthdayPreviewKey, birthdayPreviewName, birthdayPreviewScript, validateBirthdaySample, type BirthdayPreviewAsset, type BirthdayPreviewDraft, type BirthdayPreviewState } from '../../shared/birthdayPreview.js'
+import { birthdayPreviewKey, birthdayPreviewName, birthdayPreviewScript, validateBirthdayPreviewDraft, validateBirthdaySample, type BirthdayPreviewAsset, type BirthdayPreviewDraft, type BirthdayPreviewState } from '../../shared/birthdayPreview.js'
 import type { BirthdayAsset, BirthdaySettings } from '../../shared/birthdays.js'
+import { recoverPreviewDraft } from './previewDraftRecovery'
 
 export type { BirthdayPreviewDraft } from '../../shared/birthdayPreview.js'
 export interface BirthdayPreviewPersistence {
   load(): Promise<BirthdayPreviewState>
   save(draft: BirthdayPreviewDraft, revision: number): Promise<{ revision: number }>
+  stage?(draft: BirthdayPreviewDraft, revision: number): void
 }
 interface Snapshot {
   draft: BirthdayPreviewDraft
   samples: Record<string, BirthdayAsset>
+  savedDrafts: Record<string, BirthdayPreviewDraft>
+  unavailable: Record<string, string>
   busy: boolean
   error: string
   saving: boolean
@@ -48,14 +52,15 @@ export class BirthdayPreviewEntry {
 
   constructor (config: BirthdaySettings, private persistence?: BirthdayPreviewPersistence) {
     this.state = { draft: { name: birthdayPreviewName, script: birthdayPreviewScript(birthdayPreviewName), introId: config.introId ?? '', videoId: config.videoId ?? '',
-      musicId: config.musicId ?? '', bedId: config.bedId ?? '', bedVolume: config.bedVolume ?? 0.2, applauseId: config.applauseId ?? '', profileIndex: '' }, samples: {}, busy: !!persistence, saving: false, error: '' }
+      musicId: config.musicId ?? '', bedId: config.bedId ?? '', bedVolume: config.bedVolume ?? 0.2, applauseId: config.applauseId ?? '', profileIndex: '' }, samples: {}, savedDrafts: {}, unavailable: {}, busy: !!persistence, saving: false, error: '' }
     this.ready = persistence
       ? persistence.load().then((saved): void => {
           if (this.disposed) return
           this.revision = saved.revision
           const draft = { ...this.state.draft, ...saved.draft }
-          this.savedDraft = saved.draft ? JSON.stringify(draft) : ''
-          this.publish({ draft, samples: saved.samples, busy: false })
+          this.savedDraft = saved.draft && !saved.pending ? JSON.stringify(draft) : ''
+          this.publish({ draft, samples: saved.samples, savedDrafts: saved.savedDrafts ?? {}, unavailable: saved.unavailable ?? {}, busy: false })
+          if (saved.pending) void this.flush()
           return undefined
         }).catch(() => {
           this.loadFailed = true
@@ -107,20 +112,43 @@ export class BirthdayPreviewEntry {
     if (this.disposed) return
     if (['name', 'script', 'profileIndex'].some(key => key in patch && patch[key as keyof BirthdayPreviewDraft] !== this.state.draft[key as keyof BirthdayPreviewDraft])) this.contentRevision++
     this.publish({ draft: { ...this.state.draft, ...patch }, error: '' })
+    try {
+      this.persistence?.stage?.(this.state.draft, this.revision)
+    } catch {
+      this.publish({ error: 'No se pudo guardar la copia pendiente en este navegador. Espere a que termine el guardado antes de salir.' })
+    }
     void this.flush()
   }
 
-  sample (config: BirthdaySettings) {
+  sample (config: BirthdaySettings, exact = false) {
     try {
-      const asset = this.state.samples[sampleKey(config, this.state.draft)]
-      return asset && asset.durationMs <= config.maxVoiceSeconds * 1000 ? asset : undefined
+      const key = birthdayPreviewKey(config, this.state.draft, config.defaultVoiceId, config.speechStyle)
+      if (this.state.samples[key] || exact) return this.state.samples[key]
+      const [name, script] = JSON.parse(key)
+      return Object.entries(this.state.samples).reverse().find(([saved]) => {
+        const identity = JSON.parse(saved)
+        return identity[0] === name && identity[1] === script
+      })?.[1]
     } catch { return undefined }
+  }
+
+  restore (key: string) {
+    const draft = this.state.savedDrafts[key]
+    if (draft) this.update(draft)
+  }
+
+  async refreshSamples () {
+    if (!this.persistence || this.writing || this.pending || this.loadFailed || this.disposed) return
+    try {
+      const saved = await this.persistence.load()
+      if (!this.disposed) this.publish({ samples: saved.samples, savedDrafts: saved.savedDrafts ?? {}, unavailable: saved.unavailable ?? {} })
+    } catch { /* Retain known samples until a later explicit reopen can retry. */ }
   }
 
   generate (config: BirthdaySettings, request: Request, regenerate = false): Promise<BirthdayAsset | undefined> {
     if (this.disposed) return Promise.resolve(undefined)
     if (this.pending) return this.pending.promise
-    const cached = !regenerate && this.sample(config)
+    const cached = !regenerate && this.sample(config, true)
     if (cached) {
       this.publish({ error: '' })
       return Promise.resolve(cached)
@@ -150,12 +178,11 @@ export class BirthdayPreviewEntry {
       const generated = { ...draft, script: asset.script }
       const key = sampleKey(body.config, generated)
       const samples = { ...this.state.samples, [key]: asset }
-      // Keep lightweight references, never blobs, for the latest audition variants.
-      const bounded = Object.fromEntries(Object.entries(samples).slice(-20))
-      this.publish({ samples: bounded, ...(this.contentRevision === revision ? { draft: { ...this.state.draft, script: asset.script } } : {}) })
+      this.publish({ samples, savedDrafts: { ...this.state.savedDrafts, [key]: generated }, ...(this.contentRevision === revision ? { draft: { ...this.state.draft, script: asset.script } } : {}) })
       if (asset.previewRevision !== undefined) {
         this.revision = asset.previewRevision
         this.savedDraft = JSON.stringify({ ...draft, script: asset.script })
+        if (this.savedDraft !== JSON.stringify(this.state.draft)) this.persistence?.stage?.(this.state.draft, this.revision)
       }
       this.generating = false
       await this.flush()
@@ -187,6 +214,10 @@ export class BirthdayPreviewEntry {
 export class BirthdayPreviewMemory {
   private userId: number | null = null
   private rooms = new Map<number, BirthdayPreviewEntry>()
+  async flush () {
+    return (await Promise.all([...this.rooms.values()].map(entry => entry.flush()))).every(Boolean)
+  }
+
   setUser (userId: number | null) {
     if (userId === this.userId) return
     for (const entry of this.rooms.values()) entry.dispose()
@@ -197,7 +228,10 @@ export class BirthdayPreviewMemory {
   room (roomId: number, config: BirthdaySettings, persistence?: BirthdayPreviewPersistence) {
     let entry = this.rooms.get(roomId)
     if (!entry) {
-      entry = new BirthdayPreviewEntry(config, persistence)
+      const durable = persistence && this.userId !== null
+        ? recoverPreviewDraft(`birthday-preview-pending:${this.userId}:${roomId}`, persistence, validateBirthdayPreviewDraft)
+        : persistence
+      entry = new BirthdayPreviewEntry(config, durable)
       this.rooms.set(roomId, entry)
     }
     return entry

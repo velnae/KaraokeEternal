@@ -31,10 +31,11 @@ export default function KaraokeCallPreview ({ roomId, snapshot, backgrounds, una
     save: (draft, revision) => api.put<{ revision: number }>(base, { body: { draft, revision }, keepalive: true }),
     generate: input => api.post<{ key: string, job: CallJob }>(base, { body: input }),
   })
-  const { draft, busy, loading, saving, error, blocked } = useSyncExternalStore(entry.subscribe, entry.getSnapshot)
+  const { draft, busy, loading, saving, error, blocked, savedDrafts } = useSyncExternalStore(entry.subscribe, entry.getSnapshot)
   const config = backgrounds?.settings
   const [listening, setListening] = useState<CallPart | null>(null)
   useEffect(() => {
+    if (Object.values(entry.getSnapshot().samples).some(job => job.error && !job.result)) void entry.refreshSamples(true)
     const save = () => {
       void entry.flush()
     }
@@ -87,6 +88,21 @@ export default function KaraokeCallPreview ({ roomId, snapshot, backgrounds, una
       {currentJob?.error && <p role='alert'>{currentJob.error}</p>}
       <fieldset className={styles.section} disabled={busy}>
         <legend>Variantes</legend>
+        {Object.keys(savedDrafts).length > 0 && (
+          <label className={styles.field}>
+            Pruebas guardadas
+            <select
+              value=''
+              onChange={(event) => {
+                setListening(null)
+                entry.restore(event.target.value)
+              }}
+            >
+              <option value=''>Restaurar una prueba…</option>
+              {Object.entries(savedDrafts).reverse().map(([key, saved], index) => <option key={key} value={key}>{`${saved.performer} · ${saved.song} · Mesa ${saved.tableId} (${index + 1})`}</option>)}
+            </select>
+          </label>
+        )}
         <div className={styles.grid}>
           {(['video', 'bed'] as const).map(kind => (
             <label key={kind} className={styles.field}>
@@ -122,6 +138,7 @@ export default function KaraokeCallPreview ({ roomId, snapshot, backgrounds, una
             Introducción
             <select aria-label='Introducción' value={draft.introId} onChange={event => update({ introId: event.target.value })} required>
               <option value=''>Seleccione una introducción</option>
+              {draft.introId && !snapshot?.intros.some(item => item.id === draft.introId) && <option value={draft.introId}>Introducción guardada</option>}
               {snapshot?.intros.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
             </select>
           </label>

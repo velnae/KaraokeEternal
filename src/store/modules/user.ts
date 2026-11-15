@@ -8,6 +8,8 @@ import HttpApi from 'lib/HttpApi'
 import Persistor from 'store/Persistor'
 import { fetchPrefs } from './prefs'
 import { TABLE_ACCESS_REQUIRED } from 'shared/tableAccess'
+import { birthdayPreviewMemory } from 'lib/birthdayPreviewMemory'
+import { karaokePreviewMemory } from 'lib/karaokePreviewMemory'
 import {
   ACCOUNT_RECEIVE,
   ACCOUNT_REQUEST,
@@ -65,6 +67,8 @@ const logout = createAction(LOGOUT)
 export const requestLogout = createAsyncThunk(
   LOGOUT,
   async (_, thunkAPI) => {
+    // Send pending edits while the original authenticated cookie is still valid.
+    await Promise.all([birthdayPreviewMemory.flush(), karaokePreviewMemory.flush()])
     try {
       // server response should clear our cookie
       await api.get('logout')

@@ -71,7 +71,7 @@ it('deduplicates generation and keeps voice reusable across background changes b
   expect(entry.sample(snapshot)?.result?.id).toBe('result')
   await entry.generate(snapshot)
   expect(persistence.generate).toHaveBeenCalledTimes(1)
-  expect(entry.sample({ ...snapshot, tables: [{ ...snapshot.tables[0], outdated: true }] })).toBeUndefined()
+  expect(entry.sample({ ...snapshot, tables: [{ ...snapshot.tables[0], outdated: true }] })?.id).toBe('job')
   entry.update({ song: 'Otra canción' })
   expect(entry.sample(snapshot)).toBeUndefined()
   expect(entry.sample({ ...snapshot, tables: [{ ...snapshot.tables[0], revision: 2 }] })).toBeUndefined()
@@ -99,4 +99,34 @@ it('clears account caches and cannot flush a disposed draft into another account
   expect(persistence.save).not.toHaveBeenCalled()
   expect(manager.room(1, persistence)).not.toBe(entry)
   manager.setUser(null)
+})
+
+it('restores a saved trial without mixing its audio with a different table or later resource revisions', async () => {
+  const { entry, persistence } = create({ load: vi.fn().mockResolvedValue(state({ draft: { ...draft, tableId: '14' }, samples: { [key]: readyJob }, savedDrafts: { [key]: draft } })) })
+  await entry.flush()
+  expect(entry.sample(snapshot)).toBeUndefined()
+  entry.restore(key)
+  expect(entry.getSnapshot().draft).toEqual(draft)
+  const newer = { ...snapshot, tables: [{ ...snapshot.tables[0], revision: 2 }] }
+  expect(entry.sample(newer)?.result?.id).toBe('result')
+  await entry.generate(newer)
+  expect(persistence.generate).not.toHaveBeenCalled()
+})
+
+it('binds a late audio response to its captured draft rather than newer singer/song edits', async () => {
+  let release!: (value: { key: string, job: CallJob }) => void
+  const { entry } = create({ generate: vi.fn(() => new Promise<{ key: string, job: CallJob }>((resolve) => {
+    release = resolve
+  })) })
+  await entry.flush()
+  const work = entry.generate(snapshot)
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  entry.update({ performer: 'Different singer' })
+  release({ key, job: readyJob })
+  await work
+  expect(entry.getSnapshot().savedDrafts[key]).toEqual(draft)
+  expect(entry.sample(snapshot)).toBeUndefined()
+  entry.restore(key)
+  expect(entry.sample(snapshot)?.id).toBe('job')
+  await entry.flush()
 })

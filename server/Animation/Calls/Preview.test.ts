@@ -124,10 +124,39 @@ it('does not bill a stale save and reports a missing persisted audio without aut
   await fs.rm(path.join(directory, part.filename))
   const count = vi.mocked(provider.generate).mock.calls.length
   const state = await readKaraokePreview(worker, 1, 1)
-  expect(state.samples[sample.key]).toMatchObject({ result: null, error: expect.stringContaining('no está disponible') })
+  expect(state.samples[sample.key]).toMatchObject({ result: null, error: expect.stringContaining('No se pudo abrir') })
   await expect(prepareKaraokePreview(worker, 1, 1, { revision: 0, requestId: randomUUID() })).rejects.toThrow('otra ventana')
   expect(provider.generate).toHaveBeenCalledTimes(count)
 }, 30000)
+
+it('retains more than ten saved samples, original drafts and dependencies after later table changes', async () => {
+  const draft = await defaults()
+  let revision = save(draft)
+  let firstKey = ''
+  let firstId = ''
+  for (let index = 0; index < 12; index++) {
+    const variant = { ...draft, song: `Saved song ${index}` }
+    revision = save(variant, revision)
+    const prepared = await prepareKaraokePreview(worker, 1, 1, { revision, requestId: randomUUID() })
+    const result = await finished(prepared.job)
+    if (!index) {
+      firstKey = prepared.key
+      firstId = result.resultId!
+    }
+  }
+  await finished(worker.submit(1, 'table', { requestId: randomUUID(), text: 'Nueva voz de mesa siete,', revision: binding(1, tableId)!.revision }, tableId))
+  await worker['cleanup']()
+  const count = vi.mocked(provider.generate).mock.calls.length
+  await worker.stop()
+  worker = new CallJobs(directory, voice)
+  await worker.start()
+  const restored = await readKaraokePreview(worker, 1, 1)
+  expect(Object.keys(restored.samples)).toHaveLength(12)
+  expect(restored.savedDrafts![firstKey]).toEqual({ ...draft, song: 'Saved song 0' })
+  expect(restored.samples[firstKey]).toMatchObject({ outdated: false, result: { id: firstId } })
+  expect(await worker.bytes(1, firstId)).toBeTruthy()
+  expect(provider.generate).toHaveBeenCalledTimes(count)
+}, 60000)
 it('exposes preview persistence only to authenticated administrators and scopes it by user', async () => {
   const draft = await defaults()
   save({ ...draft, performer: 'Guardado por uno' })

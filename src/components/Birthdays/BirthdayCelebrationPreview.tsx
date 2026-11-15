@@ -13,17 +13,32 @@ import styles from './BirthdayCelebration.css'
 import { BirthdayAudio } from '../../routes/Player/components/Birthday/BirthdayAudio'
 
 export default function BirthdayCelebrationPreview ({ config, assets, onClose }: { config: BirthdaySettings, assets: BirthdayAsset[], onClose(): void }) {
-  const { roomId } = useAppSelector(state => state.user)
+  const { roomId, userId } = useAppSelector(state => state.user)
   const entry = birthdayPreviewMemory.room(roomId!, config, {
     load: () => birthdayApi.get<BirthdayPreviewState>(`preview/${roomId}`),
     save: (draft, revision) => birthdayApi.put<{ revision: number }>(`preview/${roomId}`, { body: { draft, revision }, keepalive: true }),
   })
-  const { draft, busy, error, saving } = useSyncExternalStore(entry.subscribe, entry.getSnapshot)
+  const { draft, busy, error, saving, savedDrafts, unavailable } = useSyncExternalStore(entry.subscribe, entry.getSnapshot)
+  useEffect(() => {
+    if (Object.keys(entry.getSnapshot().unavailable).length) void entry.refreshSamples()
+    const save = () => {
+      void entry.flush()
+    }
+    window.addEventListener('pagehide', save)
+    return () => {
+      window.removeEventListener('pagehide', save)
+      save()
+    }
+  }, [entry])
+  const close = () => {
+    void entry.flush().finally(onClose)
+  }
   const { name, script, introId, videoId, musicId, bedId, bedVolume, profileIndex, applauseId } = draft
   const setIntroId = (introId: string) => entry.update({ introId })
   const setVideoId = (videoId: string) => entry.update({ videoId })
   const setMusicId = (musicId: string) => entry.update({ musicId })
   const greeting = entry.sample(config)
+  const historicalVoice = greeting && greeting.id !== entry.sample(config, true)?.id
   const selected = [
     assets.find(asset => asset.kind === 'intro' && asset.id === introId),
     greeting,
@@ -35,10 +50,19 @@ export default function BirthdayCelebrationPreview ({ config, assets, onClose }:
   const generate = (regenerate = false) => entry.generate(config, (body, signal) => birthdayApi.post<BirthdayPreviewAsset>('audition', { signal, body: { ...body, previewRoomId: roomId } }), regenerate)
 
   return (
-    <Modal title='Previsualizar cumpleaños' className={styles.previewDialog} scrollable onClose={onClose}>
+    <Modal key={userId} title='Previsualizar cumpleaños' className={styles.previewDialog} scrollable onClose={close}>
       <PreviewPlayer key={JSON.stringify([name, selected.map(asset => asset.id), busy, bedVolume])} name={name} assets={selected} busy={busy} bedVolume={bedVolume} />
       <fieldset className={styles.variants} disabled={busy}>
         <legend>Variantes</legend>
+        {Object.keys(savedDrafts).length > 0 && (
+          <label>
+            Pruebas guardadas
+            <select value='' onChange={event => entry.restore(event.target.value)}>
+              <option value=''>Restaurar una prueba…</option>
+              {Object.entries(savedDrafts).reverse().map(([key, saved], index) => <option key={key} value={key}>{`${saved.name.trim()} · ${saved.script.slice(0, 65)}… (${index + 1})`}</option>)}
+            </select>
+          </label>
+        )}
         {([
           ['intro', 'Introducción', introId, setIntroId],
           ['video', 'Video de fondo', videoId, setVideoId],
@@ -79,6 +103,7 @@ export default function BirthdayCelebrationPreview ({ config, assets, onClose }:
             }}
           >
             <option value=''>Voz predeterminada</option>
+            {profileIndex !== '' && !config.rules[Number(profileIndex)] && <option value={profileIndex}>Perfil guardado</option>}
             {config.rules.map((rule, index) => <option key={rule.id ?? index} value={index}>{rule.title || `Perfil ${index + 1}`}</option>)}
           </select>
         </label>
@@ -106,13 +131,18 @@ export default function BirthdayCelebrationPreview ({ config, assets, onClose }:
           />
         </label>
         <div className={styles.actions}>
-          <Button variant='primary' onClick={() => void generate()}>Generar audio</Button>
+          <Button variant='primary' onClick={() => void generate()}>{historicalVoice ? 'Generar con voz actual' : 'Generar audio'}</Button>
           <Button onClick={() => void generate(true)}>Generar otro saludo</Button>
         </div>
       </fieldset>
+      {historicalVoice && <p role='status'>Audio guardado con una configuración de voz anterior.</p>}
+      {!greeting && Object.keys(unavailable).some((key) => {
+        const [savedName, savedScript] = JSON.parse(key)
+        return savedName === name.trim() && savedScript === script.trim()
+      }) && <p role='alert'>No se pudo abrir el audio guardado. Cierre y vuelva a abrir la prueba para reintentar.</p>}
       {error && <p role='alert'>{error}</p>}
       {saving && <p role='status'>Guardando previsualización…</p>}
-      <div className={styles.actions}><Button onClick={onClose}>Cerrar previsualización</Button></div>
+      <div className={styles.actions}><Button onClick={close}>Cerrar previsualización</Button></div>
     </Modal>
   )
 }

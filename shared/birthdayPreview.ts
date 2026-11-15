@@ -17,6 +17,9 @@ export interface BirthdayPreviewState {
   revision: number
   draft: BirthdayPreviewDraft | null
   samples: Record<string, BirthdayAsset>
+  savedDrafts?: Record<string, BirthdayPreviewDraft>
+  unavailable?: Record<string, string>
+  pending?: boolean
 }
 export type BirthdayPreviewAsset = BirthdayAsset & { previewRevision?: number }
 
