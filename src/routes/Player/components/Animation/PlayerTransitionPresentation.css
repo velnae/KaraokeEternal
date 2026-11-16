@@ -63,14 +63,16 @@
 
 @keyframes reveal { from { opacity: 0; } to { opacity: 1; } }
 .presentation[data-karaoke='true'] { --title-floor: 16; gap: 2cqh; }
+.presentation[data-karaoke='true']::before { content: ''; position: absolute; inset: -6cqh -5cqw; pointer-events: none; background: linear-gradient(90deg, rgb(3 5 9 / 78%), rgb(3 5 9 / 38%) 46%, transparent 76%); }
 .presentation[data-karaoke='true'] .foreground { align-items: flex-start; position: relative; z-index: 1; }
 .presentation[data-karaoke='true'] .current { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: flex-start; justify-content: center; gap: 0; width: 48%; text-align: left; }
-.presentation[data-karaoke='true'] .label { flex-basis: auto; font-size: 3cqw; }
-.presentation[data-karaoke='true'] .headline { order: 1; flex: initial; max-width: 100%; margin-top: 2cqh; font-size: clamp(16px, min(8cqw, 14cqh), 132px); text-wrap: pretty; animation: singer-enter 500ms ease-out both; transform-origin: left center; }
-.presentation[data-karaoke='true'] .table { order: 2; margin-top: 1.5cqh; font-size: 3.1cqw; font-weight: 500; color: var(--cyan, #76e0ec); }
-.presentation[data-karaoke='true'] .song { order: 3; flex-basis: auto; margin-top: 3cqh; font-size: 3.2cqw; animation: song-focus 60s ease-in-out infinite; }
+.presentation[data-karaoke='true'] .label { flex-basis: auto; font-size: 3cqw; animation: neon-enter 1.4s ease-out .6s both; }
+.presentation[data-karaoke='true'] .headline { order: 1; flex: initial; max-width: 100%; margin-top: 2cqh; font-size: clamp(16px, min(8cqw, 14cqh), 132px); text-wrap: pretty; animation: singer-enter 1.5s cubic-bezier(.16, 1, .3, 1) 1s both; transform-origin: left center; text-shadow: 0 3px 3px #030509, 0 4px 28px #030509; }
+.presentation[data-karaoke='true'] .table { position: relative; order: 2; margin-top: 1.5cqh; padding-bottom: 1cqh; font-size: 3.1cqw; font-weight: 600; color: var(--amber, #edc47c); animation: detail-enter 1.2s ease-out 2s both; }
+.presentation[data-karaoke='true'] .table::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: max(2px, .3cqh); transform-origin: left; background: linear-gradient(90deg, var(--amber, #edc47c), rgb(237 196 124 / 15%)); box-shadow: 0 0 14px rgb(237 196 124 / 55%); animation: table-line 1.2s ease-out 2s both; }
+.presentation[data-karaoke='true'] .song { order: 3; flex-basis: auto; margin-top: 3cqh; font-size: 3.2cqw; animation: detail-enter 1.2s ease-out 2.8s both, song-focus 60s ease-in-out 5s infinite; }
 .participation { flex-shrink: 0; align-self: flex-start; max-width: 48%; margin: 0; font-size: 1.7cqw; line-height: 1.3; color: #c8d6e8; text-align: left; animation: participation 60s linear infinite both; }
-.presentation[data-karaoke='true'] .artist { display: block; order: 4; margin-top: 1cqh; font-size: 2cqw; }
+.presentation[data-karaoke='true'] .artist { display: block; order: 4; margin-top: 1cqh; font-size: 2cqw; animation: detail-enter 1.1s ease-out 2.9s both; }
 .presentation[data-karaoke='true'][data-greeting='true'] .current { width: 48%; }
 .presentation[data-karaoke='true'][data-greeting='true'] .current .headline { font-size: 4cqw; }
 .presentation[data-karaoke='true'] .greeting { width: 48%; text-align: left; }
@@ -85,13 +87,23 @@
 .turnPerson { width: 24%; padding-right: 2%; box-sizing: border-box; }
 .turnSong { width: 61%; color: #d1d9e8; }
 .turnSong small { margin-left: 1cqw; font-size: .75em; color: #aab6c7; }
-.lights { position: absolute; inset: -10% 35% 0 -10%; overflow: hidden; pointer-events: none; }
-.lights i { position: absolute; width: 70%; height: 130%; top: -60%; background: linear-gradient(180deg, rgb(118 224 236 / 0%), rgb(118 224 236 / 8%), transparent); clip-path: polygon(48% 0, 52% 0, 100% 100%, 0 100%); transform-origin: top; animation: stage-light 30s ease-in-out infinite alternate; }
-.lights i + i { left: 40%; background: linear-gradient(180deg, transparent, rgb(237 196 124 / 7%), transparent); animation-delay: -15s; animation-direction: alternate-reverse; }
-@keyframes singer-enter { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
+.presentation[data-karaoke='true'] .turns { animation: turns-enter 1s cubic-bezier(.16, 1, .3, 1) 4s both; border-top-color: rgb(118 224 236 / 55%); }
+.presentation[data-karaoke='true'] .turns li:first-child { color: var(--lyrics, #f4f7ff); font-weight: 600; }
+.sweep { position: absolute; inset: -25% -15%; z-index: 2; pointer-events: none; opacity: 0; background: linear-gradient(115deg, transparent 35%, rgb(118 224 236 / 8%) 43%, rgb(118 224 236 / 70%) 49%, rgb(244 247 255 / 85%) 50%, rgb(118 224 236 / 35%) 53%, transparent 63%); animation: entry-sweep 1.2s cubic-bezier(.22, .61, .36, 1) both; }
+.lights { position: absolute; inset: -10% -5% 0 -10%; overflow: hidden; pointer-events: none; }
+.lights i { position: absolute; width: 70%; height: 130%; top: -60%; background: linear-gradient(180deg, transparent, rgb(118 224 236 / 20%), transparent); clip-path: polygon(48% 0, 52% 0, 100% 100%, 0 100%); transform-origin: top; animation: stage-light 30s ease-in-out infinite alternate; }
+.lights i + i { left: 40%; background: linear-gradient(180deg, transparent, rgb(237 196 124 / 18%), transparent); animation-delay: -15s; animation-direction: alternate-reverse; }
+@keyframes entry-sweep { 0% { opacity: 0; transform: translateX(-90%); } 18% { opacity: 1; } 65% { opacity: .9; } 100% { opacity: 0; transform: translateX(90%); } }
+@keyframes neon-enter { 0% { opacity: 0; transform: scale(.92); text-shadow: none; } 45% { opacity: 1; text-shadow: 0 0 10px var(--cyan, #76e0ec), 0 0 40px rgb(118 224 236 / 80%); } 100% { opacity: 1; transform: scale(1); text-shadow: 0 0 20px rgb(118 224 236 / 50%), 0 2px 8px #000; } }
+@keyframes singer-enter { 0% { opacity: 0; transform: translateX(-6cqw) scale(.94); clip-path: inset(-20% 100% -20% -10%); } 65% { opacity: 1; transform: translateX(.5cqw) scale(1.025); clip-path: inset(-20% -10%); } 100% { opacity: 1; transform: translateX(0) scale(1); clip-path: inset(-20% -10%); } }
+@keyframes detail-enter { from { opacity: 0; transform: translateY(3cqh); } to { opacity: 1; transform: translateY(0); } }
+@keyframes table-line { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes turns-enter { from { opacity: 0; transform: translateY(5cqh); } to { opacity: 1; transform: translateY(0); } }
 @keyframes stage-light { from { transform: rotate(-24deg); } to { transform: rotate(18deg); } }
 @keyframes participation { 0%, 73%, 96%, 100% { opacity: 0; } 76%, 92% { opacity: 1; } }
 @keyframes song-focus { 0%, 23%, 50%, 100% { text-shadow: 0 2px 16px #000, 0 1px 3px #000; } 27%, 46% { text-shadow: 0 0 18px rgb(118 224 236 / 35%), 0 2px 12px #000; } }
-@media (prefers-reduced-motion: reduce) { .participation { animation: none; opacity: 0; } .presentation[data-karaoke='true'] .song { animation: none; } }
-@media (prefers-reduced-motion: reduce) { .lights { display: none; } .presentation[data-karaoke='true'] .headline { animation: none; } }
-@media (prefers-reduced-motion: reduce) { .presentation { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .presentation, .presentation[data-karaoke='true'] :is(.label, .headline, .table, .song, .artist, .turns), .presentation[data-karaoke='true'] .table::after { animation: none; }
+  .participation { animation: none; opacity: 0; }
+  .lights, .sweep { display: none; }
+}

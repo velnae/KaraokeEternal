@@ -89,15 +89,18 @@ export default function PlayerTransitionPresentation ({ incoming, following, upc
       disposed = true
       observer.disconnect()
     }
-  }, [headline, current?.title, next?.title, greeting?.message, greeting?.sender, singer, current?.person, current?.table, current?.artist, next?.person, next?.table, brand])
+  }, [incoming?.queueId, headline, current?.title, next?.title, greeting?.message, greeting?.sender, singer, current?.person, current?.table, current?.artist, next?.person, next?.table, brand])
 
   return (
-    <section ref={presentation} className={styles.presentation} data-testid='transition-presentation' data-greeting={!!greeting} data-karaoke={singer} aria-label='Presentación musical'>
+    <section key={incoming?.queueId} ref={presentation} className={styles.presentation} data-testid='transition-presentation' data-greeting={!!greeting} data-karaoke={singer} aria-label='Presentación musical'>
       {singer && (
-        <div className={styles.lights} aria-hidden='true'>
-          <i />
-          <i />
-        </div>
+        <>
+          <div className={styles.sweep} aria-hidden='true' />
+          <div className={styles.lights} aria-hidden='true'>
+            <i />
+            <i />
+          </div>
+        </>
       )}
       <div className={styles.foreground} data-testid={announcementActive ? 'announcement-overlay' : greetingIntro ? 'greeting-intro' : undefined}>
         <header className={styles.current} data-testid='transition-incoming' data-queue-id={incoming?.queueId} data-kind={current?.kind ?? 'empty'} role='status'>

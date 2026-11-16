@@ -15,6 +15,9 @@ export default function PlayerTransitionScene ({ background, playing, sceneId, e
   children: React.ReactNode
 }) {
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [enteredScene, setEnteredScene] = useState<string | null>(() => playing ? sceneId : null)
+  // Remember the first play so pausing freezes, rather than resets, the entrance.
+  if (playing && enteredScene !== sceneId) setEnteredScene(sceneId)
   useEffect(() => {
     const preference = window.matchMedia('(prefers-reduced-motion: reduce)')
     const update = () => setReducedMotion(preference.matches)
@@ -33,6 +36,8 @@ export default function PlayerTransitionScene ({ background, playing, sceneId, e
       data-testid='transition-scene'
       data-scene-id={sceneId}
       data-exiting={exiting}
+      data-playing={playing}
+      data-scene-entered={enteredScene === sceneId}
       style={{ '--scene-exit-duration': `${EXIT_DURATION_MS}ms` } as React.CSSProperties}
       onTransitionEnd={(event) => {
         if (exiting && event.target === event.currentTarget && event.propertyName === 'opacity') onExited?.()

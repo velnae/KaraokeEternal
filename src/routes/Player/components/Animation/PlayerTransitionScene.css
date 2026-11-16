@@ -2,6 +2,15 @@
 .scene[data-exiting='true'] { opacity: 0; transition-duration: var(--scene-exit-duration); transition-timing-function: ease-in-out; }
 .scene .frame { width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; }
 .scene :is(h1, h2, p, footer) { text-shadow: 0 2px 16px #000, 0 1px 3px #000; }
+/* Pause only choreography; scene and media presentation stay independent. */
+.scene[data-playing='false'] :is([data-karaoke='true'], [data-testid='karaoke-mascot'], [aria-label='Cuenta regresiva de karaoke']),
+.scene[data-playing='false'] :is([data-karaoke='true'], [data-testid='karaoke-mascot'], [aria-label='Cuenta regresiva de karaoke']) *,
+.scene[data-playing='false'] :is([data-karaoke='true'], [data-testid='karaoke-mascot'])::before,
+.scene[data-playing='false'] :is([data-karaoke='true'], [aria-label='Cuenta regresiva de karaoke']) *::before,
+.scene[data-playing='false'] :is([data-karaoke='true'], [aria-label='Cuenta regresiva de karaoke']) *::after { animation-play-state: paused !important; }
+.scene[data-scene-entered='false'] [data-karaoke='true'], .scene[data-scene-entered='false'] [data-karaoke='true'] *, .scene[data-scene-entered='false'] [data-karaoke='true'] *::after,
+.scene[data-scene-entered='false'] [data-testid='karaoke-mascot'], .scene[data-scene-entered='false'] [data-testid='karaoke-mascot']::before { animation: none !important; }
+.scene:has([aria-label='Cuenta regresiva de karaoke']) [data-karaoke='true'] { opacity: .14 !important; transition: opacity 250ms ease-out; }
 
 @keyframes scene-enter {
   from { opacity: 0; }

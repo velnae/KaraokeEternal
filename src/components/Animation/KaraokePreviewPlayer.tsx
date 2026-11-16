@@ -317,9 +317,9 @@ export default function KaraokePreviewPlayer ({ roomId, performer, song, artist,
               setPlaying(false)
             }}
           >
-            {phase !== 'countdown' && <PlayerTransitionPresentation incoming={incoming} upcoming={presentation.incoming ? [presentation.incoming, ...presentation.upcoming].slice(0, 3) : []} venueName={venueName} greeting={null} onGreetingMounted={() => {}} />}
+            <PlayerTransitionPresentation incoming={incoming} upcoming={presentation.incoming ? [presentation.incoming, ...presentation.upcoming].slice(0, 3) : []} venueName={venueName} greeting={null} onGreetingMounted={() => {}} />
             {phase === 'countdown' && <KaraokeCountdown seconds={seconds} />}
-            <KaraokeMascot imageId={settings?.mascotImageId ?? prefs.playerDisplay.logo.animatedImageId ?? prefs.playerDisplay.logo.staticImageId} fallback={prefs.branding.logoSrc} />
+            <KaraokeMascot imageId={settings?.mascotImageId ?? prefs.playerDisplay.logo.animatedImageId ?? prefs.playerDisplay.logo.staticImageId} fallback={prefs.branding.logoSrc} countdown={phase === 'countdown'} />
           </PlayerTransitionScene>
         )}
         {expanded && (

@@ -655,7 +655,7 @@ const PlayerController = (props: PlayerControllerProps) => {
                   <p>Preparando la celebración…</p>
                 </div>
               )
-            : foregroundScene && startTurn?.phase !== 'countdown'
+            : foregroundScene
               ? (
                   <PlayerTransitionPresentation
                     {...presentedTracks}
@@ -670,7 +670,7 @@ const PlayerController = (props: PlayerControllerProps) => {
               : startTurn?.phase === 'countdown' ? null : idleOverlay}
           {transition?.phase === 'waiting' && startTurn?.phase === 'waiting' && !presentedTracks.incoming && <div className={styles.karaokeWaiting} role='status'>Prepárate para cantar</div>}
           {startTurn?.phase === 'countdown' && startTurn.endsAt !== null && <KaraokeCountdown seconds={karaokeCountdownSeconds(startTurn.endsAt, animationTime())} />}
-          {(startTurn || presentedTracks.incoming?.requestIntent === 'SING') && <KaraokeMascot imageId={animation.snapshot?.karaokeStage?.mascotImageId ?? prefs.playerDisplay.logo.animatedImageId ?? prefs.playerDisplay.logo.staticImageId} fallback={prefs.branding.logoSrc} />}
+          {(startTurn || presentedTracks.incoming?.requestIntent === 'SING') && <KaraokeMascot imageId={animation.snapshot?.karaokeStage?.mascotImageId ?? prefs.playerDisplay.logo.animatedImageId ?? prefs.playerDisplay.logo.staticImageId} fallback={prefs.branding.logoSrc} countdown={startTurn?.phase === 'countdown'} />}
         </PlayerTransitionScene>
       )}
       {(birthday.needsSound || birthday.needsVolume || (audioStatus && (animation.needsGesture || animation.error))) && (
