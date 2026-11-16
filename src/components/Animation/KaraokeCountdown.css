@@ -1,4 +1,4 @@
-.overlay { position: absolute; inset: 0; z-index: 15; display: grid; place-items: center; background: rgb(3 5 9 / 76%); color: var(--cyan, #76e0ec); pointer-events: none; }
+.overlay { position: absolute; inset: 0; z-index: 15; display: grid; grid-template-columns: 48% 1fr; place-items: center; padding-inline: 5%; background: rgb(3 5 9 / 76%); color: var(--cyan, #76e0ec); pointer-events: none; }
 .disc { display: grid; place-items: center; width: clamp(100px, 26cqw, 300px); aspect-ratio: 1; border: 2px solid currentColor; border-radius: 50%; box-shadow: 0 0 40px rgb(118 224 236 / 16%), inset 0 0 30px rgb(118 224 236 / 8%); animation: countdown-beat 850ms ease-out both; }
 .disc span { font-size: clamp(64px, 18cqw, 210px); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; text-shadow: 0 0 24px rgb(118 224 236 / 30%); }
 @keyframes countdown-beat { from { transform: scale(.88); opacity: .5; } to { transform: scale(1); opacity: 1; } }

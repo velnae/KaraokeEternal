@@ -4,10 +4,15 @@ import Modal from 'components/Modal/Modal'
 import type { KaraokeBackgroundAsset } from 'shared/karaokeBackgrounds'
 import type useKaraokeBackgrounds from './useKaraokeBackgrounds'
 import styles from './KaraokeCallPilot.css'
+import { uploadPlayerLogo } from 'lib/playerLogoApi'
+import { playerLogoImagePath } from 'shared/playerLogo'
+import KaraokeApplauseSettings from './KaraokeApplauseSettings'
 
 export default function KaraokeBackgroundSettings ({ state }: { state: ReturnType<typeof useKaraokeBackgrounds> }) {
   const { overview, draft, setDraft, busy, error, notice, upload, activate, save, reload } = state
   const [preview, setPreview] = useState<KaraokeBackgroundAsset | null>(null)
+  const [imageBusy, setImageBusy] = useState(false)
+  const [imageError, setImageError] = useState('')
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(overview?.settings)
   return (
     <section className={styles.section} aria-label='Fondos de karaoke'>
@@ -79,6 +84,78 @@ export default function KaraokeBackgroundSettings ({ state }: { state: ReturnTyp
               </fieldset>
             )
           })}
+          <fieldset className={styles.section} disabled={busy || imageBusy}>
+            <legend>Gato de la transición</legend>
+            <div className={styles.mascotUpload}>
+              {draft.mascotImageId && <img src={new URL(playerLogoImagePath(draft.mascotImageId, true), document.baseURI).href} alt='Gato seleccionado' />}
+              <label className={styles.field}>
+                Subir gato (GIF o PNG)
+                <input
+                  type='file'
+                  accept='image/gif,image/png'
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0]
+                    event.currentTarget.value = ''
+                    if (!file) return
+                    setImageError('')
+                    setImageBusy(true)
+                    void uploadPlayerLogo(file, file.type === 'image/gif' ? 'gif' : 'png', new AbortController().signal).then((image): void => {
+                      setDraft(current => current ? { ...current, mascotImageId: image.id } : current)
+                      return undefined
+                    }).catch(error => setImageError(error.message)).finally(() => setImageBusy(false))
+                  }}
+                />
+              </label>
+              {draft.mascotImageId && <Button onClick={() => setDraft({ ...draft, mascotImageId: null })}>Usar gato de Pantalla</Button>}
+            </div>
+            {imageBusy && <p role='status'>Preparando imagen…</p>}
+            {imageError && <p role='alert'>{imageError}</p>}
+          </fieldset>
+          <fieldset className={styles.section} disabled={busy}>
+            <legend>Entrada y recordatorio</legend>
+            <label className={styles.field}>
+              Subir efecto (máximo 6 s)
+              <input
+                type='file'
+                accept='audio/mpeg,audio/wav,audio/ogg'
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0]
+                  event.currentTarget.value = ''
+                  if (file) void upload('effect', file)
+                }}
+              />
+            </label>
+            <ul className={styles.list}>
+              {overview.assets.filter(asset => asset.kind === 'effect').map(asset => (
+                <li className={styles.item} key={asset.id}>
+                  <strong>{asset.title}</strong>
+                  {asset.state !== 'ready'
+                    ? <p role={asset.state === 'failed' ? 'alert' : 'status'}>{asset.error || 'Preparando efecto…'}</p>
+                    : (
+                        <div className={styles.actions}>
+                          <Button onClick={() => setPreview(asset)}>Escuchar efecto</Button>
+                        </div>
+                      )}
+                </li>
+              ))}
+            </ul>
+            <div className={styles.grid}>
+              {(['entryEffectId', 'reminderEffectId'] as const).map(key => (
+                <label className={styles.field} key={key}>
+                  {{ entryEffectId: 'Entrada (whoosh)', countdownEffectId: 'Aplauso del conteo (máximo 2 s)', endedEffectId: 'Aplauso al terminar', reminderEffectId: 'Voz «¡Karaoke!»' }[key]}
+                  <select value={draft[key] ?? ''} onChange={event => setDraft({ ...draft, [key]: event.target.value || null })}>
+                    <option value=''>{key === 'reminderEffectId' ? 'Usar voz preparada' : 'Sin efecto'}</option>
+                    {overview.assets.filter(asset => asset.kind === 'effect' && asset.state === 'ready').map(asset => <option key={asset.id} value={asset.id}>{asset.title}</option>)}
+                  </select>
+                </label>
+              ))}
+            </div>
+            <label className={styles.field}>
+              Volumen de efectos (%)
+              <input type='number' min={0} max={100} value={Math.round((draft.effectVolume ?? 0.5) * 100)} onChange={event => setDraft({ ...draft, effectVolume: event.target.valueAsNumber / 100 })} />
+            </label>
+          </fieldset>
+          <KaraokeApplauseSettings state={state} />
           <div className={styles.grid}>
             <label className={styles.field}>
               Oscurecimiento (%)
@@ -89,7 +166,7 @@ export default function KaraokeBackgroundSettings ({ state }: { state: ReturnTyp
               <input type='number' min={0} max={100} value={Math.round(draft.bedVolume * 100)} onChange={event => setDraft({ ...draft, bedVolume: event.target.valueAsNumber / 100 })} />
             </label>
           </div>
-          {dirty && <Button variant='primary' disabled={busy} onClick={() => void save()}>Guardar fondos</Button>}
+          {dirty && <Button variant='primary' disabled={busy || imageBusy} onClick={() => void save()}>Guardar configuración</Button>}
         </>
       )}
       {preview && (

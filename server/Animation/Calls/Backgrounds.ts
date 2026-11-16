@@ -4,8 +4,9 @@ import { randomUUID } from 'node:crypto'
 import { db } from '../../lib/Database.js'
 import { prepareAudio } from '../AudioPreparation.js'
 import { prepareTransitionVideo } from '../../TransitionVideo/Preparation.js'
-import { KARAOKE_BACKGROUND_AUDIO_MS, KARAOKE_BACKGROUND_VIDEO_MS, defaultKaraokeBackgrounds, karaokeBed, karaokeVideo, validateKaraokeBackgrounds,
-  type KaraokeBackgroundAsset, type KaraokeBackgroundKind, type KaraokeBackgroundSettings, type KaraokeSceneMedia } from '../../../shared/karaokeBackgrounds.js'
+import { getLogoImage } from '../../PlayerLogo/Store.js'
+import { KARAOKE_BACKGROUND_AUDIO_MS, KARAOKE_BACKGROUND_VIDEO_MS, KARAOKE_EFFECT_AUDIO_MS, defaultKaraokeBackgrounds, karaokeBed, karaokeVideo, validateKaraokeBackgrounds,
+  karaokeEffect, karaokeEffectFields, type KaraokeBackgroundAsset, type KaraokeBackgroundKind, type KaraokeBackgroundSettings, type KaraokeSceneMedia } from '../../../shared/karaokeBackgrounds.js'
 
 interface StoredAsset extends Omit<KaraokeBackgroundAsset, 'active' | 'url'> { active: number, filename: string | null, requestId: string, selectionOrder: number }
 let directory = ''
@@ -24,7 +25,7 @@ export async function startKaraokeBackgrounds (root: string) {
 }
 export function backgroundSettings (roomId: number): KaraokeBackgroundSettings {
   const row = db.get<{ data: string }>('SELECT data FROM karaokeBackgroundSettings WHERE roomId=?', [roomId])
-  return row ? JSON.parse(row.data) : { ...defaultKaraokeBackgrounds }
+  return { ...defaultKaraokeBackgrounds, ...(row ? JSON.parse(row.data) : {}) }
 }
 export const backgroundAsset = (roomId: number, id: string) => db.get<StoredAsset>('SELECT * FROM karaokeBackgroundAssets WHERE roomId=? AND id=?', [roomId, id])
 function dto (row: StoredAsset): KaraokeBackgroundAsset {
@@ -43,14 +44,29 @@ export function saveBackgroundSettings (roomId: number, input: unknown) {
     const asset = backgroundAsset(roomId, value[`${kind}Id`] ?? '')
     if (!asset || asset.kind !== kind || asset.state !== 'ready' || !asset.active) throw new Error('Seleccione un fondo activo y disponible de esta sala.')
   }
+  for (const key of karaokeEffectFields) {
+    if (!value[key]) continue
+    const asset = backgroundAsset(roomId, value[key]!)
+    if (!asset || asset.kind !== 'effect' || asset.state !== 'ready' || !asset.durationMs || asset.durationMs > KARAOKE_EFFECT_AUDIO_MS) throw new Error('Seleccione un efecto disponible de esta sala de hasta 6 segundos.')
+  }
+  if (value.mascotImageId && !getLogoImage(value.mascotImageId)) throw new Error('La imagen del gato ya no está disponible. Vuelva a subirla.')
   value.revision++
-  db.run('INSERT INTO karaokeBackgroundSettings(roomId,data) VALUES(?,?) ON CONFLICT(roomId) DO UPDATE SET data=excluded.data', [roomId, JSON.stringify(value)])
+  db.exec('SAVEPOINT karaoke_background_settings')
+  try {
+    for (const key of karaokeEffectFields) if (value[key]) db.run('UPDATE karaokeBackgroundAssets SET active=1 WHERE roomId=? AND id=?', [roomId, value[key]!])
+    db.run('INSERT INTO karaokeBackgroundSettings(roomId,data) VALUES(?,?) ON CONFLICT(roomId) DO UPDATE SET data=excluded.data', [roomId, JSON.stringify(value)])
+    db.exec('RELEASE karaoke_background_settings')
+  } catch (error) {
+    db.exec('ROLLBACK TO karaoke_background_settings; RELEASE karaoke_background_settings')
+    throw error
+  }
   return backgroundOverview(roomId)
 }
 export function activateBackground (roomId: number, id: string, active: unknown) {
   const row = backgroundAsset(roomId, id)
   if (!row || row.state !== 'ready' || typeof active !== 'boolean') throw new Error('Seleccione un recurso disponible de esta sala.')
   const config = backgroundSettings(roomId)
+  if (!active && karaokeEffectFields.some(key => config[key] === id)) throw new Error('Quite la selección del efecto antes de desactivarlo.')
   if (!active && config[`${row.kind}Mode`] === 'single' && config[`${row.kind}Id`] === id) throw new Error('Cambie el fondo fijo antes de desactivarlo.')
   db.run('UPDATE karaokeBackgroundAssets SET active=? WHERE roomId=? AND id=?', [active ? 1 : 0, roomId, id])
   return saveBackgroundSettings(roomId, config)
@@ -72,7 +88,8 @@ export async function uploadBackground (roomId: number, kind: KaraokeBackgroundK
       await fs.rename(path.join(staging, 'video.mp4'), path.join(directory, `${id}.mp4`))
       db.run(`UPDATE karaokeBackgroundAssets SET state='ready',filename=?,checksum=?,durationMs=?,width=?,height=?,size=? WHERE id=?`, [`${id}.mp4`, media.checksum, media.durationMs, media.width, media.height, media.size, id])
     } else {
-      const media = await prepareAudio(directory, id, 'ambience', await fs.readFile(source), process.env.KES_FFMPEG_PATH || 'ffmpeg', controller.signal, undefined, { durationMs: KARAOKE_BACKGROUND_AUDIO_MS })
+      const media = await prepareAudio(directory, id, kind === 'effect' ? 'effect' : 'ambience', await fs.readFile(source), process.env.KES_FFMPEG_PATH || 'ffmpeg', controller.signal, undefined,
+        kind === 'bed' ? { durationMs: KARAOKE_BACKGROUND_AUDIO_MS } : { durationMs: KARAOKE_EFFECT_AUDIO_MS, outputPaddingMs: 100 })
       db.run(`UPDATE karaokeBackgroundAssets SET state='ready',filename=?,checksum=?,durationMs=?,size=? WHERE id=?`, [media.filename, media.checksum, media.durationMs, media.size, id])
     }
   } catch (error) {
@@ -88,7 +105,7 @@ export function backgroundFile (roomId: number, id: string) {
   if (!asset?.filename || asset.state !== 'ready') throw Object.assign(new Error('El fondo no está disponible.'), { status: 404 })
   return { asset, file: path.join(directory, asset.filename) }
 }
-function choose (roomId: number, kind: KaraokeBackgroundKind, config: KaraokeBackgroundSettings, rotate = false) {
+function choose (roomId: number, kind: 'video' | 'bed', config: KaraokeBackgroundSettings, rotate = false) {
   if (config[`${kind}Mode`] === 'none') return undefined
   const row = config[`${kind}Mode`] === 'single'
     ? backgroundAsset(roomId, config[`${kind}Id`] ?? '')
@@ -96,6 +113,13 @@ function choose (roomId: number, kind: KaraokeBackgroundKind, config: KaraokeBac
   if (!row?.active || row.state !== 'ready' || row.kind !== kind) return undefined
   if (rotate && config[`${kind}Mode`] === 'all') db.run('UPDATE karaokeBackgroundAssets SET selectionOrder=(SELECT COALESCE(MAX(selectionOrder),0)+1 FROM karaokeBackgroundAssets WHERE roomId=?) WHERE id=?', [roomId, row.id])
   return dto(row)
+}
+export function karaokeEffects (roomId: number) {
+  const config = backgroundSettings(roomId)
+  return Object.fromEntries(karaokeEffectFields.map((key) => {
+    const asset = config[key] ? backgroundAsset(roomId, config[key]!) : undefined
+    return [key, asset?.kind === 'effect' && asset.state === 'ready' && asset.active ? { ...karaokeEffect(dto(asset)), volume: config.effectVolume } : null]
+  })) as Record<typeof karaokeEffectFields[number], import('../../../shared/animation.js').AnimationClip | null>
 }
 export function peekKaraokeMedia (roomId: number, rotate = false): KaraokeSceneMedia {
   const config = backgroundSettings(roomId)

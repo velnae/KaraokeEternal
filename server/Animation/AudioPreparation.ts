@@ -8,7 +8,7 @@ import { clipDurationLimit, type AudioKind, type EffectType } from '../../shared
 
 const run = promisify(execFile)
 export class AudioValidationError extends Error {}
-export async function prepareAudio (directory: string, id: string, kind: AudioKind, bytes: Buffer, ffmpeg: string, signal?: AbortSignal, effectType?: EffectType, limits?: { durationMs: number }) {
+export async function prepareAudio (directory: string, id: string, kind: AudioKind, bytes: Buffer, ffmpeg: string, signal?: AbortSignal, effectType?: EffectType, limits?: { durationMs: number, outputPaddingMs?: number }) {
   const durationLimit = limits?.durationMs ?? clipDurationLimit(kind, effectType)
   if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new AudioValidationError('Use un archivo de hasta 20 MB.')
   const metadata = await parseBuffer(bytes, undefined, { duration: true }).catch(() => null)
@@ -29,8 +29,11 @@ export async function prepareAudio (directory: string, id: string, kind: AudioKi
     await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', raw, '-af', `loudnorm=I=${loudness}:TP=-1:LRA=7`, '-ar', '44100', '-ac', '2', '-b:a', '128k', '-f', 'mp3', temporary], { timeout: 45000, maxBuffer: 16384, signal })
     const output = await fs.readFile(temporary)
     const prepared = await parseBuffer(output, { mimeType: 'audio/mpeg' }, { duration: true })
-    const durationMs = Math.ceil((prepared.format.duration ?? 0) * 1000)
-    if (!durationMs || durationMs > durationLimit || output.length > 5 * 1024 * 1024) throw new AudioValidationError('El audio preparado supera la duración o tamaño permitido.')
+    const measuredMs = Math.ceil((prepared.format.duration ?? 0) * 1000)
+    // MP3 container duration can include encoder padding. Only explicitly scoped
+    // callers allow that metadata margin; the source duration remains strict.
+    if (!measuredMs || measuredMs > durationLimit + (limits?.outputPaddingMs ?? 0) || output.length > 5 * 1024 * 1024) throw new AudioValidationError('El audio preparado supera la duración o tamaño permitido.')
+    const durationMs = Math.min(durationLimit, measuredMs)
     await fs.rename(temporary, path.join(directory, filename))
     return { filename, durationMs, size: output.length, mime: 'audio/mpeg', checksum: createHash('sha256').update(output).digest('hex') }
   } finally {

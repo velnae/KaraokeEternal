@@ -38,6 +38,7 @@ export interface TableCallVoice {
   outdated: boolean
 }
 export interface CallSnapshot {
+  reminder?: CallPart | null
   names?: CallPart[]
   automation?: CallAutomationSnapshot
   intros: CallPart[]

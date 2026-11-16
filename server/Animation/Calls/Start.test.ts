@@ -43,7 +43,7 @@ it('requires presentation and counts down exactly once despite duplicate operato
   const started = operateKaraokeTurn(1, 'operator', { ...turn, operation: 'start' })!
   vi.advanceTimersByTime(1000)
   expect(operateKaraokeTurn(1, 'another-operator', { ...turn, operation: 'start' })).toEqual(started)
-  expect(karaokeCountdownSeconds(started.endsAt!, Date.now())).toBe(4)
+  expect(karaokeCountdownSeconds(started.endsAt!, Date.now())).toBe(2)
   expect(() => operateKaraokeTurn(1, 'owner', { ...started, operation: 'consume' })).toThrow('conteo')
   expect(() => operateKaraokeTurn(1, 'wrong-owner', { ...started, operation: 'heartbeat' })).toThrow('perdió')
 })
@@ -140,5 +140,5 @@ it('keeps birthday priority and requires a fresh confirmation after it interrupt
   expect(paused).toMatchObject({ phase: 'waiting', endsAt: null, presented: true })
   expect(() => operateKaraokeTurn(1, 'operator', { ...paused, operation: 'start' })).toThrow('cumpleaños')
   db.run(`UPDATE birthdays SET playback='completed' WHERE id='birthday'`)
-  expect(operateKaraokeTurn(1, 'operator', { ...paused, operation: 'start' })).toMatchObject({ phase: 'countdown', endsAt: Date.now() + 5000 })
+  expect(operateKaraokeTurn(1, 'operator', { ...paused, operation: 'start' })).toMatchObject({ phase: 'countdown', endsAt: Date.now() + 3000 })
 })

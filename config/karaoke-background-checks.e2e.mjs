@@ -54,9 +54,9 @@ export async function checkKaraokeBackgrounds ({ page, api, base, uiBase, data, 
   await settings.getByRole('combobox', { name: 'Modo de audio', exact: true }).selectOption('single')
   await settings.getByRole('combobox', { name: 'Audio fijo', exact: true }).selectOption(firstBed.id)
   await settings.getByLabel('Volumen del fondo (%)', { exact: true }).fill('12')
-  await settings.getByRole('button', { name: 'Guardar fondos', exact: true }).focus()
+  await settings.getByRole('button', { name: 'Guardar configuración', exact: true }).focus()
   await page.keyboard.press('Enter')
-  await expect(settings.getByRole('status')).toHaveText('Fondos guardados.')
+  await expect(settings.getByRole('status')).toHaveText('Configuración guardada.')
   await page.reload()
   await expect(settings.getByRole('combobox', { name: 'Video fijo', exact: true })).toHaveValue(firstVideo.id)
   await expect(settings.getByLabel('Volumen del fondo (%)', { exact: true })).toHaveValue('12')
@@ -67,19 +67,59 @@ export async function checkKaraokeBackgrounds ({ page, api, base, uiBase, data, 
   return { video: firstVideo, bed: firstBed, extra }
 }
 
-export async function checkKaraokePreview ({ page, preview, data, db, media, providerRequests }) {
+export async function checkKaraokePreview ({ page, preview, data, db, media, providerRequests, call }) {
   const player = preview.getByRole('region', { name: 'Previsualización audiovisual', exact: true })
+  const job = await call('rooms/1/karaoke-calls/reminder', { requestId: crypto.randomUUID() })
+  await expect.poll(async () => (await call(`rooms/1/karaoke-calls/jobs/${job.id}`)).status, { timeout: 20000 }).toBe('ready')
+  const audioReady = (await call('rooms/1/karaoke-calls')).reminder
+  assert.ok(audioReady)
+  await page.evaluate(() => {
+    window.previewReminderRuns = []
+    const create = AudioContext.prototype.createBufferSource
+    AudioContext.prototype.createBufferSource = function () {
+      const source = create.call(this)
+      const start = source.start.bind(source)
+      source.start = (...args) => {
+        const run = { at: performance.now(), audioAt: source.context.currentTime, duration: source.buffer.duration, end: null }
+        window.previewReminderRuns.push(run)
+        source.addEventListener('ended', () => {
+          run.end = source.context.currentTime
+        })
+        return start(...args)
+      }
+      return source
+    }
+  })
+  let polls = 0
+  const refreshed = (response) => {
+    if (response.request().method() === 'GET' && /\/api\/rooms\/1\/karaoke-calls$/.test(new URL(response.url()).pathname)) polls++
+  }
+  page.on('response', refreshed)
   const before = providerRequests.length
   const rotation = db.prepare('SELECT id,selectionOrder FROM karaokeBackgroundAssets ORDER BY id').all()
   await expect(player.getByRole('button', { name: 'Reproducir', exact: true })).toBeEnabled()
   await player.getByRole('button', { name: 'Reproducir', exact: true }).focus()
   await page.keyboard.press('Enter')
-  await expect(player.getByText('Entrada', { exact: true })).toBeVisible()
+  await expect(player.getByRole('button', { name: 'Pausar', exact: true })).toBeVisible()
   await expect.poll(() => player.locator('video').evaluate(video => video.paused)).toBe(false)
   await player.getByRole('button', { name: 'Pausar', exact: true }).click()
   await expect.poll(() => player.locator('audio').evaluateAll(elements => elements.every(audio => audio.paused))).toBe(true)
   await player.getByRole('button', { name: 'Reproducir', exact: true }).click()
   await expect(player.getByText('Esperando inicio', { exact: true })).toBeVisible({ timeout: 15000 })
+  const waitingAt = await page.evaluate(() => performance.now())
+  await page.waitForTimeout(45000)
+  const runs = await page.evaluate(() => window.previewReminderRuns)
+  assert.ok(polls >= 12, `Keep real snapshot polling active during the preview wait: ${polls}`)
+  assert.equal(runs.length, 8, `Expected four table/Karaoke pairs while polling, got ${runs.length}`)
+  for (let pair = 0; pair < 4; pair++) {
+    const tableRun = runs[pair * 2]
+    const karaokeRun = runs[pair * 2 + 1]
+    const target = waitingAt + (pair + 1) * 10000
+    assert.ok(tableRun.at >= target - 1000 && tableRun.at <= target + 4000, 'Snapshots must not reset the ten-second reminder clock')
+    assert.ok(tableRun.end !== null && tableRun.end <= karaokeRun.audioAt + 0.02, 'The table clip finishes before Karaoke starts')
+    assert.ok(karaokeRun.end !== null)
+  }
+  assert.equal(providerRequests.length, before, 'Waiting must reuse saved audio without synthesis')
   await player.getByRole('button', { name: 'Iniciar karaoke', exact: true }).click()
   await expect(player.getByRole('status', { name: 'Cuenta regresiva de karaoke', exact: true })).toBeVisible()
   for (const width of [390, 1440]) {
@@ -88,6 +128,8 @@ export async function checkKaraokePreview ({ page, preview, data, db, media, pro
   }
   await expect(player.getByText('Previsualización finalizada', { exact: true })).toBeVisible({ timeout: 15000 })
   await expect.poll(() => player.locator('audio').evaluateAll(elements => elements.every(audio => audio.paused))).toBe(true)
+  await page.waitForTimeout(16000)
+  assert.equal(await page.evaluate(() => window.previewReminderRuns.length), runs.length, 'No reminder survives countdown or scene exit')
   await player.getByRole('button', { name: 'Reiniciar', exact: true }).click()
   await player.locator('audio,video').evaluateAll((elements) => {
     window.previousPreviewMedia = elements
@@ -106,7 +148,23 @@ export async function checkKaraokePreview ({ page, preview, data, db, media, pro
     await page.setViewportSize({ width, height: 1000 })
     await player.scrollIntoViewIfNeeded()
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+    assert.ok(await player.locator('[data-testid="transition-incoming"]').evaluate((element) => {
+      const left = element.getBoundingClientRect().left
+      return [...element.querySelectorAll('h1,p')].every(child => Math.abs(child.getBoundingClientRect().left - left) < 2)
+    }), 'Singer, table and song must keep the same left alignment in compact previews')
     await player.screenshot({ path: path.join(data, `karaoke-preview-stage-${width}.png`) })
   }
+  await player.getByRole('button', { name: 'Probar espera', exact: true }).click()
+  await page.waitForTimeout(250)
+  await preview.getByRole('button', { name: 'Cerrar', exact: true }).click()
+  await expect(preview).not.toBeVisible()
+  const beforeCloseWait = await page.evaluate(() => window.previewReminderRuns.length)
+  await page.waitForTimeout(16000)
+  assert.equal(await page.evaluate(() => window.previewReminderRuns.length), beforeCloseWait, 'Closing the preview cancels its pending reminder')
+  page.off('response', refreshed)
+  fs.writeFileSync(path.join(data, 'karaoke-preview-reminders.json'), JSON.stringify({ polls, waitingAt, runs, afterClose: beforeCloseWait }, null, 2))
+  await page.getByRole('button', { name: 'Previsualizar llamado', exact: true }).click()
+  await expect(preview).toBeVisible()
+  console.log(`Karaoke private reminders: four native table/Karaoke pairs over 45s and ${polls} snapshots, with countdown/exit/unmount cancellation passed.`)
   console.log('Karaoke preview: real presentation, video/bed/voice sequence, pause/resume/restart, variant cleanup, no synthesis or public playback/rotation and responsive layout passed.')
 }

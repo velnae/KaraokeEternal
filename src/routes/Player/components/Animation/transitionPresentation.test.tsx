@@ -45,7 +45,7 @@ describe('transition queue context', () => {
     const second = track(3)
     const queue = ordered(track(0, { status: 'PLAYED' }), current, track(2, { status: 'PENDING_APPROVAL' }),
       { queueId: -20, songId: 1, prevQueueId: 2, isOptimistic: true }, first, track(4, { status: 'REMOVED' }), second)
-    expect(transitionTracks(queue, position(1), preferences)).toEqual({ incoming: first, following: second })
+    expect(transitionTracks(queue, position(1), preferences)).toEqual({ incoming: first, following: second, upcoming: [second] })
     expect(queue.result).toEqual([0, 1, 2, -20, 8, 4, 3])
   })
 
@@ -54,23 +54,23 @@ describe('transition queue context', () => {
       const incoming = track(2, { status })
       const following = track(3)
       expect(transitionTracks(ordered(track(1, { status: 'PLAYED' }), incoming, following), position(2), preferences, true))
-        .toEqual({ incoming, following })
+        .toEqual({ incoming, following, upcoming: [following] })
     }
   })
 
   it('reflects queue reordering and removal without keeping an obsolete following track', () => {
     const first = track(2)
     const second = track(3)
-    expect(transitionTracks(ordered(second, first), position(-1), preferences)).toEqual({ incoming: second, following: first })
-    expect(transitionTracks(ordered(first, { ...second, status: 'REMOVED' }), position(-1), preferences)).toEqual({ incoming: first, following: undefined })
-    expect(transitionTracks(ordered({ ...first, status: 'PLAYED' }), position(2), preferences)).toEqual({ incoming: undefined, following: undefined })
-    expect(transitionTracks(ordered(), position(-1), preferences)).toEqual({ incoming: undefined, following: undefined })
+    expect(transitionTracks(ordered(second, first), position(-1), preferences)).toEqual({ incoming: second, following: first, upcoming: [first] })
+    expect(transitionTracks(ordered(first, { ...second, status: 'REMOVED' }), position(-1), preferences)).toEqual({ incoming: first, following: undefined, upcoming: [] })
+    expect(transitionTracks(ordered({ ...first, status: 'PLAYED' }), position(2), preferences)).toEqual({ incoming: undefined, following: undefined, upcoming: [] })
+    expect(transitionTracks(ordered(), position(-1), preferences)).toEqual({ incoming: undefined, following: undefined, upcoming: [] })
   })
 
   it('forecasts house music after the final participant even when it is outside the current scheduled result', () => {
     const incoming = track(1)
     const following = track(2, { origin: 'HOUSE', requestIntent: 'LISTEN' })
-    expect(transitionTracks(ordered(incoming, following), position(-1), preferences)).toEqual({ incoming, following })
+    expect(transitionTracks(ordered(incoming, following), position(-1), preferences)).toEqual({ incoming, following, upcoming: [following] })
   })
 
   it('respects house interleaving and participant fairness rather than insertion order', () => {
@@ -79,7 +79,13 @@ describe('transition queue context', () => {
     const house = track(3, { origin: 'HOUSE', requestIntent: 'LISTEN' })
     const newcomer = track(4, { userId: 2 })
     expect(transitionTracks(ordered(current, returning, house, newcomer), position(1), { ...preferences, houseTracksBeforeParticipant: 1 }))
-      .toEqual({ incoming: house, following: newcomer })
+      .toEqual({ incoming: house, following: newcomer, upcoming: [newcomer, returning] })
+  })
+  it('projects three upcoming requests without duplicates or changing the source queue', () => {
+    const queue = ordered(track(1), track(2, { userId: 2 }), track(3, { userId: 3 }), track(4, { userId: 4 }), track(5, { userId: 5 }))
+    const before = JSON.stringify(queue)
+    expect(transitionTracks(queue, position(-1), preferences).upcoming.map(item => item.queueId)).toEqual([2, 3, 4])
+    expect(JSON.stringify(queue)).toBe(before)
   })
 })
 

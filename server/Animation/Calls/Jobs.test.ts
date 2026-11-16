@@ -69,6 +69,19 @@ it('validates plain spoken content and renders numeric and custom table codes', 
   for (const text of ['', '<laugh>', '[excited]', 'hola\u0000', 'a'.repeat(221)]) expect(() => callText(text)).toThrow()
 })
 
+it('retains the reusable Karaoke reminder through cleanup and restart without generating it again', async () => {
+  const reminder = await finish(worker.submit(1, 'source', { ...input(), sourceKind: 'continuation', text: '¡Karaoke!' }))
+  expect(worker.snapshot(1).reminder?.id).toBe(reminder.id)
+  await expect(worker.bytes(1, reminder.id)).resolves.toBeInstanceOf(Buffer)
+  const root = worker.directory
+  await worker.stop()
+  worker = new CallJobs(root, voice)
+  await worker.start()
+  expect(worker.snapshot(1).reminder?.id).toBe(reminder.id)
+  await expect(worker.bytes(1, reminder.id)).resolves.toBeInstanceOf(Buffer)
+  expect(provider.generate).toHaveBeenCalledTimes(1)
+})
+
 it('prepares a private hybrid and full reference, sharing Gemini budget without enabling public speech', async () => {
   const body = await setup()
   const hybrid = await finish(worker.submit(1, 'hybrid', body))

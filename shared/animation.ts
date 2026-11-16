@@ -95,6 +95,7 @@ export function eligibleAmbience (clips: AnimationClip[], prefs: Pick<AnimationP
 
 export type InterventionStatus = 'PENDING' | 'RESERVED' | 'PLAYING' | 'PLAYED' | 'CANCELLED' | 'EXPIRED' | 'FAILED' | 'INTERRUPTED' | 'UNCERTAIN'
 export interface Intervention {
+  karaokeCueJSON?: string | null
   callJSON?: string | null
   background?: TransitionVideoBackground | null
   interventionId: string
@@ -160,6 +161,7 @@ export interface AmbienceGrant {
   offsetMs: number
 }
 export interface AnimationSnapshot extends AnimationRoomState {
+  karaokeStage?: import('./karaokeBackgrounds.js').KaraokeBackgroundSettings
   karaokeTurn?: import('./karaokeStart.js').KaraokeTurn | null
   karaokeBackgroundRevision?: number
   listeningPresentationsEnabled?: boolean
@@ -179,6 +181,7 @@ export interface AnimationSnapshot extends AnimationRoomState {
   greetingVoiceEnabled?: boolean
 }
 export interface AnimationReply {
+  karaokeCue?: import('./karaokeStage.js').KaraokeCuePreparation
   background?: TransitionVideoBackground | null
   eligible?: boolean
   type: string

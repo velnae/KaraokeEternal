@@ -63,7 +63,8 @@ export default class CallJobs {
   snapshot (roomId: number): CallSnapshot {
     Tables.room(roomId)
     const profile = this.tts.profile()
-    return { intros: intros(roomId).map(partDTO), profileKey: key(profile), voice: this.tts.snapshot(), error: this.startupError,
+    const reminder = db.get<PartRow>(`SELECT * FROM karaokeCallParts WHERE roomId=? AND kind='continuation' AND text='¡Karaoke!' AND retired=0 ORDER BY rowid DESC LIMIT 1`, [roomId])
+    return { reminder: reminder ? partDTO(reminder) : null, intros: intros(roomId).map(partDTO), profileKey: key(profile), voice: this.tts.snapshot(), error: this.startupError,
       names: db.all<PartRow>(`SELECT * FROM karaokeCallParts WHERE kind='name' AND retired=0 ORDER BY text,createdAt DESC`).map(partDTO),
       jobs: db.all<JobRow>(`SELECT * FROM karaokeCallJobs WHERE roomId=? AND purpose='preview'
         AND NOT (operation='source' AND json_extract(inputJSON,'$.sourceKind')='template') ORDER BY rowid DESC LIMIT 20`, [roomId]).map(row => jobDTO(row, profile)),
@@ -444,7 +445,7 @@ export default class CallJobs {
     }
     const rows = db.all<PartRow>('SELECT * FROM karaokeCallParts WHERE retired=0')
     for (const row of rows) if (['name', 'template', 'signature'].includes(row.kind)) keep.add(row.id)
-    for (const row of rows) if (row.kind === 'continuation' && ['¡Es momento de cantar!', 'recibamos a nuestro próximo cantante. ¡Un aplauso!'].includes(row.text)) keep.add(row.id)
+    for (const row of rows) if (row.kind === 'continuation' && ['¡Karaoke!', '¡Es momento de cantar!', 'recibamos a nuestro próximo cantante. ¡Un aplauso!'].includes(row.text)) keep.add(row.id)
     for (const { roomId } of db.all<{ roomId: number }>('SELECT DISTINCT roomId FROM listeningPresentations')) {
       for (const row of retainedListening(roomId)) {
         if (row.resultId) keep.add(row.resultId)

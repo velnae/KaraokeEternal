@@ -49,6 +49,60 @@ it('prepares an urgent turn without waiting for an unrelated catalog download', 
   } finally { audio.close() }
 })
 
+it('retains Karaoke reminder buffers across ordinary preparation and releases them when their turn changes', async () => {
+  const audio = new AnnouncementAudio()
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration: 1, length: 24000, numberOfChannels: 1 }) } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(url.split('/').pop())))
+  const clip = (id: string) => ({ id, title: id, checksum: createHash('sha256').update(id).digest('hex'), durationMs: 1000, kind: 'voice' } as AnimationClip)
+  try {
+    await audio.prepare([clip('catalog')])
+    await audio.prepare([clip('table')], 'karaoke')
+    await audio.prepare([])
+    expect(audio.buffers.has(clip('table').checksum)).toBe(true)
+    await audio.prepare([], 'karaoke')
+    expect(audio.buffers.has(clip('table').checksum)).toBe(false)
+  } finally { audio.close() }
+})
+
+it('publishes the prepared Karaoke reminder ahead of a full ordinary readiness window', async () => {
+  const audio = new AnnouncementAudio()
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration: 1, length: 24000, numberOfChannels: 1 }) } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(url.split('/').pop())))
+  const clip = (id: string) => ({ id, title: id, checksum: createHash('sha256').update(id).digest('hex'), durationMs: 1000, kind: 'voice', url: `api/${id}` } as AnimationClip & { url: string })
+  const reminders = [clip('table'), clip('karaoke')]
+  try {
+    await audio.prepare(Array.from({ length: 24 }, (_, index) => clip(`catalog-${index}`)))
+    await audio.prepareGreetingAssets([
+      ...Array.from({ length: 3 }, (_, index) => ({ ...clip(`call-${index}`), role: 'call' as const })),
+      ...Array.from({ length: 3 }, (_, index) => ({ ...clip(`greeting-${index}`), role: 'greeting' as const })),
+    ])
+    await audio.prepare(reminders, 'karaoke')
+    expect(audio.readyChecksums).toHaveLength(30)
+    expect(reminders.every(clip => audio.readyChecksums.includes(clip.checksum))).toBe(true)
+  } finally { audio.close() }
+})
+
+it('does not evict the current Karaoke reminder to make room for greeting preparation', async () => {
+  const audio = new AnnouncementAudio()
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: async (bytes: ArrayBuffer) => {
+    const small = new TextDecoder().decode(bytes).startsWith('reminder')
+    return small ? { duration: 1, length: 24000, numberOfChannels: 1 } : { duration: 10, length: 441000, numberOfChannels: 2 }
+  } } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(url.split('/').pop())))
+  const clip = (id: string, durationMs = 10000) => ({ id, title: id, checksum: createHash('sha256').update(id).digest('hex'), durationMs, kind: 'voice', url: `api/${id}` } as AnimationClip & { url: string })
+  const reminders = [clip('reminder-table', 1000), clip('reminder-karaoke', 1000)]
+  try {
+    await audio.prepare(reminders, 'karaoke')
+    await audio.prepare(Array.from({ length: 18 }, (_, index) => clip(`catalog-${index}`)))
+    await audio.prepareGreetingAssets([{ ...clip('new-greeting'), role: 'greeting' }])
+    expect(audio.decodedBytes).toBeLessThanOrEqual(audio.maxDecodedBytes)
+    expect(reminders.every(clip => audio.buffers.has(clip.checksum))).toBe(true)
+  } finally { audio.close() }
+})
+
 it('records failed preparation stages and rejects a late response for an obsolete turn', async () => {
   const audio = new AnnouncementAudio()
   const decode = vi.fn(async () => ({ duration: 1, length: 24000, numberOfChannels: 1 }))
@@ -168,6 +222,73 @@ it('mixes a separate quiet bed and stops both sources without extending the hard
   expect(sources.every(source => source.disconnect.mock.calls.length > 0)).toBe(true)
 })
 
+it('plays a two-second applause excerpt with a fade while keeping its full decoded source intact', async () => {
+  const audio = new AnnouncementAudio()
+  const source = { connect: vi.fn(node => node), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null as (() => void) | null, loop: false }
+  const gain = { connect: vi.fn(), disconnect: vi.fn(), gain: { value: 0, setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() } }
+  const context = { state: 'running', currentTime: 10, destination: {}, createBufferSource: () => source, createGain: () => gain,
+    addEventListener: vi.fn(), removeEventListener: vi.fn(), close: async () => {} }
+  audio.context = context as unknown as AudioContext
+  audio.buffers.set('applause', { duration: 4.44 } as AudioBuffer)
+  const playback = audio.play('applause', 0.5, { offsetMs: 0, durationMs: 2000, fadeOutMs: 200 })
+  expect(source.start).toHaveBeenCalledWith(0, 0, 2)
+  expect(source.stop).toHaveBeenCalledWith(12)
+  expect(gain.gain.setValueAtTime).toHaveBeenCalledWith(0.5, 11.8)
+  expect(gain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(0, 12)
+  context.currentTime = 12
+  source.onended!()
+  await expect(playback).resolves.toBe('ENDED')
+  expect(audio.buffers.get('applause')?.duration).toBe(4.44)
+  audio.close()
+})
+
+it.each(['command', 'suspended', 'close'])('overlaps entry, voice and bed and cancels the entrance on %s', async (operation) => {
+  const audio = new AnnouncementAudio()
+  const sources: Array<{ start: ReturnType<typeof vi.fn>, stop: ReturnType<typeof vi.fn>, disconnect: ReturnType<typeof vi.fn>, onended: (() => void) | null }> = []
+  const gains: Array<{ gain: { value: number, setValueAtTime: ReturnType<typeof vi.fn>, linearRampToValueAtTime: ReturnType<typeof vi.fn> } }> = []
+  const listeners = new Set<() => void>()
+  const context = { state: 'running', currentTime: 10, destination: {}, close: async () => {},
+    addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+    removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    createBufferSource: () => {
+      const source = { connect: vi.fn(node => node), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null as (() => void) | null }
+      sources.push(source)
+      return source
+    },
+    createGain: () => {
+      const gain = { connect: vi.fn(), disconnect: vi.fn(), gain: { value: 0.5, cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() } }
+      gains.push(gain)
+      return gain
+    },
+  }
+  audio.context = context as unknown as AudioContext
+  for (const [hash, duration] of [['entry', 3.893], ['voice', 7], ['bed', 30]] as const) audio.buffers.set(hash, { duration } as AudioBuffer)
+  const bed = audio.playBed('bed', 0.2, 20000)
+  const entry = audio.playEffect('entry', 0.5)
+  expect(() => audio.playEffect('entry', 0.5)).toThrow('no está disponible')
+  context.currentTime = 11.5
+  const voice = audio.play('voice', 0.5)
+  expect(sources).toHaveLength(3)
+  expect(sources.every(source => source.start.mock.calls.length === 1)).toBe(true)
+  expect(gains[1].gain.setValueAtTime).toHaveBeenCalledWith(0.5, 13.893 - 0.2)
+  expect(sources[1].stop).toHaveBeenCalledWith(13.893)
+  if (operation === 'suspended') {
+    context.state = 'suspended'
+    for (const listener of listeners) listener()
+  } else if (operation === 'close') audio.close()
+  else audio.stopForeground('test-command')
+  if (operation === 'command') {
+    expect(sources[0].stop).toHaveBeenLastCalledWith(30)
+    sources[1].onended!()
+    sources[2].onended!()
+  }
+  await expect(entry).resolves.toBe('STOPPED')
+  await expect(voice).resolves.toBe('STOPPED')
+  audio.close()
+  await expect(bed).resolves.toBe('STOPPED')
+  expect(sources.every(source => source.disconnect.mock.calls.length > 0)).toBe(true)
+})
+
 it('prepares while autoplay is blocked and resumes the same decoded audio after a gesture', async () => {
   const audio = new AnnouncementAudio()
   const context = { state: 'suspended', resume: vi.fn(async () => {
@@ -253,8 +374,15 @@ it('renews a waiting karaoke bed on one source and cannot revive it after stop o
   audio.context = context as unknown as AudioContext
   audio.buffers.set('bed', { duration: 2 } as AudioBuffer)
   const playing = audio.playBed('bed', 0.2, 5000, true)
+  audio.duckBed(true)
+  audio.bedVolume(0.4)
+  expect(gain.gain.linearRampToValueAtTime).toHaveBeenLastCalledWith(0, 5)
+  expect(gain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(0.1, 0.25)
   context.currentTime = 4
   expect(audio.renewBed(10000)).toBe(true)
+  expect(gain.gain.setValueAtTime).toHaveBeenLastCalledWith(0.1, 13.75)
+  audio.duckBed(false)
+  expect(gain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(0.4, 4.25)
   expect(source.start).toHaveBeenCalledTimes(1)
   expect(source.stop).toHaveBeenLastCalledWith(14)
   context.currentTime = 14

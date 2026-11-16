@@ -79,7 +79,7 @@ export default function KaraokeCallPreview ({ roomId, snapshot, backgrounds, una
   const bed = backgrounds?.assets.find(asset => asset.kind === 'bed' && asset.id === draft.bedId && asset.state === 'ready')
   return (
     <Modal key={userId} title='Previsualizar llamado' className={`${styles.dialog} ${styles.panel}`} scrollable onClose={close}>
-      {!listening && <KaraokePreviewPlayer key={JSON.stringify([key, voice?.id, video?.id, bed?.id, draft.volume, busy])} roomId={roomId} performer={draft.performer} song={draft.song} table={table ? `Mesa ${table.code}` : ''} venueName={venueName} voice={busy ? undefined : voice} video={video} bed={bed} volume={draft.volume} dimOpacity={config?.dimOpacity ?? 0.55} />}
+      {!listening && <KaraokePreviewPlayer key={JSON.stringify([key, voice?.id, video?.id, bed?.id, draft.volume, busy])} roomId={roomId} performer={draft.performer} song={draft.song} artist={draft.artist ?? ''} table={table ? `Mesa ${table.code}` : ''} venueName={venueName} voice={busy ? undefined : voice} video={video} bed={bed} volume={draft.volume} dimOpacity={config?.dimOpacity ?? 0} settings={config} assets={backgrounds?.assets ?? []} tableVoice={!table?.outdated ? table?.part ?? undefined : undefined} reminder={snapshot?.reminder ?? undefined} />}
       {listening && <PrivateCallAudio key={listening.id} roomId={roomId} part={listening} onClose={() => setListening(null)} />}
       {error && <p role='alert'>{error}</p>}
       {saving && <p role='status'>Guardando prueba…</p>}
@@ -156,6 +156,10 @@ export default function KaraokeCallPreview ({ roomId, snapshot, backgrounds, una
           <label className={styles.field}>
             Canción
             <input value={draft.song} onChange={event => update({ song: event.target.value })} maxLength={140} required />
+          </label>
+          <label className={styles.field}>
+            Artista
+            <input value={draft.artist ?? ''} onChange={event => update({ artist: event.target.value })} maxLength={100} />
           </label>
         </div>
         <details className={styles.requestDetails}>

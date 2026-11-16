@@ -70,6 +70,30 @@ it('rejects stale settings, wrong-room resources, inactive selections and invali
   expect(() => saveBackgroundSettings(1, { ...backgroundSettings(1), bedVolume: NaN })).toThrow('volúmenes')
 }, 30000)
 
+it('assigns one prepared inactive effect to both applause slots and activates it only with a valid save', async () => {
+  const effect = await uploadBackground(1, 'effect', 'Applause', audio, randomUUID())
+  expect(effect).toMatchObject({ state: 'ready', active: false })
+  const before = backgroundSettings(1)
+  expect(() => saveBackgroundSettings(1, { ...before, countdownEffectId: effect.id, endedEffectId: 'missing' })).toThrow('efecto disponible')
+  expect(backgroundOverview(1).assets.find(asset => asset.id === effect.id)?.active).toBe(false)
+  expect(backgroundSettings(1).revision).toBe(before.revision)
+  saveBackgroundSettings(1, { ...before, countdownEffectId: effect.id, endedEffectId: effect.id })
+  expect(backgroundOverview(1).assets.find(asset => asset.id === effect.id)?.active).toBe(true)
+  expect(backgroundSettings(1)).toMatchObject({ countdownEffectId: effect.id, endedEffectId: effect.id })
+}, 30000)
+
+it('accepts six seconds of Karaoke effects including encoder padding and rejects longer source audio', async () => {
+  for (const duration of [6, 6.1]) {
+    const source = path.join(directory, `effect-limit-${duration}.wav`)
+    execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=44100', '-t', String(duration), source])
+    const resource = await uploadBackground(1, 'effect', 'Applause limit', source, randomUUID())
+    if (duration === 6) {
+      expect(resource).toMatchObject({ state: 'ready', durationMs: 6000 })
+      expect(() => saveBackgroundSettings(1, { ...backgroundSettings(1), countdownEffectId: resource.id, endedEffectId: resource.id })).not.toThrow()
+    } else expect(resource).toMatchObject({ state: 'failed', error: expect.stringContaining('el máximo para este tipo es 6 s') })
+  }
+}, 30000)
+
 it('accepts 130-second Karaoke videos and rejects an overrun rather than trimming it', async () => {
   for (const duration of [130, 130.1]) {
     const source = path.join(directory, `karaoke-limit-${duration}.mp4`)

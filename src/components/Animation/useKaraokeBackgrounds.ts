@@ -28,14 +28,14 @@ export default function useKaraokeBackgrounds (roomId: number) {
       mounted.current = false
     }
   }, [refresh])
-  const act = async (operation: () => Promise<void>) => {
+  const act = async <T>(operation: () => Promise<T>) => {
     if (working.current) return
     working.current = true
     setBusy(true)
     setError('')
     setNotice('')
     try {
-      await operation()
+      return await operation()
     } catch (failure) {
       if (mounted.current) setError((failure as Error).message)
     } finally {
@@ -56,7 +56,8 @@ export default function useKaraokeBackgrounds (roomId: number) {
     const asset = await api.post<KaraokeBackgroundAsset>(`${base}/upload`, { body: form })
     await refresh()
     if (asset.state === 'failed') throw new Error(asset.error || 'No se pudo preparar el archivo. Vuelva a subirlo.')
-    if (mounted.current) setNotice('Fondo preparado. Actívelo para utilizarlo.')
+    if (mounted.current) setNotice(kind === 'effect' ? 'Audio preparado.' : 'Fondo preparado. Actívelo para utilizarlo.')
+    return asset
   })
   const activate = (id: string, active: boolean) => act(async () => {
     const result = await api.request<KaraokeBackgroundOverview>('PATCH', `${base}/assets/${id}`, { body: { active } })
@@ -68,7 +69,7 @@ export default function useKaraokeBackgrounds (roomId: number) {
   })
   const save = () => act(async () => {
     accept(await api.put<KaraokeBackgroundOverview>(base, { body: draft }))
-    if (mounted.current) setNotice('Fondos guardados.')
+    if (mounted.current) setNotice('Configuración guardada.')
   })
   const reload = () => act(async () => {
     accept(await api.get<KaraokeBackgroundOverview>(base))

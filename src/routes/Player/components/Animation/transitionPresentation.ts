@@ -34,16 +34,27 @@ export function transitionTracks (queue: Queue, player: PlayerPosition, preferen
     .map(id => queue.entities[id])
     .find((item): item is QueueItem => !!item && item.isOptimistic !== true
       && (item.status === 'APPROVED' || (loading && item.queueId === player.queueId && item.status === 'PLAYING')))
-  if (!incoming) return { incoming: undefined, following: undefined }
+  if (!incoming) return { incoming: undefined, following: undefined, upcoming: [] as QueueItem[] }
   // The scheduler holds unused house tracks outside its current result. Ask the
   // same scheduler for the next boundary instead of inventing a display order.
-  const projectedHistory = order.result.slice(0, order.result.indexOf(incoming.queueId) + 1)
-  const firstParticipant = order.turns[0]?.ids[0]
-  const nextUserId = incoming.origin === 'PARTICIPANT' ? null : firstParticipant === undefined ? null : order.entities[firstParticipant].userId
-  const after = buildRoundRobinQueue(queue.result, queue.entities, projectedHistory, incoming.queueId, nextUserId, prefs, nowSeconds + (incoming.durationSeconds ?? 180))
-  const following = after.result.slice(after.result.indexOf(incoming.queueId) + 1)
-    .map(id => after.entities[id]).find(item => item.status === 'APPROVED')
-  return { incoming, following }
+  let projectedHistory = order.result.slice(0, order.result.indexOf(incoming.queueId) + 1)
+  let previous = incoming
+  let projected = order
+  let at = nowSeconds
+  const upcoming: QueueItem[] = []
+  while (upcoming.length < 3) {
+    const firstParticipant = projected.turns[0]?.ids[0]
+    const nextUserId = previous.origin === 'PARTICIPANT' ? null : firstParticipant === undefined ? null : projected.entities[firstParticipant].userId
+    at += previous.durationSeconds ?? 180
+    projected = buildRoundRobinQueue(queue.result, queue.entities, projectedHistory, previous.queueId, nextUserId, prefs, at)
+    const next = projected.result.slice(projected.result.indexOf(previous.queueId) + 1)
+      .map(id => projected.entities[id]).find(item => item.status === 'APPROVED')
+    if (!next || next.queueId === incoming.queueId || upcoming.some(item => item.queueId === next.queueId)) break
+    upcoming.push(next)
+    projectedHistory = projected.result.slice(0, projected.result.indexOf(next.queueId) + 1)
+    previous = next
+  }
+  return { incoming, following: upcoming[0], upcoming }
 }
 
 const emojiPart = '[\\p{Extended_Pictographic}\\p{Regional_Indicator}\\p{Emoji_Presentation}][\\uFE0E\\uFE0F\\p{Emoji_Modifier}\\u{E0020}-\\u{E007F}]*'

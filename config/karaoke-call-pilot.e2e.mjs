@@ -15,7 +15,8 @@ import { checkPreviewRetention } from './preview-retention-checks.e2e.mjs'
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
 const httpsUi = process.env.KARAOKE_E2E_HTTPS_UI === '1'
-const automaticCalls = process.env.KARAOKE_E2E_AUTOMATIC_CALLS === '1'
+const stageOnly = process.env.KARAOKE_E2E_STAGE_ONLY === '1'
+const automaticCalls = stageOnly || process.env.KARAOKE_E2E_AUTOMATIC_CALLS === '1'
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'karaoke-call-pilot-'))
 const log = fs.openSync(path.join(data, 'server.log'), 'a')
 const listen = async (instance) => {
@@ -230,7 +231,7 @@ try {
   await expect(page.getByRole('button', { name: 'Preparar prueba', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'Preparar prueba', exact: true }).click()
   await expect.poll(async () => (await snapshot()).jobs.find(item => item.operation === 'hybrid')?.status, { timeout: 15000 }).toBe('ready')
-  await checkKaraokePreview({ page, preview, data, db, media: backgroundMedia, providerRequests })
+  await checkKaraokePreview({ page, preview, data, db, media: backgroundMedia, providerRequests, call })
   await page.getByRole('button', { name: 'Escuchar llamado híbrido', exact: true }).first().click()
   await expect.poll(() => page.locator('audio').evaluate(audio => audio.readyState)).toBeGreaterThanOrEqual(2)
   await page.locator('audio').evaluate(audio => audio.play())
@@ -295,7 +296,7 @@ try {
       await start()
       await call('login', { username: 'admin', password: 'call-pilot-test', roomId: 1 })
     }, fail: (text) => { failText = text } })
-  await checkPreviewRetention({ page, api, base, uiBase, data, call, providerRequests })
+  if (!stageOnly) await checkPreviewRetention({ page, api, base, uiBase, data, call, providerRequests })
   const beforeRestart = providerRequests.length
   await page.close()
   await stop()
@@ -306,7 +307,7 @@ try {
   assert.ok(persisted.jobs.some(item => item.operation === 'hybrid' && item.result))
   assert.equal(providerRequests.length, beforeRestart)
   assert.deepEqual(errors, [])
-  console.log(`Karaoke call pilot ${development ? 'development StrictMode' : 'production'}${httpsUi ? ' HTTPS UI + isolated API' : ''}${process.env.KARAOKE_E2E_CALLS_ONLY === '1' ? ' (calls/playback scope)' : ''} E2E passed. Artifacts: ${data}`)
+  console.log(`Karaoke call pilot ${development ? 'development StrictMode' : 'production'}${httpsUi ? ' HTTPS UI + isolated API' : ''}${stageOnly ? ' (Karaoke stage scope)' : process.env.KARAOKE_E2E_CALLS_ONLY === '1' ? ' (calls/playback scope)' : ''} E2E passed. Artifacts: ${data}`)
 } catch (error) {
   console.error(`Pilot failed. Artifacts: ${data}`)
   if (page && !page.isClosed()) {

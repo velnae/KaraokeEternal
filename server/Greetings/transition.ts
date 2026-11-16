@@ -10,7 +10,7 @@ import { isGreetingAllowed } from '../../shared/greetings.js'
 import { currentSession } from '../Animation/sessions.js'
 import { selectAnnouncement } from '../Animation/selection.js'
 import { interventionAssets, type Intervention } from '../../shared/animation.js'
-import { currentKaraokeMedia, peekKaraokeMedia } from '../Animation/Calls/Backgrounds.js'
+import { currentKaraokeMedia, peekKaraokeMedia, karaokeEffects } from '../Animation/Calls/Backgrounds.js'
 
 export function greetingPlayback (roomId: number) {
   const row = db.get<{ playbackJSON: string, playbackVersion: number, paused: number, audioEnabled: number }>('SELECT * FROM greetingControls WHERE roomId=?', [roomId])
@@ -29,6 +29,8 @@ export async function prepareGreetingTransition (roomId: number, queueId: number
   const assets: GreetingAsset[] = [...(call?.assets ?? [])]
   const singing = !!call && !call.kind
   if (singing) {
+    const entry = karaokeEffects(roomId).entryEffectId
+    if (entry) assets.push({ ...entry, role: 'entry', url: entry.url! })
     const bed = (currentKaraokeMedia(roomId, queueId) ?? peekKaraokeMedia(roomId)).bed
     if (bed) assets.push({ ...bed, role: 'bed', url: bed.url! })
   }

@@ -79,7 +79,7 @@ export default function useAnimationPlayer () {
     const readyClips = ready ? audio.current.readyChecksums : []
     try {
       await readiness.publish(JSON.stringify([owner, ready, readyClips]), async () => {
-        await animationRequest(ANIMATION_READY, { audioUnlocked: ready, readyClips, transitionBed: true })
+        await animationRequest(ANIMATION_READY, { audioUnlocked: ready, readyClips, transitionBed: true, karaokeQueueId: audio.current.karaokeQueueId })
       })
       if (mounted.current && owner === audioOwnerKey()) {
         setUnlocked(ready && audio.current.ready)
@@ -153,7 +153,7 @@ export default function useAnimationPlayer () {
       if (!current?.prefs.enabled || !current.prefs.automation || !current.prefs.ambienceEnabled || current.session?.status !== 'OPEN'
         || (player && !player.isAtQueueEnd && player.queueId !== -1)) ambientUse.current = null
       const grant = grantRef.current
-      if (current) audio.current.volume(ambientRun.current ? current.prefs.ambienceVolume ?? 0.2 : current.prefs.volume)
+      if (current && !current.active?.karaokeCueJSON) audio.current.volume(ambientRun.current ? current.prefs.ambienceVolume ?? 0.2 : current.prefs.volume)
       if (current) {
         const foregroundBed = current.active ? interventionPlayback(current.active).bed : undefined
         audio.current.bedVolume(transitionGrant.current?.volume ?? foregroundBed?.volume ?? ambienceBedVolume(current.prefs))

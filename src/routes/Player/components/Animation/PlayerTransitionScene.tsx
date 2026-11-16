@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react'
 import TransitionBackground from 'components/TransitionBackground/TransitionBackground'
 import type { TransitionVideoBackground } from 'shared/transitionVideo'
 import styles from './PlayerTransitionScene.css'
+import { KARAOKE_EXIT_MS } from 'shared/karaokeStage'
 
-const EXIT_DURATION_MS = 1000
+const EXIT_DURATION_MS = KARAOKE_EXIT_MS
 
 export default function PlayerTransitionScene ({ background, playing, sceneId, exiting = false, onExited, children }: {
   background: TransitionVideoBackground | null

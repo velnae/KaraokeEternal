@@ -23,6 +23,8 @@ import getLogger from '../lib/Log.js'
 import NameBank from './Calls/NameBank.js'
 import { backgroundSettings, currentKaraokeMedia, peekKaraokeMedia } from './Calls/Backgrounds.js'
 import { karaokeTurn, resetKaraokeTurn } from './Calls/Start.js'
+import { consumeReminder, karaokeCueAllowed, karaokeCueAssets } from './Calls/Cues.js'
+import { karaokeCueDuration, type KaraokeCueContext } from '../../shared/karaokeStage.js'
 
 type Owner = { socketId: string, epoch: number, unlocked: boolean, readyClips: string[], transitionBed: boolean }
 export interface AnimationIdentity { roomId: number, userId: number, socketId: string }
@@ -91,7 +93,7 @@ export default class Animation {
       history: Animation.history(roomId), playerPresent: !!owner, audioUnlocked: owner?.unlocked ?? false,
       readyClips: owner?.readyClips ?? [], serverTime: Date.now(), session: currentSession(roomId), ambience: Animation.ambience(roomId),
       catalogVersion: catalogVersion(), voiceBudgetRemainingMs: voiceBudget(Animation.selectionHistory(roomId), Date.now()), greetingVoiceEnabled: Animation.greetingEnabled(roomId),
-      karaokeTurn: karaokeTurn(roomId), karaokeCallsEnabled: callsEnabled(roomId), karaokeCallsRevision: callControls(roomId).revision, karaokeBackgroundRevision: backgroundSettings(roomId).revision, listeningPresentationsEnabled: listeningEnabled(roomId) }
+      karaokeTurn: karaokeTurn(roomId), karaokeStage: backgroundSettings(roomId), karaokeCallsEnabled: callsEnabled(roomId), karaokeCallsRevision: callControls(roomId).revision, karaokeBackgroundRevision: backgroundSettings(roomId).revision, listeningPresentationsEnabled: listeningEnabled(roomId) }
   }
 
   static greetingEnabled (roomId: number) {
@@ -134,6 +136,40 @@ export default class Animation {
     return Animation.active(identity.roomId)
   }
 
+  /** Karaoke cues use the same exclusive, finite intervention as announcements. */
+  static reserveKaraokeCue (identity: AnimationIdentity, cue: KaraokeCueContext, status: { queueId?: number }) {
+    Animation.sweep()
+    const now = Date.now()
+    const owner = owners.get(identity.roomId)
+    const snapshot = Animation.snapshot(identity.roomId)
+    const requestId = `karaoke-${cue.kind}-${cue.queueId}-${cue.token}`
+    if (owner?.socketId !== identity.socketId || !owner.unlocked || Animation.room(identity.roomId).status !== 'open'
+      || !karaokeCueAllowed(identity.roomId, cue, identity.socketId)
+      || (cue.kind === 'ended' && status.queueId !== cue.queueId)
+      || db.get('SELECT 1 FROM animationInterventions WHERE roomId=? AND requestId=?', [identity.roomId, requestId])) return null
+    if (cue.kind === 'reminder') consumeReminder(identity.roomId)
+    if (birthdayOwnsAudio(identity.roomId) || snapshot.active || snapshot.blockedUntil > now || snapshot.prefs.volume <= 0) return null
+    const assets = karaokeCueAssets(identity.roomId, cue)
+    const voiceMs = cue.kind === 'reminder' ? assets.reduce((sum, asset) => sum + asset.durationMs, 0) : 0
+    const durationMs = assets.reduce((sum, asset) => sum + karaokeCueDuration(asset), 0) + 250
+    if (!assets.length || assets.some(asset => !owner.readyClips.includes(asset.checksum)) || durationMs > 10000
+      || voiceMs > (snapshot.voiceBudgetRemainingMs ?? 0)) return null
+    const id = randomUUID()
+    const startBefore = cue.kind === 'countdown'
+      ? Math.min(now + 1500, (snapshot.karaokeTurn?.endsAt ?? now) - 250)
+      : now + 1500
+    if (startBefore <= now) return null
+    const until = startBefore + durationMs
+    db.run(`INSERT INTO animationInterventions(interventionId,roomId,requestId,requestedByUserId,clipId,clipChecksum,displayText,durationMs,voiceDurationMs,status,
+      playerEpoch,ownerSocketId,contextKey,transitionId,requestedAt,expiresAt,startBefore,leaseUntil,origin,family,sequenceJSON,karaokeCueJSON)
+      VALUES(?,?,?,?,?,?,?,?,?,'RESERVED',?,?,?,?,?,?,?,?,'GREETING','karaoke',?,?)`,
+    [id, identity.roomId, requestId, identity.userId, assets[0].id, assets[0].checksum, '', durationMs, voiceMs,
+      owner.epoch, identity.socketId, animationContext(Queue.get(identity.roomId), Animation.room(identity.roomId).prefs.queue), id, now, until, startBefore, until, JSON.stringify(assets), JSON.stringify(cue)])
+    db.run('UPDATE animationRoomState SET blockedUntil=? WHERE roomId=?', [until, identity.roomId])
+    Animation.publish(identity.roomId)
+    return Animation.active(identity.roomId)
+  }
+
   static publish (roomId: number) {
     if (!io || !db.get('SELECT roomId FROM rooms WHERE roomId = ?', [roomId])) return
     const payload = Animation.snapshot(roomId)
@@ -164,6 +200,9 @@ export default class Animation {
     const now = Date.now()
     const rows = db.all<Intervention>(`SELECT * FROM animationInterventions WHERE status IN ${activeStatuses}`)
     for (const row of rows) {
+      if (row.karaokeCueJSON && !row.stopRequestedAt && (!karaokeCueAllowed(row.roomId, JSON.parse(row.karaokeCueJSON), row.ownerSocketId!, false, !!row.startedAt) || birthdayOwnsAudio(row.roomId))) {
+        Animation.cancel(row.roomId, 'Cambió la transición de karaoke.', row.interventionId)
+      }
       if (row.callJSON && !row.stopRequestedAt) {
         const call: CallContext = JSON.parse(row.callJSON)
         if (!validCall(row.roomId, call, !!row.startedAt)) {
@@ -589,14 +628,16 @@ export default class Animation {
       const room = Animation.room(identity.roomId)
       const state = Animation.snapshot(identity.roomId)
       const call: CallContext | undefined = row.callJSON ? JSON.parse(row.callJSON) : undefined
+      const cue: KaraokeCueContext | undefined = row.karaokeCueJSON ? JSON.parse(row.karaokeCueJSON) : undefined
+      if (cue && (!karaokeCueAllowed(identity.roomId, cue, identity.socketId, false) || birthdayOwnsAudio(identity.roomId))) rejectStart('karaoke-changed', 'La transición de karaoke cambió antes del inicio.')
       if (call && !validCall(identity.roomId, call)) {
         Animation.cancel(identity.roomId, 'El llamado cambió antes del inicio')
         throw new Error('El llamado ya no corresponde al pedido.')
       }
-      const greeting = row.origin === 'GREETING' && (!call || interventionAssets(row).some(asset => (asset as AnimationClip & { role?: string }).role === 'greeting'))
+      const greeting = !cue && row.origin === 'GREETING' && (!call || interventionAssets(row).some(asset => (asset as AnimationClip & { role?: string }).role === 'greeting'))
       const control = greeting ? db.get<{ playbackVersion: number }>('SELECT playbackVersion FROM greetingControls WHERE roomId=?', [identity.roomId]) : null
       const delivery = greeting ? db.get<{ playbackVersion: number }>('SELECT playbackVersion FROM greetingTurns WHERE interventionId=?', [id]) : null
-      if (room.status !== 'open' || (greeting ? !Animation.greetingEnabled(identity.roomId) || control?.playbackVersion !== delivery?.playbackVersion : !call && !state.prefs.enabled) || state.prefs.volume <= 0
+      if (room.status !== 'open' || (greeting ? !Animation.greetingEnabled(identity.roomId) || control?.playbackVersion !== delivery?.playbackVersion : !call && !cue && !state.prefs.enabled) || state.prefs.volume <= 0
         || animationContext(Queue.get(identity.roomId), room.prefs.queue) !== row.contextKey) {
         Animation.cancel(identity.roomId, 'El contexto cambió antes del inicio')
         throw new Error('El contexto cambió antes del inicio')

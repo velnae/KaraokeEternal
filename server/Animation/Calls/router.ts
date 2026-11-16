@@ -81,9 +81,9 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
     const files = Object.values(request.files ?? {}).flat()
     try {
       const { kind, requestId } = request.body
-      if (!['video', 'bed'].includes(kind ?? '') || typeof requestId !== 'string' || !/^[\w-]{8,100}$/.test(requestId) || files.length !== 1) ctx.throw(422, 'Seleccione un video MP4 o un audio MP3, WAV u OGG.')
+      if (!['video', 'bed', 'effect'].includes(kind ?? '') || typeof requestId !== 'string' || !/^[\w-]{8,100}$/.test(requestId) || files.length !== 1) ctx.throw(422, 'Seleccione un video MP4 o un audio MP3, WAV u OGG.')
       if (files[0].size > (kind === 'video' ? 40 : 20) * 1024 * 1024) ctx.throw(422, 'El archivo supera el tamaño permitido.')
-      ctx.body = await uploadBackground(Number(ctx.params.roomId), kind as 'video' | 'bed', files[0].originalFilename || 'Fondo de karaoke', files[0].filepath, requestId!)
+      ctx.body = await uploadBackground(Number(ctx.params.roomId), kind as 'video' | 'bed' | 'effect', files[0].originalFilename || 'Fondo de karaoke', files[0].filepath, requestId!)
       ctx.status = 202
     } finally { await Promise.all(files.map(file => fs.rm(file.filepath, { force: true }))) }
   })
@@ -144,6 +144,10 @@ export function createCallRouter (getWorker = () => worker, getAutomation = getC
   })
   router.post('/karaoke-calls/intros', (ctx) => {
     ctx.body = getWorker()!.submit(Number(ctx.params.roomId), 'intro', body(ctx))
+    ctx.status = 202
+  })
+  router.post('/karaoke-calls/reminder', (ctx) => {
+    ctx.body = getWorker()!.submit(Number(ctx.params.roomId), 'source', { requestId: body(ctx).requestId, sourceKind: 'continuation', text: '¡Karaoke!' })
     ctx.status = 202
   })
   router.post('/karaoke-calls/listening-intros', (ctx) => {

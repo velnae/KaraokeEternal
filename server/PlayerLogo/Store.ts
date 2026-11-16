@@ -22,6 +22,7 @@ function references () {
   const row = db.get<{ data: string }>('SELECT data FROM prefs WHERE key=?', ['playerDisplay'])
   const settings = row ? JSON.parse(row.data) as PlayerDisplaySettings : null
   return [settings?.logo?.staticImageId, settings?.logo?.animatedImageId,
+    ...db.all<{ data: string }>('SELECT data FROM karaokeBackgroundSettings').map(row => JSON.parse(row.data).mascotImageId),
     ...(settings?.announcement?.messages ?? []).map(message => message.image)].filter(isPlayerLogoId)
 }
 
@@ -127,7 +128,7 @@ export class PlayerLogoStore {
 
   async remove (id: string, cutoff = Infinity) {
     if (!isPlayerLogoId(id)) throw logoResourceError(404, 'No se encontró la imagen.')
-    if (references().includes(id)) throw logoResourceError(409, 'La imagen está guardada en Pantalla. Quite su selección y aplique los cambios primero.')
+    if (references().includes(id)) throw logoResourceError(409, 'La imagen está en uso. Quite su selección y aplique los cambios primero.')
     const removed = db.run('DELETE FROM playerLogoImages WHERE id=? AND updatedAt<=?', [id, Number.isFinite(cutoff) ? cutoff : Date.now()])
     if (removed.changes) await fs.rm(path.join(this.directory, id), { recursive: true, force: true })
   }

@@ -13,6 +13,7 @@ import GreetingCommitGate from './GreetingCommitGate'
 import type AnnouncementAudio from './AnnouncementAudio'
 import { ensureState } from 'redux-optimistic-ui'
 import { tracePlayback } from 'lib/playbackTrace'
+import { KARAOKE_ENTRY_ATTACK_MS } from 'shared/karaokeStage'
 
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, Math.max(0, ms)))
 function upcoming () {
@@ -145,14 +146,15 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       const completion = channel.play(asset.checksum, current.prefs.volume)
       scheduled = true
       const bed = grant!.transition!.assets.find(item => item.role === 'bed')
-      if (first && bed && ownsBed) {
+      const startBed = !!bed && ownsBed && !bedStarted
+      if (startBed) {
         try {
           void channel.playBed(bed.checksum, bed.volume ?? ambienceBedVolume(current.prefs), deadline - performance.now() - 100, bed.loop !== false)
           bedStarted = true
         } catch { /* Voice remains usable without an optional background bed. */ }
       }
       await audioEvent(first ? 'STARTED' : 'ASSET_STARTED', first ? undefined : asset.id)
-      if (first && bedStarted) await audioEvent('ASSET_STARTED', bed!.id)
+      if (startBed && bedStarted) await audioEvent('ASSET_STARTED', bed!.id)
       await onStarted?.()
       if (await completion !== 'ENDED') throw new Error('La voz fue interrumpida')
       if (asset.role === 'call' || asset.role === 'signature') void audioEvent('ASSET_ENDED', asset.id).catch(() => {})
@@ -249,16 +251,27 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
           const key = `greeting-started:${intervention.interventionId}`
           if (sessionStorage.getItem(key)) throw new Error('Esta lectura ya se inició')
           sessionStorage.setItem(key, '1')
+          const entry = grant.transition.assets.find(asset => asset.role === 'entry')
+          let entryCompletion: Promise<'ENDED' | 'STOPPED'> | undefined
+          if (entry) {
+            if (!voiceValid() || animationTime() >= intervention.startBefore!) throw new Error('La entrada ya no está autorizada')
+            const began = performance.now()
+            entryCompletion = channel.playEffect(entry.checksum, entry.volume ?? store.getState().animation.snapshot!.prefs.volume)
+            scheduled = true
+            await audioEvent('STARTED')
+            await delay(KARAOKE_ENTRY_ATTACK_MS - (performance.now() - began))
+          }
           const greeting = grant.transition.assets.find(asset => asset.role === 'greeting')
-          const foreground = grant.transition.assets.filter(asset => asset.role !== 'bed')
+          const foreground = grant.transition.assets.filter(asset => asset.role !== 'bed' && asset.role !== 'entry')
           for (const [index, asset] of foreground.entries()) {
             if (asset.role === 'intro') setIntro(asset.displayText)
             if ((asset.role === 'call' && !greeting) || asset.role === 'greeting') await show(!!greeting)
             const onStarted = asset.role === 'greeting'
               ? async () => { await greetingRequest('audioStarted', { turnKey: grant!.turnKey, greetingId: grant!.items[0].greetingId }) }
               : undefined
-            await play(asset, index === 0, onStarted)
+            await play(asset, index === 0 && !entry, onStarted)
           }
+          if (entryCompletion && await entryCompletion !== 'ENDED') throw new Error('La entrada fue interrumpida')
           voiceCompleted = true
           if (greeting) void greetingRequest('audioEnded', { turnKey: grant.turnKey, greetingId: grant.items[0].greetingId }).catch(() => {})
         } catch (error) {

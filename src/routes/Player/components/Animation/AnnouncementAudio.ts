@@ -1,9 +1,9 @@
 import { clipDurationLimit, TRANSITION_BED_MS, type AnimationClip } from '../../../../../shared/animation.js'
 import type { GreetingAsset } from '../../../../../shared/greetings.js'
 import { nextTraceIdentity, tracePlayback } from '../../../../lib/playbackTrace'
-import { KARAOKE_BACKGROUND_AUDIO_MS, isKaraokeBedClip } from '../../../../../shared/karaokeBackgrounds.js'
+import { KARAOKE_BACKGROUND_AUDIO_MS, KARAOKE_EFFECT_AUDIO_MS, isKaraokeBedClip, isKaraokeEffectClip } from '../../../../../shared/karaokeBackgrounds.js'
 
-const durationLimit = (clip: AnimationClip) => isKaraokeBedClip(clip) ? KARAOKE_BACKGROUND_AUDIO_MS : clipDurationLimit(clip.kind, clip.effectType)
+const durationLimit = (clip: AnimationClip) => isKaraokeBedClip(clip) ? KARAOKE_BACKGROUND_AUDIO_MS : isKaraokeEffectClip(clip) ? KARAOKE_EFFECT_AUDIO_MS : clipDurationLimit(clip.kind, clip.effectType)
 
 /** A finite, isolated voice channel. It never changes music gain or playback. */
 export default class AnnouncementAudio {
@@ -16,10 +16,15 @@ export default class AnnouncementAudio {
   private finishSource: (() => void) | null = null
   private renewSource: ((milliseconds: number, loop?: boolean) => boolean) | null = null
   private gain: GainNode | null = null
+  private effectStop: ((reason?: string) => void) | null = null
+  private effectFinish: (() => void) | null = null
+  private effectChecksum: string | null = null
   private generation = 0
   private preparing: Promise<string[]> = Promise.resolve([])
   private playingChecksum: string | null = null
   private catalogKeys = new Set<string>()
+  private karaokeKeys = new Set<string>()
+  karaokeQueueId: number | null = null
   private greetingKeys = new Set<string>()
   private callKeys = new Set<string>()
   private bedChecksum: string | null = null
@@ -29,6 +34,8 @@ export default class AnnouncementAudio {
   private bedCompletion: Promise<'ENDED' | 'STOPPED'> | null = null
   private bedRenew: ((durationMs: number) => boolean) | null = null
   private ambienceHeld = false
+  private bedDucked = false
+  private desiredBedVolume = 0
   readonly maxDecodedBytes = 64 * 1024 * 1024
   readonly preparationErrors = new Map<string, string>()
 
@@ -44,7 +51,7 @@ export default class AnnouncementAudio {
 
   musicStarted () { this.ambienceHeld = false }
   get readyChecksums () {
-    return [...new Set([this.playingChecksum, this.bedChecksum, ...this.callKeys, ...this.greetingKeys, ...this.buffers.keys()])]
+    return [...new Set([this.playingChecksum, this.effectChecksum, this.bedChecksum, ...this.karaokeKeys, ...this.callKeys, ...this.greetingKeys, ...this.buffers.keys()])]
       .filter((hash): hash is string => !!hash && this.buffers.has(hash)).slice(0, 30)
   }
 
@@ -86,7 +93,7 @@ export default class AnnouncementAudio {
   }
 
   // Decoding does not require autoplay permission; prepare before a possible gesture.
-  async prepare (clips: AnimationClip[]) {
+  async prepare (clips: AnimationClip[], group: 'catalog' | 'karaoke' = 'catalog') {
     const context = this.ensureContext()
     const generation = this.generation
     const assertCurrent = () => {
@@ -99,9 +106,10 @@ export default class AnnouncementAudio {
       assertCurrent()
       this.preparationErrors.clear()
       const desired = new Set(clips.slice(0, 24).map(clip => clip.checksum))
-      this.catalogKeys = desired
+      if (group === 'karaoke') this.karaokeKeys = desired
+      else this.catalogKeys = desired
       for (const hash of this.buffers.keys()) {
-        if (!desired.has(hash) && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && hash !== this.playingChecksum && hash !== this.bedChecksum) this.buffers.delete(hash)
+        if (!this.catalogKeys.has(hash) && !this.karaokeKeys.has(hash) && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && hash !== this.playingChecksum && hash !== this.bedChecksum) this.buffers.delete(hash)
       }
       const retained = new Set<string>()
       for (const clip of clips.slice(0, 24)) {
@@ -127,7 +135,7 @@ export default class AnnouncementAudio {
           if (size > this.maxDecodedBytes) throw new Error('El audio supera la memoria disponible para este canal.')
           for (const hash of this.buffers.keys()) {
             if (this.decodedBytes + size <= this.maxDecodedBytes) break
-            if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
+            if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.karaokeKeys.has(hash) && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
           }
           if (this.decodedBytes + size > this.maxDecodedBytes) continue
           this.buffers.set(clip.checksum, buffer)
@@ -165,10 +173,10 @@ export default class AnnouncementAudio {
     const prepare = async () => {
       if (!current()) return []
       const calls = assets.filter(asset => asset.role === 'call').slice(0, 3)
-      const greetings = assets.filter(asset => asset.role !== 'call').slice(0, 3)
+      const greetings = [...assets.filter(asset => asset.role !== 'call' && asset.role !== 'entry').slice(0, 3), ...assets.filter(asset => asset.role === 'entry').slice(0, 1)]
       const desired = new Set([...calls, ...greetings].map(asset => asset.checksum))
       for (const hash of [...this.greetingKeys, ...this.callKeys]) {
-        if (!desired.has(hash) && !this.catalogKeys.has(hash) && hash !== this.playingChecksum && hash !== this.bedChecksum) this.buffers.delete(hash)
+        if (!desired.has(hash) && !this.catalogKeys.has(hash) && !this.karaokeKeys.has(hash) && hash !== this.playingChecksum && hash !== this.bedChecksum) this.buffers.delete(hash)
       }
       this.callKeys = new Set(calls.map(asset => asset.checksum))
       this.greetingKeys = new Set(greetings.map(asset => asset.checksum))
@@ -193,7 +201,7 @@ export default class AnnouncementAudio {
             const size = buffer.length * buffer.numberOfChannels * 4
             for (const hash of this.buffers.keys()) {
               if (this.decodedBytes + size <= this.maxDecodedBytes) break
-              if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.callKeys.has(hash) && !this.greetingKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
+              if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.karaokeKeys.has(hash) && !this.callKeys.has(hash) && !this.greetingKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
             }
             stage = 'memory'
             if (this.decodedBytes + size > this.maxDecodedBytes) throw new Error('memory')
@@ -220,6 +228,8 @@ export default class AnnouncementAudio {
     if (!context || context.state !== 'running' || !buffer || this.bedStop || this.ambienceHeld || durationMs <= 0) throw new Error('El fondo no está disponible')
     const duration = Math.min(TRANSITION_BED_MS / 1000, durationMs / 1000, loop ? Infinity : buffer.duration)
     let until = context.currentTime + duration
+    this.desiredBedVolume = volume
+    let level = volume * (this.bedDucked ? 0.25 : 1)
     this.bedChecksum = checksum
     this.bedCompletion = new Promise<'ENDED' | 'STOPPED'>((resolve) => {
       const source = context.createBufferSource()
@@ -228,8 +238,8 @@ export default class AnnouncementAudio {
       source.loop = loop
       source.connect(gain).connect(context.destination)
       gain.gain.setValueAtTime(0, context.currentTime)
-      gain.gain.linearRampToValueAtTime(volume, Math.min(until, context.currentTime + 0.2))
-      gain.gain.setValueAtTime(volume, Math.max(context.currentTime, until - 0.25))
+      gain.gain.linearRampToValueAtTime(level, Math.min(until, context.currentTime + 0.2))
+      gain.gain.setValueAtTime(level, Math.max(context.currentTime, until - 0.25))
       gain.gain.linearRampToValueAtTime(0, until)
       let settled = false
       let stopped = false
@@ -272,7 +282,7 @@ export default class AnnouncementAudio {
         timer = setTimeout(() => stop(0), Math.min(10000, durationMs) + 100)
         gain.gain.cancelScheduledValues(context.currentTime)
         gain.gain.setValueAtTime(gain.gain.value, context.currentTime)
-        gain.gain.setValueAtTime(volume, Math.max(context.currentTime, until - 0.25))
+        gain.gain.setValueAtTime(level, Math.max(context.currentTime, until - 0.25))
         gain.gain.linearRampToValueAtTime(0, until)
         source.stop(until)
         return true
@@ -280,9 +290,10 @@ export default class AnnouncementAudio {
       this.bedFinish = finish
       this.bedVolumeChange = (value) => {
         if (stopped || settled || context.currentTime >= until - 0.25) return
+        level = value
         gain.gain.cancelScheduledValues(context.currentTime)
         gain.gain.setValueAtTime(gain.gain.value, context.currentTime)
-        gain.gain.linearRampToValueAtTime(value, Math.min(until - 0.25, context.currentTime + 0.02))
+        gain.gain.linearRampToValueAtTime(value, Math.min(until - 0.25, context.currentTime + 0.25))
         gain.gain.setValueAtTime(value, until - 0.25)
         gain.gain.linearRampToValueAtTime(0, until)
       }
@@ -300,10 +311,72 @@ export default class AnnouncementAudio {
     return completion
   }
 
-  bedVolume (value: number) { this.bedVolumeChange?.(value) }
+  bedVolume (value: number) {
+    this.desiredBedVolume = value
+    this.bedVolumeChange?.(value * (this.bedDucked ? 0.25 : 1))
+  }
+
+  duckBed (ducked: boolean) {
+    this.bedDucked = ducked
+    this.bedVolumeChange?.(this.desiredBedVolume * (ducked ? 0.25 : 1))
+  }
+
   renewBed (durationMs: number) { return this.bedRenew?.(durationMs) ?? false }
 
-  play (checksum: string, volume: number, segment?: { offsetMs: number, durationMs: number, renewable?: boolean, loop?: boolean }): Promise<'ENDED' | 'STOPPED'> {
+  /** One finite entrance effect can overlap speech without taking its bed. */
+  playEffect (checksum: string, volume: number): Promise<'ENDED' | 'STOPPED'> {
+    const context = this.context
+    const buffer = this.buffers.get(checksum)
+    if (!context || context.state !== 'running' || !buffer || this.effectStop) throw new Error('El efecto de entrada no está disponible')
+    this.effectChecksum = checksum
+    return new Promise((resolve) => {
+      const source = context.createBufferSource()
+      const gain = context.createGain()
+      source.buffer = buffer
+      source.connect(gain).connect(context.destination)
+      const began = context.currentTime
+      const until = began + buffer.duration
+      gain.gain.setValueAtTime(volume, began)
+      gain.gain.setValueAtTime(volume, Math.max(began, until - 0.2))
+      gain.gain.linearRampToValueAtTime(0, until)
+      let settled = false
+      let stopped = false
+      const watchdog = setTimeout(() => stop(), buffer.duration * 1000 + 100)
+      const finish = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(watchdog)
+        context.removeEventListener('statechange', stateChanged)
+        source.disconnect()
+        gain.disconnect()
+        source.onended = null
+        this.effectStop = null
+        this.effectFinish = null
+        this.effectChecksum = null
+        resolve(stopped ? 'STOPPED' : 'ENDED')
+      }
+      const stop = () => {
+        if (settled || stopped) return
+        stopped = true
+        gain.gain.cancelScheduledValues(context.currentTime)
+        gain.gain.setValueAtTime(gain.gain.value, context.currentTime)
+        gain.gain.linearRampToValueAtTime(0, context.currentTime + 0.03)
+        source.stop(context.currentTime + 0.03)
+        if (context.state !== 'running') finish()
+      }
+      const stateChanged = () => {
+        if (context.state !== 'running') stop()
+      }
+      this.effectStop = stop
+      this.effectFinish = finish
+      context.addEventListener('statechange', stateChanged)
+      source.onended = finish
+      source.start()
+      source.stop(until)
+    })
+  }
+
+  play (checksum: string, volume: number, segment?: { offsetMs: number, durationMs: number, renewable?: boolean, loop?: boolean, fadeOutMs?: number }): Promise<'ENDED' | 'STOPPED'> {
     const context = this.context
     const buffer = this.buffers.get(checksum)
     if (!context || context.state !== 'running' || !buffer || this.stopSource) throw new Error('El canal de voz no está disponible')
@@ -389,6 +462,12 @@ export default class AnnouncementAudio {
         this.renewSource = renew
         if (!renew(segment.durationMs)) stop()
       } else {
+        if (segment?.fadeOutMs && segment.fadeOutMs > 0) {
+          const end = context.currentTime + duration
+          gain.gain.setValueAtTime(volume, context.currentTime)
+          gain.gain.setValueAtTime(volume, end - Math.min(duration, segment.fadeOutMs / 1000))
+          gain.gain.linearRampToValueAtTime(0, end)
+        }
         watchdog = setTimeout(() => stop('duration-watchdog'), duration * 1000 + 100)
         source.start(0, offset, duration)
         source.stop(context.currentTime + duration)
@@ -401,7 +480,10 @@ export default class AnnouncementAudio {
     this.bedStop?.(30)
   }
 
-  stopForeground (reason = 'explicit-stop') { this.stopSource?.(reason) }
+  stopForeground (reason = 'explicit-stop') {
+    this.stopSource?.(reason)
+    this.effectStop?.(reason)
+  }
 
   renewAmbience (milliseconds: number, loop?: boolean) { return this.renewSource?.(milliseconds, loop) ?? false }
 
@@ -415,6 +497,7 @@ export default class AnnouncementAudio {
     // Closing the context may prevent a scheduled `ended` event altogether.
     // Resolve the owned playback before disposing its audio clock.
     this.finishSource?.()
+    this.effectFinish?.()
     this.bedFinish?.()
     const context = this.context
     this.generation++
@@ -422,6 +505,9 @@ export default class AnnouncementAudio {
     this.buffers.clear()
     this.preparationErrors.clear()
     this.catalogKeys.clear()
+    this.karaokeKeys.clear()
+    this.karaokeQueueId = null
+    this.bedDucked = false
     this.greetingKeys.clear()
     this.callKeys.clear()
     if (context && context.state !== 'closed') {

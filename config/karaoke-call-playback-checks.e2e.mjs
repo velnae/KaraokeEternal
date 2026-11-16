@@ -8,6 +8,7 @@ import { checkListeningPresentations } from './listening-presentation-checks.e2e
 import { checkNameVoiceBank } from './name-voice-bank-checks.e2e.mjs'
 import { checkSingingHistory } from './singing-history-checks.e2e.mjs'
 import { checkManualKaraokeStart } from './karaoke-start-checks.e2e.mjs'
+import { observeKaraokeStage, prepareKaraokeStage } from './karaoke-stage-checks.e2e.mjs'
 
 export async function checkAutomaticCalls ({ page, context, browser, api, base, uiBase, data, db, call, snapshot, restart, fail }) {
   const sockets = []
@@ -197,6 +198,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
       const hashes = new WeakMap()
       const active = new Map()
       window.callTrace = { starts: [], decoded: [], sceneStarts: [], videoStarts: 0, videoResources: [] }
+      window.callTrace.levels = () => [...active.keys()].map(node => ({ checksum: hashes.get(node.buffer), loop: node.loop, volume: node.fixtureGain?.gain.value ?? 0 }))
       const decode = AudioContext.prototype.decodeAudioData
       AudioContext.prototype.decodeAudioData = async function (bytes) {
         const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
@@ -209,16 +211,27 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
       AudioContext.prototype.createBufferSource = function (...args) {
         const node = create.apply(this, args)
         const start = node.start.bind(node)
+        const connect = node.connect.bind(node)
         const disconnect = node.disconnect.bind(node)
+        node.connect = (destination, ...args) => {
+          node.fixtureGain = destination
+          return connect(destination, ...args)
+        }
         node.disconnect = (...args) => {
           active.delete(node)
           return disconnect(...args)
         }
         node.start = (...args) => {
           const kind = labels.get(hashes.get(node.buffer)) || 'other'
-          window.callTrace.starts.push({ kind, at: performance.now(), overlap: [...active.values()] })
+          const entry = { kind, checksum: hashes.get(node.buffer), at: performance.now(), durationMs: node.buffer.duration * 1000, loop: node.loop,
+            audioStartedAt: node.context.currentTime, audioEndedAt: null, endedAt: null, overlap: [...active.values()] }
+          window.callTrace.starts.push(entry)
           active.set(node, kind)
-          node.addEventListener('ended', () => active.delete(node))
+          node.addEventListener('ended', () => {
+            entry.endedAt = performance.now()
+            entry.audioEndedAt = node.context.currentTime
+            active.delete(node)
+          })
           return start(...args)
         }
         return node
@@ -298,22 +311,44 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     // The HTTPS fixture bridges polling through APIRequestContext; unloading
     // cannot close that remote transport synchronously like a real WebSocket.
     await expect.poll(async () => (await emit(operator, 'server/ANIMATION_SYNC')).payload.playerPresent, { timeout: 60000 }).toBe(false)
-    await player.goto(uiBase + 'player', { waitUntil: 'domcontentloaded', timeout: 60000 })
+    try {
+      await player.goto(uiBase + 'player', { waitUntil: 'domcontentloaded', timeout: 60000 })
+    } catch (error) {
+      // The tunnel may close an idle HTTP connection during the deliberate
+      // owner-expiry wait. Retry that navigation once, never a playback action.
+      if (uiBase === base || !error.message.includes('ERR_CONNECTION_CLOSED')) throw error
+      await player.goto(uiBase + 'player', { waitUntil: 'domcontentloaded', timeout: 60000 })
+    }
     await expect.poll(async () => (await emit(operator, 'server/ANIMATION_SYNC')).payload.playerEpoch, { timeout: 20000 }).toBeGreaterThan(independentState.playerEpoch)
     await player.locator('body').click({ position: { x: 10, y: 10 } })
     await expect.poll(async () => (await emit(operator, 'server/ANIMATION_SYNC')).payload.audioUnlocked, { timeout: 20000 }).toBe(true)
+    const stageEnabled = process.env.KARAOKE_E2E_STAGE === '1' || process.env.KARAOKE_E2E_STAGE_ONLY === '1'
+    const stage = stageEnabled ? await prepareKaraokeStage({ api, base, call, data, page, uiBase, db }) : null
+    if (stage) {
+      fs.copyFileSync(path.join(data, 'seek-song.mp4'), path.join(data, 'song-6.mp4'))
+      db.prepare('UPDATE media SET duration=12 WHERE songId=6').run()
+      stage.mediaId = db.prepare('SELECT mediaId FROM media WHERE songId=6').get().mediaId
+    }
     const interrupted = await add(ana, 6, 'SING')
+    const followingIds = stage ? [await add(luis, 2, 'SING'), await add(ana, 4, 'LISTEN'), await add(operator, 5, 'LISTEN', 'HOUSE')] : []
+    if (stage) {
+      await expect.poll(() => db.prepare('SELECT status FROM karaokeCallRequests WHERE queueId=?').get(followingIds[0])?.status, { timeout: 15000 }).toBe('ready')
+      await observeKaraokeStage(player)
+    }
     await expect.poll(() => db.prepare('SELECT status FROM karaokeCallRequests WHERE queueId=?').get(interrupted)?.status, { timeout: 15000 }).toBe('ready')
     await emit(operator, 'server/PLAYER_REQ_PLAY')
     await expect(player.locator('[data-testid="transition-scene"]')).toBeVisible({ timeout: 15000 })
     await expect.poll(() => db.prepare('SELECT queueId FROM karaokeBackgroundScenes WHERE roomId=1').get()?.queueId, { timeout: 15000 }).toBe(interrupted)
-    await emit(operator, 'server/PLAYER_REQ_PAUSE')
-    await player.waitForTimeout(2500)
-    assert.equal(db.prepare('SELECT startedAt FROM karaokeCallRequests WHERE queueId=?').get(interrupted).startedAt, null)
-    await emit(operator, 'server/PLAYER_REQ_PLAY')
-    await checkManualKaraokeStart({ page, player, operator, emit, db, call, snapshot, uiBase, data, queueId: interrupted })
+    if (!stage) {
+      await emit(operator, 'server/PLAYER_REQ_PAUSE')
+      await player.waitForTimeout(2500)
+      assert.equal(db.prepare('SELECT startedAt FROM karaokeCallRequests WHERE queueId=?').get(interrupted).startedAt, null)
+      await emit(operator, 'server/PLAYER_REQ_PLAY')
+    }
+    await checkManualKaraokeStart({ page, player, operator, emit, db, call, snapshot, uiBase, data, queueId: interrupted, stage, followingIds })
     assert.equal(db.prepare('SELECT count(*) n FROM animationInterventions WHERE json_extract(callJSON,?)=? AND startedAt IS NOT NULL').get('$.queueId', interrupted).n, 1)
     assert.equal(db.prepare(`SELECT status FROM animationInterventions WHERE json_extract(callJSON,'$.queueId')=? AND startedAt IS NOT NULL`).get(interrupted).status, 'PLAYED')
+    if (process.env.KARAOKE_E2E_STAGE_ONLY === '1') return
     console.log('Independent karaoke: cold player, animator/automation/turn disabled, finished animator session, explicit pause/retry and animator control changes during speech passed.')
     const restoreState = (await emit(operator, 'server/ANIMATION_SYNC')).payload
     await emit(operator, 'server/ANIMATION_CONTROL', { controlVersion: restoreState.controlVersion, enabled: true, automation: true, events: { turn: true } })
@@ -333,7 +368,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
     if (process.env.KARAOKE_E2E_CALLS_ONLY !== '1') await checkNameVoiceBank({ page, browser, api, base, uiBase, data, db, call, join, add, emit, connect, proxy, fail })
   } catch (error) {
     if (player && !player.isClosed()) {
-      const evidence = await player.evaluate(() => ({ url: location.href, text: document.body.innerText, trace: window.karaokePlaybackTrace?.snapshot() })).catch(() => null)
+      const evidence = await player.evaluate(() => ({ url: location.href, text: document.body.innerText, trace: window.karaokePlaybackTrace?.snapshot(), audio: window.callTrace, stage: window.karaokeStage })).catch(() => null)
       fs.writeFileSync(path.join(data, 'call-player-failure.json'), JSON.stringify(evidence, null, 2))
       fs.writeFileSync(path.join(data, 'call-room-failure.json'), JSON.stringify({ state: db.prepare('SELECT * FROM animationRoomState').all(), scenes: db.prepare('SELECT * FROM karaokeBackgroundScenes').all(), interventions: db.prepare('SELECT status,reason,callJSON,startedAt,stopRequestedAt FROM animationInterventions').all() }, null, 2))
       await player.screenshot({ path: path.join(data, 'call-player-failure.png') }).catch(() => {})

@@ -18,7 +18,9 @@ import { prepareGreetingTransition } from '../../Greetings/transition.js'
 import * as greetingAudio from '../../Greetings/audioRouter.js'
 import * as catalog from '../catalog.js'
 import { listeningTemplate, listeningTemplates } from './Listening.js'
-import { callTransitionFailure, recordCallOmission } from './Playback.js'
+import { callTransitionFailure, recordCallOmission, planCallTransition } from './Playback.js'
+import { backgroundSettings, saveBackgroundSettings } from './Backgrounds.js'
+import { KARAOKE_ENTRY_ATTACK_MS } from '../../../shared/karaokeStage.js'
 import NameBank from './NameBank.js'
 
 let directory: string
@@ -78,6 +80,34 @@ async function bank () {
   automatic.setup(1, { requestId: randomUUID(), revision: callControls(1).revision })
   await until(() => automatic.snapshot(1).tablesReady === 1)
 }
+
+it('reserves the entry and singing presentation together, budgets only speech and omits an unready or oversized effect', async () => {
+  await bank()
+  const identity = player()
+  const id = add()
+  await until(() => requestCall(1, id)?.status === 'ready')
+  db.run(`INSERT INTO karaokeBackgroundAssets(id,roomId,requestId,kind,title,active,state,checksum,durationMs,createdAt)
+    VALUES('entry',1,'entry','effect','Entry',1,'ready','entry-hash',3893,1)`)
+  saveBackgroundSettings(1, { ...backgroundSettings(1), entryEffectId: 'entry' })
+  const prepared = (await prepareGreetingTransition(1, id))!
+  const hashes = prepared.assets.map(asset => asset.checksum)
+  const speech = prepared.call!.assets.find(asset => asset.role === 'call')!
+  const plan = planCallTransition(1, null, prepared, hashes, speech.durationMs, 25000)!
+  expect(plan.assets.map(asset => asset.role)).toEqual(['entry', 'call'])
+  expect(plan.voiceMs).toBe(speech.durationMs)
+  expect(plan.durationMs).toBe(Math.max(3893, KARAOKE_ENTRY_ATTACK_MS + speech.durationMs) + 250)
+  expect(planCallTransition(1, null, prepared, hashes.filter(hash => hash !== 'entry-hash'), speech.durationMs, 25000)?.assets.map(asset => asset.role)).toEqual(['call'])
+  expect(planCallTransition(1, null, prepared, hashes, speech.durationMs, speech.durationMs + 3250)?.assets.map(asset => asset.role)).toEqual(['call'])
+  expect(planCallTransition(1, null, prepared, hashes, 0, 25000)).toBeNull()
+  const grant = Greetings.reserve(1, identity.socketId, id, { queueId: -1 }, undefined, prepared, hashes, 1)!
+  const intervention = grant.transition!.intervention
+  expect(db.all('SELECT * FROM animationInterventions')).toHaveLength(1)
+  expect(intervention.voiceDurationMs).toBe(speech.durationMs)
+  Animation.event(identity, intervention.interventionId, intervention.playerEpoch!, 'STARTED')
+  Animation.event(identity, intervention.interventionId, intervention.playerEpoch!, 'ASSET_STARTED', speech.id)
+  expect(db.all<{ clipId: string }>('SELECT clipId FROM audioUsage ORDER BY rowid').map(row => row.clipId)).toEqual(['entry', speech.id])
+  Animation.event(identity, intervention.interventionId, intervention.playerEpoch!, 'ENDED')
+}, 30000)
 
 it('retains singing history and privately recovers original speech after identity and profile changes', async () => {
   await bank()

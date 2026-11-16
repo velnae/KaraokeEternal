@@ -12,7 +12,7 @@ import { inspectLogoImage } from './inspect.js'
 vi.mock('../lib/Database.js', async (original) => {
   const module = await original<typeof import('../lib/Database.js')>()
   const db = new module.DatabaseWrapper(':memory:')
-  db.exec('CREATE TABLE prefs(key TEXT PRIMARY KEY,data TEXT); CREATE TABLE roles(roleId INTEGER,name TEXT); CREATE TABLE paths(pathId INTEGER,path TEXT,priority INTEGER,data TEXT);')
+  db.exec('CREATE TABLE prefs(key TEXT PRIMARY KEY,data TEXT); CREATE TABLE roles(roleId INTEGER,name TEXT); CREATE TABLE paths(pathId INTEGER,path TEXT,priority INTEGER,data TEXT); CREATE TABLE karaokeBackgroundSettings(roomId INTEGER PRIMARY KEY,data TEXT);')
   return { ...module, db }
 })
 import { db } from '../lib/Database.js'
@@ -71,6 +71,19 @@ afterAll(async () => {
 })
 
 describe('screen image resources', () => {
+  it('retains a mascot selected only by Karaoke until its selection is removed', async () => {
+    const response = await upload('gif', gif)
+    expect(response.status).toBe(201)
+    const image = await response.json()
+    db.run('INSERT INTO karaokeBackgroundSettings(roomId,data) VALUES(1,?)', [JSON.stringify({ mascotImageId: image.id })])
+    db.run('UPDATE playerLogoImages SET updatedAt=0 WHERE id=?', [image.id])
+    await store.cleanup()
+    expect(getLogoImage(image.id)).toBeDefined()
+    await expect(store.remove(image.id)).rejects.toThrow('en uso')
+    db.run('DELETE FROM karaokeBackgroundSettings WHERE roomId=1')
+    await store.cleanup()
+    expect(getLogoImage(image.id)).toBeUndefined()
+  })
   it('reports a preparation/storage failure without publishing a resource and releases the upload slot', async () => {
     const prepare = vi.spyOn(store, 'prepare').mockRejectedValueOnce(new Error('Fixture storage failure'))
     try {

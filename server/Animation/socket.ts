@@ -10,14 +10,16 @@ import { captureKaraokeMedia, karaokeBedClips } from './Calls/Backgrounds.js'
 import { callsEnabled, recordCallOmission } from './Calls/Playback.js'
 import { KARAOKE_TURN } from '../../shared/karaokeStart.js'
 import { beginKaraokeTurn, karaokeTurn, operateKaraokeTurn } from './Calls/Start.js'
+import { KARAOKE_CUE, karaokeCueKinds } from '../../shared/karaokeStage.js'
+import { karaokeCuePreparation } from './Calls/Cues.js'
 import {
   ANIMATION_REQUEST, ANIMATION_CANCEL, ANIMATION_CONTROL, ANIMATION_RESERVE,
   ANIMATION_READY, ANIMATION_EVENT, ANIMATION_SYNC, ANIMATION_STATE,
   ANIMATION_AUTO, ANIMATION_SESSION, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, VOICE_FAMILIES,
 } from '../../shared/animation.js'
 
-const actions = [ANIMATION_REQUEST, ANIMATION_CANCEL, ANIMATION_CONTROL, ANIMATION_RESERVE, ANIMATION_READY, ANIMATION_EVENT, ANIMATION_SYNC, ANIMATION_AUTO, ANIMATION_SESSION, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, TRANSITION_VIDEO_SCENE, KARAOKE_TURN]
-const playerActions = [ANIMATION_RESERVE, ANIMATION_READY, ANIMATION_EVENT, ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, TRANSITION_VIDEO_SCENE]
+const actions = [ANIMATION_REQUEST, ANIMATION_CANCEL, ANIMATION_CONTROL, ANIMATION_RESERVE, ANIMATION_READY, ANIMATION_EVENT, ANIMATION_SYNC, ANIMATION_AUTO, ANIMATION_SESSION, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, TRANSITION_VIDEO_SCENE, KARAOKE_TURN, KARAOKE_CUE]
+const playerActions = [ANIMATION_RESERVE, ANIMATION_READY, ANIMATION_EVENT, ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, TRANSITION_VIDEO_SCENE, KARAOKE_CUE]
 const isId = (value: unknown): value is string => typeof value === 'string' && /^[\w-]{1,100}$/.test(value)
 
 export default Object.fromEntries(actions.map(type => [type, (sock, action, acknowledge) => {
@@ -32,8 +34,17 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
     let grant
     let ambience
     let background
+    let karaokeCue
     let eligible: boolean | undefined
-    if (type === KARAOKE_TURN) {
+    if (type === KARAOKE_CUE) {
+      if (!Number.isSafeInteger(input.queueId) || input.queueId < 1) throw new Error('Turno no válido.')
+      if (input.operation === 'prepare') karaokeCue = karaokeCuePreparation(roomId, input.queueId)
+      else {
+        if (input.operation !== 'reserve' || !karaokeCueKinds.includes(input.kind) || !isId(input.token)
+          || (input.runId !== undefined && !isId(input.runId)) || (input.revision !== undefined && !Number.isSafeInteger(input.revision))) throw new Error('Efecto de karaoke no válido.')
+        grant = Animation.reserveKaraokeCue(identity, { queueId: input.queueId, kind: input.kind, token: input.token, runId: input.runId, revision: input.revision }, sock._lastPlayerStatus ?? {})
+      }
+    } else if (type === KARAOKE_TURN) {
       if (!['start', 'cancel'].includes(input.operation) && !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad')
       if (input.operation === 'begin') {
         if (!Number.isSafeInteger(input.queueId)) throw new Error('Turno no válido.')
@@ -72,7 +83,8 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
     } else if (type === ANIMATION_READY) {
       if (typeof input.audioUnlocked !== 'boolean' || !Array.isArray(input.readyClips) || input.readyClips.length > 30
         || (input.transitionBed !== undefined && typeof input.transitionBed !== 'boolean')) throw new Error('Preparación no válida')
-      const hashes = new Set([...catalogClips(roomId), ...karaokeBedClips(roomId)].map(clip => clip.checksum))
+      const cueQueueIds = [karaokeTurn(roomId)?.queueId, input.karaokeQueueId].filter((id): id is number => Number.isSafeInteger(id))
+      const hashes = new Set([...catalogClips(roomId), ...karaokeBedClips(roomId), ...cueQueueIds.flatMap(id => karaokeCuePreparation(roomId, id).assets)].map(clip => clip.checksum))
       Animation.ready(identity, input.audioUnlocked, input.readyClips.filter(hash => hashes.has(hash)), input.transitionBed === true)
     } else if (type === ANIMATION_RESERVE || type === ANIMATION_AUTO) {
       if ((type === ANIMATION_RESERVE && !isId(input.interventionId)) || !isId(input.transitionId) || typeof input.contextKey !== 'string'
@@ -112,7 +124,7 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       Animation.ambienceStarted(identity, input.id, input.runId)
     }
     Animation.sweep()
-    acknowledge?.({ type: ANIMATION_STATE, payload: Animation.snapshot(roomId), ...(background !== undefined ? { background } : {}), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
+    acknowledge?.({ type: ANIMATION_STATE, payload: Animation.snapshot(roomId), ...(karaokeCue ? { karaokeCue } : {}), ...(background !== undefined ? { background } : {}), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
   } catch (error) {
     acknowledge?.({ type: ANIMATION_STATE, error: (error as Error).message })
   }

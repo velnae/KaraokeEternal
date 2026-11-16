@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { db } from '../../lib/Database.js'
 import { callControls } from './Store.js'
 import { KARAOKE_COUNTDOWN_MS, type KaraokeTurn } from '../../../shared/karaokeStart.js'
+import { KARAOKE_REMINDER_MS } from '../../../shared/karaokeStage.js'
 
 interface Row extends Omit<KaraokeTurn, 'playerPresent' | 'presented' | 'phase'> { roomId: number, ownerSocketId: string | null, heartbeatAt: number, presented: number, phase: KaraokeTurn['phase'] | 'played' }
 const row = (roomId: number) => db.get<Row>('SELECT * FROM karaokeStartTurns WHERE roomId=?', [roomId])
 const dto = (value: Row): KaraokeTurn => ({ queueId: value.queueId, runId: value.runId, phase: value.phase as KaraokeTurn['phase'], presented: !!value.presented,
-  revision: value.revision, endsAt: value.endsAt, playerPresent: !!value.ownerSocketId && value.heartbeatAt > Date.now() - 15000 })
+  revision: value.revision, endsAt: value.endsAt, reminderAt: value.reminderAt, playerPresent: !!value.ownerSocketId && value.heartbeatAt > Date.now() - 15000 })
 const fail = (message: string): never => {
   throw Object.assign(new Error(message), { status: 409 })
 }
@@ -14,7 +15,7 @@ const fail = (message: string): never => {
 export function resetKaraokeTurn (roomId: number, owner?: string) {
   const saved = row(roomId)
   if (!saved || saved.phase === 'played' || (owner && saved.ownerSocketId !== owner)) return
-  db.run(`UPDATE karaokeStartTurns SET phase=CASE WHEN presented=1 THEN 'waiting' ELSE 'presenting' END,endsAt=NULL,ownerSocketId=NULL,revision=revision+1 WHERE roomId=?`, [roomId])
+  db.run(`UPDATE karaokeStartTurns SET phase=CASE WHEN presented=1 THEN 'waiting' ELSE 'presenting' END,endsAt=NULL,ownerSocketId=NULL,reminderAt=?,revision=revision+1 WHERE roomId=?`, [Date.now() + KARAOKE_REMINDER_MS, roomId])
 }
 export function recoverKaraokeTurns () {
   for (const saved of db.all<Row>('SELECT * FROM karaokeStartTurns')) resetKaraokeTurn(saved.roomId)
@@ -64,7 +65,7 @@ export function operateKaraokeTurn (roomId: number, owner: string, input: { oper
       db.run(`UPDATE karaokeStartTurns SET phase='waiting',endsAt=NULL,revision=revision+1 WHERE roomId=?`, [roomId])
       return fail('Espere a que termine el cumpleaños y confirme nuevamente el karaoke.')
     }
-    if (operation === 'presented' && !saved.presented) db.run(`UPDATE karaokeStartTurns SET presented=1,phase='waiting',revision=revision+1 WHERE roomId=?`, [roomId])
+    if (operation === 'presented' && !saved.presented) db.run(`UPDATE karaokeStartTurns SET presented=1,phase='waiting',reminderAt=?,revision=revision+1 WHERE roomId=?`, [Date.now() + KARAOKE_REMINDER_MS, roomId])
     if (operation === 'consume') {
       if (current.phase === 'released') return current
       if (current.phase !== 'countdown' || current.endsAt === null || current.endsAt > Date.now()) return fail('El conteo todavía no terminó.')
@@ -85,7 +86,7 @@ export function operateKaraokeTurn (roomId: number, owner: string, input: { oper
       db.run(`UPDATE karaokeStartTurns SET phase='countdown',endsAt=?,revision=revision+1 WHERE roomId=?`, [Date.now() + KARAOKE_COUNTDOWN_MS, roomId])
     } else if (operation === 'cancel') {
       if (!['waiting', 'countdown'].includes(current.phase)) return fail('La canción ya está iniciando.')
-      db.run(`UPDATE karaokeStartTurns SET phase='waiting',endsAt=NULL,revision=revision+1 WHERE roomId=?`, [roomId])
+      db.run(`UPDATE karaokeStartTurns SET phase='waiting',endsAt=NULL,reminderAt=?,revision=revision+1 WHERE roomId=?`, [Date.now() + KARAOKE_REMINDER_MS, roomId])
     } else return fail('Operación de inicio no válida.')
   }
   return karaokeTurn(roomId)

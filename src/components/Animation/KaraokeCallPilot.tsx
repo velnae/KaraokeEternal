@@ -143,6 +143,14 @@ export default function KaraokeCallPilot ({ roomId }: { roomId: number }) {
             </form>
           </section>
           <KaraokeBackgroundSettings state={backgrounds} />
+          <section className={styles.section} aria-label='Recordatorio de mesa'>
+            <h3>Recordatorio cada 10 segundos</h3>
+            <div className={styles.actions}>
+              {!snapshot?.reminder && <Button disabled={busy || !!unavailable} onClick={() => void submit('karaoke-calls/reminder', {})}>Preparar «¡Karaoke!»</Button>}
+              {snapshot?.reminder && <Button onClick={() => setListening(snapshot.reminder!)}>Escuchar «¡Karaoke!»</Button>}
+            </div>
+            {!snapshot?.reminder && <p role='status'>{unavailable || 'Prepare «¡Karaoke!» o seleccione su grabación en Efectos de karaoke para completar el recordatorio de mesa.'}</p>}
+          </section>
           <details className={styles.requestDetails}>
             <summary>Preparaciones de recursos</summary>
             <CallPreparationList jobs={snapshot?.jobs.filter(item => item.operation !== 'hybrid' && item.operation !== 'reference') ?? []} cancel={cancel} listen={setListening} />

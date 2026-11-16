@@ -6,6 +6,7 @@ import { callControls, callSessionAllows, part } from './Store.js'
 import { getCallAutomation } from './Automation.js'
 import Queue from '../../Queue/Queue.js'
 import getLogger from '../../lib/Log.js'
+import { KARAOKE_ENTRY_ATTACK_MS } from '../../../shared/karaokeStage.js'
 
 export function callsEnabled (roomId: number) {
   const room = db.get<{ status: string }>('SELECT status FROM rooms WHERE roomId=?', [roomId])
@@ -70,8 +71,13 @@ export function planCallTransition (roomId: number, greeting: Greeting | null, p
   const durationMs = spoken ? selected.durationMs + displayMs : Math.max(selected.durationMs, displayMs)
   if (durationMs > limit) return null
   const bed = available.find(asset => asset.role === 'bed')
-  return { assets: [selected, ...(spoken ? [spoken, ...(signature ? [signature] : [])] : []), ...(bed ? [bed] : [])], call: context,
-    displayMs, durationMs: durationMs + 250, voiceMs: selected.durationMs + (spoken ? spoken.durationMs + signatureMs : 0) }
+  // The optional entry shares the call's reservation, without consuming speech
+  // budget or delaying the call until the whole effect has finished.
+  const entry = available.find(asset => asset.role === 'entry'
+    && Math.max(asset.durationMs, KARAOKE_ENTRY_ATTACK_MS + durationMs) <= limit)
+  return { assets: [...(entry ? [entry] : []), selected, ...(spoken ? [spoken, ...(signature ? [signature] : [])] : []), ...(bed ? [bed] : [])], call: context,
+    displayMs, durationMs: (entry ? Math.max(entry.durationMs, KARAOKE_ENTRY_ATTACK_MS + durationMs) : durationMs) + 250,
+    voiceMs: selected.durationMs + (spoken ? spoken.durationMs + signatureMs : 0) }
 }
 
 function planListeningTransition (roomId: number, greeting: Greeting | null, prepared: GreetingPreparation, ready: string[], budgetMs: number, remainingMs: number): GreetingTransition | null {
