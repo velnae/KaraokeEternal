@@ -11,8 +11,10 @@ metadata:
 
 ## Activation Contract
 
-Use for playback incidents, production evidence requests and local reproduction
-of proposed playback improvements. Load the linked workflow before executing.
+Use for playback incidents, production evidence requests and explicitly requested
+local reproduction. Routine playback edits do not trigger this workflow. Choose
+verification under the project's risk-based policy; inspection can suffice for
+clear, localized, low-risk changes. Load the linked workflow when investigating.
 
 ## Hard Rules
 
@@ -28,6 +30,7 @@ of proposed playback improvements. Load the linked workflow before executing.
 
 | Evidence | Action |
 | --- | --- |
+| Routine edit without an incident or reproduction request | Follow the project verification policy; skip diagnostic bundles and scenario runs unless needed to resolve a concrete uncertainty |
 | Local symptom only | Initialize bundle and record local version |
 | Existing affected-tab trace | Import bounded technical events |
 | Authorized production read | Collect bounded UTC window and room |
@@ -41,9 +44,12 @@ of proposed playback improvements. Load the linked workflow before executing.
 2. Run `npm run diagnostics -- help`; initialize a new ignored bundle.
 3. Inspect local release and collect authorized evidence using the workflow.
 4. Correlate intervention/checksum IDs; distinguish wall, monotonic and audio clocks.
-5. Use CodeGraph to inspect the implicated path. Assemble and run the local scenario.
+5. Use CodeGraph to inspect the implicated path. Assemble and run only a local
+   scenario needed to answer the investigation's concrete question.
 6. Establish a failing assertion before claiming reproduction. Implement a focused
-   correction only when requested; run relevant regressions and HTTPS development smoke.
+   correction only when requested. Choose focused verification for the affected
+   contract; do not automatically run both development/production scenarios or
+   add an HTTPS smoke test.
 7. Run `report` and state the actual evidence and checks.
 
 ## Output Contract

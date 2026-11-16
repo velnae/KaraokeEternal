@@ -21,6 +21,9 @@ project rules in `AGENTS.md`; keep the upstream design skill unchanged.
   describes obvious behavior. If the action is understandable without it, omit it.
 - Do not replace removed text with tooltips, badges, or help icons by default.
 - Keep Spanish UI copy and the existing theme and components.
+- Follow the project's risk-based verification policy. Loading UI skills or
+  touching UI code does not automatically require browser checks or screenshots;
+  inspection can suffice for clear, localized, low-risk changes.
 - Preserve accessible names, essential status feedback, and actionable error,
   blocking, and empty-state messages. Never leave a disabled primary action
   unexplained or without a next step.
@@ -39,10 +42,11 @@ project rules in `AGENTS.md`; keep the upstream design skill unchanged.
 1. Identify the user's action and the minimum elements needed to complete it.
 2. Review each proposed sentence: remove redundant guidance before editing.
 3. Implement the smallest change using existing patterns.
-4. Verify the affected flow over HTTPS, including relevant keyboard behavior;
-   inspect mobile and desktop screenshots for visual changes.
-5. Follow the project's impact-based checks. Keep validation and error recovery
-   working when removing explanatory copy.
+4. If a concrete uncertainty warrants a browser check, use development HTTPS and
+   exercise only the affected behavior. Include keyboard or responsive checks
+   where relevant; do not start broad E2E suites by default.
+5. Keep validation and error recovery working when removing explanatory copy.
+   Stop verification once the relevant uncertainty is resolved.
 
 ## Output Contract
 

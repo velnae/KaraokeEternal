@@ -28,7 +28,10 @@ Load when configuring database clients or diagnosing DBHub connectivity.
 2. Verify local MCP with `make db-check connection=karaoke`; verify production only when requested using `connection=karaoke-prod`.
 3. Use `make db-sync` for local sqlit; `make db-prod` opens remote read-only sqlite3 because the VPS has no sqlit.
 4. Restart OpenCode after config/skill changes; reconnect DBHub after dotenv edits.
-5. Run `make db-test` for isolated launcher regressions. MCP startup alone does not prove query access.
+5. Run `make db-test` only when a concrete launcher regression or behavioral
+   change warrants it under the project's verification policy. Instruction-only
+   or clear low-risk edits do not trigger launcher tests. MCP startup alone does
+   not prove query access.
 
 ## Output Contract
 State which sources were configured and actually queried. Report missing prerequisites and restart requirements without claiming unverified access.

@@ -23,17 +23,20 @@
 
 ## Playback diagnosis and local reproduction
 
-For playback incidents, production log investigation or reproducible playback
-improvements, load `.opencode/skills/karaoke-diagnostics/SKILL.md` and follow
+For playback incidents, production log investigation or explicitly requested
+playback reproduction, load `.opencode/skills/karaoke-diagnostics/SKILL.md` and follow
 `docs/playback-diagnostics.md`. Use `npm run diagnostics -- help` for the bounded
 tools. Production collection requires an explicit production-read request;
 local scenarios use temporary data. Never equate a passing synthetic scenario
 with reproduction of a production incident.
+Routine playback edits do not require this diagnostic workflow; choose any
+verification using the risk-based policy below.
 
 ## Development mode — fast, proportional delivery
 
 This project is in active development. Default to a short loop: inspect the
-affected code, implement the smallest complete change, verify it, and summarize.
+affected code, implement the smallest complete change, and summarize. Verify only
+when a concrete uncertainty, meaningful risk or explicit request warrants it.
 
 - Implement clear, reversible requests directly. Reserve formal plans, SDD
   artifacts, issues, review rounds and approval checkpoints for explicit requests
@@ -65,12 +68,14 @@ affected code, implement the smallest complete change, verify it, and summarize.
 - Preserve development `no-store` headers, hashed JS/CSS filenames and the
   refreshed HTML index. If changes appear stale, check compilation and browser/
   CDN responses before changing cache rules or restarting services.
-- Verify the affected user flow through the HTTPS URL with Playwright. If the
-  tunnel is unavailable, continue with local checks and report HTTPS validation
-  as pending. Do not claim a localhost-only check covers the tunnel.
+- When browser verification is warranted by the policy below, use the HTTPS URL
+  with Playwright. If the tunnel is unavailable, use relevant local evidence and
+  report the HTTPS gap only if it matters to the task. Do not claim a
+  localhost-only check covers the tunnel.
 - Existing `config/*.e2e.mjs` suites launch isolated local servers with temporary
-  databases; use them for repeatable regression checks, alongside the relevant
-  HTTPS smoke test. Keep automated fixtures and destructive tests off shared data.
+  databases; use them only when their coverage resolves a concrete risk. Do not
+  automatically pair an isolated suite with an HTTPS smoke test. Keep automated
+  fixtures and destructive tests off shared data.
 - Before enabling an E2E suite's HTTPS mode, check its target hostname. Older
   suites may still hardcode `karaoke.puyu.pe`; point them at the development
   hostname before use. Keep local and VPS data independent after the migration.
@@ -79,6 +84,8 @@ affected code, implement the smallest complete change, verify it, and summarize.
 
 ## Runtime parity — Node 24
 
+- These runtime requirements apply when verification is needed; they do not
+  require running checks, preparing a runtime or building for every change.
 - Run tests, type checks, verification builds and isolated reproduction servers
   with **Node 24**, matching production. Use the documented production patch
   (**24.22.2**, see `docs/production-deployment.md`) when available; report any
@@ -92,22 +99,38 @@ affected code, implement the smallest complete change, verify it, and summarize.
   behavior from a newer local Node version. If Node 24 is unavailable, prepare it
   or report verification as blocked rather than substituting a newer major.
 
-## Minimum quality — choose checks by impact
+## Verification — proportional to actual risk
 
-| Change | Verification |
+Verification is not an automatic step for every edit. For any clear, localized,
+low-risk change, inspection of the affected code and resulting diff can be
+sufficient. This applies to application logic, UI, audio, configuration and
+documentation alike; file type or subsystem alone does not trigger checks.
+
+| Situation | Response |
 | --- | --- |
-| Documentation/instructions only | Review the diff, referenced paths and commands; run `git diff --check`. |
-| Application logic or bug fix | Run focused tests with `npm test -- <test-file-or-directory>` and lint changed JS/TS files with `npx --no-install eslint <files>`. Run `npm run typecheck` when TypeScript changes. |
-| UI/UX | Exercise the affected flow in Playwright over HTTPS; apply the UI checks below. |
-| Player/audio lifecycle | Run the affected regression scenarios in development (React StrictMode) and production, using isolated data/ports. Include the affected HTTPS playback flow. |
-| Authentication, persistence or queue coordination | Add or run focused regression coverage for the changed contract and its relevant failure path. |
+| Clear, localized change with no concrete uncertainty | Implement and inspect; no test, lint, typecheck, build or browser run is required. |
+| Specific uncertainty or plausible regression | Use the smallest check that can resolve it: a focused test, lint/type check, brief manual check or narrow smoke test. |
+| Consequential contract or cross-cutting behavior change | Select focused coverage for the affected behavior and failure path; broaden only when findings justify it. |
+| Explicit verification request or required CI gate | Honor that scope without adding unrelated suites. |
 
-Apply the relevant rows together. Add tests for meaningful new behavior or a
-reproducible bug; avoid tests that only mirror implementation or cosmetic edits.
-Reserve full-suite runs and production builds for cross-cutting changes,
-dependency/build configuration changes, required CI checks or explicit requests.
-Build the needed target when a focused production check requires it. Report
-failures and untested behavior honestly; fix regressions introduced by the change.
+- Before launching a check, identify what uncertainty it resolves. Do not create
+  tests that merely mirror an edit, or run commands as a completion ritual.
+- Assess actual behavior and blast radius, not line count alone. Changes to
+  authorization, stored data, queue coordination or audio ownership may warrant
+  regression coverage even when small; touching those areas does not mandate a
+  broad suite.
+- Development/production E2E pairs, long waits, diagnostic bundles, full suites
+  and production builds are not defaults. Use them only for a demonstrated need,
+  such as mode-specific behavior, a build/runtime risk or an explicit request.
+- Stop when the relevant uncertainty is resolved. Do not repeat passing checks
+  or broaden verification without new evidence. A flaky unrelated scenario does
+  not expand a punctual task into a test-infrastructure repair.
+- Keep the final report brief and truthful about checks actually performed and
+  any material gap. Inspection-only delivery is valid; do not describe unrun
+  tests as passed or create a blocker merely because they were not run.
+
+This policy governs verification scope in the project UI rules and local skills
+below. Skill activation alone must not trigger a test or diagnostic workflow.
 
 ## UI and UX — required skill
 
@@ -122,9 +145,9 @@ the interface**:
 
 Reuse the existing karaoke theme, components and application structure. For new
 or reshaped interfaces, define visual hierarchy and interaction states briefly
-before implementation; a separate design document is not required. For visual
-changes, inspect screenshots at mobile and desktop sizes. Preserve Spanish UI
-copy and use English identifiers and technical comments.
+before implementation; a separate design document is not required. When visual
+verification is warranted, inspect relevant mobile and desktop screenshots.
+Preserve Spanish UI copy and use English identifiers and technical comments.
 
 Prioritize an intuitive, simple UI with fewer elements. Do not add supporting
 text that repeats controls, explains internal rules, or describes obvious
@@ -139,9 +162,10 @@ Do not leave primary actions disabled without a visible explanation and a next
 step. Distinguish requesting an announcement from authorizing public playback:
 waiting for audio preparation must not silently prevent a valid pending request.
 
-Verify the changed flow with Playwright, including keyboard use for affected
-controls and responsive layouts for visual changes. Keep checks focused on the
-changed behavior; use the quality table above for player/audio lifecycle changes.
+Choose UI verification using the risk-based policy above. When a browser check
+is warranted, focus on the affected interaction, including keyboard or responsive
+behavior where relevant. A punctual UI edit does not automatically require
+Playwright, screenshots or player/audio E2E suites.
 
 Keep the vendored skill unchanged; document project conventions here and apply
 them through the local `karaoke-ui` companion skill.
