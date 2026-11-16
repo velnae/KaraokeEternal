@@ -9,7 +9,10 @@ export async function checkPreviewRetention ({ page, api, base, uiBase, data, ca
   await page.getByRole('button', { name: 'Previsualizar llamado', exact: true }).click()
   const karaoke = page.getByRole('dialog', { name: 'Previsualizar llamado', exact: true })
   const saved = await call('rooms/1/karaoke-calls/preview')
-  const key = Object.keys(saved.savedDrafts)[0]
+  // Playback recovery checks deliberately remove a shared hybrid's files. This
+  // scenario restores an available immutable sample, not that corrupted asset.
+  const key = Object.keys(saved.savedDrafts).find(key => saved.samples[key]?.result)
+  assert.ok(key, 'An available saved preview is required for retention checks')
   const original = saved.savedDrafts[key]
   const savedSelect = karaoke.getByRole('combobox', { name: 'Pruebas guardadas', exact: true })
   await savedSelect.focus()
