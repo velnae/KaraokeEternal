@@ -32,10 +32,19 @@ export function preparationClips (roomId: number) {
     }
   }
   const active = Animation.active(roomId)
-  for (const clip of karaokeBedClips(roomId)) add(clip)
   if (active) for (const clip of interventionAssets(active)) if (catalogIds.has(clip.id)) add(clip)
   const ambient = Animation.ambience(roomId)
   if (ambient) add(ambient.clip)
+  const karaokeBeds = karaokeBedClips(roomId)
+  if (karaokeBeds.length) {
+    // Keep a usable voice for each enabled event before warming long backgrounds.
+    const families = new Set(result.filter(clip => clip.kind === 'voice').map(clip => clip.family))
+    for (const clip of clips) {
+      if (clip.kind !== 'voice' || !automatic(clip) || families.has(clip.family)) continue
+      add(clip)
+      families.add(clip.family)
+    }
+  }
   if (prefs.ambienceEnabled) {
     let remaining = ambient ? 1 : 2
     for (const clip of eligibleAmbience(clips, prefs)) {
@@ -44,6 +53,7 @@ export function preparationClips (roomId: number) {
       if (--remaining === 0) break
     }
   }
+  for (const clip of karaokeBeds) add(clip)
   // Spend the bounded decode window on enabled automatic events before optional demos.
   for (const pool of [clips.filter(automatic), clips.filter(clip => !automatic(clip))]) {
     const groups = new Map<string, AnimationClip[]>()

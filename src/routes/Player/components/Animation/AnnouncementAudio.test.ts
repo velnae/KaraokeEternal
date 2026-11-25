@@ -179,6 +179,37 @@ it.each([
   }
 })
 
+it.each([44100, 48000])('keeps announcement families, general ambience and a two-minute Karaoke bed ready at %i Hz', async (sampleRate) => {
+  const families = ['welcome', 'goodbye', 'celebration', 'closing', 'invitation', 'booth', 'turn'] as const
+  const voices = families.map(family => ({ id: family, kind: 'voice', family, durationMs: 6000 }))
+  const ambience = ['ambient-one', 'ambient-two'].map(id => ({ id, kind: 'ambience', durationMs: 30120 }))
+  const bed = { id: 'karaoke-bed', kind: 'ambience', source: 'Karaoke', roomId: 1, durationMs: 120033,
+    url: 'api/rooms/1/karaoke-calls/backgrounds/assets/karaoke-bed' }
+  const catalog = [...voices, ...ambience, bed].map(item => ({ ...item, checksum: createHash('sha256').update(item.id).digest('hex') } as AnimationClip))
+  const decodeAt = (rate: number) => async (bytes: ArrayBuffer) => {
+    const id = Buffer.from(bytes).toString()
+    const duration = catalog.find(clip => clip.id === id)!.durationMs / 1000
+    return { duration, length: Math.round(duration * rate), numberOfChannels: 2 }
+  }
+  vi.stubGlobal('OfflineAudioContext', class {
+    decodeAudioData: ReturnType<typeof decodeAt>
+    constructor (_channels: number, _length: number, rate: number) { this.decodeAudioData = decodeAt(rate) }
+  })
+  vi.stubGlobal('document', { baseURI: 'http://localhost/karaoke/' })
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(url.split('/').pop())))
+  const audio = new AnnouncementAudio()
+  audio.context = { state: 'running', sampleRate, close: async () => {}, decodeAudioData: decodeAt(sampleRate) } as unknown as AudioContext
+
+  await audio.prepare(catalog)
+
+  expect(audio.readyChecksums).toEqual(catalog.map(clip => clip.checksum))
+  expect(audio.decodedBytes).toBeLessThanOrEqual(audio.maxDecodedBytes)
+  const preparedBed = audio.buffers.get(catalog[catalog.length - 1].checksum)!
+  expect(preparedBed.duration).toBeCloseTo(120.033, 3)
+  expect(preparedBed.numberOfChannels).toBe(2)
+  audio.close()
+})
+
 it('mixes a separate quiet bed and stops both sources without extending the hard deadline', async () => {
   const audio = new AnnouncementAudio()
   const sources: Array<{ connect: ReturnType<typeof vi.fn>, disconnect: ReturnType<typeof vi.fn>, start: ReturnType<typeof vi.fn>, stop: ReturnType<typeof vi.fn>, onended: (() => void) | null }> = []

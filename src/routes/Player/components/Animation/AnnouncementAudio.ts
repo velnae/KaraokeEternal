@@ -4,6 +4,16 @@ import { nextTraceIdentity, tracePlayback } from '../../../../lib/playbackTrace'
 import { KARAOKE_BACKGROUND_AUDIO_MS, KARAOKE_EFFECT_AUDIO_MS, isKaraokeBedClip, isKaraokeEffectClip } from '../../../../../shared/karaokeBackgrounds.js'
 
 const durationLimit = (clip: AnimationClip) => isKaraokeBedClip(clip) ? KARAOKE_BACKGROUND_AUDIO_MS : isKaraokeEffectClip(clip) ? KARAOKE_EFFECT_AUDIO_MS : clipDurationLimit(clip.kind, clip.effectType)
+const KARAOKE_BED_SAMPLE_RATE = 24000
+
+function decodeClip (context: AudioContext, clip: AnimationClip, bytes: ArrayBuffer) {
+  // Decode long accompaniment at a fixed rate so it fits alongside speech in
+  // the shared cache. Buffer sources resample to the live context on playback.
+  const decoder = isKaraokeBedClip(clip) && clip.durationMs > clipDurationLimit('ambience') && context.sampleRate > KARAOKE_BED_SAMPLE_RATE
+    ? new OfflineAudioContext(2, 1, KARAOKE_BED_SAMPLE_RATE)
+    : context
+  return decoder.decodeAudioData(bytes)
+}
 
 /** A finite, isolated voice channel. It never changes music gain or playback. */
 export default class AnnouncementAudio {
@@ -126,7 +136,7 @@ export default class AnnouncementAudio {
           if (checksum !== clip.checksum) throw new Error('La versión del clip cambió')
           assertCurrent()
           stage = 'decode'
-          const buffer = await context.decodeAudioData(bytes)
+          const buffer = await decodeClip(context, clip, bytes)
           assertCurrent()
           stage = 'duration'
           if (buffer.duration <= 0 || buffer.duration * 1000 > durationLimit(clip) || Math.abs(buffer.duration * 1000 - clip.durationMs) > 100) throw new Error('La duración del clip no es válida')
@@ -193,7 +203,7 @@ export default class AnnouncementAudio {
             stage = 'checksum'
             if (checksum !== asset.checksum) throw new Error('checksum')
             stage = 'decode'
-            const buffer = await context.decodeAudioData(bytes)
+            const buffer = await decodeClip(context, asset, bytes)
             if (!current()) break
             const limit = asset.role === 'greeting' ? 20000 : durationLimit(asset)
             stage = 'duration'

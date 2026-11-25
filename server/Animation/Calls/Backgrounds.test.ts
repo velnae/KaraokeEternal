@@ -150,6 +150,18 @@ it('uses its own bed and volume with Animator off and shares the existing finite
   expect(Animation.ambience(1)).toBeNull()
   expect(callControls(1).enabled).toBe(true)
 }, 30000)
+
+it('prepares distinct automatic voice families before prospective Karaoke beds', async () => {
+  const { bed } = await configured()
+  db.run('UPDATE rooms SET data=? WHERE roomId=1', [JSON.stringify({ prefs: { animation: { enabled: true, automation: true, profile: 'party' } } })])
+  for (const [id, family, automatic] of [['a', 'turn', true], ['b', 'turn', true], ['c', 'closing', true], ['d', 'manual', false]]) {
+    db.run(`INSERT INTO audioResources(id,roomId,kind,title,state,preparation,durationMs,checksum,metadataJSON,createdAt,updatedAt)
+      VALUES(?,1,'voice',?,'active','ready',6000,?,?,0,0)`, [id, id, id, JSON.stringify({ text: id, family, automatic, modes: ['party'] })])
+  }
+
+  expect(preparationClips(1).map(clip => clip.id)).toEqual(['a', 'c', bed.id, 'b', 'd'])
+}, 30000)
+
 it('persists a failed preparation and leaves saved media and configuration usable', async () => {
   const { video } = await configured()
   const failed = await uploadBackground(1, 'bed', 'Broken', video.url, randomUUID())
