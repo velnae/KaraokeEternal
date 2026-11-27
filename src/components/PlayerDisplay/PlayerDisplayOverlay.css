@@ -12,6 +12,7 @@
 .centered { display: grid; grid-template-columns: minmax(0, 1fr); }
 .centered .messages, .centered .imageSlot { grid-area: 1 / 1; }
 .centered .imageSlot { justify-self: start; width: var(--image-slot-size); }
+.centered .noticeImage { left: var(--notice-image-center, calc(var(--image-slot-size) / 2)); right: auto; transform: translate(-50%, -50%); width: min(var(--icon-size), var(--notice-image-limit, var(--icon-size))); height: auto; aspect-ratio: 1; }
 .centered .imageSlot[data-greeting-slot] { width: var(--avatar-slot); }
 .centered .message[data-artwork] { padding-inline: calc(var(--image-slot-size) + var(--message-gap)); }
 .centered .message[data-artwork='avatar'] { padding-inline: calc(var(--avatar-slot) + var(--message-gap)); }

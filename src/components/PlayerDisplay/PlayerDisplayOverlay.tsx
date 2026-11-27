@@ -38,7 +38,10 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying,
   const fit = fitting.settings === settings && fitting.greetingId === greetingId && fitting.width === viewport.width && fitting.height === viewport.height ? fitting.scale : 1
   const panel = useRef<HTMLElement>(null)
   const content = useRef<HTMLDivElement>(null)
+  const notice = useRef<HTMLDivElement>(null)
+  const imageSlot = useRef<HTMLSpanElement>(null)
   const announce = a.enabled && intent === 'LISTEN' && (a.messages.length > 0 || !!greeting)
+  const hasNoticeImage = !!image && !failedImages.includes(image)
   const layout = displayLayout(settings, viewport)
   const geometry = layout.announcement
   const imageScale = typeof currentPosition === 'number' ? a.messages[currentPosition]?.imageScale ?? 100 : 100
@@ -64,6 +67,47 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying,
       '--portrait-inset': `${padding + borderWidth}px`,
     },
   } as React.CSSProperties
+
+  useLayoutEffect(() => {
+    const element = panel.current
+    const message = notice.current
+    const slot = imageSlot.current
+    if (!announce || a.alignment !== 'center' || !hasNoticeImage || !element || !message || !slot) return
+
+    const updatePosition = () => {
+      const bounds = element.getBoundingClientRect()
+      if (!bounds.width) return
+      const style = getComputedStyle(element)
+      // Text ranges measure the rendered lines, not the full-width text blocks.
+      const range = document.createRange()
+      let textLeft = Infinity
+      for (const lineBlock of Array.from(message.children)) {
+        range.selectNodeContents(lineBlock)
+        const text = range.getBoundingClientRect()
+        if (text.width) textLeft = Math.min(textLeft, text.left)
+      }
+      if (!Number.isFinite(textLeft)) return
+
+      // The settings preview may scale the entire panel with a CSS transform.
+      const toLocal = parseFloat(style.width) / bounds.width
+      const midpoint = (bounds.left + textLeft) / 2
+      const available = (textLeft - bounds.left) * toLocal
+      slot.style.setProperty('--notice-image-center', `${(midpoint - slot.getBoundingClientRect().left) * toLocal}px`)
+      slot.style.setProperty('--notice-image-limit', `${Math.max(0, available - parseFloat(style.gap) / 2)}px`)
+    }
+
+    updatePosition()
+    const observer = new ResizeObserver(updatePosition)
+    observer.observe(element)
+    observer.observe(message)
+    document.fonts.addEventListener('loadingdone', updatePosition)
+    return () => {
+      observer.disconnect()
+      document.fonts.removeEventListener('loadingdone', updatePosition)
+      slot.style.removeProperty('--notice-image-center')
+      slot.style.removeProperty('--notice-image-limit')
+    }
+  }, [a, announce, currentPosition, fit, geometry.width, geometry.iconSize, padding, borderWidth, hasNoticeImage])
 
   // All messages share a grid cell. Fit its largest content once, keeping rotation stable.
   useEffect(() => {
@@ -133,8 +177,8 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying,
           aria-label='Comunicados del local'
           data-has-greeting={!!greeting}
         >
-          {(showGreeting || (image && !failedImages.includes(image))) && (
-            <span className={styles.imageSlot} data-greeting-slot={showGreeting || undefined}>
+          {(showGreeting || hasNoticeImage) && (
+            <span ref={imageSlot} className={styles.imageSlot} data-greeting-slot={showGreeting || undefined}>
               {showGreeting && !failedImages.includes(greetingAvatar) && (
                 <img
                   className={clsx(styles.messageImage, styles.greetingAvatar)}
@@ -150,7 +194,7 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying,
                   <path d='M23 4a8 8 0 0 1 5 5m-3-6a10 10 0 0 1 5 5M3 18a9 9 0 0 0 3 6' fill='none' stroke='currentColor' strokeWidth='1.4' strokeLinecap='round' />
                 </svg>
               )}
-              {!showGreeting && image && !failedImages.includes(image) && <img className={styles.messageImage} src={announcementImageSource(image)} alt='' onError={() => setFailedImages(values => [...values, image])} />}
+              {image && hasNoticeImage && <img className={clsx(styles.messageImage, styles.noticeImage)} src={announcementImageSource(image)} alt='' onError={() => setFailedImages(values => [...values, image])} />}
             </span>
           )}
           <div ref={content} className={styles.messages}>
@@ -161,7 +205,7 @@ const PlayerDisplayOverlay = ({ branding, settings, viewport, intent, isPlaying,
               </div>
             )}
             {a.messages.map((message, position) => (
-              <div key={`notice:${position}`} className={clsx(styles.message, position === currentPosition && styles.current)} data-artwork={message.image && !failedImages.includes(message.image) ? 'notice' : undefined} aria-hidden={position !== currentPosition}>
+              <div key={`notice:${position}`} ref={position === currentPosition ? notice : undefined} className={clsx(styles.message, position === currentPosition && styles.current)} data-artwork={message.image && !failedImages.includes(message.image) ? 'notice' : undefined} aria-hidden={position !== currentPosition}>
                 <strong>{message.title}</strong>
                 {message.text && <p>{message.text}</p>}
               </div>
