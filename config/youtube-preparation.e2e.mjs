@@ -438,6 +438,9 @@ try {
       const source = destination === 1 ? -1 : destination - 1
       const events = await page.evaluate(() => window.karaokePlaybackTrace.snapshot().events)
       const turn = events.filter(event => event.sourceQueueId === source && event.monotonicMs >= since && event.monotonicMs <= play.at)
+      const shadow = turn.find(event => event.event === 'v2-plan-observed' && event.observedQueueId === destination)
+      assert.equal(shadow?.state, 'match', `${label}: passive plan agrees with V1 selection and scene`)
+      assert.ok(turn.some(event => event.event === 'v2-plan-handoff' && event.turnIdentity === shadow.turnIdentity && event.state === 'match'), `${label}: same planned turn reaches handoff`)
       const selected = turn.some(event => event.queueId === destination && event.event === 'background-reply' && event.state === 'selected')
       const visible = await page.evaluate(({ since, until, id }) => window.youtubePreparation.frames.some(frame => frame.at > since && frame.at < until && frame.opacity > 0.5 && frame.backdrop === id), { since, until: play.at, id: background.id })
       const decodedAt = await page.evaluate(() => window.youtubePreparation.decodedAt)
@@ -449,7 +452,7 @@ try {
         greeting: characterizeLayer({ omission: 'house-track', rendered: turn.some(event => event.event === 'greeting-audio-event' && event.state === 'STARTED') }),
       }
       // Write before assertions so a regression leaves its evidence as well.
-      fs.writeFileSync(path.join(data, `v1-turn-${destination}.json`), JSON.stringify({ version: 1, source, destination, label, layers }, null, 2))
+      fs.writeFileSync(path.join(data, `v1-turn-${destination}.json`), JSON.stringify({ version: 1, source, destination, label, shadow, layers }, null, 2))
       for (const key of ['voice', 'ambience', 'backdrop', 'curtain']) assert.equal(layers[key].outcome, 'completed', `${label}/${key}: ${JSON.stringify(layers[key])}`)
       assert.equal(layers.greeting.outcome, 'omitted')
     }

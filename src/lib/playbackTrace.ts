@@ -15,6 +15,8 @@ type TraceFields = {
   remainingMs?: number
   diagnosticId?: string
   sourceQueueId?: number
+  turnIdentity?: string
+  observedQueueId?: number | null
   assetCount?: number
   cacheHits?: number
 }

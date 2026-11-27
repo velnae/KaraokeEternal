@@ -54,6 +54,8 @@ interface PlayerControllerProps {
 }
 
 import { beginTransitionDiagnostic, type TransitionDiagnostic } from 'lib/playbackTrace'
+import { planNormalTurn, compareTurnSelection, turnIdentity } from '../../runtime/turnPlan'
+import { tracePlayback } from 'lib/playbackTrace'
 
 type TransitionScene = { id: string, background: TransitionVideoBackground | null, phase: 'warmup' | 'preroll' | 'intro' | 'voice' | 'waiting' | 'loading' | 'handoff' | 'exiting' }
 const PREROLL_MS = 1500
@@ -400,6 +402,19 @@ const PlayerController = (props: PlayerControllerProps) => {
         ? { id: prepared?.id ?? crypto.randomUUID(), background: transitionRef.current?.background ?? backgroundRef.current ?? animationRef.current.snapshot?.ambience?.background ?? null, phase: manualTurn?.presented ? 'waiting' : 'intro' }
         : null
       // Retain the current backdrop before releasing idle ambience or awaiting a new selection.
+      let observedPlan: ReturnType<typeof planNormalTurn> | undefined
+      if (process.env.NODE_ENV === 'development') {
+        const state = store.getState()
+        const snapshot = state.animation.snapshot
+        observedPlan = planNormalTurn({ roomId: state.user.roomId, epoch: snapshot?.playerEpoch ?? null, source: sourceId,
+          replayKey: before._lastReplayTime, boundary, queue: getPlaybackQueue(state), held: heldItem ?? null, announce,
+          backdrop: !!backgroundRef.current || state.rooms.entities[state.user.roomId]?.prefs?.transitionVideo?.mode === 'all',
+          animator: !!snapshot?.prefs.enabled, greetings: !!snapshot?.greetingVoiceEnabled,
+          ambience: !!snapshot?.prefs.ambienceEnabled && snapshot.prefs.ambienceVolume !== 0 })
+        tracePlayback('v2-plan-observed', { diagnosticId: diagnostic?.diagnosticId, roomId: state.user.roomId, sourceQueueId: sourceId,
+          queueId: observedPlan.destination, observedQueueId: upcoming?.queueId ?? null, turnIdentity: observedPlan.identity,
+          state: compareTurnSelection(observedPlan, upcoming?.queueId ?? null, !!scene), reason: observedPlan.steps.join(',') || observedPlan.kind })
+      }
       if (scene) updateTransition(scene)
       else if (prepared && transitionRef.current?.id === prepared.id) {
         updateTransition(null)
@@ -515,6 +530,12 @@ const PlayerController = (props: PlayerControllerProps) => {
         }
       }
       const next = reserved?.isOptimistic !== true && reserved?.status === 'APPROVED' ? reserved : selection()
+      if (observedPlan) tracePlayback('v2-plan-handoff', { diagnosticId: diagnostic?.diagnosticId, sourceQueueId: sourceId,
+        turnIdentity: observedPlan.identity, queueId: observedPlan.destination, observedQueueId: next?.queueId ?? null,
+        state: observedPlan.identity === turnIdentity(store.getState().user.roomId, store.getState().animation.snapshot?.playerEpoch ?? null,
+          current.queueId, current._lastReplayTime, next?.queueId ?? null)
+          ? 'match'
+          : 'turn-changed' })
       if (!next) {
         await finishTransition()
         dispatch(playerStatus({ historyJSON: current.historyJSON, isAtQueueEnd: true, isErrored: false, mediaType: null, _isPlayingNext: false, _isBetweenTracks: false }))
