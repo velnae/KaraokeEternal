@@ -1,6 +1,6 @@
 import { clipDurationLimit, TRANSITION_BED_MS, type AnimationClip } from '../../../../../shared/animation.js'
 import type { GreetingAsset } from '../../../../../shared/greetings.js'
-import { nextTraceIdentity, tracePlayback } from '../../../../lib/playbackTrace'
+import { nextTraceIdentity, tracePlayback, type TransitionDiagnostic } from '../../../../lib/playbackTrace'
 import { KARAOKE_BACKGROUND_AUDIO_MS, KARAOKE_EFFECT_AUDIO_MS, isKaraokeBedClip, isKaraokeEffectClip } from '../../../../../shared/karaokeBackgrounds.js'
 
 const durationLimit = (clip: AnimationClip) => isKaraokeBedClip(clip) ? KARAOKE_BACKGROUND_AUDIO_MS : isKaraokeEffectClip(clip) ? KARAOKE_EFFECT_AUDIO_MS : clipDurationLimit(clip.kind, clip.effectType)
@@ -176,7 +176,7 @@ export default class AnnouncementAudio {
   }
 
   /** A separate preparation group keeps catalog refreshes from evicting a greeting. */
-  async prepareGreetingAssets (assets: GreetingAsset[], isCurrent = () => true, urgent = false) {
+  async prepareGreetingAssets (assets: GreetingAsset[], isCurrent = () => true, urgent = false, diagnostic?: TransitionDiagnostic) {
     const context = this.ensureContext()
     const generation = this.generation
     const current = () => isCurrent() && this.context === context && this.generation === generation && context.state !== 'closed'
@@ -192,6 +192,8 @@ export default class AnnouncementAudio {
       this.greetingKeys = new Set(greetings.map(asset => asset.checksum))
       const retained = new Set<string>()
       const ordered = [...calls, ...greetings.sort((a, b) => Number(b.role === 'greeting') - Number(a.role === 'greeting'))]
+      const began = diagnostic ? performance.now() : 0
+      let cacheHits = 0
       for (const asset of ordered) {
         let stage = 'download'
         try {
@@ -217,12 +219,15 @@ export default class AnnouncementAudio {
             if (this.decodedBytes + size > this.maxDecodedBytes) throw new Error('memory')
             this.buffers.set(asset.checksum, buffer)
             tracePlayback('turn-asset-ready', { channelId: this.traceChannelId, checksum: asset.checksum, state: asset.role })
-          }
+          } else if (diagnostic) cacheHits++
           retained.add(asset.checksum)
         } catch {
+          diagnostic?.flag('turn-asset-failed', { checksum: asset.checksum, state: stage })
           tracePlayback('turn-asset-failed', { channelId: this.traceChannelId, checksum: asset.checksum, state: asset.role, reason: stage })
         }
       }
+      diagnostic?.record('turn-cache-summary', { assetCount: ordered.length, cacheHits, elapsedMs: performance.now() - began,
+        state: current() ? 'complete' : 'cancelled' })
       return [...retained]
     }
     // A turn must not queue behind a slow, unrelated catalog refresh.

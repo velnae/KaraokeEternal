@@ -18,17 +18,20 @@ import {
   ANIMATION_AUTO, ANIMATION_SESSION, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, VOICE_FAMILIES,
 } from '../../shared/animation.js'
 
+import { transitionReservationTrace } from '../lib/transitionDiagnostics.js'
+
 const actions = [ANIMATION_REQUEST, ANIMATION_CANCEL, ANIMATION_CONTROL, ANIMATION_RESERVE, ANIMATION_READY, ANIMATION_EVENT, ANIMATION_SYNC, ANIMATION_AUTO, ANIMATION_SESSION, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, TRANSITION_VIDEO_SCENE, KARAOKE_TURN, KARAOKE_CUE]
 const playerActions = [ANIMATION_RESERVE, ANIMATION_READY, ANIMATION_EVENT, ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED, TRANSITION_VIDEO_SCENE, KARAOKE_CUE]
 const isId = (value: unknown): value is string => typeof value === 'string' && /^[\w-]{1,100}$/.test(value)
 
 export default Object.fromEntries(actions.map(type => [type, (sock, action, acknowledge) => {
   const roomId = sock.user?.roomId
+  let trace: ReturnType<typeof transitionReservationTrace>
   try {
     if (!canOperate(sock.user) || !Number.isInteger(roomId)) throw new Error('No tiene autorización para esta sala')
     const input = action.payload ?? {}
     if (typeof input !== 'object' || Array.isArray(input)) throw new Error('Solicitud no válida')
-    if (type !== ANIMATION_SYNC && (!Number.isFinite(input.expiresAt) || input.expiresAt < Date.now() || input.expiresAt > Date.now() + 10000)) throw new Error('La orden venció. Actualice el estado.')
+    if (type !== ANIMATION_SYNC && (!Number.isFinite(input.expiresAt) || input.expiresAt < Date.now() || input.expiresAt > Date.now() + 10000)) throw Object.assign(new Error('La orden venció. Actualice el estado.'), { code: 'COMMAND_EXPIRED' })
     if (playerActions.includes(type) && !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad')
     const identity = { roomId, userId: sock.user.userId, socketId: sock.id }
     let grant
@@ -95,6 +98,7 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       if (input.probeOnly !== undefined && (type !== ANIMATION_AUTO || typeof input.probeOnly !== 'boolean')) throw new Error('Consulta no válida')
       if (input.probeOnly) eligible = !!Animation.automaticPlan(identity, input)
       else {
+        trace = transitionReservationTrace(input.diagnosticId, 'animator-reserve', roomId, input.expectedNextQueueId)
         grant = type === ANIMATION_AUTO ? Animation.automatic(identity, input, sock._lastPlayerStatus ?? {}) : Animation.reserve(identity, input, sock._lastPlayerStatus ?? {})
         sock.server.to(Rooms.prefix(roomId)).emit('action', { type: QUEUE_PUSH, payload: Queue.get(roomId) })
       }
@@ -124,8 +128,13 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       Animation.ambienceStarted(identity, input.id, input.runId)
     }
     Animation.sweep()
-    acknowledge?.({ type: ANIMATION_STATE, payload: Animation.snapshot(roomId), ...(karaokeCue ? { karaokeCue } : {}), ...(background !== undefined ? { background } : {}), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
+    if (acknowledge) {
+      const payload = Animation.snapshot(roomId)
+      trace?.(grant ? 'ready' : 'no-audio', grant?.interventionId)
+      acknowledge({ type: ANIMATION_STATE, payload, ...(karaokeCue ? { karaokeCue } : {}), ...(background !== undefined ? { background } : {}), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
+    }
   } catch (error) {
-    acknowledge?.({ type: ANIMATION_STATE, error: (error as Error).message })
+    trace?.('rejected')
+    acknowledge?.({ type: ANIMATION_STATE, error: (error as Error).message, code: (error as { code?: string }).code })
   }
 }]))

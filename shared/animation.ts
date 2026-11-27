@@ -17,6 +17,9 @@ export const ANIMATION_AMBIENCE_STARTED = 'server/ANIMATION_AMBIENCE_STARTED'
 export const ANIMATION_STATE = 'animation/STATE'
 export const ANIMATION_DISCONNECTED = 'animation/DISCONNECTED'
 export const ANIMATION_LIMITS = { clipMs: 10000, requestMs: 600000, startMs: 3000, marginMs: 500 }
+// The server must receive STARTED after the grant travels to the player and
+// the start receipt travels back, including recovery of a lost grant reply.
+export const AUTOMATIC_START_WINDOW_MS = 2 * ANIMATION_LIMITS.startMs
 
 export const VOICE_FAMILIES = ['welcome', 'turn', 'closing', 'invitation', 'celebration', 'goodbye', 'booth', 'promotion'] as const
 export type VoiceFamily = typeof VOICE_FAMILIES[number]
@@ -181,6 +184,7 @@ export interface AnimationSnapshot extends AnimationRoomState {
   greetingVoiceEnabled?: boolean
 }
 export interface AnimationReply {
+  code?: string
   karaokeCue?: import('./karaokeStage.js').KaraokeCuePreparation
   background?: TransitionVideoBackground | null
   eligible?: boolean

@@ -34,7 +34,7 @@ import { KARAOKE_FADE_MS } from 'shared/karaokeStage'
 import KaraokeCountdown from 'components/Animation/KaraokeCountdown'
 import { karaokeCountdownSeconds, type KaraokeTurn } from 'shared/karaokeStart'
 import { animationTime } from 'lib/animationApi'
-import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
+import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY, PLAYER_EMIT_STATUS } from 'shared/actionTypes'
 import styles from './PlayerController.css'
 import {
   appendCompletedToHistory,
@@ -51,6 +51,8 @@ interface PlayerControllerProps {
   width: number
   height: number
 }
+
+import { beginTransitionDiagnostic } from 'lib/playbackTrace'
 
 type TransitionScene = { id: string, background: TransitionVideoBackground | null, phase: 'intro' | 'voice' | 'waiting' | 'loading' | 'handoff' | 'exiting' }
 
@@ -241,6 +243,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     let retryHouseSelection = false
     let retryAfterBirthday = false
     const sourceId = before.queueId
+    const diagnostic = boundary === 'idle' ? undefined : beginTransitionDiagnostic(sourceId, store.getState().user.roomId)
     const historyJSON = appendCompletedToHistory(before.historyJSON, includeCurrentInHistory && sourceId >= 0 ? sourceId : undefined)
     // Replay suppresses announcements for that playback, not the incoming turn.
     dispatch(playerStatus({ historyJSON, _isBetweenTracks: true, _isReplayPlayback: false, queueDecisionAt: Math.floor(Date.now() / 1000) }))
@@ -270,6 +273,19 @@ const PlayerController = (props: PlayerControllerProps) => {
       const held = store.getState().animation.snapshot?.karaokeTurn
       const heldItem = held ? ensureState(store.getState().queue).entities[held.queueId] : null
       const upcoming = heldItem?.isOptimistic !== true && heldItem?.status === 'APPROVED' ? heldItem : selection()
+      const deadline = transitionStartedAt + 25000
+      const connection = socket.id
+      const turnValid = () => mounted.current && socket.connected && socket.id === connection && store.getState().player._authority === 'GRANTED'
+        && store.getState().player.queueId === sourceId && controlVersion === animationRef.current.controlVersion() && performance.now() < deadline
+        && (heldItem && heldItem === upcoming ? store.getState().animation.snapshot?.karaokeTurn?.queueId === upcoming.queueId : selection()?.queueId === upcoming?.queueId)
+      // Socket actions are ordered. The server applies status synchronously before
+      // the following permit request and validates authority again on that request.
+      if (turnValid()) {
+        dispatch(playerStatusCancel())
+        const state = store.getState()
+        const status = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
+        socket.timeout(3000).emit('action', { type: PLAYER_EMIT_STATUS, payload: { ...status, visualizer: state.playerVisualizer } }, () => {})
+      }
       const manualTurn = upcoming?.requestIntent === 'SING' && upcoming.origin !== 'HOUSE'
         ? await karaokeStartRef.current.begin(upcoming.queueId)
         : null
@@ -311,11 +327,11 @@ const PlayerController = (props: PlayerControllerProps) => {
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         updateTransition({ ...scene, phase: 'voice' })
       }
-      const greeted = upcoming && !manualTurn?.presented && controlVersion === animationRef.current.controlVersion()
-        ? await greetingsRef.current.attempt(upcoming.queueId, callRequested ? Math.max(0, 25000 - (performance.now() - transitionStartedAt)) : undefined)
+      const greeted = upcoming && upcoming.origin !== 'HOUSE' && !manualTurn?.presented && turnValid()
+        ? await greetingsRef.current.attempt(upcoming.queueId, deadline - performance.now(), diagnostic, !!callRequested)
         : false
-      if (!greeted && !manualTurn?.presented && announce && controlVersion === animationRef.current.controlVersion()) {
-        await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null)
+      if (!greeted && !manualTurn?.presented && announce && turnValid()) {
+        await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null, diagnostic, turnValid, deadline)
       }
       if (manualTurn && upcoming) {
         if (transitionRef.current) updateTransition({ ...transitionRef.current, phase: 'waiting' })
@@ -398,6 +414,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         _isPlayingNext: false, _isBetweenTracks: false, _isReplayPlayback: false,
       }))
     } finally {
+      diagnostic?.flush()
       if (mounted.current) setPreparingQueueId(null)
       advancing.current = false
       // A command received during an idle probe must get a fresh transition,

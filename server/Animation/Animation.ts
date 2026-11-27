@@ -13,6 +13,7 @@ import { currentSession, operateSession, pendingEvent } from './sessions.js'
 import { categoryEffects, heardAt, profileIntervals, selectAnnouncement, supportingEffects, voiceBudget } from './selection.js'
 import { backfillAudioUsage, leastUsedAudio, recordAudioUsage } from './usage.js'
 import { GREETING_START_MS } from '../../shared/greetings.js'
+import { AUTOMATIC_START_WINDOW_MS } from '../../shared/animation.js'
 import { captureTransitionBackground, leasedTransitionBackground } from '../TransitionVideo/Playback.js'
 import { callsEnabled, listeningEnabled, prepareCall, validCall } from './Calls/Playback.js'
 import { callControls } from './Calls/Store.js'
@@ -363,7 +364,7 @@ export default class Animation {
       const next = db.get<{ status: string }>('SELECT status FROM queue WHERE roomId = ? AND queueId = ?', [identity.roomId, input.expectedNextQueueId])
       if (next?.status !== 'APPROVED') throw new Error('El siguiente turno cambió')
     }
-    const startBefore = Math.min(now + ANIMATION_LIMITS.startMs, row.expiresAt)
+    const startBefore = Math.min(now + (row.origin === 'AUTO' ? AUTOMATIC_START_WINDOW_MS : ANIMATION_LIMITS.startMs), row.expiresAt)
     const leaseUntil = startBefore + row.durationMs + ANIMATION_LIMITS.marginMs
     // A bed is optional and concurrent, never another sequential track or a
     // reason to block an otherwise ready announcement.
@@ -491,7 +492,7 @@ export default class Animation {
     const id = randomUUID()
     db.run(`INSERT INTO animationInterventions(interventionId,roomId,requestId,requestedByUserId,clipId,clipChecksum,displayText,durationMs,status,requestedAt,expiresAt,origin,sessionId,sourceEventKey,family,sequenceJSON)
       VALUES(?,?,?,?,?,?,?,?,'PENDING',?,?,'AUTO',?,?,?,?)`, [id, roomId, key, identity.userId, clip.id, clip.checksum, clip.displayText,
-      sequence.reduce((sum, asset) => sum + asset.durationMs, 0), now, Math.min(now + ANIMATION_LIMITS.startMs, clip.validUntil ?? Infinity), session.sessionId, key, family, JSON.stringify(sequence)])
+      sequence.reduce((sum, asset) => sum + asset.durationMs, 0), now, Math.min(now + AUTOMATIC_START_WINDOW_MS, clip.validUntil ?? Infinity), session.sessionId, key, family, JSON.stringify(sequence)])
     if (signal) db.run('UPDATE animationRoomState SET pendingEventJSON=NULL WHERE roomId=?', [roomId])
     db.run('UPDATE animationRoomState SET lastOmission=NULL WHERE roomId=?', [roomId])
     try {

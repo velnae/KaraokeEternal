@@ -5,18 +5,22 @@ import Animation from '../Animation/Animation.js'
 import { participation } from '../Tables/admission.js'
 import { GREETINGS, normalizeGreetingMessage } from '../../shared/greetings.js'
 import getLogger from '../lib/Log.js'
+import { transitionReservationTrace } from '../lib/transitionDiagnostics.js'
 import { prepareGreetingTransition } from './transition.js'
 import { getGreetingAudioAsset } from './audioRouter.js'
 import { db } from '../lib/Database.js'
 import { interventionAssets, type Intervention } from '../../shared/animation.js'
-import type { GreetingAsset } from '../../shared/greetings.js'
+import type { GreetingAsset, GreetingGrant } from '../../shared/greetings.js'
 import { catalogClips } from '../Animation/catalog.js'
 import { getCallAutomation } from '../Animation/Calls/Automation.js'
 
 const log = getLogger('greetings')
+// Only the same connected player may recover the latest reservation reply.
+const receipts = new WeakMap<object, { roomId: number, key: string, queueId: number, grant: GreetingGrant }>()
 
 export default {
   [GREETINGS]: async (sock, { payload }, acknowledge) => {
+    let trace: ReturnType<typeof transitionReservationTrace>
     try {
       const identity = sock.user
       participation(identity)
@@ -29,7 +33,15 @@ export default {
         return payload[key] as number
       }
       if (operation === 'read') return acknowledge({ payload: Greetings.snapshot(identity, status) })
-      if (!Number.isFinite(payload?.expiresAt) || payload.expiresAt < Date.now() || payload.expiresAt > Date.now() + 10000) throw new Error('La orden venció. Actualiza e intenta nuevamente.')
+      if (!Number.isFinite(payload?.expiresAt) || payload.expiresAt < Date.now() || payload.expiresAt > Date.now() + 10000) return acknowledge({ error: 'La orden venció. Actualiza e intenta nuevamente.', code: 'COMMAND_EXPIRED' })
+      if (operation === 'receipt') {
+        if (!canOperate(identity) || !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad')
+        const receipt = receipts.get(sock)
+        const active = Animation.active(roomId)
+        const grant = receipt?.roomId === roomId && receipt.key === payload.receiptId && receipt.queueId === number('queueId') ? receipt.grant : null
+        const permit = grant?.transition?.intervention
+        return acknowledge({ grant: grant && grant.until > Date.now() && (!permit || (active?.interventionId === permit.interventionId && active.status === 'RESERVED' && !active.stopRequestedAt && active.startBefore! > Date.now())) ? grant : null })
+      }
       if (operation === 'attach') Greetings.attach(identity, number('queueId'), { message: normalizeGreetingMessage(payload.message) }, status)
       else if (operation === 'remove') Greetings.remove(identity, number('greetingId'))
       else if (operation === 'prepareAudio') {
@@ -43,6 +55,7 @@ export default {
         Greetings.pause(roomId, payload.paused)
       } else if (['prepare', 'reserve', 'start', 'end', 'finish', 'audioStarted', 'audioEnded', 'audioFailed'].includes(operation)) {
         if (!canOperate(identity) || !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad')
+        if (operation === 'prepare' || operation === 'reserve') trace = transitionReservationTrace(payload.diagnosticId, operation, roomId, payload.queueId)
         const revalidate = () => {
           if (sock.connected === false || sock.user?.roomId !== roomId || !canOperate(sock.user) || !Rooms.isAuthoritativePlayer(sock) || payload.expiresAt < Date.now()) throw new Error('El permiso de reproducción venció')
         }
@@ -50,6 +63,7 @@ export default {
           getCallAutomation()?.prioritize(roomId, number('queueId'))
           const preparation = await prepareGreetingTransition(roomId, number('queueId'))
           revalidate()
+          trace?.('ready')
           return acknowledge({ preparation })
         }
         if (operation === 'reserve') {
@@ -66,7 +80,9 @@ export default {
           const animation = Animation.snapshot(roomId)
           const blocker = animation.microphoneOccupied ? 'Micrófono ocupado' : animation.active || animation.blockedUntil > Date.now() ? 'Intervención del operador en curso' : undefined
           const grant = Greetings.reserve(roomId, sock.id, number('queueId'), sock._lastPlayerStatus ?? {}, blocker, prepared, ready, identity.userId, remainingMs)
+          if (grant && typeof payload.receiptId === 'string' && payload.receiptId.length <= 64) receipts.set(sock, { key: payload.receiptId, roomId, queueId: payload.queueId, grant })
           Animation.publish(roomId)
+          trace?.(grant?.transition ? 'ready' : 'no-audio', grant?.transition?.intervention.interventionId)
           return acknowledge({ grant })
         }
         if (operation === 'start' && payload.voiced === true) {
@@ -83,6 +99,7 @@ export default {
       Animation.publish(roomId)
       acknowledge({ payload: Greetings.snapshot(identity, status) })
     } catch (error) {
+      trace?.('rejected')
       if (error instanceof Error && 'code' in error && error.code === 'ERR_SQLITE_ERROR') {
         log.error('Greeting operation %s failed in room %s: %s', payload?.operation, sock.user?.roomId, error.message)
       }

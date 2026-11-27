@@ -21,7 +21,7 @@ export function animationRequest (type: string, payload: object = {}, timeout = 
       if (socket.id !== socketId) return reject(new Error('Sin confirmación. Consulte el estado antes de repetir.'))
       if (error) return reject(new AnimationReceiptTimeout('Sin confirmación. Consulte el estado antes de repetir.'))
       if (reply?.payload) store.dispatch({ type: ANIMATION_STATE, payload: reply.payload })
-      if (reply?.error) return reject(new Error(reply.error))
+      if (reply?.error) return reject(Object.assign(new Error(reply.error), { code: reply.code }))
       resolve(reply)
     })
   })

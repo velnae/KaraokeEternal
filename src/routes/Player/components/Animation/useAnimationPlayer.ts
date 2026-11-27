@@ -4,6 +4,8 @@ import store from 'store/store'
 import { useAppSelector } from 'store/hooks'
 import socket from 'lib/socket'
 import { animationPlaybackEvent, animationRequest, animationTime, fetchPreparedAnimationClips, syncAnimation } from 'lib/animationApi'
+import { transitionRequest } from 'lib/transitionRequest'
+import { AnimationReceiptTimeout } from 'lib/animationPlaybackReceipt'
 import {
   ANIMATION_CANCEL, ANIMATION_EVENT, ANIMATION_READY, ANIMATION_RESERVE, ANIMATION_LIMITS,
   ANIMATION_AUTO, ANIMATION_AMBIENCE, ANIMATION_AMBIENCE_STOP, ANIMATION_AMBIENCE_STARTED,
@@ -15,7 +17,7 @@ import { playerStatusCancel, playerUpdate } from '../../modules/player'
 import AnnouncementAudio from './AnnouncementAudio'
 import { hasLocalPlaybackProof } from './playbackFence'
 import { needsAnimationClock, ReadinessPublication } from './playerEfficiency'
-import { tracePlayback } from '../../../../lib/playbackTrace'
+import { tracePlayback, type TransitionDiagnostic } from '../../../../lib/playbackTrace'
 
 const voiceRequested = (snapshot?: AnimationSnapshot | null) => !!snapshot && (snapshot.prefs.enabled || snapshot.greetingVoiceEnabled === true || snapshot.karaokeCallsEnabled === true || !!snapshot.karaokeTurn)
 
@@ -437,7 +439,7 @@ export default function useAnimationPlayer () {
     })
   }, [ambientPlaying, ambientTick])
 
-  const attempt = useCallback(async (boundary: 'ended' | 'idle' | 'start', sourceQueueId: number | null, expectedNextQueueId: number | null) => {
+  const attempt = useCallback(async (boundary: 'ended' | 'idle' | 'start', sourceQueueId: number | null, expectedNextQueueId: number | null, diagnostic?: TransitionDiagnostic, turnValid: () => boolean = () => true, deadline = Infinity) => {
     const state = store.getState()
     const current = state.animation.snapshot
     const active = current?.active
@@ -469,23 +471,32 @@ export default function useAnimationPlayer () {
         if (!probe.eligible) return
       }
       await stopAmbience()
-      // Flush the boundary before reserving. Periodic status is throttled and
-      // may still describe the preceding (now ended) song as occupying the room.
-      store.dispatch(playerStatusCancel())
-      const playerStatus = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
-      await animationRequest(PLAYER_EMIT_STATUS, { ...playerStatus, visualizer: state.playerVisualizer }, ANIMATION_LIMITS.startMs)
       const refreshed = store.getState()
       const room = refreshed.rooms.entities[refreshed.user.roomId]
       const contextKey = animationContext(ensureState(refreshed.queue), room?.prefs?.queue)
-      if (!mounted.current || generation !== version.current) throw new Error('La pausa cambió antes de reservar')
+      if (!mounted.current || generation !== version.current || !turnValid()) throw new Error('La pausa cambió antes de reservar')
       // Status synchronization precedes the permit: it must not consume the
       // reservation's response budget. The granted startBefore still fences start.
       began = performance.now()
-      const reply = await animationRequest(automatic ? ANIMATION_AUTO : ANIMATION_RESERVE, {
+      diagnostic?.record('animator-reserve-request', { queueId: expectedNextQueueId })
+      const transitionId = crypto.randomUUID()
+      const reply = await transitionRequest(() => animationRequest(automatic ? ANIMATION_AUTO : ANIMATION_RESERVE, {
         interventionId: active?.interventionId, playerEpoch: current.playerEpoch, controlVersion: current.controlVersion,
-        contextKey, transitionId: crypto.randomUUID(), boundary, sourceQueueId, expectedNextQueueId, replay: state.player._isReplayPlayback,
-      }, ANIMATION_LIMITS.startMs)
+        contextKey, transitionId, boundary, sourceQueueId, expectedNextQueueId, replay: state.player._isReplayPlayback,
+        ...(diagnostic && { diagnosticId: diagnostic.diagnosticId }),
+      }, Math.min(1500, deadline - performance.now())), syncAnimation, turnValid).catch(async (error) => {
+        if (!(error instanceof AnimationReceiptTimeout) || !turnValid()) throw error
+        // The reserve handler publishes the persisted grant before its direct reply.
+        // Avoid a second round trip when that exact permit is already here.
+        const pushed = store.getState().animation.snapshot?.active
+        const recovered = pushed?.transitionId === transitionId && pushed.status === 'RESERVED' ? pushed : (await syncAnimation()).payload?.active
+        if (!recovered || recovered.status !== 'RESERVED' || recovered.transitionId !== transitionId || recovered.ownerSocketId !== socket.id || !turnValid()) throw error
+        return { grant: recovered }
+      })
       grant = reply.grant
+      diagnostic?.record('animator-reserve-reply', { queueId: expectedNextQueueId, interventionId: grant?.interventionId,
+        elapsedMs: performance.now() - began, state: grant ? 'granted' : 'no-grant' })
+      if (diagnostic && performance.now() - began >= 1000) diagnostic.flag('animator-reserve-slow', { queueId: expectedNextQueueId, interventionId: grant?.interventionId })
       if (!grant) return
       grantRef.current = grant
       tracePlayback('intervention-granted', { channelId: audio.current.traceChannelId, interventionId: grant.interventionId,
@@ -494,12 +505,13 @@ export default function useAnimationPlayer () {
       const latestSnapshot = latest.animation.snapshot
       const latestContext = animationContext(ensureState(latest.queue), latest.rooms.entities[latest.user.roomId]?.prefs?.queue)
       const storageKey = `animation-started:${grant.interventionId}`
-      if (!mounted.current || generation !== version.current || performance.now() - began >= ANIMATION_LIMITS.startMs
+      if (!mounted.current || generation !== version.current || !turnValid() || performance.now() + grant.durationMs > deadline
         || !socket.connected || latest.player._authority !== 'GRANTED' || !latestSnapshot?.prefs.enabled
         || latestSnapshot.prefs.volume <= 0 || latestSnapshot.active?.stopRequestedAt
         || latestSnapshot.playerEpoch !== grant.playerEpoch || latestSnapshot.active?.interventionId !== grant.interventionId
         || latestContext !== grant.contextKey || animationTime() >= grant.startBefore!
         || attempted.current.has(grant.interventionId) || sessionStorage.getItem(storageKey)) {
+        diagnostic?.flag('animator-start-rejected', { interventionId: grant.interventionId, remainingMs: grant.startBefore! - animationTime() })
         await animationRequest(ANIMATION_EVENT, { interventionId: grant.interventionId, playerEpoch: grant.playerEpoch, event: 'NOT_STARTED' })
         return
       }
@@ -533,7 +545,10 @@ export default function useAnimationPlayer () {
       try {
         await animationPlaybackEvent(grant, 'STARTED')
         if (bedStarted) await animationPlaybackEvent(grant, 'ASSET_STARTED', bed!.id)
-      } catch { audio.current.stopForeground('start-ack-failed') }
+      } catch {
+        diagnostic?.flag('animator-start-ack-failed', { interventionId: grant.interventionId })
+        audio.current.stopForeground('start-ack-failed')
+      }
       let outcome = await completion
       for (const asset of assets.slice(1)) {
         const latest = store.getState().animation.snapshot
@@ -557,6 +572,8 @@ export default function useAnimationPlayer () {
       tracePlayback('intervention-finished', { channelId: audio.current.traceChannelId, interventionId: grant.interventionId, state: outcome })
       await animationRequest(ANIMATION_EVENT, { interventionId: grant.interventionId, playerEpoch: grant.playerEpoch, event: outcome })
     } catch (error) {
+      diagnostic?.flag('animator-step-failed', { queueId: expectedNextQueueId, interventionId: grant?.interventionId,
+        state: started ? 'playback' : grant ? 'start' : began ? 'reserve' : 'status' })
       audio.current.stopForeground('intervention-error')
       if (mounted.current) setError((error as Error).message)
       if (grant && !started && socket.connected) {
