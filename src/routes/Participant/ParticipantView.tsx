@@ -17,7 +17,7 @@ import Icon from 'components/Icon/Icon'
 import { useSongRequests } from 'components/SongSearch/useSongRequests'
 import SongResultCard from 'components/SongSearch/SongResultCard'
 import { estimatedWait, isPendingRequest, requestPriority, requestStatusLabels } from './model'
-import { useConnection } from './useConnection'
+import { useConnectionStatus } from './useConnection'
 import { useYouTubeSearch } from './useYouTubeSearch'
 import SongArtwork from 'components/SongArtwork/SongArtwork'
 import theme from 'styles/karaokeTheme.css'
@@ -38,7 +38,8 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
   const requestScope = useRef({ active: true })
   const focusedLocation = useRef('')
   const highlight = useRef({ clear: () => {} })
-  const connected = useConnection()
+  const connectionStatus = useConnectionStatus()
+  const connected = connectionStatus === 'connected'
   const user = useAppSelector(state => state.user)
   const room = useAppSelector(state => state.rooms.entities[user.roomId])
   const queue = useAppSelector(state => ensureState(state.queue))
@@ -120,7 +121,7 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
   const ready = connected && !queue.isLoading && !!room
   const canRequest = ready && room.status === 'open' && remaining > 0 && (!replacementId || !!replacement)
   let pageNotice = ''
-  if (!connected) pageNotice = 'Sin conexión · Reconectando…'
+  if (!connected) pageNotice = connectionStatus === 'reconnecting' ? 'Sin conexión · Reconectando…' : 'Conectando…'
   else if (room?.status === 'closed') pageNotice = 'Sala cerrada.'
   else if (!ready) pageNotice = 'Actualizando…'
   else if (page === 'search' && replacementId && !replacement) pageNotice = 'Este pedido ya no se puede reemplazar. Revisa Mis pedidos.'

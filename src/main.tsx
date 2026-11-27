@@ -16,7 +16,7 @@ Persistor.init(store, () => {
   }
 })
 
-socket.on('reconnect_attempt', () => {
+socket.io.on('reconnect_attempt', () => {
   store.dispatch(connectSocket())
 })
 
