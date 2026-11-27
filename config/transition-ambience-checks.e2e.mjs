@@ -1,9 +1,9 @@
 import { expect } from 'playwright/test'
 import assert from 'node:assert/strict'
 
-export async function installYouTubeTransitionFixture (context, mediaPath) {
+export async function installYouTubeTransitionFixture (context, mediaPath, blockFirstPlay = false) {
   await context.route('**/transition-youtube.mp4', route => route.fulfill({ path: mediaPath, contentType: 'video/mp4' }))
-  await context.addInitScript(() => {
+  await context.addInitScript((blockFirstPlay) => {
     window.youtubeTransition = { endedAt: 0, sceneAt: 0, video: null }
     document.addEventListener('DOMContentLoaded', () => {
       new MutationObserver(() => {
@@ -49,6 +49,11 @@ export async function installYouTubeTransitionFixture (context, mediaPath) {
         }
 
         playVideo () {
+          if (blockFirstPlay) {
+            blockFirstPlay = false
+            this.options.events.onAutoplayBlocked({ target: this })
+            return
+          }
           void this.video.play().catch((error) => {
             if (error.name === 'NotAllowedError') this.options.events.onAutoplayBlocked({ target: this })
             else if (error.name !== 'AbortError') throw error
@@ -69,7 +74,7 @@ export async function installYouTubeTransitionFixture (context, mediaPath) {
         }
       },
     }
-  })
+  }, blockFirstPlay)
 }
 
 export async function checkAmbienceHandoff ({ player, uiBase, emit, db, bed, voice, httpsUi }) {

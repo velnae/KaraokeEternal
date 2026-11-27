@@ -10,9 +10,12 @@ import assert from 'node:assert/strict'
 import { installYouTubeTransitionFixture, checkAmbienceHandoff, checkCurtainSilence } from './transition-ambience-checks.e2e.mjs'
 import { checkTransitionPresentation } from './transition-presentation-checks.e2e.mjs'
 import { capturePlaybackTrace } from './diagnostics/capture.js'
+import { checkColdStartup } from './public-player-startup-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
+const coldSource = process.env.KARAOKE_E2E_COLD_SOURCE
+if (coldSource) assert.ok(development && !process.env.KARAOKE_E2E_HTTPS_UI && ['local', 'youtube'].includes(coldSource))
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'transition-player-'))
 const log = fs.openSync(path.join(data, 'server.log'), 'a')
 const reservation = createServer()
@@ -71,7 +74,7 @@ const uploadAudio = async (id, kind, family, seconds, frequency, category = 'tra
 const active = () => db.prepare('SELECT * FROM animationInterventions WHERE status IN (\'RESERVED\',\'PLAYING\') ORDER BY rowid DESC LIMIT 1').get()
 const songStatus = id => db.prepare('SELECT status FROM queue WHERE queueId=?').get(id)?.status
 
-try {
+scenario: try {
   for (const [name, duration, source] of [['song', 3, 'color=c=blue:s=320x180:r=10'], ['background', 1, 'testsrc2=size=320x180:rate=10']]) {
     execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', source, '-f', 'lavfi', '-i', 'sine=frequency=220',
       '-t', String(duration), '-c:v', 'libx264', '-threads', '2', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(data, `${name}.mp4`)])
@@ -111,9 +114,10 @@ try {
     ambienceEnabled: true, profile: 'mixed', volume: 0.5, ambienceVolume: 0.2,
     events: { welcome: false, turn: true, closing: true, invitation: false, celebration: false, goodbye: false, booth: false, promotion: false } })
   await emit('server/ANIMATION_SESSION', { operation: 'open' })
-  for (let index = 0; index < 2; index++) await emit('server/QUEUE_ADD', { songId: 1, requestId: crypto.randomUUID() })
+  if (coldSource === 'youtube') db.prepare(`INSERT INTO queue(roomId,userId,source,externalId,title,artistOrChannel,origin) VALUES(1,1,'YOUTUBE','fixture0001','Cold start','Fixture','HOUSE')`).run()
+  else for (let index = 0; index < (coldSource ? 1 : 2); index++) await emit('server/QUEUE_ADD', { songId: 1, requestId: crypto.randomUUID() })
   const catalog = await call('animation/catalog')
-  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || '/usr/bin/chromium', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] })
+  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || '/usr/bin/chromium', headless: true, args: coldSource ? ['--autoplay-policy=document-user-activation-required'] : ['--autoplay-policy=no-user-gesture-required'] })
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, storageState: await api.storageState() })
   if (httpsUi) {
     // Use the real HTTPS frontend without taking over the shared room's player.
@@ -235,6 +239,12 @@ try {
   const sound = player.getByRole('region', { name: 'Sonido de pausa del reproductor', exact: true })
   const selection = sound.getByRole('combobox', { name: 'Ambiente a reproducir', exact: true })
   await expect(selection).toBeEnabled()
+  if (coldSource) {
+    const auth = await context.storageState()
+    await context.close()
+    await checkColdStartup({ browser, auth, base, data, source: coldSource, emit })
+    break scenario
+  }
   await expect(selection).toHaveValue('')
   await selection.selectOption(bed.id)
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.prefs.ambienceClipId).toBe(bed.id)
