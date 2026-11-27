@@ -278,7 +278,7 @@ try {
   await guest.getByRole('button', { name: 'Entrar', exact: true }).click()
   await expect(guest.getByRole('heading', { name: '¿Qué quieres pedir?' })).toBeVisible()
   held = true
-  const first = await submit(0, '¡Feliz cumpleaños!', playbackMode && process.env.KARAOKE_E2E_PLAYER_V2 !== '1' ? 'SING' : 'LISTEN')
+  const first = await submit(0, '¡Feliz cumpleaños!', playbackMode ? 'SING' : 'LISTEN')
   const second = await submit(1, '¡Feliz cumpleaños!')
   await expect.poll(() => requests.length).toBe(1)
   await expect.poll(() => job(first.greetingId)?.status).toBe('generating')

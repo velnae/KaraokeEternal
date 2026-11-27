@@ -58,21 +58,21 @@ Run with Node 24.22.2 and isolated fixtures. Extend `config/youtube-preparation.
 
 Both executors use the same guarded backdrop, bed, entry, greeting and animator adapters. When a directed turn is active, cancellation and handoff timeout go through the director's release path. In development, correlate `v2-plan-observed`, `v2-turn-command` and `v2-turn-released` with the turn identity and the media observations. A `start-song` command is an intent; the incoming `PLAYING` event confirms the handoff.
 
-The final switch remains gated on room acceptance for normal playback, listening requests, manual karaoke, birthdays and idle transitions. Until that evidence is available, retain the per-turn executor selector and rollback path.
+The director is the sole song executor in development and production builds. Room acceptance on the physical display and speakers is tracked separately from this code cutover. Rollback requires restoring the previous application version.
 
 ### Stage 7: birthdays and idle ambience
 
 In the V2 pilot a room boundary drains any active or pending idle ambience before a song or birthday takes ownership. A birthday scheduled during a directed handoff invalidates the pending promotion before reserving the celebration. Birthday phases still use `birthdayTimeline` and the existing renewable server permit, independently of the ordinary presentation deadline. After completion the scheduler reads the current queue again; a manual karaoke release is still required. Cancellation prevents a delayed finish from resuming a replaced turn.
 
-Isolated check: `KARAOKE_E2E_MODE=development KARAOKE_E2E_PLAYER_V2=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium mise exec node@24.22.2 -- node config/birthdays.e2e.mjs`.
+Isolated check: `KARAOKE_E2E_MODE=development PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium mise exec node@24.22.2 -- node config/birthdays.e2e.mjs`.
 
 ### Stage 4 development pilot
 
-On the development `/player` tab, run `sessionStorage.setItem('karaoke:player-executor', 'v2')` to opt in for the **next** eligible HOUSE transition with a scene or participant LISTEN request. Use `observe` (default) for V1 with passive comparison, or `legacy` for V1 without comparison. No reload is needed. The selector has no effect in production.
+The temporary per-tab pilot selector has been removed. Open `/player` normally.
 
 ### Stage 6: karaoke
 
-The same development selector also enables SING turns. The existing stage adapter supplies entry/call, reminders, countdown and the outgoing ending cue. Automatic starts continue after presentation. Manual turns wait on the server's renewable karaoke run: the presentation timeout cannot release the track. A matching queue and run must still be released after fading the bed; actual media playback acknowledges `played`. Re-entering a presented turn skips its call. Use `KARAOKE_E2E_MODE=development KARAOKE_E2E_STAGE_ONLY=1 KARAOKE_E2E_PLAYER_V2=1` with `config/karaoke-call-pilot.e2e.mjs` for isolated stage checks.
+The stage adapter supplies entry/call, reminders, countdown and the outgoing ending cue. Automatic starts continue after presentation. Manual turns wait on the server's renewable karaoke run: the presentation timeout cannot release the track. A matching queue and run must still be released after fading the bed; actual media playback acknowledges `played`. Re-entering a presented turn skips its call. Use `KARAOKE_E2E_MODE=development KARAOKE_E2E_STAGE_ONLY=1` with `config/karaoke-call-pilot.e2e.mjs` for isolated stage checks.
 
 ### Stage 5: listening requests
 
@@ -80,8 +80,8 @@ The director attempts the request presentation once, with the turn's cancellatio
 
 V2 starts the visual and ambience adapters independently, runs the intro, delegates the authorized voice/curtain sequence to the existing animator, and unlocks the shared queue promotion only after that sequence settles. The incoming media's play event drives exit; cancellation invalidates outstanding adapter callbacks. Look for `v2-turn-executing` and `v2-turn-released` in the development trace.
 
-Isolated browser check: `KARAOKE_E2E_PLAYER_V2=1 KARAOKE_E2E_MODE=development KARAOKE_E2E_DELAYED_ACKS=1 mise exec node@24.22.2 -- node config/youtube-preparation.e2e.mjs`. Check the real development display and speakers before widening the allowlist.
+Isolated browser check: `KARAOKE_E2E_MODE=development KARAOKE_E2E_DELAYED_ACKS=1 mise exec node@24.22.2 -- node config/youtube-preparation.e2e.mjs`.
 
-Use one development selector (`legacy`, `observe`, `v2`) plus an allowlist of migrated recipes. Choose the executor before the first side effect and keep it for the full turn. If the operator disables V2 mid-turn, switch at the next safe boundary; for immediate stop, cancel, release or wait out the permit, then reselect. Never replay the interrupted transition on V1. Compare plan and outcome by turn ID without recording private greeting text. Review omitted layers, duplicate starts and handoff latency alongside audible/visual evidence.
+Compare plan and outcome by turn ID without recording private greeting text. Review omitted layers, duplicate starts and handoff latency alongside audible/visual evidence.
 
-**First implementation task:** add the normal-turn fixtures and pure plan tests from units 1–2, then connect the passive comparison. The first code review should be possible without starting a public player. The first decision to expand scope comes after unit 4, using both isolated evidence and an observed development-room pass.
+**Implementation status:** cutover complete in source. The rollout history above documents the migration; it is no longer necessary to configure the player tab.

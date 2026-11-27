@@ -116,8 +116,6 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
     }, true)
   })
   const player = await adminContext.newPage()
-  const directed = process.env.KARAOKE_E2E_PLAYER_V2 === '1'
-  if (directed) await player.addInitScript(() => sessionStorage.setItem('karaoke:player-executor', 'v2'))
   setPlayer(player)
   let networkDelayMs = 0
   const lateReceipts = process.env.KARAOKE_E2E_GREETING_RECEIPTS === '1'
@@ -212,7 +210,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   await expect(player.getByTestId('greeting-overlay')).toHaveAttribute('data-greeting-id', String(first.greetingId))
   assert.equal(await backgroundElement.evaluate(video => video === document.querySelector('video[data-media-role="transition-background"]')), true)
   await expect.poll(() => backgroundElement.evaluate(video => video.videoWidth > 0 && !video.paused)).toBe(true)
-  await expect(player.getByTestId('transition-incoming')).toHaveAttribute('data-kind', directed ? 'listen' : 'sing')
+  await expect(player.getByTestId('transition-incoming')).toHaveAttribute('data-kind', 'sing')
   await expect(player.getByTestId('transition-incoming')).toContainText('Ana')
   await expect(player.getByTestId('transition-incoming')).toContainText('Mesa 4')
   const duplicate = await adminContext.newPage()
@@ -231,7 +229,7 @@ export async function runGreetingPlaybackChecks ({ api, admin, adminContext, gue
   await expect(player.getByTestId('transition-incoming')).toContainText('Pedido de Ana')
   await expect.poll(() => delivery(second)?.voiceStatus, { timeout: 12000 }).toBe('PLAYED')
   await waitPlayed(second)
-  if (directed) assert.equal(await player.evaluate(id => window.karaokePlaybackTrace.snapshot().events.filter(event => event.event === 'v2-turn-executing' && event.queueId === id).length, second.queueId), 1)
+  if (process.env.KARAOKE_E2E_MODE === 'development') assert.equal(await player.evaluate(id => window.karaokePlaybackTrace.snapshot().events.filter(event => event.event === 'v2-turn-executing' && event.queueId === id).length, second.queueId), 1)
   assert.equal(db.prepare('SELECT status FROM greetings WHERE greetingId=?').get(second.greetingId).status, 'DISPLAYED')
   assert.equal(db.prepare('SELECT sum(attempts) n FROM greetingAudioJobs').get().n, attempts)
   for (const item of [first, second]) {

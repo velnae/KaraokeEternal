@@ -6,7 +6,7 @@ import { assertKaraokeArrival, assertKaraokeHandoff, assertKaraokeReminders, rec
 export async function checkManualKaraokeStart ({ page, player, operator, emit, db, call, snapshot, uiBase, data, queueId, stage, followingIds }) {
   const turn = () => db.prepare('SELECT * FROM karaokeStartTurns WHERE roomId=1').get()
   await expect.poll(() => turn()?.phase, { timeout: 30000 }).toBe('waiting')
-  if (process.env.KARAOKE_E2E_PLAYER_V2 === '1') assert.ok(await player.evaluate(id =>
+  if (process.env.KARAOKE_E2E_MODE === 'development') assert.ok(await player.evaluate(id =>
     window.karaokePlaybackTrace.snapshot().events.some(event => event.event === 'v2-turn-executing' && event.queueId === id), queueId), 'The manual karaoke turn must use the V2 executor')
   assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(queueId).status, 'APPROVED')
   const voiceCount = db.prepare(`SELECT count(*) n FROM animationInterventions WHERE json_extract(callJSON,'$.queueId')=? AND startedAt IS NOT NULL`).get(queueId).n

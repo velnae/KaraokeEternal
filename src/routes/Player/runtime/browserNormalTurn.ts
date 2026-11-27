@@ -2,14 +2,6 @@ import { createTurnDirector } from './turnDirector'
 import type { planNormalTurn } from './turnPlan'
 import { TRANSITION_INTRO_MS } from 'shared/animation'
 
-export function developmentExecutor () {
-  if (process.env.NODE_ENV !== 'development') return 'legacy'
-  try {
-    const mode = sessionStorage.getItem('karaoke:player-executor')
-    return mode === 'v2' || mode === 'legacy' ? mode : 'observe'
-  } catch { return 'observe' }
-}
-
 interface Adapters {
   serverNow: () => number
   backdrop: (signal: AbortSignal) => Promise<void>

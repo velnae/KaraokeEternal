@@ -17,7 +17,8 @@ it('preserves scheduler order at natural end without sorting by queue ID', () =>
 it('replans a newly approved request but preserves a held approved turn', () => {
   const queue = { result: [7, 14, 12], entities: { ...base.queue.entities, 14: track(14, 'APPROVED', 'PARTICIPANT') } }
   const update = planNormalTurn({ ...base, queue })
-  expect(update).toMatchObject({ destination: 14, kind: 'special', steps: [] })
+  expect(update).toMatchObject({ destination: 14, kind: 'normal' })
+  expect(update.steps).toContain('present-request')
   expect(update.identity).not.toBe(planNormalTurn(base).identity)
   expect(planNormalTurn({ ...base, queue, held: track(12) }).destination).toBe(12)
   expect(planNormalTurn({ ...base, queue, held: track(12, 'REMOVED') }).destination).toBe(14)

@@ -55,7 +55,7 @@ interface PlayerControllerProps {
 
 import { beginTransitionDiagnostic, type TransitionDiagnostic } from 'lib/playbackTrace'
 import { planNormalTurn, compareTurnSelection, turnIdentity } from '../../runtime/turnPlan'
-import { beginBrowserTurn, developmentExecutor } from '../../runtime/browserNormalTurn'
+import { beginBrowserTurn } from '../../runtime/browserNormalTurn'
 import { createRoomBoundary } from '../../runtime/roomBoundary'
 import { tracePlayback } from 'lib/playbackTrace'
 
@@ -207,7 +207,10 @@ const PlayerController = (props: PlayerControllerProps) => {
     }
     if (!release && directed.current?.destination === playing.queueId) {
       directed.current.report({ type: 'playing' })
-      if (!scene) dispatch(playerPlay())
+      if (!scene) {
+        animationRef.current.channel.musicStarted()
+        dispatch(playerPlay())
+      }
       return
     }
     if (release?.turn.queueId === playing.queueId) {
@@ -363,8 +366,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     const sourceId = before.queueId
     if (!warmup.current) diagnosticRef.current = boundary === 'idle' ? undefined : beginTransitionDiagnostic(sourceId, store.getState().user.roomId)
     const diagnostic = diagnosticRef.current
-    const executor = developmentExecutor()
-    const roomRun = executor === 'v2' ? roomBoundary.begin() : null
+    const roomRun = roomBoundary.begin()
     let idleAfterTurn = false
     let owned: ReturnType<typeof beginBrowserTurn> | undefined
     let promoted = false
@@ -383,11 +385,9 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (birthdayPending) {
         const scene = transitionRef.current
         if (scene && warmup.current?.id === scene.id) updateTransition({ ...scene, phase: 'intro' })
-        if (!roomRun) await animationRef.current.stopAmbience()
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       }
       const celebrate = () => {
-        if (!roomRun) return birthdayRef.current.attempt(boundary, sourceId)
         return roomRun.celebrate(async () => {
           await animationRef.current.stopAmbience()
           await animationRef.current.stopTransition(80)
@@ -398,7 +398,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       }
       const celebration = birthdayPending ? await celebrate() : 'none'
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
-      if (celebration === 'waiting' || (roomRun && celebration === 'interrupted')) return
+      if (celebration === 'waiting' || celebration === 'interrupted') return
       if (celebration === 'finished') {
         dispatch(playerStatus({ isPlaying: true }))
         boundary = 'start'
@@ -443,18 +443,19 @@ const PlayerController = (props: PlayerControllerProps) => {
         ? { id: prepared?.id ?? crypto.randomUUID(), background: transitionRef.current?.background ?? backgroundRef.current ?? animationRef.current.snapshot?.ambience?.background ?? null, phase: manualTurn?.presented ? 'waiting' : 'intro' }
         : null
       // Retain the current backdrop before releasing idle ambience or awaiting a new selection.
-      let observedPlan: ReturnType<typeof planNormalTurn> | undefined
-      if (executor !== 'legacy') {
+      const observedPlan = (() => {
         const state = store.getState()
         const snapshot = state.animation.snapshot
-        observedPlan = planNormalTurn({ roomId: state.user.roomId, epoch: snapshot?.playerEpoch ?? null, source: sourceId,
+        return planNormalTurn({ roomId: state.user.roomId, epoch: snapshot?.playerEpoch ?? null, source: sourceId,
           replayKey: before._lastReplayTime, boundary, queue: getPlaybackQueue(state), held: heldItem ?? null, announce,
           backdrop: !!backgroundRef.current || state.rooms.entities[state.user.roomId]?.prefs?.transitionVideo?.mode === 'all',
           animator: !!snapshot?.prefs.enabled, greetings: !!snapshot?.greetingVoiceEnabled,
           listeningPresentations: snapshot?.listeningPresentationsEnabled,
           karaokeCalls: snapshot?.karaokeCallsEnabled, manualKaraoke: manualTurn,
           ambience: !!snapshot?.prefs.ambienceEnabled && snapshot.prefs.ambienceVolume !== 0 })
-        tracePlayback('v2-plan-observed', { diagnosticId: diagnostic?.diagnosticId, roomId: state.user.roomId, sourceQueueId: sourceId,
+      })()
+      if (diagnostic) {
+        tracePlayback('v2-plan-observed', { diagnosticId: diagnostic.diagnosticId, roomId: store.getState().user.roomId, sourceQueueId: sourceId,
           queueId: observedPlan.destination, observedQueueId: upcoming?.queueId ?? null, turnIdentity: observedPlan.identity,
           state: compareTurnSelection(observedPlan, upcoming?.queueId ?? null, !!scene), reason: observedPlan.steps.join(',') || observedPlan.kind })
       }
@@ -464,9 +465,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         void animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: prepared.id, finished: true }, 1000).catch(() => {})
       }
       if (upcoming || boundary !== 'idle') {
-        if (roomRun) {
-          if (!await roomRun.yieldIdle(animationRef.current.stopAmbience)) return
-        } else await animationRef.current.stopAmbience()
+        if (!await roomRun.yieldIdle(animationRef.current.stopAmbience)) return
       }
       // A pause can arrive while the previous ambience is being released.
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
@@ -532,8 +531,11 @@ const PlayerController = (props: PlayerControllerProps) => {
         if (scene) updateTransition({ ...transitionRef.current!, phase: 'voice' })
         await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null, diagnostic, () => valid(signal), deadline)
       }
-      if (executor === 'v2' && observedPlan && upcoming && (observedPlan.kind === 'karaoke' || observedPlan.kind === 'listening' || (observedPlan.kind === 'normal' && scene))
-        && observedPlan.destination === upcoming.queueId && observedPlan.scene === !!scene && turnValid()) {
+      if (upcoming) {
+        if (!turnValid() || observedPlan.destination !== upcoming.queueId) {
+          retryHouseSelection = true
+          return
+        }
         directed.current?.cancel('replaced')
         owned = beginBrowserTurn(observedPlan, Math.max(1, deadline - performance.now()), {
           serverNow: animationTime,
@@ -567,34 +569,21 @@ const PlayerController = (props: PlayerControllerProps) => {
         diagnostic?.record('v2-turn-executing', { queueId: upcoming.queueId })
         if (!await owned.handoff || owned.signal.aborted) return
       } else if (scene) {
-        // A scene owns one choice across intro, speech and loading. Preview and
-        // audio-permit renewals must not consume another position in the rotation.
-        const firstVisual = backdrop()
-        const earlyBed = upcoming?.requestIntent !== 'SING' ? bed() : null
-        await firstVisual
-        if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
-        if (upcoming?.requestIntent === 'SING' && !manualTurn?.presented && !callRequested) {
-          await entry()
-          if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
-        }
-        await (earlyBed ?? bed())
+        // Final outro before the room enters idle; there is no song to promote.
+        await Promise.all([backdrop(), bed()])
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         const now = performance.now()
         // A visual pre-roll does not play the bed and cannot replace its lead-in.
-        const until = now + (manualTurn?.presented || upcoming?.requestIntent === 'SING' ? 0 : TRANSITION_INTRO_MS)
+        const until = now + TRANSITION_INTRO_MS
         while (performance.now() < until && mounted.current && controlVersion === animationRef.current.controlVersion() && transitionRef.current?.id === scene.id) {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         updateTransition({ ...transitionRef.current, phase: 'voice' })
       }
-      const greeted = !owned && upcoming && upcoming.origin !== 'HOUSE' && !manualTurn?.presented && turnValid()
-        ? await presentation()
-        : false
-      if (!owned && !greeted && !manualTurn?.presented && announce && turnValid()) {
+      if (!upcoming && announce && turnValid()) {
         await announcement()
       }
-      if (!owned && manualTurn && !await waitForOperator(manualTurn)) return
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       const current = store.getState().player
       if (!socket.connected || current._authority !== 'GRANTED' || current._isReplayingQueueId !== null
@@ -604,7 +593,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       // An approval can arrive while a normal announcement is running.
       if (birthdayRef.current.pending) {
         // Keep the current picture until the celebration has its own scene.
-        if (roomRun && owned) {
+        if (owned) {
           // Drop the prior plan and its handoff deadline before reserving a long celebration.
           retryAfterBirthday = true
           return
@@ -612,7 +601,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         await animationRef.current.stopTransition(80)
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
         const celebration = await celebrate()
-        if (celebration === 'waiting' || (roomRun && celebration === 'interrupted') || !mounted.current || controlVersion !== animationRef.current.controlVersion()) return
+        if (celebration === 'waiting' || celebration === 'interrupted' || !mounted.current || controlVersion !== animationRef.current.controlVersion()) return
         if (celebration === 'finished') {
           dispatch(playerStatus({ isPlaying: true }))
           retryAfterBirthday = true
@@ -632,11 +621,11 @@ const PlayerController = (props: PlayerControllerProps) => {
         }
       }
       const next = reserved?.isOptimistic !== true && reserved?.status === 'APPROVED' ? reserved : selection()
-      if (owned && next?.queueId !== owned.destination) {
+      if ((next?.queueId ?? null) !== observedPlan.destination) {
         retryHouseSelection = true
         return
       }
-      if (observedPlan) tracePlayback('v2-plan-handoff', { diagnosticId: diagnostic?.diagnosticId, sourceQueueId: sourceId,
+      if (diagnostic) tracePlayback('v2-plan-handoff', { diagnosticId: diagnostic.diagnosticId, sourceQueueId: sourceId,
         turnIdentity: observedPlan.identity, queueId: observedPlan.destination, observedQueueId: next?.queueId ?? null,
         state: observedPlan.identity === turnIdentity(store.getState().user.roomId, store.getState().animation.snapshot?.playerEpoch ?? null,
           current.queueId, current._lastReplayTime, next?.queueId ?? null)
@@ -645,8 +634,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (!next) {
         await finishTransition()
         dispatch(playerStatus({ historyJSON: current.historyJSON, isAtQueueEnd: true, isErrored: false, mediaType: null, _isPlayingNext: false, _isBetweenTracks: false }))
-        if (roomRun) idleAfterTurn = true
-        else void animationRef.current.startAmbience()
+        idleAfterTurn = true
         return
       }
       if (manualTurn?.queueId === next.queueId) releasedKaraoke.current = { turn: manualTurn, acknowledging: false }
@@ -661,8 +649,8 @@ const PlayerController = (props: PlayerControllerProps) => {
       }))
     } finally {
       if (owned && !promoted) owned.cancel('replaced')
-      const resumeIdle = idleAfterTurn && roomRun?.current() && !birthdayRef.current.pending
-      roomRun?.close()
+      const resumeIdle = idleAfterTurn && roomRun.current() && !birthdayRef.current.pending
+      roomRun.close()
       if (resumeIdle) roomBoundary.enterIdle(animationRef.current.startAmbience)
       diagnostic?.flush()
       if (mounted.current) setPreparingQueueId(null)
@@ -792,8 +780,7 @@ const PlayerController = (props: PlayerControllerProps) => {
   useEffect(() => {
     if (!birthday.pending && !birthday.busy && !player._isQueueStopped && !advancing.current && !animation.busy && !animation.blocked && animation.unlocked && !ambientPlaying
       && !player.isErrored && (player.isAtQueueEnd || player.queueId === -1)) {
-      if (developmentExecutor() === 'v2') roomBoundary.enterIdle(startAmbience)
-      else void startAmbience()
+      roomBoundary.enterIdle(startAmbience)
     }
   }, [birthday.pending, birthday.busy, animation.snapshot, animation.busy, animation.blocked, animation.unlocked, ambientPlaying, ambientTick, startAmbience, player.isErrored, player.isAtQueueEnd, player.queueId, player._isQueueStopped, roomBoundary])
 

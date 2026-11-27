@@ -6,8 +6,6 @@ import { checkListeningTemplateAdmin } from './listening-template-admin-checks.e
 import { checkListeningRebuilds } from './listening-rebuild-checks.e2e.mjs'
 
 export async function checkListeningPresentations ({ page, player, operator, luis, join, add, emit, db, upload, snapshot, uiBase, data, fail }) {
-  const directed = process.env.KARAOKE_E2E_PLAYER_V2 === '1'
-  if (directed) await player.evaluate(() => sessionStorage.setItem('karaoke:player-executor', 'v2'))
   let releaseColdAudio = false
   const ready = queueId => db.prepare('SELECT * FROM listeningPresentations WHERE queueId=?').get(queueId)
   const played = queueId => db.prepare(`SELECT * FROM animationInterventions WHERE json_extract(callJSON,'$.queueId')=? AND startedAt IS NOT NULL ORDER BY requestedAt DESC LIMIT 1`).get(queueId)
@@ -38,7 +36,7 @@ export async function checkListeningPresentations ({ page, player, operator, lui
     const intervention = played(queueId)
     if (cold) fs.writeFileSync(path.join(data, 'cold-listening.json'), JSON.stringify({ intervention, trace: await player.evaluate(() => window.karaokePlaybackTrace.snapshot()) }, null, 2))
     assert.equal(intervention?.status, 'PLAYED', JSON.stringify(intervention))
-    if (directed) {
+    if (process.env.KARAOKE_E2E_MODE === 'development') {
       const turns = await player.evaluate(id => window.karaokePlaybackTrace.snapshot().events.filter(e => e.event === 'v2-turn-executing' && e.queueId === id).length, queueId)
       assert.equal(turns, 1, 'One directed presentation for this listening request')
     }

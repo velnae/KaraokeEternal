@@ -34,7 +34,7 @@ export function planNormalTurn (input: TurnInputs) {
   const listening = next?.origin === 'PARTICIPANT' && next.requestIntent === 'LISTEN'
   const karaoke = !!next && next.origin !== 'HOUSE' && next.requestIntent === 'SING'
   const manual = karaoke ? input.manualKaraoke : null
-  const kind = !next ? 'empty' : karaoke ? 'karaoke' : listening ? 'listening' : next.origin === 'HOUSE' ? 'normal' : 'special'
+  const kind = !next ? 'empty' : karaoke ? 'karaoke' : listening ? 'listening' : 'normal'
   const call = (listening && !!input.listeningPresentations) || (karaoke && !!input.karaokeCalls)
   const scene = (kind === 'normal' || listening || karaoke) && input.boundary !== 'idle' && (input.announce || call || !!manual) && (input.backdrop || input.animator || input.greetings || call || !!manual)
   const steps: string[] = []
@@ -42,7 +42,7 @@ export function planNormalTurn (input: TurnInputs) {
     if (scene) steps.push('prepare-backdrop')
     if (scene && karaoke && !manual?.presented && !call) steps.push('karaoke-entry')
     if (scene && (input.ambience || (karaoke && (call || manual)))) steps.push('start-eligible-bed')
-    if (listening || (karaoke && !manual?.presented)) steps.push('present-request')
+    if (next?.origin !== 'HOUSE' && !manual?.presented) steps.push('present-request')
     if (input.announce && input.animator && !manual?.presented) steps.push('attempt-voice', 'finish-eligible-curtain')
     if (manual) steps.push('wait-for-release')
     steps.push('start-song')
