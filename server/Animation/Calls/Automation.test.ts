@@ -81,6 +81,27 @@ async function bank () {
   await until(() => automatic.snapshot(1).tablesReady === 1)
 }
 
+it('reconciles only pending presentations and skips writes until their inputs change', () => {
+  db.run('INSERT INTO karaokeCallControls(roomId,listeningEnabled) VALUES(1,1)')
+  add('LISTEN', 'PLAYED')
+  add('LISTEN', 'APPROVED', 'HOUSE')
+  const pending = add('LISTEN')
+  const presentations = () => db.all<{ queueId: number, inputKey: string }>('SELECT queueId,inputKey FROM listeningPresentations WHERE roomId=1')
+  const totalChanges = () => db.get<{ count: number }>('SELECT total_changes() count')!.count
+
+  automatic.reconcile()
+  const original = presentations()
+  expect(original.map(row => row.queueId)).toEqual([pending])
+  const writes = totalChanges()
+  automatic.reconcile()
+  expect(totalChanges()).toBe(writes)
+
+  db.run('UPDATE users SET name=? WHERE userId=1', ['Andrea'])
+  automatic.reconcile()
+  expect(presentations().map(row => row.queueId)).toEqual([pending])
+  expect(presentations()[0].inputKey).not.toBe(original[0].inputKey)
+})
+
 it('reserves the entry and singing presentation together, budgets only speech and omits an unready or oversized effect', async () => {
   await bank()
   const identity = player()

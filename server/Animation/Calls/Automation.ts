@@ -1,9 +1,8 @@
 import { db } from '../../lib/Database.js'
-import Queue from '../../Queue/Queue.js'
+import Queue, { type CallQueueItem } from '../../Queue/Queue.js'
 import Tables from '../../Tables/Tables.js'
 import getLogger from '../../lib/Log.js'
 import type GreetingVoice from '../../Greetings/GreetingVoice.js'
-import type { QueueItem } from '../../../shared/types.js'
 import { animationPrefs } from '../../../shared/animation.js'
 import { callContinuation, callPlaybackReasons, type CallAsset, type CallAutomationSnapshot, type CallContext, type CallControls, type CallPreparation, type CallRequestState } from '../../../shared/karaokeCalls.js'
 import { CallError } from './Jobs.js'
@@ -30,7 +29,7 @@ interface BankTask {
 interface BankPlan { requestId: string, tasks: BankTask[], paused?: boolean }
 const service: { current?: CallAutomation } = {}
 export const getCallAutomation = () => service.current
-export const isSingingRequest = (item?: QueueItem) => !!item && item.origin !== 'HOUSE' && item.requestIntent === 'SING'
+export const isSingingRequest = (item?: Pick<CallQueueItem, 'origin' | 'requestIntent'>) => !!item && item.origin !== 'HOUSE' && item.requestIntent === 'SING'
 
 export default class CallAutomation {
   private timer?: ReturnType<typeof setInterval>
@@ -62,13 +61,13 @@ export default class CallAutomation {
   }
 
   private open (roomId: number) { return db.get<{ status: string }>('SELECT status FROM rooms WHERE roomId=?', [roomId])?.status === 'open' }
-  private eligible (roomId: number, item?: QueueItem) { return this.open(roomId) && isSingingRequest(item) && item?.status === 'APPROVED' }
+  private eligible (roomId: number, item?: CallQueueItem) { return this.open(roomId) && isSingingRequest(item) && item?.status === 'APPROVED' }
   private compatibleIntros (roomId: number) {
     const controls = callControls(roomId)
     return intros(roomId).filter(item => !controls.introIds.length || controls.introIds.includes(item.variantId))
   }
 
-  private table (roomId: number, item: QueueItem) {
+  private table (roomId: number, item: CallQueueItem) {
     if (!item.tableId) return null
     try {
       const table = Tables.get(roomId, item.tableId)
@@ -79,7 +78,7 @@ export default class CallAutomation {
     } catch { return null }
   }
 
-  private inputKey (roomId: number, item: QueueItem, intro?: PartRow) {
+  private inputKey (roomId: number, item: CallQueueItem, intro?: PartRow) {
     const table = this.table(roomId, item)
     return key([roomId, item.queueId, item.tableId, item.tableLabelSnapshot, item.userDisplayName, item.title,
       item.origin, item.requestIntent, intro?.profileKey ?? '', intro?.id, table?.code, table?.revision, table?.part?.id, compositionRevision])
@@ -268,7 +267,7 @@ export default class CallAutomation {
       DO UPDATE SET inputKey=excluded.inputKey,jobId=excluded.jobId,resultId=excluded.resultId`, [roomId, scope, inputKey, result?.id ?? null, result?.status === 'ready' ? result.resultId : null])
   }
 
-  private reconcileRequest (roomId: number, item: QueueItem) {
+  private reconcileRequest (roomId: number, item: CallQueueItem) {
     let row = requestCall(roomId, item.queueId)
     if (row?.startedAt) return
     const intro = this.chooseIntro(roomId, row)
@@ -312,18 +311,19 @@ export default class CallAutomation {
     try {
       for (const { roomId } of db.all<{ roomId: number }>('SELECT roomId FROM karaokeCallControls UNION SELECT roomId FROM greetingControls WHERE audioEnabled=1')) {
         const controls = callControls(roomId)
-        const queue = Queue.get(roomId)
-        if (this.open(roomId)) this.listening.reconcile(roomId, queue.result.map(id => queue.entities[id])
-          .sort((a, b) => Number(b.queueId === this.next.get(roomId)) - Number(a.queueId === this.next.get(roomId))))
+        const open = this.open(roomId)
+        const next = this.next.get(roomId)
+        // This is preparation order only; the player still chooses the next song.
+        const approved = Queue.approvedForCalls(roomId).sort((a, b) => Number(b.queueId === next) - Number(a.queueId === next))
+        if (open) this.listening.reconcile(roomId, approved)
+        const candidates = approved.filter(isSingingRequest)
+        const singingIds = new Set(candidates.map(item => item.queueId))
         for (const request of db.all<RequestRow>(`SELECT * FROM karaokeCallRequests WHERE roomId=? AND startedAt IS NULL AND status!='cancelled'`, [roomId])) {
-          const item = queue.entities[request.queueId]
-          if (isSingingRequest(item) && item.status === 'APPROVED') continue
+          if (singingIds.has(request.queueId)) continue
           if (request.jobId && pending.has(job(roomId, request.jobId)?.status ?? '')) this.worker.cancel(roomId, request.jobId)
           if (!request.startedAt) db.run(`UPDATE karaokeCallRequests SET status='cancelled',reason='El pedido ya no espera un llamado automático.' WHERE queueId=?`, [request.queueId])
         }
-        if (!controls.preparing || !this.open(roomId)) continue
-        const candidates = queue.result.map(id => queue.entities[id]).filter(item => this.eligible(roomId, item))
-          .sort((a, b) => Number(b.queueId === this.next.get(roomId)) - Number(a.queueId === this.next.get(roomId)))
+        if (!controls.preparing || !open) continue
         const introductions = this.compatibleIntros(roomId)
         const intro = introductions[0]
         if (intro) this.fallback(roomId, intro)

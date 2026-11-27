@@ -17,6 +17,8 @@ import { findMusicBlock, musicBlockedMessage, type MusicBlocking } from '../../s
 
 const HIDDEN_QUEUE_STATUSES = ['REJECTED', 'REMOVED']
 
+export type CallQueueItem = Pick<QueueItem, 'queueId' | 'origin' | 'requestIntent' | 'status' | 'title' | 'tableId' | 'tableLabelSnapshot' | 'userDisplayName'>
+
 class Queue {
   static assertMusicAllowed (song: Parameters<typeof findMusicBlock>[0]): void {
     if (findMusicBlock(song, Prefs.getMusicBlocking())) {
@@ -148,6 +150,16 @@ class Queue {
     if (!item) throw new Error('Solo puedes reemplazar un pedido fallido vigente')
     if (db.get('SELECT 1 FROM queue WHERE replacesQueueId=?', [queueId])) throw new Error('Este pedido ya tiene un reemplazo. Revisa la cola.')
     return item
+  }
+
+  static approvedForCalls (roomId: number): CallQueueItem[] {
+    const rows = db.all<CallQueueItem & { userRole: string }>(`SELECT q.queueId,q.origin,q.requestIntent,q.status,q.title,q.tableId,q.tableLabelSnapshot,
+      u.name AS userDisplayName,r.name AS userRole
+      FROM queue q JOIN users u USING(userId) LEFT JOIN roles r ON r.roleId=u.roleId
+      WHERE q.roomId=? AND q.status='APPROVED' AND q.origin!='HOUSE' ORDER BY q.queueId`, [roomId])
+    return rows.map(({ userRole, ...item }) => ({
+      ...item, userDisplayName: userRole === 'guest' ? publicGuestName(item.userDisplayName) : item.userDisplayName,
+    }))
   }
 
   /**

@@ -1,6 +1,7 @@
 import { db } from '../../lib/Database.js'
 import type GreetingVoice from '../../Greetings/GreetingVoice.js'
 import type { QueueItem } from '../../../shared/types.js'
+import type { CallQueueItem } from '../../Queue/Queue.js'
 import { callPlaybackReasons, type CallAsset, type CallContext, type CallPreparation, type CallPurpose, type CallRequestState } from '../../../shared/karaokeCalls.js'
 import CallJobs, { CallError } from './Jobs.js'
 import { callControls, fixedPart, job, jobDTO, key, part, partDTO, partProfile, retainedListening, sameSpeaker, tableVoice, type JobRow, type PartRow } from './Store.js'
@@ -13,7 +14,7 @@ import NameBank from './NameBank.js'
 
 export const listeningTemplates = defaultListeningTemplates
 export const listeningTemplate = listeningTemplates[0]
-export const isListeningRequest = (item?: QueueItem) => item?.origin === 'PARTICIPANT' && item.requestIntent === 'LISTEN'
+export const isListeningRequest = (item?: Pick<CallQueueItem, 'origin' | 'requestIntent'>) => item?.origin === 'PARTICIPANT' && item.requestIntent === 'LISTEN'
 interface PresentationRow { inputKey: string, resultId: string | null, signatureId: string | null, startedAt: number | null, templateId: string | null, templatePartId: string | null, playbackReason: keyof typeof callPlaybackReasons | null, recoveryJobId: string | null, namePartId: string | null }
 
 /** Reconciled by CallAutomation; sources share its worker and provider budget. */
@@ -23,12 +24,12 @@ export default class ListeningCalls {
     this.templates = new ListeningTemplates(worker, voice)
   }
 
-  private template (roomId: number, item: QueueItem, started = false) {
+  private template (roomId: number, item: CallQueueItem, started = false) {
     const previous = db.get<PresentationRow>('SELECT * FROM listeningPresentations WHERE roomId=? AND queueId=?', [roomId, item.queueId])
     return this.templates.choose(roomId, previous?.templateId, previous?.templatePartId, started)
   }
 
-  private table (roomId: number, item: QueueItem) {
+  private table (roomId: number, item: CallQueueItem) {
     if (!item.tableId) return undefined
     try {
       if (Tables.get(roomId, item.tableId).status !== 'active') return undefined
@@ -38,12 +39,12 @@ export default class ListeningCalls {
     } catch { return undefined }
   }
 
-  private inputKey (roomId: number, item: QueueItem, template: PartRow | null | undefined = this.template(roomId, item)?.audio, recipe = 'listening-v3', namePartId = NameBank.selected(NameBank.speechName(item.userDisplayName), this.profile(roomId, item) ?? this.voice.profile())?.id) {
+  private inputKey (roomId: number, item: CallQueueItem, template: PartRow | null | undefined = this.template(roomId, item)?.audio, recipe = 'listening-v3', namePartId = NameBank.selected(NameBank.speechName(item.userDisplayName), this.profile(roomId, item) ?? this.voice.profile())?.id) {
     return key([recipe, item.queueId, item.userDisplayName, item.tableId, item.tableLabelSnapshot,
       item.requestIntent, item.origin, template?.text, this.table(roomId, item)?.id, template ? partProfile(template, this.voice.profile()) : this.profile(roomId, item), ...(recipe === 'listening-v3' ? [namePartId] : [])])
   }
 
-  private profile (roomId: number, item: QueueItem) {
+  private profile (roomId: number, item: CallQueueItem) {
     const presentation = callControls(roomId).listeningEnabled && isListeningRequest(item) ? this.template(roomId, item)?.audio : undefined
     const reference = presentation ?? fixedPart(roomId, 'signature', 'De')
     return reference ? partProfile(reference, this.voice.profile()) : null
@@ -86,7 +87,7 @@ export default class ListeningCalls {
     return sourceKind === 'signature' ? fixedPart(roomId, 'signature', text, reference) : undefined
   }
 
-  reconcile (roomId: number, items: QueueItem[]) {
+  reconcile (roomId: number, items: CallQueueItem[]) {
     const enabled = callControls(roomId).listeningEnabled
     const greetingsEnabled = !!db.get(`SELECT 1 FROM greetingControls WHERE roomId=? AND audioEnabled=1 AND paused=0 AND json_extract(playbackJSON,'$.enabled')=1`, [roomId])
     if (!enabled && !greetingsEnabled) return
@@ -95,22 +96,30 @@ export default class ListeningCalls {
       // A reserved/displaying greeting still owns its attribution. Dropping the
       // signature here invalidates its reservation before STARTED can arrive.
       const greeting = greetingsEnabled && db.get(`SELECT 1 FROM greetings WHERE roomId=? AND queueId=? AND status IN ('QUEUED','RESERVED','DISPLAYING')`, [roomId, item.queueId])
-      const selected = this.template(roomId, item)
-      const present = enabled && isListeningRequest(item) && !!selected
-      if (!present && !greeting) continue
+      const listening = enabled && isListeningRequest(item)
+      if (!listening && !greeting) continue
       const previous = db.get<PresentationRow>('SELECT * FROM listeningPresentations WHERE roomId=? AND queueId=?', [roomId, item.queueId])
       if (previous?.startedAt) continue
+      const selected = this.templates.choose(roomId, previous?.templateId, previous?.templatePartId)
+      if (!selected && !greeting) continue
       const inputKey = this.inputKey(roomId, item, selected?.audio ?? null)
-      const template = present ? selected?.audio : undefined
+      const template = listening ? selected?.audio : undefined
       const prefix = greeting ? this.source(roomId, 'signature', 'De', template) : undefined
       const profile = this.profile(roomId, item)
       const name = profile && (template || prefix) ? NameBank.ensureAudio(this.worker, roomId, NameBank.speechName(item.userDisplayName), profile, this.voice.snapshot().configured && this.voice.snapshot().config.enabled) : undefined
       const signature = name && prefix && sameSpeaker(name, prefix) ? this.ensure(roomId, 'compose', { sourceIds: [prefix.id, name.id], sourceKind: 'signature' }, item.queueId) : undefined
       const table = this.table(roomId, item)
       const result = name && template ? this.ensure(roomId, 'compose', { sourceIds: [...(table && sameSpeaker(table, template) ? [table.id] : []), template.id, name.id] }, item.queueId) : undefined
+      const resultId = result?.id ?? null
+      const signatureId = signature?.id ?? null
+      const templateId = selected?.id ?? null
+      const templatePartId = selected?.audio?.id ?? null
+      const namePartId = name?.id ?? null
+      if (previous && previous.inputKey === inputKey && previous.resultId === resultId && previous.signatureId === signatureId
+        && previous.templateId === templateId && previous.templatePartId === templatePartId && previous.namePartId === namePartId) continue
       db.run(`INSERT INTO listeningPresentations(roomId,queueId,inputKey,resultId,signatureId,templateId,templatePartId,namePartId) VALUES(?,?,?,?,?,?,?,?)
         ON CONFLICT(roomId,queueId) DO UPDATE SET inputKey=excluded.inputKey,resultId=excluded.resultId,signatureId=excluded.signatureId,templateId=excluded.templateId,templatePartId=excluded.templatePartId,namePartId=excluded.namePartId`,
-      [roomId, item.queueId, inputKey, result?.id ?? null, signature?.id ?? null, selected?.id ?? null, selected?.audio?.id ?? null, name?.id ?? null])
+      [roomId, item.queueId, inputKey, resultId, signatureId, templateId, templatePartId, namePartId])
     }
   }
 
