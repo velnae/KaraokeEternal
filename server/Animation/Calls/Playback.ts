@@ -4,7 +4,7 @@ import { GREETING_START_MS, greetingDuration, type Greeting, type GreetingPrepar
 import type { CallContext } from '../../../shared/karaokeCalls.js'
 import { callControls, callSessionAllows, part } from './Store.js'
 import { getCallAutomation } from './Automation.js'
-import Queue from '../../Queue/Queue.js'
+import Queue, { type CallQueueItem } from '../../Queue/Queue.js'
 import getLogger from '../../lib/Log.js'
 import { KARAOKE_ENTRY_ATTACK_MS } from '../../../shared/karaokeStage.js'
 
@@ -32,8 +32,8 @@ export function recordCallOmission (roomId: number, queueId: number) {
   getLogger('calls').info('Call omitted room=%s queue=%s reason=%s result=%s stage=music-start', roomId, queueId, reason, row.resultId)
 }
 const signatureEnabled = (roomId: number) => !!db.get(`SELECT 1 FROM greetingControls WHERE roomId=? AND audioEnabled=1 AND paused=0 AND json_extract(playbackJSON,'$.enabled')=1`, [roomId])
-export const prepareCall = (roomId: number, queueId: number) => {
-  const prepared = getCallAutomation()?.preparation(roomId, queueId)
+export const prepareCall = (roomId: number, queueId: number, item?: CallQueueItem) => {
+  const prepared = getCallAutomation()?.preparation(roomId, queueId, false, item)
   if (!prepared) return null
   const canPresent = prepared.kind === 'listening' ? listeningEnabled(roomId) : !prepared.kind && callsEnabled(roomId)
   const assets = prepared.assets.filter(asset => asset.role === 'signature' ? signatureEnabled(roomId) : canPresent)
@@ -47,7 +47,7 @@ export const validCall = (roomId: number, context: CallContext, started = false)
     const room = db.get<{ data: string, status: string }>('SELECT data,status FROM rooms WHERE roomId=?', [roomId])
     allowed = listeningEnabled(roomId) || (started && room?.status === 'open' && animationPrefs(JSON.parse(room.data).prefs?.animation).enabled)
   }
-  return allowed && Queue.get(roomId).entities[context.queueId]?.status === 'APPROVED' && getCallAutomation()?.valid(roomId, context, started) === true
+  return allowed && Queue.itemForCall(roomId, context.queueId)?.status === 'APPROVED' && getCallAutomation()?.valid(roomId, context, started) === true
 }
 
 /** One finite reservation contains the call and, when it fits, the greeting. */

@@ -59,7 +59,7 @@ it('withdraws a delivered greeting from announcements without rewriting its deli
   expect(invoke('readAnnouncements', {}, actor).error).toContain('autoridad')
   expect(invoke('readAnnouncements', {}, admin).error).toContain('autoridad')
   vi.spyOn(Rooms, 'isAuthoritativePlayer').mockReturnValue(true)
-  expect(invoke('readAnnouncements', {}, admin).announcements).toEqual([{ queueId: 1, greetingId: 1, sender: 'Sender', message: 'Own' }])
+  expect(invoke('readAnnouncements', {}, admin).announcements).toEqual([{ queueId: 1, greetingId: 1, sender: 'Sender', message: 'Own', avatarUrl: 'assets/avatars/general.webp' }])
   expect(invoke('remove', { greetingId: 1 }).error).toBeTruthy()
   expect(invoke('pause', { paused: true }, admin).payload.paused).toBe(true)
   expect(invoke('readAnnouncements', {}, admin).announcements).toEqual([])

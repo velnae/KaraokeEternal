@@ -123,7 +123,7 @@ export default class ListeningCalls {
     }
   }
 
-  preparation (roomId: number, item: QueueItem, allowStarted = false): CallPreparation | null {
+  preparation (roomId: number, item: CallQueueItem, allowStarted = false): CallPreparation | null {
     if (item.status !== 'APPROVED' || item.origin !== 'PARTICIPANT') return null
     const row = db.get<PresentationRow>('SELECT * FROM listeningPresentations WHERE roomId=? AND queueId=?', [roomId, item.queueId])
     const template = this.template(roomId, item, allowStarted)?.audio ?? null
@@ -157,7 +157,7 @@ export default class ListeningCalls {
       revision: controls.revision, assets, reason: null }
   }
 
-  valid (roomId: number, item: QueueItem, context: CallContext, started: boolean) {
+  valid (roomId: number, item: CallQueueItem, context: CallContext, started: boolean) {
     const prepared = this.preparation(roomId, item, started)
     return !!prepared && (context.kind === 'signature' ? prepared.signatureKey : prepared.inputKey) === context.inputKey
       && (context.kind === 'signature' || started || prepared.revision === context.revision)
@@ -168,7 +168,7 @@ export default class ListeningCalls {
     db.run('UPDATE listeningPresentations SET startedAt=COALESCE(startedAt,?) WHERE roomId=? AND queueId=?', [Date.now(), roomId, queueId])
   }
 
-  prioritize (roomId: number, item: QueueItem) {
+  prioritize (roomId: number, item: CallQueueItem) {
     const name = NameBank.pronouncedText(NameBank.speechName(item.userDisplayName), this.profile(roomId, item) ?? this.voice.profile())
     const template = this.template(roomId, item)?.text ?? ''
     const text = [this.table(roomId, item)?.text, template, name].filter(Boolean).join(' ')

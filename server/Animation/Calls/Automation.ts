@@ -217,8 +217,7 @@ export default class CallAutomation {
     return result
   }
 
-  prioritize (roomId: number, queueId: number) {
-    const item = Queue.get(roomId).entities[queueId]
+  prioritize (roomId: number, queueId: number, item = Queue.itemForCall(roomId, queueId)) {
     if (!item || item.status !== 'APPROVED') return
     this.next.set(roomId, queueId)
     this.listening.prioritize(roomId, item)
@@ -348,9 +347,8 @@ export default class CallAutomation {
     return result && source && !jobOutdated(source, this.voice.profile()) ? result : undefined
   }
 
-  preparation (roomId: number, queueId: number, allowStarted = false): CallPreparation | null {
+  preparation (roomId: number, queueId: number, allowStarted = false, item = Queue.itemForCall(roomId, queueId)): CallPreparation | null {
     const controls = callControls(roomId)
-    const item = Queue.get(roomId).entities[queueId]
     if (!item) return null
     const listening = this.listening.preparation(roomId, item, allowStarted)
     if (!controls.enabled || !this.eligible(roomId, item)) return listening
@@ -378,7 +376,7 @@ export default class CallAutomation {
 
   valid (roomId: number, context: CallContext, started = false) {
     if (context.kind) {
-      const item = Queue.get(roomId).entities[context.queueId]
+      const item = Queue.itemForCall(roomId, context.queueId)
       return !!item && this.listening.valid(roomId, item, context, started)
     }
     const prepared = this.preparation(roomId, context.queueId, started)

@@ -54,6 +54,21 @@ const prepared = (item: Greeting, greetingMs = 3000, introMs = 2000): GreetingPr
   performer: { name: 'Ana', tableLabel: 'Mesa 4', requestIntent: 'SING', title: 'Song' },
 })
 
+it('prepares only the requested song beside a large history and rechecks it on the next request', async () => {
+  const { queueId } = request()
+  db.exec(`WITH RECURSIVE history(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM history WHERE i<3000)
+    INSERT INTO queue(roomId,userId,status,source,title,artistOrChannel,externalId) SELECT 1,1,'PLAYED','YOUTUBE','History','Artist','AAAAAAAAAAA' FROM history`)
+  const fullQueue = vi.spyOn(Queue, 'get')
+  const bounded = vi.spyOn(Queue, 'itemForCall')
+  const result = await prepareGreetingTransition(1, queueId, { prioritize: true })
+  expect(result?.performer).toMatchObject({ name: 'Ana', title: 'Song karaoke' })
+  expect(bounded).toHaveBeenCalledTimes(1)
+  expect(await prepareGreetingTransition(2, queueId)).toBeNull()
+  db.run("UPDATE queue SET status='REMOVED' WHERE queueId=?", [queueId])
+  expect(await prepareGreetingTransition(1, queueId)).toBeNull()
+  expect(fullQueue).not.toHaveBeenCalled()
+})
+
 it('keeps one introduction, complete greeting and optional bed inside the transition ceiling', () => {
   const { item } = request()
   const plan = planGreetingTransition(item, prepared(item, 19000, 8000), ready, 120000)!

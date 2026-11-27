@@ -275,7 +275,7 @@ scenario: try {
   await player.setViewportSize({ width: 1440, height: 1000 })
   await player.goto(`${uiBase}player`)
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.readyClips.includes(bed.checksum), { timeout: 15000 }).toBe(true)
-  await player.getByRole('button', { name: 'Reproducir', exact: true }).click()
+  await player.getByRole('toolbar', { name: 'Controles de reproducción' }).getByRole('button', { name: 'Reproducir', exact: true }).click()
   await expect(player.getByTestId('transition-scene')).toBeVisible()
   await expect.poll(() => player.evaluate(() => window.transitionTrace.active.includes('ambience'))).toBe(true)
   await emit('server/PLAYER_REQ_PAUSE')

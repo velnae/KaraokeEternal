@@ -6,6 +6,7 @@ import { animationPrefs, eligibleAmbience } from '../../shared/animation.js'
 import { defaultGreetingPlayback, GREETING_START_MS, type Greeting, type GreetingPlaybackPrefs, type GreetingPreparation, type GreetingAsset, type GreetingTransition } from '../../shared/greetings.js'
 import { getGreetingAudioAsset } from './audioRouter.js'
 import { prepareCall } from '../Animation/Calls/Playback.js'
+import { getCallAutomation } from '../Animation/Calls/Automation.js'
 import { isGreetingAllowed } from '../../shared/greetings.js'
 import { currentSession } from '../Animation/sessions.js'
 import { selectAnnouncement } from '../Animation/selection.js'
@@ -18,12 +19,13 @@ export function greetingPlayback (roomId: number) {
     enabled: !!row?.audioEnabled && !row?.paused && JSON.parse(row.playbackJSON).enabled === true }
 }
 
-export async function prepareGreetingTransition (roomId: number, queueId: number): Promise<GreetingPreparation | null> {
+export async function prepareGreetingTransition (roomId: number, queueId: number, { prioritize = false } = {}): Promise<GreetingPreparation | null> {
   const stored = db.get<Greeting>('SELECT * FROM greetings WHERE roomId=? AND queueId=? AND status=\'QUEUED\'', [roomId, queueId])
   const item = stored && isGreetingAllowed(stored) ? stored : undefined
-  const song = Queue.get(roomId).entities[queueId]
+  const song = Queue.itemForCall(roomId, queueId)
   if (!song || song.status !== 'APPROVED') return null
-  const call = prepareCall(roomId, queueId)
+  if (prioritize) getCallAutomation()?.prioritize(roomId, queueId, song)
+  const call = prepareCall(roomId, queueId, song)
   if (!item && !call) return null
   const control = greetingPlayback(roomId)
   const assets: GreetingAsset[] = [...(call?.assets ?? [])]

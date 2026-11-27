@@ -12,7 +12,6 @@ import { db } from '../lib/Database.js'
 import { interventionAssets, type Intervention } from '../../shared/animation.js'
 import type { GreetingAsset, GreetingGrant } from '../../shared/greetings.js'
 import { catalogClips } from '../Animation/catalog.js'
-import { getCallAutomation } from '../Animation/Calls/Automation.js'
 
 const log = getLogger('greetings')
 // Only the same connected player may recover the latest reservation reply.
@@ -64,8 +63,7 @@ export default {
           if (sock.connected === false || sock.user?.roomId !== roomId || !canOperate(sock.user) || !Rooms.isAuthoritativePlayer(sock) || payload.expiresAt < Date.now()) throw new Error('El permiso de reproducción venció')
         }
         if (operation === 'prepare') {
-          getCallAutomation()?.prioritize(roomId, number('queueId'))
-          const preparation = await prepareGreetingTransition(roomId, number('queueId'))
+          const preparation = await prepareGreetingTransition(roomId, number('queueId'), { prioritize: true })
           revalidate()
           trace?.('ready')
           return acknowledge({ preparation })

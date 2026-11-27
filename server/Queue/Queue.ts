@@ -19,6 +19,14 @@ const HIDDEN_QUEUE_STATUSES = ['REJECTED', 'REMOVED']
 
 export type CallQueueItem = Pick<QueueItem, 'queueId' | 'origin' | 'requestIntent' | 'status' | 'title' | 'tableId' | 'tableLabelSnapshot' | 'userDisplayName'>
 
+type CallQueueRow = CallQueueItem & { userRole: string }
+const callQueueSelect = `SELECT q.queueId,q.origin,q.requestIntent,q.status,q.title,q.tableId,q.tableLabelSnapshot,
+  u.name AS userDisplayName,r.name AS userRole
+  FROM queue q JOIN users u USING(userId) LEFT JOIN roles r ON r.roleId=u.roleId`
+const callQueueItem = ({ userRole, ...item }: CallQueueRow): CallQueueItem => ({
+  ...item, userDisplayName: userRole === 'guest' ? publicGuestName(item.userDisplayName) : item.userDisplayName,
+})
+
 class Queue {
   static assertMusicAllowed (song: Parameters<typeof findMusicBlock>[0]): void {
     if (findMusicBlock(song, Prefs.getMusicBlocking())) {
@@ -153,13 +161,14 @@ class Queue {
   }
 
   static approvedForCalls (roomId: number): CallQueueItem[] {
-    const rows = db.all<CallQueueItem & { userRole: string }>(`SELECT q.queueId,q.origin,q.requestIntent,q.status,q.title,q.tableId,q.tableLabelSnapshot,
-      u.name AS userDisplayName,r.name AS userRole
-      FROM queue q JOIN users u USING(userId) LEFT JOIN roles r ON r.roleId=u.roleId
+    const rows = db.all<CallQueueRow>(`${callQueueSelect}
       WHERE q.roomId=? AND q.status='APPROVED' AND q.origin!='HOUSE' ORDER BY q.queueId`, [roomId])
-    return rows.map(({ userRole, ...item }) => ({
-      ...item, userDisplayName: userRole === 'guest' ? publicGuestName(item.userDisplayName) : item.userDisplayName,
-    }))
+    return rows.map(callQueueItem)
+  }
+
+  static itemForCall (roomId: number, queueId: number) {
+    const row = db.get<CallQueueRow>(`${callQueueSelect} WHERE q.queueId=? AND q.roomId=? AND q.status!='REMOVED'`, [queueId, roomId])
+    return row && callQueueItem(row)
   }
 
   /**
