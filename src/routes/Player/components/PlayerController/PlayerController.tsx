@@ -20,7 +20,7 @@ import PlayerTransitionPresentation from '../Animation/PlayerTransitionPresentat
 import { createTransitionPresentationSelector } from '../Animation/transitionPresentation'
 import useSelectedPlayerBackground from '../Animation/useSelectedPlayerBackground'
 import usePlayerDiagnostic, { logPlayerDiagnostic } from 'lib/usePlayerDiagnostic'
-import Button from 'components/Button/Button'
+import PublicPlayerControls from '../PublicPlayerControls'
 import animationStyles from 'components/Animation/Animation.css'
 import getRoomPrefs from '../../selectors/getRoomPrefs'
 import type { QueueItem } from 'shared/types'
@@ -949,19 +949,10 @@ const PlayerController = (props: PlayerControllerProps) => {
           {(startTurn || presentedTracks.incoming?.requestIntent === 'SING') && <KaraokeMascot imageId={animation.snapshot?.karaokeStage?.mascotImageId ?? prefs.playerDisplay.logo.animatedImageId ?? prefs.playerDisplay.logo.staticImageId} fallback={prefs.branding.logoSrc} countdown={startTurn?.phase === 'countdown'} />}
         </PlayerTransitionScene>
       )}
-      {(birthday.needsSound || birthday.needsVolume || (audioStatus && (animation.needsGesture || animation.error))) && (
+      <PublicPlayerControls showPlay={!player.isPlaying || birthday.needsSound || animation.needsGesture} />
+      {birthday.needsVolume && (
         <div className={animationStyles.unlock}>
-          {animation.needsGesture || birthday.needsSound
-            ? (
-                <>
-                  <p>Activa el sonido</p>
-                  <Button variant='primary' onClick={birthday.needsSound ? birthday.unlock : animation.unlock}>Permitir sonido</Button>
-                </>
-              )
-            : animation.error ? <p role='status'>No se pudo activar el sonido.</p> : null}
-          {animation.error && !animation.needsGesture && <Button onClick={animation.unlock}>Reintentar audio</Button>}
-          {birthday.error && <p role='alert'>{birthday.error}</p>}
-          {birthday.needsVolume && <p role='status'>Suba el volumen para iniciar el cumpleaños.</p>}
+          <p role='status'>Suba el volumen desde administración para iniciar el cumpleaños.</p>
         </div>
       )}
       {!showScene && !birthday.scene && idleOverlay}

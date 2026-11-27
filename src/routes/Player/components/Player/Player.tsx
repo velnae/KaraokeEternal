@@ -248,7 +248,7 @@ class Player extends React.PureComponent<PlayerProps> {
             key={mediaKey}
             ref={active ? this.youtubePlayer : undefined}
             controls={0}
-            showAutoplayRecovery
+            showAutoplayRecovery={false}
             onLocalPlay={localPlay.recover}
             onBlocked={this.markBlocked}
             height={this.props.height}

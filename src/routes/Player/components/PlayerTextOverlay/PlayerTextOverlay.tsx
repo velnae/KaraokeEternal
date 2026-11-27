@@ -1,11 +1,6 @@
 import React from 'react'
-import { Link } from 'react-router'
-import { useAppDispatch } from 'store/hooks'
-import { requestPlayNext } from 'store/modules/status'
-import { localPlay } from '../../runtime/localPlay'
 import UpNow from './UpNow/UpNow'
 import Icon from 'components/Icon/Icon'
-import Button from 'components/Button/Button'
 import type { QueueItem } from 'shared/types'
 import type { DisplayCorner } from 'shared/playerDisplay'
 import styles from './PlayerTextOverlay.css'
@@ -22,7 +17,6 @@ interface PlayerTextOverlayProps {
 }
 
 const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueItem, queueItem, width, height, turnPlacement }: PlayerTextOverlayProps) => {
-  const dispatch = useAppDispatch()
   let content
 
   if (isQueueEmpty || (isAtQueueEnd && !nextQueueItem)) {
@@ -30,7 +24,6 @@ const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueIte
       <section className={styles.panel} role='status'>
         <Icon icon='MICROPHONE' size={48} />
         <h1>Sin canciones</h1>
-        <Link to='/library' target='_blank' rel='noopener'>Buscar canciones</Link>
       </section>
     )
   } else if (!queueItem || (isAtQueueEnd && nextQueueItem)) {
@@ -38,7 +31,6 @@ const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueIte
       <section className={styles.panel}>
         <p className={styles.singer} translate='no'>{nextQueueItem?.userDisplayName}</p>
         <h1 translate='no'>{nextQueueItem?.title || 'Listo para cantar'}</h1>
-        <Button className={styles.playButton} icon='PLAY' onClick={localPlay.start}>Reproducir</Button>
       </section>
     )
   } else if (isErrored) {
@@ -46,10 +38,7 @@ const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueIte
       <section className={styles.panel} role='alert'>
         <Icon icon='ALERT_OUTLINE' size={44} />
         <h1>No se pudo reproducir</h1>
-        <div className={styles.actions}>
-          <Link to='/queue' target='_blank' rel='noopener'>Ver cola</Link>
-          <Button className={styles.playButton} onClick={() => dispatch(requestPlayNext())}>Siguiente canción</Button>
-        </div>
+        <p>Revise la canción desde la cola.</p>
       </section>
     )
   } else {

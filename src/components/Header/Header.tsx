@@ -71,7 +71,7 @@ const Header = React.forwardRef<HTMLDivElement>((_, ref) => {
       {isOperator && !isPlayer && !isQueue && isPlayerPresent
         && <UpNext isUpNext={isUpNext} isUpNow={isUpNow} wait={wait} />}
 
-      {isOperator
+      {isOperator && !isPlayer
         && <PlaybackCtrl />}
 
       {isAdmin && !isPlayer
