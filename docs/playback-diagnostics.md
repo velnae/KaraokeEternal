@@ -96,6 +96,22 @@ Opening another browser does not expose the original tab's history. Older builds
 will not have this export until the instrumentation is deployed normally.
 The export has no commands to start, stop or otherwise control playback.
 
+### Automatic incident capture in development
+
+On the affected development `/player` tab, export the latest captured incident:
+
+```js
+copy(JSON.stringify(window.karaokePlaybackTrace.incidents()[0], null, 2))
+```
+
+The browser keeps up to three recent captures for 30 minutes in the tab's session
+storage, including after a reload in that tab. Use `snapshot()` for a live trace
+when there is no automatic capture. Import either export with `import-player`.
+Use the `diagnosticId` to match the development server's `[transition]` logs for
+slow or unsuccessful reservation requests. The capture also records scene
+phases, background readiness and the incoming player's actual start. No extra
+diagnostic traffic or storage is enabled in production.
+
 Events include audio start/finish, cancellation reason, gain muted, context state,
 intervention identity, relevant commands, connection loss and music start. Audio
 start records the scheduled duration; finish records both monotonic elapsed time

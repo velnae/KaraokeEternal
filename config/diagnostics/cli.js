@@ -25,8 +25,8 @@ export function validateWindow (since, until) {
 
 export function sanitizePlayer (value) {
   if (value?.schemaVersion !== 1 || !Array.isArray(value.events) || value.events.length > 300) throw new Error('Invalid playback trace')
-  const numbers = ['sequence', 'wallTime', 'monotonicMs', 'channelId', 'runId', 'roomId', 'queueId', 'durationMs', 'elapsedMs', 'audioElapsedMs', 'playerEpoch', 'volume', 'remainingMs']
-  const strings = ['event', 'reason', 'state', 'interventionId', 'checksum']
+  const numbers = ['sequence', 'wallTime', 'monotonicMs', 'channelId', 'runId', 'roomId', 'queueId', 'sourceQueueId', 'durationMs', 'elapsedMs', 'audioElapsedMs', 'playerEpoch', 'volume', 'remainingMs', 'assetCount', 'cacheHits']
+  const strings = ['event', 'reason', 'state', 'interventionId', 'checksum', 'diagnosticId']
   const events = value.events.map((event) => {
     if (!event || typeof event.event !== 'string' || !Number.isFinite(event.sequence) || !Number.isFinite(event.monotonicMs)) throw new Error('Invalid trace event')
     const clean = {}
