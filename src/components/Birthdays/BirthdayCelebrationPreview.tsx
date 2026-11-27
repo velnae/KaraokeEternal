@@ -249,7 +249,7 @@ function PreviewPlayer ({ name, assets, busy, bedVolume }: { name: string, asset
   }
   return (
     <>
-      <div className={styles.stage}>{(!started || selected?.phase !== 'prelude') && <BirthdayPresentation key={run} name={name} video={assets.find(asset => asset.kind === 'video')} phase={visualPhase} playing={playing && audible} onVideoError={() => setVideoError(true)} />}</div>
+      <div className={styles.stage}><BirthdayPresentation key={run} name={name} video={assets.find(asset => asset.kind === 'video')} phase={started ? visualPhase : 'intro'} playing={playing && (visualPhase === 'prelude' || audible)} onVideoError={() => setVideoError(true)} /></div>
       <p className={styles.status} role='status'>{finished ? 'Previsualización finalizada' : selected ? birthdayLabels[selected.phase] : 'Previsualización en este dispositivo'}</p>
       {busy && <p role='status'>Generando saludo de prueba…</p>}
       {!assets.some(asset => asset.kind === 'greeting') && !busy && <p role='status'>Genere el audio para probar el saludo con este nombre, texto y voz.</p>}

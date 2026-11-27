@@ -3,7 +3,7 @@ import type { BirthdayAsset, BirthdayPhase } from 'shared/birthdays'
 import { birthdayUrl } from './api'
 import styles from '../../routes/Player/components/Birthday/BirthdayScene.css'
 
-export default function BirthdayPresentation ({ name, video, phase = 'intro', playing = true, onVideoError }: { name: string, video?: BirthdayAsset, phase?: BirthdayPhase, playing?: boolean, onVideoError?(): void }) {
+export default function BirthdayPresentation ({ name, video, phase = 'intro', playing = true, staged = false, onVideoReady, onVideoError }: { name: string, video?: Pick<BirthdayAsset, 'id' | 'url'>, phase?: BirthdayPhase, playing?: boolean, staged?: boolean, onVideoReady?(): void, onVideoError?(): void }) {
   const [failed, setFailed] = useState(false)
   const [videoRatio, setVideoRatio] = useState(16 / 9)
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
@@ -41,7 +41,7 @@ export default function BirthdayPresentation ({ name, video, phase = 'intro', pl
     entrances.current.forEach((animation) => {
       if (animation.playState === 'paused') animation.play()
     })
-  }, [playing, reducedMotion, showName])
+  }, [playing, reducedMotion, showName, phase])
   useLayoutEffect(() => {
     const title = heading.current
     const container = composition.current
@@ -63,7 +63,7 @@ export default function BirthdayPresentation ({ name, video, phase = 'intro', pl
     const observer = new ResizeObserver(fit)
     observer.observe(container)
     return () => observer.disconnect()
-  }, [name])
+  }, [name, showName])
   useEffect(() => {
     const current = element.current
     if (playing && !reducedMotion) void current?.play().catch(() => {})
@@ -71,7 +71,7 @@ export default function BirthdayPresentation ({ name, video, phase = 'intro', pl
     return () => current?.pause()
   }, [playing, video?.id, reducedMotion])
   return (
-    <section className={styles.scene} data-phase={phase} aria-label={`Cumpleaños de ${name}`} style={{ '--birthday-video-ratio': videoRatio } as React.CSSProperties}>
+    <section className={styles.scene} data-phase={phase} aria-hidden={staged || undefined} aria-label={`Cumpleaños de ${name}`} style={{ '--birthday-video-ratio': videoRatio, 'visibility': staged ? 'hidden' : undefined } as React.CSSProperties}>
       <div ref={composition} className={styles.composition}>
         {video && !failed && (
           <video
@@ -82,6 +82,7 @@ export default function BirthdayPresentation ({ name, video, phase = 'intro', pl
             loop
             playsInline
             src={birthdayUrl(video.url)}
+            onLoadedData={onVideoReady}
             onLoadedMetadata={(event) => {
               const { videoWidth, videoHeight } = event.currentTarget
               if (videoWidth && videoHeight) setVideoRatio(videoWidth / videoHeight)
@@ -92,13 +93,15 @@ export default function BirthdayPresentation ({ name, video, phase = 'intro', pl
             }}
           />
         )}
-        <div className={styles.recognition}>
-          <p ref={greeting}>
-            <span aria-hidden='true'>🎂 </span>
-            ¡Feliz cumpleaños!
-          </p>
-          <h1 ref={heading} style={{ visibility: showName ? 'visible' : 'hidden' }}>{name}</h1>
-        </div>
+        {phase !== 'prelude' && (
+          <div className={styles.recognition}>
+            <p ref={greeting}>
+              <span aria-hidden='true'>🎂 </span>
+              ¡Feliz cumpleaños!
+            </p>
+            <h1 ref={heading} style={{ visibility: showName ? 'visible' : 'hidden' }}>{name}</h1>
+          </div>
+        )}
       </div>
     </section>
   )

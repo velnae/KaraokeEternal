@@ -885,6 +885,8 @@ const PlayerController = (props: PlayerControllerProps) => {
     />
   )
 
+  const birthdayEvent = birthday.scene?.grant.event ?? (player._authority === 'GRANTED' ? birthday.pendingEvent : undefined)
+  const birthdayVideoId = birthday.scene ? birthday.scene.grant.assets.find(asset => asset.kind === 'video')?.id : birthdayEvent?.videoId
   return (
     <>
       <Player
@@ -918,8 +920,8 @@ const PlayerController = (props: PlayerControllerProps) => {
         width={props.width}
         height={props.height}
       />
-      {birthday.scene && <BirthdayScene key={birthday.scene.grant.event.id} grant={birthday.scene.grant} phase={birthday.scene.phase} />}
-      {(showScene || preroll) && (!birthday.scene || transition) && (
+      {birthdayEvent && birthdayVideoId && <BirthdayScene key={`${birthdayEvent.id}:${birthdayVideoId}`} event={birthdayEvent} videoId={birthdayVideoId} phase={birthday.scene?.phase} />}
+      {(showScene || preroll) && (
         <PlayerTransitionScene
           background={background}
           playing={!!(transition || animation.scene || greetings.scene || animation.ambientPlaying || player.isPlaying || player._isPlayingNext)}
@@ -929,13 +931,8 @@ const PlayerController = (props: PlayerControllerProps) => {
           exiting={transition?.phase === 'exiting'}
           onExited={handleVisualExit}
         >
-          {birthday.pendingEvent
-            ? (
-                <div className={styles.authorityNotice} role='status'>
-                  <h1>{`Cumpleaños de ${birthday.pendingEvent.name}`}</h1>
-                  <p>Preparando la celebración…</p>
-                </div>
-              )
+          {birthday.pendingEvent || birthday.busy
+            ? null
             : foregroundScene || preroll
               ? (
                   <PlayerTransitionPresentation

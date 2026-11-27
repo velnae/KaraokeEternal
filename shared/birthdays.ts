@@ -96,6 +96,7 @@ export function birthdayTimeline (assets: BirthdayAsset[], version?: 1): Birthda
     { phase: 'applause', durationMs: applause?.durationMs ?? 0, asset: applause }]
 }
 export interface PublicBirthday {
+  videoId?: string
   id: string
   name: string
   playback: BirthdayPlayback

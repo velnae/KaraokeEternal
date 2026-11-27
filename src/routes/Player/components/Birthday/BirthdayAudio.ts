@@ -39,6 +39,12 @@ export class BirthdayAudio {
 
   async prepare (assets: BirthdayAsset[], signal: AbortSignal, bedVolume = 0.2) {
     this.bedVolume = bedVolume
+    await this.loadAssets(assets, signal)
+    this.bedDuration = assets.filter(asset => asset.kind === 'intro' || asset.kind === 'greeting').reduce((sum, asset) => sum + (this.buffers.get(asset.id)?.duration ?? 0), 0)
+    if (this.choreographyVersion) this.bedDuration += (birthdayTiming.preludeMs + birthdayTiming.bridgeMs) / 1000
+  }
+
+  async loadAssets (assets: BirthdayAsset[], signal: AbortSignal) {
     for (const asset of assets.filter(item => item.kind !== 'video')) {
       try {
         if (!asset.url.startsWith('api/birthdays/assets/')) throw new Error('Recurso de cumpleaños inválido.')
@@ -60,8 +66,6 @@ export class BirthdayAudio {
         this.warning += asset.kind === 'bed' ? 'No se pudo preparar el audio de fondo. La celebración continúa sin acompañamiento. ' : 'No se pudo preparar el aplauso. La celebración continúa sin ese efecto. '
       }
     }
-    this.bedDuration = assets.filter(asset => asset.kind === 'intro' || asset.kind === 'greeting').reduce((sum, asset) => sum + (this.buffers.get(asset.id)?.duration ?? 0), 0)
-    if (this.choreographyVersion) this.bedDuration += (birthdayTiming.preludeMs + birthdayTiming.bridgeMs) / 1000
   }
 
   stopBed () {

@@ -40,7 +40,9 @@ export const getBirthday = (roomId: number, id: string) => {
   return row
 }
 export const rows = (roomId: number) => db.all<BirthdayRow>('SELECT * FROM birthdays WHERE roomId=? ORDER BY createdAt DESC,id', [roomId])
-export const publicEvents = (roomId: number): PublicBirthday[] => rows(roomId).filter(row => ['scheduled', 'playing'].includes(row.playback)).map(publicBirthday)
+export const publicEvents = (roomId: number): PublicBirthday[] => rows(roomId).filter(row => ['scheduled', 'playing'].includes(row.playback)).map(row => ({
+  ...publicBirthday(row), videoId: (JSON.parse(row.settingsJSON) as BirthdaySettings).videoId ?? undefined,
+}))
 export const birthdayOwnsAudio = (roomId: number) => !!db.get('SELECT 1 FROM birthdays WHERE roomId=? AND playback=\'playing\'', [roomId])
 export function eventAssets (row: BirthdayRow): AssetRow[] {
   const config: BirthdaySettings = JSON.parse(row.settingsJSON)

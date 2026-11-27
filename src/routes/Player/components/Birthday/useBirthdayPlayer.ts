@@ -96,11 +96,18 @@ export default function useBirthdayPlayer (channel: AnnouncementAudio) {
       controller.signal.throwIfAborted()
       channel.stop()
       store.dispatch(playerStatus({ isAtQueueEnd: true }))
-      await audio.prepare(grant.assets, controller.signal, grant.bedVolume)
+      if (live.current) setScene({ grant, phase: 'prelude' })
+      const later = grant.assets.filter(asset => asset.kind === 'music' || asset.kind === 'applause')
+      await audio.prepare(grant.assets.filter(asset => !later.includes(asset)), controller.signal, grant.bedVolume)
+      // Observe failures immediately, but only wait for each buffer at its own cue.
+      const loading = new Map(later.map(asset => [asset.id, Promise.allSettled([audio.loadAssets([asset], controller.signal)])]))
       if (live.current) setError(grant.warning || audio.warning)
       const steps = birthdayTimeline(grant.assets, grant.choreographyVersion)
       for (const [index, step] of steps.entries()) {
         const { phase, asset } = step
+        const result = asset && (await loading.get(asset.id))?.[0]
+        if (result?.status === 'rejected') throw result.reason
+        if (phase === 'applause' && live.current) setError(grant.warning || audio.warning)
         controller.signal.throwIfAborted()
         if (index > 0) await progress('phase', phase)
         if (!asset && phase !== 'prelude' && live.current) setScene({ grant, phase })
@@ -130,6 +137,7 @@ export default function useBirthdayPlayer (channel: AnnouncementAudio) {
       if (live.current) setError(failure instanceof Error ? failure.message : 'La celebración se interrumpió.')
       return 'interrupted'
     } finally {
+      controller.abort()
       signal?.removeEventListener('abort', cancel)
       clearInterval(heartbeat)
       activeAudio.current?.stop()
