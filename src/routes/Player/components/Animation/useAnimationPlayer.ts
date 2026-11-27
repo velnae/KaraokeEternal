@@ -5,6 +5,8 @@ import { useAppSelector } from 'store/hooks'
 import socket from 'lib/socket'
 import { animationPlaybackEvent, animationRequest, animationTime, fetchPreparedAnimationClips, syncAnimation } from 'lib/animationApi'
 import { transitionRequest } from 'lib/transitionRequest'
+import { localPlay } from '../../runtime/localPlay'
+import { requestPlay } from 'store/modules/status'
 import { AnimationReceiptTimeout } from 'lib/animationPlaybackReceipt'
 import {
   ANIMATION_CANCEL, ANIMATION_EVENT, ANIMATION_READY, ANIMATION_RESERVE, ANIMATION_LIMITS,
@@ -93,9 +95,9 @@ export default function useAnimationPlayer () {
     }
   }, [readiness])
 
-  const resumeAudio = useCallback(() => {
+  const resumeAudio = useCallback((localGesture = false) => {
     const owner = audioOwnerKey()
-    if (!owner || !mounted.current || !voiceRequested(store.getState().animation.snapshot)) return
+    if (!mounted.current || (!localGesture && (!owner || !voiceRequested(store.getState().animation.snapshot)))) return
     if (audio.current.ready && store.getState().animation.snapshot?.audioUnlocked && preparedOwner.current === owner) return
     // Called synchronously by the local click/keydown, before network requests.
     const resumed = audio.current.resume()
@@ -262,18 +264,30 @@ export default function useAnimationPlayer () {
   }, [needsVoice, snapshot?.playerEpoch, authority, roomId, connected, isPlaying, availabilityVersion, resumeAudio])
 
   useEffect(() => {
-    const gesture = (event: Event) => {
-      if (event.isTrusted) resumeAudio()
-    }
+    const unbind = localPlay.bind({
+      scope: () => {
+        const { player, user, animation } = store.getState()
+        return socket.connected && player?._authority === 'GRANTED'
+          ? `${user.roomId}:${socket.id}:${animation.snapshot?.playerEpoch ?? ''}:${player.queueId}:${player._lastReplayTime}`
+          : null
+      },
+      hasIntent: () => store.getState().player.isPlaying || store.getState().player._isPlayingNext,
+      activate: () => resumeAudio(true),
+      request: () => store.dispatch(requestPlay()),
+    })
     const foreground = () => {
       if (document.visibilityState === 'visible' && voiceRequested(store.getState().animation.snapshot)) resumeAudio()
     }
-    document.addEventListener('click', gesture, true)
-    document.addEventListener('keydown', gesture, true)
     document.addEventListener('visibilitychange', foreground)
+    const invalidate = ({ type }: { type: string }) => {
+      if ([PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_NEXT, PLAYER_CMD_REPLAY].includes(type)) localPlay.reset()
+    }
+    socket.on('action', invalidate)
+    socket.on('disconnect', localPlay.reset)
     return () => {
-      document.removeEventListener('click', gesture, true)
-      document.removeEventListener('keydown', gesture, true)
+      unbind()
+      socket.off('action', invalidate)
+      socket.off('disconnect', localPlay.reset)
       document.removeEventListener('visibilitychange', foreground)
     }
   }, [resumeAudio])

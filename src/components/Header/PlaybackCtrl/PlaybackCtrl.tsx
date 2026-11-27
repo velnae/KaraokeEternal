@@ -19,6 +19,7 @@ import RemotePlayerControls from './RemotePlayerControls'
 import useBirthdaySync from 'components/Birthdays/useBirthdaySync'
 import { selectBirthdays } from 'store/modules/birthdays'
 import { nextBirthday } from 'shared/playbackSequence'
+import { localPlay } from 'routes/Player/runtime/localPlay'
 
 const PlaybackCtrl = () => {
   useBirthdaySync()
@@ -36,7 +37,7 @@ const PlaybackCtrl = () => {
   const dispatch = useAppDispatch()
   const handleOptions = (opts: PlaybackOptions) => dispatch(requestOptions(opts))
   const handlePause = () => dispatch(requestPause())
-  const handlePlay = () => dispatch(requestPlay())
+  const handlePlay = () => isPlayer ? localPlay.start() : dispatch(requestPlay())
   const handlePlayNext = () => dispatch(requestPlayNext())
   const handleVolume = (val: number) => dispatch(requestVolume(val))
   const handleFullscreen = useCallback(() => {

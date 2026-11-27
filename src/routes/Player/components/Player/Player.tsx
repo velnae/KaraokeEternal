@@ -9,6 +9,7 @@ import { type PlayerVisualizerState } from '../../modules/playerVisualizer'
 import type { MediaType } from 'shared/types'
 import type { SongSource } from 'shared/queueLifecycle'
 import { tracePlayback } from '../../../../lib/playbackTrace'
+import { localPlay } from '../../runtime/localPlay'
 
 const PlayerVisualizer = React.lazy(() => import('./PlayerVisualizer/PlayerVisualizer'))
 
@@ -60,6 +61,36 @@ class Player extends React.PureComponent<PlayerProps> {
   }
 
   youtubePlayer = React.createRef<YouTubePlayer>()
+  blockedScope: string | null = null
+  retrying = false
+  unbindGesture?: () => void
+
+  activateMedia = (scope: string) => {
+    if (this.props.source !== 'YOUTUBE') {
+      this.ensureAudioContext()
+      if (this.audioCtx?.state === 'suspended') void this.audioCtx.resume().catch(() => {})
+    }
+    if (this.blockedScope !== scope || !this.props.isVisible) return false
+    if (this.retrying) return true
+    const youtube = this.youtubePlayer.current
+    const native = this.audioSourceNode?.mediaElement
+    if (youtube?.state.autoplayBlocked) {
+      this.retrying = true
+      youtube.retryPlayback()
+    } else if (this.props.source === 'LOCAL' && native) {
+      this.retrying = true
+      void native.play().then((): void => {
+        if (localPlay.scope() === scope && this.audioSourceNode?.mediaElement === native) this.props.onStatus({ isPlaying: true })
+        return undefined
+      }).catch(() => { this.retrying = false })
+    } else return false
+    return true
+  }
+
+  markBlocked = () => {
+    this.blockedScope = localPlay.scope()
+    this.retrying = false
+  }
 
   seekForDevelopment = (target: 'end' | 'forward'): string | undefined => {
     if (process.env.NODE_ENV === 'development' && process.env.DEV_PLAYER_TOOLS === 'true') {
@@ -71,6 +102,7 @@ class Player extends React.PureComponent<PlayerProps> {
     // StrictMode immediately remounts the same instance and media element.
     // Keep its source/context association alive across that synchronous cycle.
     this.audioLifecycle++
+    this.unbindGesture = localPlay.bindMedia(this.activateMedia)
     this.updateVolume()
   }
 
@@ -143,6 +175,7 @@ class Player extends React.PureComponent<PlayerProps> {
   }
 
   componentWillUnmount () {
+    this.unbindGesture?.()
     const lifecycle = ++this.audioLifecycle
     // Actual route exits release the graph. A StrictMode remount in this same
     // turn cancels disposal; closing then recreating a source for the preserved
@@ -169,6 +202,8 @@ class Player extends React.PureComponent<PlayerProps> {
   }
 
   handlePlay = () => {
+    this.blockedScope = null
+    this.retrying = false
     tracePlayback('music-playing', { queueId: this.props.mediaKey })
     this.isFetching = false
     this.updateVolume()
@@ -214,6 +249,8 @@ class Player extends React.PureComponent<PlayerProps> {
             ref={active ? this.youtubePlayer : undefined}
             controls={0}
             showAutoplayRecovery
+            onLocalPlay={localPlay.recover}
+            onBlocked={this.markBlocked}
             height={this.props.height}
             isActive={active}
             isPlaying={active && this.props.isPlaying}
@@ -235,7 +272,10 @@ class Player extends React.PureComponent<PlayerProps> {
 
     if (!this.props.isVisible || typeof this.props.mediaKey !== 'number' || typeof this.props.mediaId !== 'number') return null
 
-    const mediaProps = { ...this.props, onAudioElement: this.handleAudioElement, onPlay: this.handlePlay }
+    const mediaProps = { ...this.props, onAudioElement: this.handleAudioElement, onPlay: this.handlePlay, onAutoplayBlocked: () => {
+      this.markBlocked()
+      this.props.onStatus({ isPlaying: false })
+    } }
     const media = playerKind === 'cdg'
       ? <CDGPlayer {...mediaProps} />
       : playerKind === 'mp4'

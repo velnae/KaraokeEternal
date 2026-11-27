@@ -1,7 +1,8 @@
 import React from 'react'
 import { Link } from 'react-router'
 import { useAppDispatch } from 'store/hooks'
-import { requestPlay, requestPlayNext } from 'store/modules/status'
+import { requestPlayNext } from 'store/modules/status'
+import { localPlay } from '../../runtime/localPlay'
 import UpNow from './UpNow/UpNow'
 import Icon from 'components/Icon/Icon'
 import Button from 'components/Button/Button'
@@ -37,7 +38,7 @@ const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueIte
       <section className={styles.panel}>
         <p className={styles.singer} translate='no'>{nextQueueItem?.userDisplayName}</p>
         <h1 translate='no'>{nextQueueItem?.title || 'Listo para cantar'}</h1>
-        <Button className={styles.playButton} icon='PLAY' onClick={() => dispatch(requestPlay())}>Reproducir</Button>
+        <Button className={styles.playButton} icon='PLAY' onClick={localPlay.start}>Reproducir</Button>
       </section>
     )
   } else if (isErrored) {

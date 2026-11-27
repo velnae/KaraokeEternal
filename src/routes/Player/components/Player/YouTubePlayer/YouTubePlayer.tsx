@@ -84,6 +84,8 @@ const loadYouTubeIframeApi = (): Promise<YouTubeApi> => {
 }
 
 interface YouTubePlayerProps {
+  onLocalPlay?: () => void
+  onBlocked?: () => void
   controls?: 0 | 1
   showAutoplayRecovery?: boolean
   height: number
@@ -278,6 +280,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
     this.awaitingPlayback = false
     this.stopStatusUpdates()
     this.setState({ autoplayBlocked: true })
+    this.props.onBlocked?.()
     // A browser permission block is recoverable; do not fail or skip this song.
     this.props.onStatus({ isPlaying: false })
   }
@@ -373,7 +376,7 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
         {this.state.autoplayBlocked && (this.props.showAutoplayRecovery ?? this.props.controls !== 0) && (
           <div className={styles.notice} role='status'>
             <p>El navegador bloqueó el inicio de YouTube. Pulse Reproducir aquí para continuar con esta canción.</p>
-            <Button variant='primary' onClick={this.retryPlayback}>Reproducir aquí</Button>
+            <Button variant='primary' onClick={this.props.onLocalPlay ?? this.retryPlayback}>Reproducir aquí</Button>
           </div>
         )}
       </div>

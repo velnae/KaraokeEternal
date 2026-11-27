@@ -12,6 +12,7 @@ interface MP4PlayerProps {
   // media events
   onEnd(): void
   onError(error: string): void
+  onAutoplayBlocked?(element: HTMLMediaElement): void
   onLoad(): void
   onPlay(): void
   onStatus(status: { position: number }): void
@@ -75,8 +76,13 @@ class MP4Player extends React.Component<MP4PlayerProps> {
     if (!this.video.current) return
 
     if (this.props.isPlaying) {
-      this.video.current.play()
-        .catch(err => this.props.onError(`No se pudo iniciar el video: ${err.message}`))
+      const el = this.video.current
+      const key = this.props.mediaKey
+      void el.play().catch((err) => {
+        if (el !== this.video.current || key !== this.props.mediaKey || !this.props.isPlaying) return
+        if (err.name === 'NotAllowedError' && this.props.onAutoplayBlocked) this.props.onAutoplayBlocked(el)
+        else this.props.onError(`No se pudo iniciar el video: ${err.message}`)
+      })
     } else {
       this.video.current.pause()
     }

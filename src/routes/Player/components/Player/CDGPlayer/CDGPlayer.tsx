@@ -20,6 +20,7 @@ interface CDGPlayerProps {
   // media events
   onEnd(): void
   onError(error: string): void
+  onAutoplayBlocked?(element: HTMLMediaElement): void
   onLoad(): void
   onPlay(): void
   onStatus(status: { position: number }): void
@@ -150,8 +151,13 @@ class CDGPlayer extends React.Component<CDGPlayerProps> {
     if (!this.audio.current) return
 
     if (this.props.isPlaying) {
-      this.audio.current.play()
-        .catch(err => this.props.onError(`No se pudo iniciar el audio: ${err.message}`))
+      const el = this.audio.current
+      const key = this.props.mediaKey
+      void el.play().catch((err) => {
+        if (el !== this.audio.current || key !== this.props.mediaKey || !this.props.isPlaying) return
+        if (err.name === 'NotAllowedError' && this.props.onAutoplayBlocked) this.props.onAutoplayBlocked(el)
+        else this.props.onError(`No se pudo iniciar el audio: ${err.message}`)
+      })
     } else {
       this.audio.current.pause()
       this.stopCDG()
