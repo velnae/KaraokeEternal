@@ -39,4 +39,8 @@ The printed `cold-start-<source>.json` records visible controls, the first scree
 | Duplicate player, disconnect, remount or late callback | Only the current authorized player may start. Reconnecting does not replay an old intent. |
 | Development tools off/on; operator window open | Public controls stay minimal with tools off, including in development. Explicit tools and remote administration still expose their respective controls. |
 
-**First work unit:** the cold-tab baseline plus the single-gesture contract. Land the public control switch only when that contract has a working recovery path for both native media and YouTube.
+## Stage 5 verification
+
+Use the stage 1 command with `KARAOKE_E2E_COLD_SOURCE` set to `local`, `youtube`, `empty` or `remote`. Each run creates a temporary room, records the Chromium version, queue item, actual media start and local/remote Play counts, and writes its own JSON report. All four cases passed with Node 24.22.2. `empty` starts with no songs and adds the first approved local track after Play. `remote` restarts the isolated server, waits for renewed player authority, then sends Play from administration before any local click. The blocked YouTube fixture requires one recovery click and zero local room Play requests.
+
+The shared development HTTPS check reached the authority-denied screen because another player already owned the room. Physical acceptance is still open: on the authorized room display, open a fresh session and record source, visible controls, first audible output through the speakers and any second gesture. Do not take over an active room to run the fixture.

@@ -15,7 +15,7 @@ import { checkColdStartup } from './public-player-startup-checks.e2e.mjs'
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
 const coldSource = process.env.KARAOKE_E2E_COLD_SOURCE
-if (coldSource) assert.ok(development && !process.env.KARAOKE_E2E_HTTPS_UI && ['local', 'youtube'].includes(coldSource))
+if (coldSource) assert.ok(development && !process.env.KARAOKE_E2E_HTTPS_UI && ['local', 'youtube', 'empty', 'remote'].includes(coldSource))
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'transition-player-'))
 const log = fs.openSync(path.join(data, 'server.log'), 'a')
 const reservation = createServer()
@@ -114,8 +114,8 @@ scenario: try {
     ambienceEnabled: true, profile: 'mixed', volume: 0.5, ambienceVolume: 0.2,
     events: { welcome: false, turn: true, closing: true, invitation: false, celebration: false, goodbye: false, booth: false, promotion: false } })
   await emit('server/ANIMATION_SESSION', { operation: 'open' })
-  if (coldSource === 'youtube') db.prepare(`INSERT INTO queue(roomId,userId,source,externalId,title,artistOrChannel,origin) VALUES(1,1,'YOUTUBE','fixture0001','Cold start','Fixture','HOUSE')`).run()
-  else for (let index = 0; index < (coldSource ? 1 : 2); index++) await emit('server/QUEUE_ADD', { songId: 1, requestId: crypto.randomUUID() })
+  if (['youtube', 'remote'].includes(coldSource)) db.prepare(`INSERT INTO queue(roomId,userId,source,externalId,title,artistOrChannel,origin) VALUES(1,1,'YOUTUBE','fixture0001','Cold start','Fixture','HOUSE')`).run()
+  else if (coldSource !== 'empty') for (let index = 0; index < (coldSource ? 1 : 2); index++) await emit('server/QUEUE_ADD', { songId: 1, requestId: crypto.randomUUID() })
   const catalog = await call('animation/catalog')
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || '/usr/bin/chromium', headless: true, args: coldSource ? ['--autoplay-policy=document-user-activation-required'] : ['--autoplay-policy=no-user-gesture-required'] })
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, storageState: await api.storageState() })
@@ -242,7 +242,10 @@ scenario: try {
   if (coldSource) {
     const auth = await context.storageState()
     await context.close()
-    await checkColdStartup({ browser, auth, base, data, source: coldSource, emit, bed })
+    await checkColdStartup({ browser, auth, base, data, source: coldSource, emit, bed, restart: async () => {
+      await stop()
+      await start()
+    } })
     break scenario
   }
   await expect(selection).toHaveValue('')
@@ -272,7 +275,7 @@ scenario: try {
   await player.setViewportSize({ width: 1440, height: 1000 })
   await player.goto(`${uiBase}player`)
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.readyClips.includes(bed.checksum), { timeout: 15000 }).toBe(true)
-  await player.getByRole('toolbar', { name: 'Controles de reproducción' }).getByRole('button', { name: 'Reproducir', exact: true }).click()
+  await player.getByRole('button', { name: 'Reproducir', exact: true }).click()
   await expect(player.getByTestId('transition-scene')).toBeVisible()
   await expect.poll(() => player.evaluate(() => window.transitionTrace.active.includes('ambience'))).toBe(true)
   await emit('server/PLAYER_REQ_PAUSE')
@@ -377,7 +380,7 @@ scenario: try {
   }
   await expect.poll(() => decoration.evaluate(video => video.paused).catch(() => true)).toBe(true)
   const abandoned = await decoration.elementHandle()
-  await player.getByRole('link', { name: 'Volver a la cola', exact: true }).click()
+  await player.goto(`${uiBase}queue`)
   if (abandoned) await expect.poll(() => abandoned.evaluate(video => video.paused && !video.hasAttribute('src'))).toBe(true)
   await checkAmbienceHandoff({ player, uiBase, emit, db, bed, voice: volumeVoice, httpsUi })
   await checkCurtainSilence({ player, emit, db, effect, shortEffect })

@@ -6,9 +6,10 @@ import { installYouTubeTransitionFixture } from './transition-ambience-checks.e2
 
 // The login tab has already closed. Transfer auth only: this document has never
 // received a user gesture. Keep report data bounded; never save cookies or packets.
-export async function checkColdStartup ({ browser, auth, base, data, source, emit, bed }) {
+export async function checkColdStartup ({ browser, auth, base, data, source, emit, bed, restart }) {
   const context = await browser.newContext({ storageState: auth })
-  const report = { source, controls: {}, events: [] }
+  const youtube = ['youtube', 'remote'].includes(source)
+  const report = { source, browser: browser.version(), medium: youtube ? 'youtube-fixture' : 'local-mp4', controls: {}, events: [] }
   const output = path.join(data, `cold-start-${source}.json`)
   try {
     await context.addInitScript(() => {
@@ -22,10 +23,11 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
         return promise
       }
     })
-    if (source === 'youtube') await installYouTubeTransitionFixture(context, path.join(data, 'song.mp4'), true)
+    if (youtube) await installYouTubeTransitionFixture(context, path.join(data, 'song.mp4'), true)
     const page = await context.newPage()
     if (source === 'local') await page.route(`**/api/animation/assets/${bed.id}`, route => route.fulfill({ status: 503, body: 'Unavailable fixture bed' }))
     const mark = (event, fields = {}) => report.events.push({ event, at: Date.now(), ...fields })
+    const starts = () => page.evaluate(() => window.karaokePlaybackTrace.snapshot().events.filter(e => e.event === 'music-playing'))
     const captureControls = async phase => {
       report.controls[phase] = await page.locator('button:visible,a:visible').evaluateAll(nodes => nodes.map(n => n.getAttribute('aria-label') || n.textContent.trim()).filter(Boolean))
     }
@@ -62,6 +64,7 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
     await captureControls('beforePlay')
     assert.deepEqual(report.controls.beforePlay.sort(), ['Pantalla completa', 'Reproducir'])
     assert.equal(await page.evaluate(() => window.coldStartup.activatedAtLoad), false)
+    if (source === 'empty') await expect(page.getByRole('heading', { name: 'Sin canciones' })).toBeVisible()
     if (source === 'youtube') {
       await page.keyboard.press('Control+Alt+k')
       await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('player-fs-container')
@@ -70,14 +73,35 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
       await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull()
       assert.ok(!report.events.some(e => e.event === 'play-request'))
     }
-    mark('click-play')
-    await play.press('Enter')
+    if (source === 'remote') {
+      const epoch = (await emit('server/ANIMATION_SYNC')).payload.playerEpoch
+      await restart()
+      await expect.poll(async () => {
+        const { payload } = await emit('server/ANIMATION_SYNC')
+        return payload.playerPresent && payload.playerEpoch !== epoch
+      }, { timeout: 20000 }).toBe(true)
+      await expect(play).toBeVisible()
+      assert.equal((await starts()).length, 0)
+      mark('authority-reacquired')
+      mark('operator-play')
+      await emit('server/PLAYER_REQ_PLAY')
+    } else {
+      mark('click-play')
+      await play.press('Enter')
+    }
     await expect.poll(() => report.events.filter(e => e.event === 'play-command').length).toBe(1)
-    await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.active?.status, { timeout: 20000 }).toBe('PLAYING')
-    await captureControls('duringAnnouncement')
-    assert.deepEqual(report.controls.duringAnnouncement, ['Pantalla completa'])
-    const starts = () => page.evaluate(() => window.karaokePlaybackTrace.snapshot().events.filter(e => e.event === 'music-playing'))
-    if (source === 'youtube') {
+    if (source === 'empty') {
+      await expect(page.getByRole('alert')).toHaveCount(0)
+      assert.equal((await starts()).length, 0)
+      mark('first-approval')
+      await emit('server/QUEUE_ADD', { songId: 1, requestId: crypto.randomUUID() })
+    } else if (source !== 'remote') {
+      await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.active?.status, { timeout: 20000 }).toBe('PLAYING')
+      await captureControls('duringAnnouncement')
+      assert.deepEqual(report.controls.duringAnnouncement, ['Pantalla completa'])
+    }
+    if (youtube) {
+      await expect.poll(() => page.evaluate(() => !!window.youtubeTransition.video?.currentSrc), { timeout: 25000 }).toBe(true)
       await expect(play).toBeVisible({ timeout: 25000 })
       await captureControls('blocked')
       assert.equal((await starts()).length, 0)
@@ -88,7 +112,7 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
     const first = (await starts())[0]
     mark('media-playing', { at: first.wallTime, queueId: first.queueId })
     assert.equal(first.queueId, 1)
-    assert.equal(report.events.filter(e => e.event === 'play-request').length, 1)
+    assert.equal(report.events.filter(e => e.event === 'play-request').length, source === 'remote' ? 0 : 1)
     assert.ok(report.events.find(e => e.event === 'play-command').at <= first.wallTime)
     await captureControls('playing')
     report.activation = await page.evaluate(() => window.coldStartup)
