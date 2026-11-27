@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import type { DisplayCorner } from 'shared/playerDisplay'
 import { CSSTransition } from 'react-transition-group'
-import UserImage from 'components/UserImage/UserImage'
+import PlayerAvatar from '../../PlayerAvatar'
 import type { QueueItem } from 'shared/types'
 import styles from './UpNow.css'
 
@@ -48,12 +48,8 @@ const UpNow = ({ queueItem, placement }: UpNowProps) => {
       }}
     >
       <div ref={nodeRef} className={styles.container} data-position={placement?.position ?? 'top-right'} style={{ maxWidth: placement?.maxWidth }} translate='no'>
-        <div className={styles.innerContainer}>
-          <UserImage
-            userId={queueItem.userId}
-            dateUpdated={queueItem.userDateUpdated}
-            className={styles.userImage}
-          />
+        <div className={styles.innerContainer} data-listening={queueItem.origin === 'PARTICIPANT' && queueItem.requestIntent === 'LISTEN'}>
+          {queueItem.origin === 'PARTICIPANT' && <PlayerAvatar src={queueItem.userAvatarUrl} light={queueItem.requestIntent === 'LISTEN'} className={styles.userImage} />}
           <div className={styles.user}>
             <small>{queueItem.origin === 'HOUSE' ? 'Música de la casa' : queueItem.requestIntent === 'SING' ? 'Karaoke' : 'Pedido musical'}</small>
             {queueItem.origin !== 'HOUSE' && queueItem.userDisplayName}

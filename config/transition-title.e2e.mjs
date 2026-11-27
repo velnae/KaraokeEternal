@@ -17,8 +17,8 @@ const bundle = await build({
     const root = createRoot(document.getElementById('root'))
     window.present = (patch = {}) => {
       const track = { queueId: 1, title: 'Rayando el sol', origin: 'PARTICIPANT', requestIntent: 'LISTEN',
-        source: 'YOUTUBE', userDisplayName: 'Ana', artistOrChannel: '', tableLabelSnapshot: 'Mesa 07', ...patch }
-      root.render(<React.StrictMode><Presentation incoming={track} following={{ ...track, queueId: 2 }}
+        source: 'YOUTUBE', userDisplayName: 'Ana', userAvatarUrl: 'assets/avatars/mujer/01.webp', artistOrChannel: '', tableLabelSnapshot: 'Mesa 07', ...patch }
+      root.render(<React.StrictMode><Presentation incoming={track} following={{ ...track, queueId: 2, userAvatarUrl: 'assets/avatars/varon/02.webp' }}
         venueName='Il Gatto' greeting={patch.greeting ?? null} onGreetingMounted={() => {}} /></React.StrictMode>)
     }
     window.present()
@@ -74,15 +74,19 @@ try {
     await page.setViewportSize({ width, height })
     for (const requestIntent of ['LISTEN', 'SING']) {
       await present({ title: long, requestIntent })
-      await expect.poll(async () => (await measurements()).every(({ size, minimum, overflow, clipped }) => overflow && clipped && Math.abs(size - minimum) < 0.01)).toBe(true)
+      await expect.poll(async () => (await measurements()).filter(({ size, minimum, overflow, clipped }) => !overflow || !clipped || Math.abs(size - minimum) >= 0.01), { message: `${requestIntent} long titles at ${width}×${height}` }).toEqual([])
       assert.deepEqual((await measurements()).map(item => item.lines), [requestIntent === 'LISTEN' ? 3 : 2, 2])
       if (requestIntent === 'SING') {
         await expect(page.getByRole('heading')).toHaveText('Ana')
         assert.equal(await page.getByRole('heading').evaluate(node => node.style.fontSize), '')
       }
       await page.screenshot({ path: path.join(output, `${requestIntent}-${width}.png`) })
-      await present({ title: 'Sol', requestIntent })
-      await expect.poll(async () => (await measurements()).every(({ size, base }) => size === base)).toBe(true)
+       await present({ title: 'Sol', requestIntent })
+       await expect.poll(async () => (await measurements()).every(({ size, base }) => size === base)).toBe(true)
+      const avatar = page.getByTestId('transition-incoming').locator('[data-player-avatar] img')
+      await expect.poll(() => avatar.evaluate(img => img.naturalWidth)).toBe(160)
+      const portrait = await avatar.boundingBox()
+      assert.ok(portrait.width >= 24 && portrait.x >= 0 && portrait.x + portrait.width <= width)
     }
   }
   // A resize must reconsider the same title, even without new props.
@@ -118,8 +122,12 @@ try {
   }), 'a third title line must not displace the track context in a short viewport')
   // Greetings reserve space and retain the compact two-line track context.
   await page.setViewportSize({ width: 844, height: 360 })
-  await present({ title: long, requestIntent: 'LISTEN', greeting: { greetingId: 7, message: '¡Feliz cumpleaños!', sender: 'Ana' } })
+  await present({ title: long, requestIntent: 'LISTEN', greeting: { greetingId: 7, message: '¡Feliz cumpleaños!', sender: 'Ana', tableLabel: 'Mesa 07', avatarUrl: 'assets/avatars/mujer/01.webp' } })
   await expect(page.getByTestId('greeting-overlay')).toBeVisible()
+  await expect(page.getByTestId('transition-incoming').locator('[data-player-avatar]')).toHaveCount(0)
+  await expect(page.getByTestId('greeting-overlay').locator('footer')).toContainText('De Ana')
+  await expect(page.getByTestId('greeting-overlay').locator('footer')).toContainText('Mesa 07')
+  await expect(page.getByTestId('greeting-overlay').locator('[data-player-avatar] img')).toHaveAttribute('src', 'assets/avatars/mujer/01.webp')
   assert.equal((await measurements())[0].lines, 2)
   assert.ok(await page.getByTestId('transition-presentation').evaluate((root) => {
     const header = root.querySelector('header').getBoundingClientRect()

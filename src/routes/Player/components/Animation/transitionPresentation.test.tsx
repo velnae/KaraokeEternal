@@ -150,7 +150,7 @@ describe('public transition information', () => {
       expect(html).toContain('Después')
       if (current.kind === 'sing') expect(html).toContain('>Ana</h1>')
       else expect(html).toContain('>Rayando el sol</h1>')
-      if (current.kind === 'listen') expect(html).toContain('Pedido de Ana')
+      if (current.kind === 'listen') expect(html).toContain('<strong>Ana</strong>')
       if (current.kind === 'house') {
         expect(html).toContain('Selección de la casa')
         expect(html).not.toContain('Ana')
@@ -160,11 +160,11 @@ describe('public transition information', () => {
   }
 
   it('keeps an attributed greeting with track context, without requiring animator transcript text', () => {
-    const greeting = { greetingId: 7, message: '¡Feliz cumpleaños!', sender: 'Ana' } as Greeting
+    const greeting = { greetingId: 7, message: '¡Feliz cumpleaños!', sender: 'Lucía', avatarUrl: 'assets/avatars/mujer/03.webp' } as Greeting
     const html = renderToStaticMarkup(
       <PlayerTransitionPresentation
-        incoming={track(1)}
-        following={track(2)}
+        incoming={track(1, { userAvatarUrl: 'assets/avatars/varon/02.webp' })}
+        following={track(2, { userAvatarUrl: 'assets/avatars/varon/04.webp' })}
         venueName='Il Gatto'
         announcementActive
         greeting={greeting}
@@ -175,9 +175,29 @@ describe('public transition information', () => {
     expect(html).toContain('data-greeting-id="7"')
     expect(html).toContain('¡Feliz cumpleaños!')
     expect(html).not.toContain('Para Carla')
-    expect(html).toContain('De Ana')
+    expect(html).toMatch(/<footer[^>]*>.*mujer\/03\.webp.*De Lucía<\/footer>/)
+    expect(html).toMatch(/<header[^>]*>.*varon\/02\.webp.*<\/header>/)
+    expect(html).toMatch(/<aside[^>]*>.*varon\/04\.webp.*<\/aside>/)
     expect(html).toContain('Después')
     expect(html).toContain('announcement-overlay')
+  })
+
+  it('attributes a karaoke call and its projected turns without giving house music a participant avatar', () => {
+    const html = renderToStaticMarkup(
+      <PlayerTransitionPresentation
+        incoming={track(1, { requestIntent: 'SING', userAvatarUrl: 'assets/avatars/mujer/01.webp' })}
+        upcoming={[
+          track(2, { userAvatarUrl: 'assets/avatars/varon/02.webp' }),
+          track(3, { origin: 'HOUSE', userAvatarUrl: 'assets/avatars/varon/03.webp' }),
+        ]}
+        venueName='Il Gatto'
+        greeting={null}
+        onGreetingMounted={() => {}}
+      />,
+    )
+    expect(html).toMatch(/<header[^>]*>.*mujer\/01\.webp.*>Ana<\/h1>/)
+    expect(html).toMatch(/<li data-queue-id="2">.*varon\/02\.webp.*<\/li>/)
+    expect(html).not.toContain('varon/03.webp')
   })
 
   it('hides Después at queue end and retains useful information while an idle announcement plays', () => {

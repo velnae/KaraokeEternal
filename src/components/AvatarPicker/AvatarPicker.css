@@ -1,0 +1,70 @@
+.trigger {
+  flex: 0 0 52px;
+  align-self: center;
+}
+
+.trigger .tile, .grid .tile {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  margin: 0;
+  background: #b8c8da;
+  border: 1px solid #8096ae;
+  border-radius: 12px;
+
+  img { display: block; width: 46px; height: 46px; object-fit: contain; }
+}
+
+.dialog { width: min(420px, calc(100% - 24px)); }
+
+.trigger.tall {
+  align-self: stretch;
+  display: flex;
+
+  .tile {
+    width: 100%;
+    height: auto;
+
+    img { width: 90%; height: auto; aspect-ratio: 1; }
+  }
+}
+
+.groups {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+
+  button { flex: 1; min-height: 44px; }
+}
+
+.groups button[aria-pressed='true'] {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+}
+
+.grid .tile[aria-pressed='true'] {
+  outline: 3px solid #075763;
+  outline-offset: -3px;
+}
+
+.trigger .tile:focus-visible, .grid .tile:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+}
+
+.grid .tile {
+  width: 100%;
+  height: 72px;
+
+  img { width: 66px; height: 66px; }
+}
+
+.reset { margin-top: 12px; min-height: 44px; }

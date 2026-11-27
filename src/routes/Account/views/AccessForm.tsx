@@ -78,7 +78,7 @@ export default function AccessForm (props: AccessFormProps) {
   }
 
   return (
-    <div className={clsx(theme.theme, styles.container)}>
+    <div className={clsx(theme.theme, styles.container, showName && styles.guestAccess)}>
       <ClientBranding className={styles.logo} />
       <div className={styles.panel}>
         <h1>{destination?.tableLabel ?? (staff ? 'Acceso del personal' : 'Entrar al karaoke')}</h1>
@@ -129,12 +129,13 @@ export default function AccessForm (props: AccessFormProps) {
             onPasswordChange={setPassword}
             onFirstFieldRef={rememberField}
             isSubmitting={busy}
-            onSubmit={({ name, image, passwordConfirm }) => {
+            onSubmit={({ name, image, passwordConfirm, avatarId }) => {
               const data = new FormData()
               data.set('role', mode)
               data.set('name', name.trim())
               data.set('roomId', String(roomId))
               data.set('roomPassword', roomPassword)
+              if (avatarId) data.set('avatarId', avatarId)
               if (access === 'table') data.set('invitation', props.invitation)
               if (showRegister) {
                 data.set('username', username.trim())

@@ -1,6 +1,9 @@
 import React, { useState } from 'react'
+import clsx from 'clsx'
 import Button from 'components/Button/Button'
 import InputImage from 'components/InputImage/InputImage'
+import AvatarPicker from 'components/AvatarPicker/AvatarPicker'
+import { defaultAvatar } from 'shared/avatars'
 import styles from './Create.css'
 import { guestNameError, normalizeGuestName } from 'shared/guestName'
 import { useAppSelector } from 'store/hooks'
@@ -12,7 +15,7 @@ interface CreateProps {
   password: string
   onUsernameChange: (username: string) => void
   onPasswordChange: (password: string) => void
-  onSubmit: (params: { name: string, image: Blob | undefined, passwordConfirm: string }) => void
+  onSubmit: (params: { name: string, image: Blob | undefined, passwordConfirm: string, avatarId?: string }) => void
   onFirstFieldRef: (el: HTMLInputElement | null) => void
   children?: React.ReactNode
 }
@@ -33,14 +36,40 @@ const Create = ({
   const [nameTouched, setNameTouched] = useState(false)
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [image, setImage] = useState<Blob | undefined>(undefined)
+  const [avatar, setAvatar] = useState(defaultAvatar)
   const nameError = guest ? guestNameError(name, terms) : null
+  const hasExtraFields = !!children
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     setNameTouched(true)
     if (nameError) return
-    onSubmit({ name: guest ? normalizeGuestName(name) : name, image, passwordConfirm })
+    onSubmit({ name: guest ? normalizeGuestName(name) : name, image, passwordConfirm, avatarId: guest ? avatar : undefined })
   }
+
+  const nameInput = (
+    <input
+      type='text'
+      id={guest ? 'guest-display-name' : undefined}
+      placeholder={guest ? undefined : 'nombre para mostrar'}
+      aria-label={guest ? 'Tu nombre' : 'Nombre para mostrar'}
+      autoComplete='nickname'
+      maxLength={guest ? undefined : 50}
+      minLength={2}
+      required
+      aria-invalid={(nameTouched && !!nameError) || undefined}
+      aria-describedby={guest && nameTouched && nameError ? 'guest-name-error' : undefined}
+      value={name}
+      onChange={e => setName(e.target.value)}
+      ref={guest ? onFirstFieldRef : undefined}
+    />
+  )
+
+  const submit = (
+    <Button type='submit' variant='primary' disabled={isSubmitting}>
+      {isSubmitting ? 'Entrando…' : 'Entrar'}
+    </Button>
+  )
 
   return (
     <form
@@ -75,31 +104,32 @@ const Create = ({
         </>
       )}
 
-      {guest && <label htmlFor='guest-display-name'>Tu nombre</label>}
-      <div className={styles.userDisplayContainer}>
-        {!guest && <InputImage onSelect={setImage} />}
-        <input
-          type='text'
-          id={guest ? 'guest-display-name' : undefined}
-          placeholder={guest ? undefined : 'nombre para mostrar'}
-          aria-label={guest ? 'Tu nombre' : 'Nombre para mostrar'}
-          autoComplete='nickname'
-          maxLength={guest ? undefined : 50}
-          minLength={2}
-          required
-          aria-invalid={(nameTouched && !!nameError) || undefined}
-          aria-describedby={guest && nameTouched && nameError ? 'guest-name-error' : undefined}
-          value={name}
-          onChange={e => setName(e.target.value)}
-          ref={guest ? onFirstFieldRef : undefined}
-        />
-      </div>
-
-      {nameTouched && nameError && <small id='guest-name-error' role='alert'>{nameError}</small>}
-      {children}
-      <Button type='submit' variant='primary' disabled={isSubmitting}>
-        {isSubmitting ? 'Entrando…' : 'Entrar'}
-      </Button>
+      {guest
+        ? (
+            <>
+              <div className={clsx(styles.guestLayout, hasExtraFields && styles.compactAvatar)}>
+                <label htmlFor='guest-display-name'>Tu nombre</label>
+                <AvatarPicker value={avatar} onSelect={setAvatar} tall={!hasExtraFields} />
+                <div className={styles.guestFields}>
+                  {nameInput}
+                  {nameTouched && nameError && <small id='guest-name-error' role='alert'>{nameError}</small>}
+                  {!hasExtraFields && submit}
+                </div>
+              </div>
+              {children}
+              {hasExtraFields && submit}
+            </>
+          )
+        : (
+            <>
+              <div className={styles.userDisplayContainer}>
+                <InputImage onSelect={setImage} />
+                {nameInput}
+              </div>
+              {children}
+              {submit}
+            </>
+          )}
     </form>
   )
 }

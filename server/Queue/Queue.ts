@@ -180,11 +180,13 @@ class Queue {
         queue.tableId, queue.tableLabelSnapshot,
         media.mediaId, media.relPath, media.rgTrackGain, media.rgTrackPeak,
         users.name AS userDisplayName, users.dateUpdated AS userDateUpdated,
+        guestAvatars.id AS avatarId, guestAvatars.revision AS avatarRevision,
         (SELECT name FROM roles WHERE roleId = users.roleId) AS userRole,
         paths.pathId, paths.data AS pathData,
         MAX(isPreferred) AS isPreferred
       FROM queue
         INNER JOIN users USING(userId)
+        LEFT JOIN guestAvatars ON guestAvatars.id = users.avatarId
         LEFT JOIN media USING(songId)
         LEFT JOIN paths USING(pathId)
       WHERE roomId = ${roomId} AND queue.status != 'REMOVED'
@@ -216,6 +218,8 @@ class Queue {
       userDisplayName: string
       userRole: string
       userDateUpdated: number
+      avatarId: string | null
+      avatarRevision: number | null
       pathId: number | null
       pathData: string | null
       isPreferred: number | null
@@ -236,14 +240,18 @@ class Queue {
         pathData: unusedPathData,
         isPreferred: unusedIsPreferred,
         userRole,
+        avatarId,
+        avatarRevision,
         ...item
       } = row
       void unusedPathId
       void unusedPathData
       void unusedIsPreferred
+      const userDisplayName = userRole === 'guest' ? publicGuestName(item.userDisplayName) : item.userDisplayName
       entities[row.queueId] = {
         ...item,
-        userDisplayName: userRole === 'guest' ? publicGuestName(item.userDisplayName) : item.userDisplayName,
+        userDisplayName,
+        ...(item.origin === 'PARTICIPANT' && userRole === 'guest' && avatarId && userDisplayName === item.userDisplayName && { userAvatarUrl: catalogImageUrl({ id: avatarId, revision: avatarRevision ?? 0 }) }),
         mediaType: row.source === 'YOUTUBE' ? 'youtube' : this.getType(relPath ?? ''),
         isVideoKeyingEnabled: !!pathPrefs?.isVideoKeyingEnabled,
       }
@@ -565,3 +573,4 @@ class Queue {
 }
 
 export default Queue
+import { catalogImageUrl } from '../Avatars/catalog.js'

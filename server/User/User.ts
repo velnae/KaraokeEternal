@@ -4,6 +4,8 @@ import crypto from '../lib/crypto.js'
 import Queue from '../Queue/Queue.js'
 import { randomChars } from '../lib/util.js'
 import { validateGuestName } from '../../shared/guestName.js'
+import { defaultAvatar } from '../../shared/avatars.js'
+import { canChooseAvatar } from '../Avatars/catalog.js'
 import { User as UserType } from '../../shared/types.js'
 
 export type ServerUser = UserType & {
@@ -78,11 +80,16 @@ class User {
     newPasswordConfirm,
     name,
     image,
+    avatarId = undefined as unknown,
   }, role = 'standard') {
     username = username?.trim()
     name = role === 'guest' ? validateGuestName(name) : name?.trim()
 
     const fields = new Map()
+    if (avatarId !== undefined && (role !== 'guest' || !canChooseAvatar(avatarId))) {
+      throw new Error('El avatar no es válido')
+    }
+    if (role === 'guest' && (avatarId !== undefined || !image)) fields.set('avatarId', avatarId ?? defaultAvatar)
 
     if (role !== 'guest') {
       if (!username) {

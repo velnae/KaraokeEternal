@@ -84,3 +84,8 @@
   .resultActions { justify-content: flex-end; }
   .pageHeading h1 { max-width: none; }
 }
+.identity .identityAvatar {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+}

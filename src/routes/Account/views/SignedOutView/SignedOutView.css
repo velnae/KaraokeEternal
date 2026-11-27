@@ -29,9 +29,16 @@
 
 .panel { padding: 24px; background: var(--equipment); border: 1px solid var(--edge); border-radius: 22px; }
 
+@media (max-width: 480px) {
+  .guestAccess { padding-inline: 12px; }
+  .guestAccess .panel { padding-inline: 16px; }
+}
+
 .field {
   display: grid;
   gap: 6px;
+
+  input { min-width: 0; }
 }
 
 .room { margin-bottom: 16px; }

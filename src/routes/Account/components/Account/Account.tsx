@@ -68,6 +68,7 @@ const Account = () => {
           onSubmit={handleSubmit}
           showUsername={!user.isGuest}
           showPassword={!user.isGuest}
+          showGuestAvatar={user.isGuest}
         >
           {isDirty && !user.isGuest && (
             <input

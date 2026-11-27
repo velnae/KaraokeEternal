@@ -74,7 +74,7 @@ export default function JoinView () {
   const showsGuestForm = !loading && !staff && !!destination && !user.userId
 
   return (
-    <main style={{ padding: `${headerHeight + (showsGuestForm ? 0 : 24)}px 20px 100px`, maxWidth: 560, margin: 'auto' }}>
+    <main style={{ padding: `${headerHeight + (showsGuestForm ? 0 : 24)}px ${showsGuestForm ? 0 : 20}px 100px`, maxWidth: 560, margin: 'auto' }}>
       {loading
         ? <p role='status'>Verificando mesa…</p>
         : staff

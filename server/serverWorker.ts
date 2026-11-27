@@ -26,6 +26,7 @@ import { PlayerLogoStore } from './PlayerLogo/Store.js'
 import { createPlayerLogoRouter, isPlayerLogoPath } from './PlayerLogo/router.js'
 import roomsRouter from './Rooms/router.js'
 import userRouter from './User/router.js'
+import avatarRouter from './Avatars/router.js'
 import tablesRouter from './Tables/router.js'
 import animationRouter from './Animation/router.js'
 import birthdayRouter from './Birthdays/router.js'
@@ -216,6 +217,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   const parseBirthdayImport = koaBody({ multipart: true, formidable: { maxFileSize: 40 * 1024 * 1024, maxTotalFileSize: 40 * 1024 * 1024, maxFiles: 1, maxFields: 1, maxFieldsSize: 16 * 1024 } })
   app.use((ctx, next) => {
     // This router authenticates before its own bounded parsers touch the body.
+    if (ctx.path.toLowerCase().startsWith(`${urlPath}api/avatars`.toLowerCase())) return next()
     if (isTransitionVideoPath(ctx.path, urlPath) || isPlayerLogoPath(ctx.path, urlPath) || isCallPromotionPath(ctx.path, urlPath)
       || /\/api\/rooms\/\d+\/karaoke-calls\/backgrounds\/upload\/?$/i.test(ctx.path)) return next()
     if (ctx.path.toLowerCase().startsWith(`${urlPath}api/birthdays/`.toLowerCase())) {
@@ -246,6 +248,7 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
   baseRouter.use(greetingAudioRouter.routes())
   baseRouter.use(roomsRouter.routes())
   baseRouter.use(userRouter.routes())
+  baseRouter.use(avatarRouter.routes())
   baseRouter.use(tablesRouter.routes())
   baseRouter.use(callRouter.routes())
   baseRouter.use(callPromotionRouter.routes())

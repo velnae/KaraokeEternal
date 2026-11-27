@@ -33,6 +33,9 @@ interface RequestWithBody {
   files?: Record<string, File | File[]>
 }
 
+import { defaultAvatar } from '../../shared/avatars.js'
+import { avatarUrl, canChooseAvatar } from '../Avatars/catalog.js'
+
 const router = new KoaRouter({ prefix: '/api' })
 const readFile = promisify(fs.readFile)
 const deleteFile = promisify(fs.unlink)
@@ -60,6 +63,7 @@ const createUserCtx = (user, roomId, sessionId?: string | null) => {
     dateUpdated: user.dateUpdated,
     isAdmin: user.role === 'admin',
     isGuest: user.role === 'guest',
+    avatarId: user.role === 'guest' ? user.avatarId ?? (user.image ? null : defaultAvatar) : null,
     role: user.role,
     name: user.name,
     roomId: parseInt(roomId, 10) || null,
@@ -341,6 +345,12 @@ router.put('/user/:userId', async (ctx) => {
     fields.set('image', null)
   }
 
+  if (req.body.avatarId !== undefined) {
+    if (targetId !== user.userId || user.role !== 'guest') ctx.throw(403)
+    if (!canChooseAvatar(req.body.avatarId)) ctx.throw(422, 'El avatar no está disponible. Seleccione otro.')
+    fields.set('avatarId', req.body.avatarId)
+  }
+
   // changing role?
   if (req.body.role) {
     // @todo since we're not ensuring there'd be at least one admin
@@ -353,7 +363,8 @@ router.put('/user/:userId', async (ctx) => {
     fields.set('roleId', sql`(SELECT roleId FROM roles WHERE name = ${req.body.role})`)
   }
 
-  fields.set('dateUpdated', Math.floor(Date.now() / 1000))
+  const updatedAt = Math.floor(Date.now() / 1000)
+  fields.set('dateUpdated', fields.has('avatarId') ? Math.max(updatedAt, (user.dateUpdated ?? 0) + 1) : updatedAt)
 
   const query = sql`
     UPDATE users
@@ -403,10 +414,7 @@ router.put('/user/:userId', async (ctx) => {
       ctx.throw(401, err.message)
     }
   } else {
-    updatedUser = {
-      ...user,
-      name: name || user.name,
-    }
+    updatedUser = User.getById(user.userId, true)
   }
 
   const userCtx = createUserCtx(updatedUser, ctx.user.roomId || null, ctx.user.participantSessionId)
@@ -585,6 +593,14 @@ router.get('/user/:userId/image', (ctx) => {
   }
 
   const user = User.getById(targetId)
+
+  const avatar = user && user.role === 'guest' && (avatarUrl(user.avatarId) ?? (!user.image ? avatarUrl(defaultAvatar) : undefined))
+  if (avatar) {
+    const base = ctx.path.replace(/api\/user\/[^/]+\/image\/?$/i, '')
+    ctx.set('Cache-Control', 'no-store')
+    ctx.redirect(base + avatar)
+    return
+  }
 
   if (!user || !user.image) {
     ctx.throw(404)

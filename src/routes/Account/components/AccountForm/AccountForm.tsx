@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { roleLabels, type UserRole } from 'shared/permissions'
 import InputImage from 'components/InputImage/InputImage'
+import AvatarPicker from 'components/AvatarPicker/AvatarPicker'
+import UserImage from 'components/UserImage/UserImage'
 import { UserWithRole } from 'shared/types'
 import styles from './AccountForm.css'
 import { guestNameError, normalizeGuestName } from 'shared/guestName'
@@ -15,6 +17,7 @@ interface AccountFormProps {
   showUsername?: boolean
   showPassword?: boolean
   showImage?: boolean
+  showGuestAvatar?: boolean
   roleOptions?: readonly UserRole[]
   defaultRole?: UserRole
   user?: UserWithRole
@@ -29,6 +32,7 @@ const AccountForm = ({
   showUsername = true,
   showPassword = true,
   showImage = true,
+  showGuestAvatar = false,
   roleOptions = ['standard', 'operator', 'manager', 'admin'],
   defaultRole,
   user,
@@ -43,26 +47,30 @@ const AccountForm = ({
   const [checkedName, setCheckedName] = useState<string | null>(null)
   const nameError = isGuest && checkedName !== null ? guestNameError(checkedName, terms) : null
   const [prevDateUpdated, setPrevDateUpdated] = useState(user?.dateUpdated)
+  const [avatar, setAvatar] = useState<string>()
   const [state, setState] = useState({
     isDirty: false,
     isChangingPassword: showPassword && (!user || user.userId === null),
     userImage: undefined as Blob | undefined,
   })
 
-  const prevIsDirty = useRef(state.isDirty)
+  const avatarChanged = avatar !== undefined && avatar !== user?.avatarId
+  const dirty = state.isDirty || avatarChanged
+  const prevIsDirty = useRef(dirty)
 
   if (user && user.dateUpdated !== prevDateUpdated) {
     setPrevDateUpdated(user.dateUpdated)
+    setAvatar(undefined)
     setState(prev => ({ ...prev, isDirty: false }))
   }
 
   useEffect(() => {
-    if (onDirtyChange && prevIsDirty.current !== state.isDirty) {
-      onDirtyChange(state.isDirty)
+    if (onDirtyChange && prevIsDirty.current !== dirty) {
+      onDirtyChange(dirty)
     }
 
-    prevIsDirty.current = state.isDirty
-  }, [state.isDirty, onDirtyChange])
+    prevIsDirty.current = dirty
+  }, [dirty, onDirtyChange])
 
   const updateDirty = () => {
     if (!user || user.userId === null) return
@@ -112,6 +120,8 @@ const AccountForm = ({
     if (typeof state.userImage !== 'undefined') {
       data.append('image', state.userImage)
     }
+
+    if (showGuestAvatar && avatarChanged) data.append('avatarId', avatar)
 
     if (role.current) {
       data.append('role', role.current.value)
@@ -165,7 +175,7 @@ const AccountForm = ({
       )}
 
       <div className={styles.userDisplayContainer}>
-        {showImage && (
+        {showImage && !showGuestAvatar && (
           <InputImage
             user={user}
             onSelect={handleUserImageChange}
@@ -185,6 +195,13 @@ const AccountForm = ({
           aria-describedby={nameError ? 'account-name-error' : undefined}
           ref={name}
         />
+        {showGuestAvatar && (
+          <AvatarPicker
+            value={avatar ?? user?.avatarId ?? null}
+            legacyImage={<UserImage userId={user.userId} dateUpdated={user.dateUpdated} />}
+            onSelect={setAvatar}
+          />
+        )}
       </div>
       {isGuest && guestNameError(user?.name, terms) && <p role='status'>Tu nombre aparece como “Invitado” en la pantalla. Corrígelo aquí y guarda los cambios.</p>}
       {nameError && <p id='account-name-error' role='alert'>{nameError}</p>}

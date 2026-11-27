@@ -15,7 +15,7 @@ export const createClientIndex = (urlPath: string, getContent: () => string): Mi
   const routes = [urlPath, ...[
     'account', 'personal', 'invitados', 'library', 'queue', 'requests', 'player', 'join',
     'admin', 'admin/rooms', 'admin/users', 'admin/playlists', 'admin/account', 'admin/personalization', 'admin/settings/animator',
-    'admin/settings/playback', 'admin/settings/files', 'admin/settings/branding', 'admin/settings/moderation',
+    'admin/settings/playback', 'admin/settings/files', 'admin/settings/branding', 'admin/settings/avatars', 'admin/settings/moderation',
     'admin/settings/music-blocking', 'admin/settings/display',
     'admin/settings/birthdays', 'admin/settings/karaoke', 'admin/settings/audio-providers',
   ].map(route => `${urlPath}${route}/`)]

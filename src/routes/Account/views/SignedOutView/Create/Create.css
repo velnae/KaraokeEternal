@@ -11,4 +11,29 @@
 .userDisplayContainer {
   display: flex;
   gap: var(--space-s);
+
+  input { flex: 1; min-width: 0; }
+}
+
+.guestLayout {
+  display: grid;
+  grid-template-columns: clamp(76px, 26vw, 112px) minmax(0, 1fr);
+  gap: var(--space-s);
+
+  > label { grid-column: 2; }
+}
+
+@media (max-width: 480px) {
+  .guestLayout { grid-template-columns: clamp(72px, 22.5vw, 112px) minmax(0, 1fr); }
+}
+
+.guestLayout.compactAvatar { grid-template-columns: 52px minmax(0, 1fr); }
+
+.guestFields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-s);
+
+  input { min-width: 0; }
+  button[type='submit'] { margin-top: 0; }
 }

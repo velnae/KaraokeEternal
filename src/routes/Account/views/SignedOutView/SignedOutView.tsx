@@ -96,7 +96,7 @@ const SignedOutView = ({ invitation, destination }: { invitation?: string, desti
     }))
   }
 
-  const handleCreate = ({ name, image, passwordConfirm }: { name: string, image: Blob | undefined, passwordConfirm: string }) => {
+  const handleCreate = ({ name, image, passwordConfirm, avatarId }: { name: string, image: Blob | undefined, passwordConfirm: string, avatarId?: string }) => {
     if (isSubmitting) return
     const data = new FormData()
 
@@ -106,6 +106,7 @@ const SignedOutView = ({ invitation, destination }: { invitation?: string, desti
     data.append('roomId', String(roomId))
     data.append('roomPassword', roomPassword)
     data.append('name', name.trim())
+    if (avatarId) data.append('avatarId', avatarId)
     if (invitation) data.append('invitation', invitation)
 
     if (typeof image !== 'undefined') {

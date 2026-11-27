@@ -31,6 +31,7 @@ export const greetingAudioLabels: Record<GreetingAudioStatus, string> = {
   uncertain: 'Solo pantalla', failed: 'Solo pantalla', cancelled: 'Solo pantalla', unavailable: 'Solo pantalla',
 }
 export interface Greeting extends GreetingDraft {
+  avatarUrl?: string
   greetingId: number
   queueId: number
   userId: number
@@ -46,7 +47,7 @@ export interface Greeting extends GreetingDraft {
   audio?: GreetingAudio
   playback?: { status: GreetingVoiceStatus, reason: string | null }
 }
-export type GreetingAnnouncement = Pick<Greeting, 'greetingId' | 'queueId' | 'message' | 'sender'>
+export type GreetingAnnouncement = Pick<Greeting, 'greetingId' | 'queueId' | 'message' | 'sender'> & { avatarUrl?: string }
 export interface GreetingSnapshot {
   items: Greeting[]
   opportunities: Record<number, GreetingOpportunity>

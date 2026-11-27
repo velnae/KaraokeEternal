@@ -197,5 +197,21 @@ it('requires a valid QR for the name-only entry point and always creates a guest
   expect(db.all('SELECT * FROM users')).toHaveLength(0)
   const created = await call('table-guest', { ...name, invitation: token })
   expect(created.status).toBe(200)
-  expect(await created.json()).toMatchObject({ name: 'Ana', role: 'guest', tableId })
+  expect(await created.json()).toMatchObject({ name: 'Ana', role: 'guest', tableId, avatarId: 'general' })
+})
+
+it('persists catalog avatars without changing the guest table session', async () => {
+  const body = { name: 'Ana', roomId: 1, invitation: token }
+  expect((await call('table-guest', { ...body, avatarId: 'varon/99' })).status).toBe(403)
+  const created = await call('table-guest', { ...body, avatarId: 'mujer/13' })
+  expect(created.status).toBe(200)
+  const user = await created.json()
+  expect(user.avatarId).toBe('mujer/13')
+  const cookie = created.headers.get('set-cookie')!.split(';')[0]
+  expect((await call(`user/${user.userId}`, { avatarId: 'mujer/14' }, cookie, 'PUT')).status).toBe(422)
+  const updated = await call(`user/${user.userId}`, { avatarId: 'varon/02' }, cookie, 'PUT')
+  expect(await updated.json()).toMatchObject({ avatarId: 'varon/02', tableId, participantSessionId: user.participantSessionId })
+  expect(await (await call('user', undefined, cookie)).json()).toMatchObject({ avatarId: 'varon/02' })
+  const image = await fetch(`${base}/api/user/${user.userId}/image`, { headers: { cookie }, redirect: 'manual' })
+  expect(image.headers.get('location')).toBe('/assets/avatars/varon/02.webp')
 })

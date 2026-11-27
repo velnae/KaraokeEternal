@@ -5,9 +5,16 @@
 .imageSlot { position: relative; flex: 0 0 var(--image-slot-size); height: 0; }
 .messageImage { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: var(--icon-size); height: var(--icon-size); max-width: none; object-fit: contain; }
 .greetingIcon { width: min(var(--icon-size), calc(var(--title-size) * 1.5)); height: auto; }
+.announcement { --avatar-slot: min(28%, clamp(76px, 9vw, 220px)); }
+.imageSlot[data-greeting-slot] { flex-basis: var(--avatar-slot); align-self: stretch; height: auto; }
+.imageSlot .greetingAvatar { width: auto; max-width: 100%; height: calc(100% + 2 * var(--portrait-inset)); aspect-ratio: 1; background-color: #b8c8da; }
 .messages { display: grid; min-width: 0; flex: 1; }
-.centered { justify-content: center; }
-.centered .messages { flex: 0 1 auto; }
+.centered { display: grid; grid-template-columns: minmax(0, 1fr); }
+.centered .messages, .centered .imageSlot { grid-area: 1 / 1; }
+.centered .imageSlot { justify-self: start; width: var(--image-slot-size); }
+.centered .imageSlot[data-greeting-slot] { width: var(--avatar-slot); }
+.centered .message[data-artwork] { padding-inline: calc(var(--image-slot-size) + var(--message-gap)); }
+.centered .message[data-artwork='avatar'] { padding-inline: calc(var(--avatar-slot) + var(--message-gap)); }
 .centered .message { text-align: center; }
 .message { grid-area: 1 / 1; align-self: center; opacity: 0; visibility: hidden; transition: opacity 200ms ease, visibility 200ms; overflow-wrap: anywhere; text-align: left; }
 .announcement[data-has-greeting='true'] .message:not(.current) { transition: none; }

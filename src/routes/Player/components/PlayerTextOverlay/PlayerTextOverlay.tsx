@@ -4,6 +4,7 @@ import Icon from 'components/Icon/Icon'
 import type { QueueItem } from 'shared/types'
 import type { DisplayCorner } from 'shared/playerDisplay'
 import styles from './PlayerTextOverlay.css'
+import PlayerAvatar from '../PlayerAvatar'
 
 interface PlayerTextOverlayProps {
   queueItem?: QueueItem
@@ -37,7 +38,12 @@ const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueIte
   } else if (!queueItem || (isAtQueueEnd && nextQueueItem)) {
     content = (
       <section className={styles.panel}>
-        <p className={styles.singer} translate='no'>{nextQueueItem?.userDisplayName}</p>
+        {nextQueueItem?.origin !== 'HOUSE' && nextQueueItem?.userDisplayName && (
+          <p className={styles.singer} translate='no'>
+            {nextQueueItem.origin === 'PARTICIPANT' && <PlayerAvatar className={styles.avatar} src={nextQueueItem.userAvatarUrl} />}
+            {nextQueueItem.userDisplayName}
+          </p>
+        )}
         <h1 translate='no'>{nextQueueItem?.title || 'Listo para cantar'}</h1>
       </section>
     )

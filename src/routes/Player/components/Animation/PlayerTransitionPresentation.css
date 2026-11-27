@@ -42,9 +42,45 @@
 .greeting { min-height: 0; max-width: 100%; text-align: center; }
 .greeting > p { margin: 0; font-size: clamp(20px, min(3.2cqw, 5cqh), 48px); line-height: 1.35; max-width: 46ch; overflow-wrap: anywhere; white-space: pre-wrap; }
 .greeting footer { margin-top: clamp(8px, 2cqh, 24px); color: #d1d9e8; font-size: clamp(16px, min(2cqw, 3.5cqh), 30px); overflow-wrap: anywhere; }
+.identity, .singerIdentity { display: flex; align-items: center; gap: clamp(6px, 1cqw, 16px); min-width: 0; }
+.identity { justify-content: center; max-width: 100%; }
+.following .identity, .presentation[data-karaoke='true'] .greeting .identity { justify-content: flex-start; }
+.current .identity { margin-top: clamp(8px, 1.2cqh, 16px); }
+.current .identity .attribution, .following .identity .nextPerson { margin-top: 0; }
+.following .identity { margin-top: 6px; }
+.stageAvatar, .inlineAvatar, .turnAvatar { display: inline-block; flex: none; overflow: hidden; vertical-align: middle; }
+.stageAvatar { --portrait-edge: #76e0ec99; --portrait-inset: clamp(2px, .32cqw, 6px); width: clamp(36px, min(7cqw, 12cqh), 120px); aspect-ratio: 1; }
+.inlineAvatar { width: clamp(30px, min(3cqw, 5cqh), 56px); aspect-ratio: 1; }
+.turnAvatar { --portrait-inset: 0px; width: 1.35em; height: 1.35em; margin-right: .4em; }
+.presentation[data-karaoke='true'] .singerIdentity { order: 1; width: 100%; margin-top: 2cqh; }
+.presentation[data-karaoke='true'] .singerIdentity .headline { min-width: 0; margin: 0; }
+.presentation[data-greeting='true'] .stageAvatar { width: clamp(28px, 5cqh, 64px); }
+
+.requestSignature {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  align-items: center;
+  gap: clamp(8px, 1cqw, 14px);
+  margin: clamp(8px, 2cqh, 20px) auto 0;
+  padding: 6px 16px 6px 6px;
+  background: rgb(3 5 9 / 76%);
+  border-radius: 16px;
+  text-align: left;
+}
+.requestPortrait { flex: none; width: clamp(42px, min(8cqw, 10cqh), 104px); aspect-ratio: 1; }
+.requestByline { display: grid; min-width: 0; overflow-wrap: anywhere; line-height: 1.15; }
+.requestByline strong { font-size: clamp(18px, min(2.7cqw, 4cqh), 40px); }
+.requestByline small { color: #d1d9e8; font-size: clamp(14px, min(1.8cqw, 3cqh), 24px); }
+.presentation[data-greeting='true'] .requestPortrait { width: clamp(32px, 6cqh, 64px); }
+.greeting .requestSignature { margin: 0 auto; }
 
 @container (max-height: 450px) {
+  .requestSignature { margin: 0 auto; padding-block: 2px; }
+  .requestPortrait { width: 36px; }
   .presentation { gap: 8px; }
+  .inlineAvatar { --portrait-inset: 0px; width: 24px; }
   .current { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 4px 12px; }
   .current .label { flex-basis: 100%; font-size: 20px; }
   .current .table { font-size: 24px; margin: 0; }

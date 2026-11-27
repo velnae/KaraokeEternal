@@ -54,6 +54,14 @@ it('blocks a greeting changed after reservation at the display-start gate', () =
   expect(Greetings.items(1)[0].status).toBe('REMOVED')
 })
 
+it('resolves the catalog avatar for the sender of a reserved greeting', () => {
+  db.run('UPDATE users SET avatarId = ?, roleId = (SELECT roleId FROM roles WHERE name = ?) WHERE userId = 1', ['mujer/03', 'guest'])
+  const queueId = song()
+  const greetingId = attach(queueId)
+  expect(Queue.get(1).entities[queueId].userAvatarUrl).toBe('assets/avatars/mujer/03.webp')
+  expect(Greetings.reserve(1, 'screen', queueId, {})?.items[0]).toMatchObject({ greetingId, avatarUrl: 'assets/avatars/mujer/03.webp' })
+})
+
 it('attaches to the accepted request within the submission flow and deduplicates a retry', () => {
   const queueId = song()
   expect(Greetings.opportunity(identity, queueId, {})).toEqual({ greeting: null, canAdd: true, reason: null })

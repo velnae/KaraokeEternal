@@ -1,0 +1,17 @@
+.frame {
+  box-sizing: border-box;
+  border: 1px solid var(--portrait-edge, #91a8bf66);
+  border-radius: 24%;
+  background: radial-gradient(ellipse at 50% 20%, #34445c, #101722 80%);
+  box-shadow: 0 2px 8px #03050970;
+  padding: var(--portrait-inset, 2px);
+}
+
+.frame > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.frame.light { background: #b8c8da; border: 1px solid white; }

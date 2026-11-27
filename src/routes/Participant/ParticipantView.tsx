@@ -29,6 +29,7 @@ import { isKaraokeTitle, karaokeTitleRequiredMessage, youtubeSearchCanRetry, you
 import { requestIntentLabels, type RequestIntent } from 'shared/requestIntent'
 import searchStyles from 'components/SongSearch/SongSearch.css'
 import { musicBlockedStatus, musicBlockedMessage, musicAllBlockedMessage } from 'shared/musicBlocking'
+import UserImage from 'components/UserImage/UserImage'
 
 const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | 'room' }) => {
   const dispatch = useAppDispatch()
@@ -245,7 +246,9 @@ const ParticipantView = ({ page = 'search' }: { page?: 'search' | 'requests' | '
           <span translate='no'>{room?.name || 'Tu sala'}</span>
         </span>
         <Link to='/account' aria-label={`Mi cuenta: ${user.name}`}>
-          <Icon icon='PERSON' size={20} />
+          {user.isGuest && user.avatarId
+            ? <UserImage className={styles.identityAvatar} userId={user.userId} dateUpdated={user.dateUpdated} />
+            : <Icon icon='PERSON' size={20} />}
           <span translate='no'>{user.name}</span>
         </Link>
       </div>

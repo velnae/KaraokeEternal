@@ -16,6 +16,7 @@ export interface Song {
 }
 
 export interface QueueItem {
+  userAvatarUrl?: string
   rejectionReason?: string | null
   replacesQueueId?: number | null
   historyClearedAt?: number | null
@@ -99,6 +100,7 @@ export interface Path {
 }
 
 export interface User {
+  avatarId?: string | null
   role?: string
   userId: number
   username: string

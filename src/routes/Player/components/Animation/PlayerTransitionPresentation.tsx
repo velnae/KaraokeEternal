@@ -3,6 +3,7 @@ import type { QueueItem } from 'shared/types'
 import { isGreetingAllowed, type Greeting } from '../../../../../shared/greetings'
 import { transitionTrack } from './transitionPresentation'
 import styles from './PlayerTransitionPresentation.css'
+import PlayerAvatar from '../PlayerAvatar'
 
 const usePresentationLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
@@ -18,15 +19,30 @@ interface Props {
   onGreetingMounted: (node: HTMLElement | null) => void
 }
 
+function RequestSignature ({ name, table, avatarUrl }: { name: string, table?: string | null, avatarUrl?: string }) {
+  return (
+    <div className={styles.requestSignature} translate='no'>
+      <PlayerAvatar light className={styles.requestPortrait} src={avatarUrl} />
+      <div className={styles.requestByline}>
+        <strong>{name}</strong>
+        {table && <small>{table}</small>}
+      </div>
+    </div>
+  )
+}
+
 export default function PlayerTransitionPresentation ({ incoming, following, upcoming, venueName, announcementActive, greetingIntro, greeting, moderationTerms, onGreetingMounted }: Props) {
   if (greeting && !isGreetingAllowed(greeting, moderationTerms)) greeting = null
   const current = incoming && transitionTrack(incoming)
   const next = following && transitionTrack(following)
   const brand = venueName.trim() || 'Il Gatto'
   const singer = current?.kind === 'sing'
+  const listeningRequest = incoming?.origin === 'PARTICIPANT' && current?.kind === 'listen'
   const showTurns = singer && !!upcoming?.length
   const headline = current ? singer && current.person ? current.person : current.title : 'Elige tu próxima canción'
   const attribution = current && !singer && [current.person && `Pedido de ${current.person}`, current.table].filter(Boolean).join(' · ')
+  const hasSinger = singer && !!current.person
+  const headlineElement = <h1 className={styles.headline} data-transition-title={!!current && !hasSinger} data-singer-name={hasSinger || undefined} translate='no'>{headline}</h1>
   const presentation = useRef<HTMLElement>(null)
 
   usePresentationLayoutEffect(() => {
@@ -35,7 +51,7 @@ export default function PlayerTransitionPresentation ({ incoming, following, upc
     let disposed = false
     const fitTitles = () => {
       if (disposed) return
-      const titles = Array.from(root.querySelectorAll<HTMLElement>('[data-transition-title="true"]'))
+      const titles = Array.from(root.querySelectorAll<HTMLElement>('[data-transition-title="true"], [data-singer-name]'))
       const header = root.querySelector<HTMLElement>('header')
       const foreground = header?.parentElement
       const greeting = foreground?.querySelector<HTMLElement>('[data-testid="greeting-overlay"]')
@@ -108,10 +124,24 @@ export default function PlayerTransitionPresentation ({ incoming, following, upc
             {current?.kind === 'house' || !current ? brand : current.label}
           </p>
           {singer && current.table && <p className={styles.table} translate='no'>{current.table}</p>}
-          <h1 className={styles.headline} data-transition-title={!!current} translate='no'>{headline}</h1>
+          {singer && current.person && incoming?.origin === 'PARTICIPANT'
+            ? (
+                <div className={styles.singerIdentity}>
+                  <PlayerAvatar className={styles.stageAvatar} src={incoming.userAvatarUrl} />
+                  {headlineElement}
+                </div>
+              )
+            : headlineElement}
           {singer && current.person && <p className={styles.song} data-transition-title='true' translate='no'>{current.title}</p>}
           {current?.artist && <p className={styles.artist} translate='no'>{current.artist}</p>}
-          {attribution && <p className={styles.attribution} translate='no'>{attribution}</p>}
+          {listeningRequest && current.person
+            ? !greeting && <RequestSignature name={current.person} table={current.table} avatarUrl={incoming.userAvatarUrl} />
+            : attribution && (
+              <div className={styles.identity}>
+                {incoming?.origin === 'PARTICIPANT' && current.person && <PlayerAvatar className={styles.inlineAvatar} src={incoming.userAvatarUrl} />}
+                <p className={styles.attribution} translate='no'>{attribution}</p>
+              </div>
+            )}
           {current?.kind === 'house' && <p className={styles.attribution}>Selección de la casa</p>}
           {!current && <p className={styles.attribution}>Pide música o karaoke desde el QR de tu mesa.</p>}
         </header>
@@ -119,7 +149,14 @@ export default function PlayerTransitionPresentation ({ incoming, following, upc
         {greeting && (
           <section key={greeting.greetingId} ref={onGreetingMounted} className={styles.greeting} role='status' data-testid='greeting-overlay' data-greeting-id={greeting.greetingId}>
             <p translate='no'>{greeting.message}</p>
-            <footer translate='no'>{`De ${greeting.sender}`}</footer>
+            {listeningRequest
+              ? <footer><RequestSignature name={`De ${greeting.sender}`} table={greeting.tableLabel} avatarUrl={greeting.avatarUrl ?? incoming.userAvatarUrl} /></footer>
+              : (
+                  <footer className={styles.identity} translate='no'>
+                    <PlayerAvatar className={styles.inlineAvatar} src={greeting.avatarUrl} />
+                    {`De ${greeting.sender}`}
+                  </footer>
+                )}
           </section>
         )}
       </div>
@@ -132,7 +169,10 @@ export default function PlayerTransitionPresentation ({ incoming, following, upc
               return (
                 <li key={item.queueId} data-queue-id={item.queueId}>
                   <span className={styles.turnTable}>{track.table || '—'}</span>
-                  <span className={styles.turnPerson} translate='no'>{track.person || track.label}</span>
+                  <span className={styles.turnPerson} translate='no'>
+                    {item.origin === 'PARTICIPANT' && track.person && <PlayerAvatar className={styles.turnAvatar} src={item.userAvatarUrl} />}
+                    {track.person || track.label}
+                  </span>
                   <span className={styles.turnSong} translate='no'>
                     {track.title}
                     {track.kind === 'listen' && track.person && <small>Para escuchar</small>}
@@ -150,7 +190,12 @@ export default function PlayerTransitionPresentation ({ incoming, following, upc
             <span>{next.label}</span>
           </div>
           <p className={styles.nextTitle} data-transition-title='true' translate='no'>{next.title}</p>
-          {(next.person || next.table) && <p className={styles.nextPerson} translate='no'>{[next.table, next.person].filter(Boolean).join(' · ')}</p>}
+          {(next.person || next.table) && (
+            <div className={styles.identity}>
+              {following?.origin === 'PARTICIPANT' && next.person && <PlayerAvatar className={styles.inlineAvatar} src={following.userAvatarUrl} />}
+              <p className={styles.nextPerson} translate='no'>{[next.table, next.person].filter(Boolean).join(' · ')}</p>
+            </div>
+          )}
         </aside>
       )}
     </section>

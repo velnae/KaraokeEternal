@@ -14,6 +14,8 @@ import { callTransitionFailure, planCallTransition, prepareCall } from '../Anima
 import { isGreetingAllowed } from '../../shared/greetings.js'
 import { publicGuestName } from '../../shared/guestName.js'
 import getLogger from '../lib/Log.js'
+import { defaultAvatar } from '../../shared/avatars.js'
+import { avatarUrl } from '../Avatars/catalog.js'
 
 export interface GreetingPlayerStatus { queueId?: number, historyJSON?: string, nextUserId?: number | null, isAtQueueEnd?: boolean, queueDecisionAt?: number }
 interface Identity { roomId: number, userId: number, role?: string, isAdmin?: boolean }
@@ -123,12 +125,14 @@ export default class Greetings {
 
   static announcements (roomId: number, currentQueueId = -1) {
     if (Greetings.paused(roomId) || Rooms.get(roomId).entities[roomId]?.status !== 'open') return []
-    return db.all<Pick<Greeting, 'greetingId' | 'queueId' | 'message' | 'sender'>>(`
-      SELECT g.greetingId,g.queueId,g.message,g.sender FROM greetings g JOIN queue q USING(queueId)
+    return db.all<Pick<Greeting, 'greetingId' | 'queueId' | 'message' | 'sender'> & { avatarId: string | null }>(`
+      SELECT g.greetingId,g.queueId,g.message,g.sender,u.avatarId FROM greetings g JOIN queue q USING(queueId)
+      LEFT JOIN users u ON u.userId=g.userId
       WHERE g.roomId=? AND q.roomId=g.roomId AND q.source='YOUTUBE' AND q.requestIntent='LISTEN'
         AND (q.status IN ('PENDING_APPROVAL','APPROVED','PLAYING') OR (q.queueId=? AND q.status='PLAYED'))
         AND g.announcementWithdrawnAt IS NULL AND g.status NOT IN ('REMOVED','CANCELLED')`, [roomId, currentQueueId])
       .filter(item => isGreetingAllowed(item))
+      .map(({ avatarId, ...item }) => ({ ...item, avatarUrl: avatarUrl(avatarId) ?? avatarUrl(defaultAvatar) }))
   }
 
   static paused (roomId: number) { return db.get<{ paused: number }>('SELECT paused FROM greetingControls WHERE roomId=?', [roomId])?.paused === 1 }
@@ -263,7 +267,8 @@ export default class Greetings {
     }
     const song = order.entities[next!]
     if (blocker || (!call && (reason || !selected))) return null
-    return { turnKey, until, displayMs, items: selected && !reason ? [{ ...selected, turnKey, status: 'RESERVED' }] : [], transition, callMode: !!call,
+    const senderAvatar = selected && !reason && db.get<{ avatarId: string | null }>('SELECT avatarId FROM users WHERE userId = ?', [selected.userId])
+    return { turnKey, until, displayMs, items: selected && !reason ? [{ ...selected, avatarUrl: avatarUrl(senderAvatar && senderAvatar.avatarId) ?? avatarUrl(defaultAvatar), turnKey, status: 'RESERVED' }] : [], transition, callMode: !!call,
       background: transition?.intervention.background ?? captureTransitionBackground(roomId, `greeting:${roomId}:${turnKey}`, until),
       performer: { name: song.userDisplayName, tableLabel: song.tableLabelSnapshot ?? null, requestIntent: song.requestIntent ?? 'UNKNOWN', title: song.title } }
   }
