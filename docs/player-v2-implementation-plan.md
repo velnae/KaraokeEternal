@@ -58,6 +58,10 @@ Run with Node 24.22.2 and isolated fixtures. Extend `config/youtube-preparation.
 
 On the development `/player` tab, run `sessionStorage.setItem('karaoke:player-executor', 'v2')` to opt in for the **next** eligible HOUSE transition with a scene or participant LISTEN request. Use `observe` (default) for V1 with passive comparison, or `legacy` for V1 without comparison. No reload is needed. The selector has no effect in production.
 
+### Stage 6: karaoke
+
+The same development selector also enables SING turns. The existing stage adapter supplies entry/call, reminders, countdown and the outgoing ending cue. Automatic starts continue after presentation. Manual turns wait on the server's renewable karaoke run: the presentation timeout cannot release the track. A matching queue and run must still be released after fading the bed; actual media playback acknowledges `played`. Re-entering a presented turn skips its call. Use `KARAOKE_E2E_MODE=development KARAOKE_E2E_STAGE_ONLY=1 KARAOKE_E2E_PLAYER_V2=1` with `config/karaoke-call-pilot.e2e.mjs` for isolated stage checks.
+
 ### Stage 5: listening requests
 
 The director attempts the request presentation once, with the turn's cancellation signal and remaining budget. A handled presentation (including a screen-only card) advances directly to the song. A confirmed absence can use the ordinary announcement fallback; an ambiguous reservation must not trigger a second announcement. The greeting adapter retains card commit, reading time and server attribution. Withdrawing a greeting stops its foreground and its own bed, preserving an independently owned transition bed.

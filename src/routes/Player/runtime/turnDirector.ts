@@ -1,20 +1,21 @@
 import type { planNormalTurn } from './turnPlan'
 
 type Plan = ReturnType<typeof planNormalTurn>
-type Phase = 'prepared' | 'intro' | 'presenting' | 'reserving' | 'recovering' | 'voice' | 'curtain' | 'handoff' | 'exit' | 'finished' | 'cancelled'
+type Phase = 'prepared' | 'intro' | 'presenting' | 'reserving' | 'recovering' | 'voice' | 'curtain' | 'waiting' | 'handoff' | 'exit' | 'finished' | 'cancelled'
 type CancelReason = 'pause' | 'stop' | 'skip' | 'remote-close' | 'unmount' | 'disconnect' | 'authority-lost' | 'replaced' | 'deadline' | 'uncertain-start' | 'adapter-error'
 type Event = { type: 'ended' | 'intro-ended' | 'unanswered' | 'omitted' | 'voice-ended' | 'curtain-ended' | 'sequence-settled' | 'playing' | 'exited' }
   | { type: 'permit', identity: string, id: string, startBefore: number, start: 'unused' | 'uncertain' }
   | { type: 'cancel', reason: CancelReason }
   | { type: 'presentation', handled: boolean }
-type Command = { type: 'prepare-backdrop' | 'start-bed' | 'intro' | 'present-request' | 'reserve' | 'lookup' | 'finish-curtain' | 'start-song' | 'exit-on-playing' }
+  | { type: 'released', runId: string, queueId: number }
+type Command = { type: 'prepare-backdrop' | 'start-bed' | 'intro' | 'present-request' | 'reserve' | 'lookup' | 'finish-curtain' | 'wait-for-release' | 'start-song' | 'exit-on-playing' }
   | { type: 'play-voice', permitId: string }
 type Decision = { phase: Phase, commands: Command[], reason?: CancelReason }
 const move = (phase: Phase, ...commands: Command[]): Decision => ({ phase, commands })
 
 /** Callback scope and permit validity are independent: a current callback can carry an expired grant. */
 export function reduceTurn (plan: Plan, phase: Phase, event: Event, serverNow: number): Decision {
-  const handoff = () => move('handoff', { type: 'start-song' })
+  const handoff = () => plan.karaokeRunId ? move('waiting', { type: 'wait-for-release' }) : move('handoff', { type: 'start-song' })
   const reserve = () => plan.steps.includes('attempt-voice') ? move('reserving', { type: 'reserve' }) : handoff()
   const present = () => plan.steps.includes('present-request') ? move('presenting', { type: 'present-request' }) : reserve()
   if (phase === 'finished' || phase === 'cancelled') return move(phase)
@@ -40,6 +41,7 @@ export function reduceTurn (plan: Plan, phase: Phase, event: Event, serverNow: n
   }
   if (phase === 'voice' && event.type === 'voice-ended') return move('curtain', { type: 'finish-curtain' })
   if (phase === 'curtain' && event.type === 'curtain-ended') return handoff()
+  if (phase === 'waiting' && event.type === 'released' && event.runId === plan.karaokeRunId && event.queueId === plan.destination) return move('handoff', { type: 'start-song' })
   if (phase === 'handoff' && event.type === 'playing') return plan.scene ? move('exit', { type: 'exit-on-playing' }) : move('finished')
   if (phase === 'exit' && event.type === 'exited') return move('finished')
   return move(phase)
@@ -62,7 +64,7 @@ export function createTurnDirector (ports: Ports) {
   let active: TurnRun | undefined
   const cancel = (reason: CancelReason) => active?.report({ type: 'cancel', reason })
   const begin = (plan: Plan, budgetMs: number) => {
-    if (!['normal', 'listening'].includes(plan.kind) || !Number.isFinite(budgetMs) || budgetMs <= 0) throw new Error('Expected a bounded music turn')
+    if (!['normal', 'listening', 'karaoke'].includes(plan.kind) || !Number.isFinite(budgetMs) || budgetMs <= 0) throw new Error('Expected a bounded music turn')
     if (active?.plan.identity === plan.identity) return active
     cancel('replaced')
     const controller = new AbortController()
@@ -91,9 +93,15 @@ export function createTurnDirector (ports: Ports) {
         ports.release(plan, decision.reason ?? 'finished')
         return
       }
-      if (previous === 'prepared' && event.type === 'ended') {
-        deadline = ports.now() + budgetMs
-        disarm = ports.schedule(budgetMs, () => report({ type: 'cancel', reason: 'deadline' }))
+      if (phase === 'waiting' && previous !== phase) {
+        disarm?.()
+        deadline = Infinity // Operator wait is bounded by the server's renewable authority, not presentation time.
+      } else if ((previous === 'prepared' && event.type === 'ended') || (previous === 'waiting' && phase === 'handoff')) {
+        const ms = previous === 'waiting' ? 10000 : budgetMs
+        deadline = ports.now() + ms
+        disarm = ports.schedule(ms, () => {
+          if (ports.now() >= deadline) report({ type: 'cancel', reason: 'deadline' })
+        })
       }
       for (const command of decision.commands) if (active === run && phase === decision.phase) execute(command)
     }

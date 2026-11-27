@@ -6,7 +6,7 @@ import { planNormalTurn } from './turnPlan'
 const plan = planNormalTurn({ source: 1, replayKey: 0, epoch: 2, roomId: 1, boundary: 'ended', held: null, announce: true,
   queue: { result: [2], entities: { 2: { queueId: 2, status: 'APPROVED', origin: 'HOUSE' } } }, backdrop: true, animator: true, ambience: true, greetings: false })
 
-function fixture () {
+function fixture (recipe = plan) {
   let now = 0
   let timeout = () => {}
   const commands: string[] = []
@@ -18,7 +18,7 @@ function fixture () {
       return disarm
     },
     execute: cmd => commands.push(cmd.type), release })
-  const run = director.begin(plan, 1000)
+  const run = director.begin(recipe, 1000)
   const boundary = () => {
     run.report({ type: 'ended' })
     run.report({ type: 'ended' })
@@ -31,6 +31,26 @@ function fixture () {
 }
 
 const permit = { type: 'permit', identity: plan.identity, id: 'grant', startBefore: 11000, start: 'unused' } as const
+it('holds a presented karaoke beyond the presentation deadline and starts only on its matching release', () => {
+  const karaoke = planNormalTurn({ source: 1, replayKey: 0, roomId: 1, epoch: 2, boundary: 'ended', announce: true, held: null,
+    queue: { result: [2], entities: { 2: { queueId: 2, origin: 'PARTICIPANT', requestIntent: 'SING', status: 'APPROVED' } } },
+    animator: true, greetings: true, backdrop: true, ambience: false, manualKaraoke: { runId: 'current', presented: true } })
+  const { boundary, advance, expire, run, commands } = fixture(karaoke)
+  boundary()
+  advance()
+  expire()
+  run.report({ type: 'released', runId: 'old', queueId: 2 })
+  run.report({ type: 'released', runId: 'current', queueId: 3 })
+  expect(commands).toEqual(['prepare-backdrop', 'start-bed', 'intro', 'wait-for-release'])
+  run.report({ type: 'released', runId: 'current', queueId: 2 })
+  run.report({ type: 'released', runId: 'current', queueId: 2 })
+  expect(commands.filter(c => c === 'start-song')).toHaveLength(1)
+  const replacement = fixture(karaoke)
+  replacement.boundary()
+  replacement.director.cancel('skip')
+  replacement.run.report({ type: 'released', runId: 'current', queueId: 2 })
+  expect(replacement.commands).not.toContain('start-song')
+})
 it.each([true, false])('listening presentation handled=%s gates the generic announcement', (handled) => {
   const request = planNormalTurn({ source: 1, replayKey: 0, roomId: 1, epoch: 2, boundary: 'ended', announce: true, held: null,
     queue: { result: [2], entities: { 2: { queueId: 2, origin: 'PARTICIPANT', requestIntent: 'LISTEN', status: 'APPROVED' } } },

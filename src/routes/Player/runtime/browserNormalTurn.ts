@@ -16,6 +16,8 @@ interface Adapters {
   bed: (signal: AbortSignal) => Promise<void>
   announcement: (signal: AbortSignal) => Promise<void>
   presentation: (signal: AbortSignal) => Promise<boolean>
+  entry: (signal: AbortSignal) => Promise<void>
+  operatorRelease: (signal: AbortSignal) => Promise<{ runId: string, queueId: number } | null>
   exit: () => void
   released: (reason: string) => void
 }
@@ -37,16 +39,25 @@ export function beginBrowserTurn (plan: ReturnType<typeof planNormalTurn>, budge
           break
         case 'start-bed': bed = adapters.bed(run.signal).catch(() => {})
           break
-        case 'intro': void Promise.resolve(bed).then((): void => {
+        case 'intro': void Promise.resolve(bed).then(async (): Promise<void> => {
           if (run.signal.aborted) return undefined
+          if (plan.kind === 'karaoke') {
+            if (plan.steps.includes('karaoke-entry')) await adapters.entry(run.signal)
+            run.report({ type: 'intro-ended' })
+            return
+          }
           const timer = setTimeout(() => run.report({ type: 'intro-ended' }), TRANSITION_INTRO_MS)
           run.signal.addEventListener('abort', () => clearTimeout(timer), { once: true })
           return undefined
-        })
+        }).catch(() => run.report({ type: 'cancel', reason: 'adapter-error' }))
           break
         case 'present-request': void adapters.presentation(run.signal).then(handled => run.report({ type: 'presentation', handled }), () => run.report({ type: 'cancel', reason: 'adapter-error' }))
           break
         case 'reserve': void adapters.announcement(run.signal).then(() => run.report({ type: 'sequence-settled' }), () => run.report({ type: 'cancel', reason: 'adapter-error' }))
+          break
+        case 'wait-for-release': void adapters.operatorRelease(run.signal).then(release => run.report(release
+          ? { type: 'released', runId: release.runId, queueId: release.queueId }
+          : { type: 'cancel', reason: 'replaced' }), () => run.report({ type: 'cancel', reason: 'adapter-error' }))
           break
         case 'start-song': ready(true)
           break

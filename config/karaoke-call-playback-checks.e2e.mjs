@@ -269,6 +269,7 @@ export async function checkAutomaticCalls ({ page, context, browser, api, base, 
       await new Promise(resolve => setTimeout(resolve, 3500))
       await route.fallback()
     })
+    if (process.env.KARAOKE_E2E_PLAYER_V2 === '1') await player.addInitScript(() => sessionStorage.setItem('karaoke:player-executor', 'v2'))
     await player.goto(uiBase + 'player')
     await expect.poll(async () => (await emit(operator, 'server/ANIMATION_SYNC')).payload.playerPresent).toBe(true)
     const firstChecksum = db.prepare('SELECT p.checksum FROM karaokeCallParts p JOIN karaokeCallRequests r ON p.id=r.resultId WHERE r.queueId=?').get(first).checksum

@@ -203,7 +203,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       diagnosticRef.current?.record('transition-incoming-playing', { queueId: playing.queueId })
       diagnosticRef.current?.flush()
     }
-    if (directed.current?.destination === playing.queueId) {
+    if (!release && directed.current?.destination === playing.queueId) {
       directed.current.report({ type: 'playing' })
       if (!scene) dispatch(playerPlay())
       return
@@ -217,9 +217,12 @@ const PlayerController = (props: PlayerControllerProps) => {
         return mounted.current && socket.connected && animationRef.current.controlVersion() === version
           && current._authority === 'GRANTED' && current.queueId === playing.queueId && current._lastReplayTime === playing._lastReplayTime
       }
-      if (scene) updateTransition({ ...scene, phase: 'exiting' })
-      void animationRef.current.stopTransition(250)
-      animationRef.current.channel.musicStarted()
+      if (directed.current?.destination === playing.queueId) directed.current.report({ type: 'playing' })
+      else {
+        if (scene) updateTransition({ ...scene, phase: 'exiting' })
+        void animationRef.current.stopTransition(250)
+        animationRef.current.channel.musicStarted()
+      }
       void karaokeStartRef.current.played(release.turn).then((): void => {
         if (stillPlaying()) dispatch(playerPlay())
         return undefined
@@ -427,6 +430,7 @@ const PlayerController = (props: PlayerControllerProps) => {
           backdrop: !!backgroundRef.current || state.rooms.entities[state.user.roomId]?.prefs?.transitionVideo?.mode === 'all',
           animator: !!snapshot?.prefs.enabled, greetings: !!snapshot?.greetingVoiceEnabled,
           listeningPresentations: snapshot?.listeningPresentationsEnabled,
+          karaokeCalls: snapshot?.karaokeCallsEnabled, manualKaraoke: manualTurn,
           ambience: !!snapshot?.prefs.ambienceEnabled && snapshot.prefs.ambienceVolume !== 0 })
         tracePlayback('v2-plan-observed', { diagnosticId: diagnostic?.diagnosticId, roomId: state.user.roomId, sourceQueueId: sourceId,
           queueId: observedPlan.destination, observedQueueId: upcoming?.queueId ?? null, turnIdentity: observedPlan.identity,
@@ -440,12 +444,57 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (upcoming || boundary !== 'idle') await animationRef.current.stopAmbience()
       // A pause can arrive while the previous ambience is being released.
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
-      if (executor === 'v2' && observedPlan && upcoming && (observedPlan.kind === 'listening' || (observedPlan.kind === 'normal' && scene))
-        && observedPlan.destination === upcoming.queueId && observedPlan.scene === !!scene && turnValid() && !manualTurn) {
+      const waitForOperator = async (turn: KaraokeTurn, signal?: AbortSignal) => {
+        if (!upcoming || turn.queueId !== upcoming.queueId || signal?.aborted) return false
+        if (transitionRef.current) updateTransition({ ...transitionRef.current, phase: 'waiting' })
+        const valid = () => {
+          const state = store.getState()
+          const item = ensureState(state.queue).entities[turn.queueId]
+          return !signal?.aborted && mounted.current && socket.connected && controlVersion === animationRef.current.controlVersion()
+            && state.player._authority === 'GRANTED' && (state.player.isPlaying || state.player._isPlayingNext)
+            && item?.isOptimistic !== true && item?.status === 'APPROVED' && !birthdayRef.current.pending
+            && state.rooms.entities[state.user.roomId]?.status !== 'closed'
+        }
+        const started = await karaokeStartRef.current.wait(turn, valid, async () => {
+          if (store.getState().animation.snapshot?.karaokeTurn?.phase === 'waiting') await animationRef.current.keepTransition(before.queueId === -1 || before.queueId === upcoming.queueId ? null : before.queueId, upcoming.queueId)
+        }, async (tick) => {
+          if (tick.phase === 'countdown') {
+            void animationRef.current.stopTransition(KARAOKE_FADE_MS)
+            void karaokeCuesRef.current.play({ queueId: tick.queueId, kind: 'countdown', token: `${tick.runId}-${tick.revision}`, runId: tick.runId, revision: tick.revision })
+          } else if (tick.phase === 'waiting' && tick.reminderAt && animationTime() >= tick.reminderAt) {
+            await karaokeCuesRef.current.play({ queueId: tick.queueId, kind: 'reminder', token: `${tick.runId}-${tick.reminderAt}`, runId: tick.runId, revision: tick.revision })
+          }
+        }).catch(() => false)
+        if (started) return valid()
+        if (signal?.aborted) return false
+        const pending = ensureState(store.getState().queue).entities[turn.queueId]
+        if (birthdayRef.current.pending) {
+          await animationRef.current.stopTransition(80)
+          retryAfterBirthday = true
+        } else if (mounted.current && socket.connected && controlVersion === animationRef.current.controlVersion()
+          && (!pending || (pending.isOptimistic !== true && pending.status !== 'APPROVED'))) {
+          await finishTransition()
+          retryHouseSelection = true
+        } else if (valid()) setTimeout(() => {
+          if (mounted.current) retryAdvance(value => value + 1)
+        }, 1000)
+        return false
+      }
+      if (executor === 'v2' && observedPlan && upcoming && (observedPlan.kind === 'karaoke' || observedPlan.kind === 'listening' || (observedPlan.kind === 'normal' && scene))
+        && observedPlan.destination === upcoming.queueId && observedPlan.scene === !!scene && turnValid()) {
         directed.current?.cancel('replaced')
         const valid = (signal: AbortSignal) => !signal.aborted && turnValid() && (!scene || transitionRef.current?.id === scene.id)
         owned = beginBrowserTurn(observedPlan, Math.max(1, deadline - performance.now()), {
           serverNow: animationTime,
+          entry: async (signal) => {
+            if (scene && valid(signal)) await karaokeCuesRef.current.play({ queueId: upcoming.queueId, kind: 'entry', token: manualTurn?.runId ?? scene.id })
+          },
+          operatorRelease: async (signal) => {
+            if (!manualTurn || !await waitForOperator(manualTurn, signal)) return null
+            await animationRef.current.stopTransition(KARAOKE_FADE_MS)
+            const live = store.getState().animation.snapshot?.karaokeTurn
+            return !signal.aborted && live?.phase === 'released' && live.runId === manualTurn.runId && live.queueId === upcoming.queueId ? live : null
+          },
           backdrop: async (signal) => {
             if (!scene) return
             let visual = prepared ? await prepared.visual : undefined
@@ -471,7 +520,7 @@ const PlayerController = (props: PlayerControllerProps) => {
             void animationRef.current.stopTransition(80).then((): void => {
               if (scene && directed.current === owned && transitionRef.current?.id === scene.id) {
                 updateTransition({ ...transitionRef.current, phase: 'exiting' })
-                dispatch(playerPlay())
+                if (!manualTurn) dispatch(playerPlay())
               }
               return undefined
             })
@@ -527,41 +576,7 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (!owned && !greeted && !manualTurn?.presented && announce && turnValid()) {
         await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null, diagnostic, turnValid, deadline)
       }
-      if (manualTurn && upcoming) {
-        if (transitionRef.current) updateTransition({ ...transitionRef.current, phase: 'waiting' })
-        const valid = () => {
-          const state = store.getState()
-          const item = ensureState(state.queue).entities[manualTurn.queueId]
-          return mounted.current && socket.connected && controlVersion === animationRef.current.controlVersion()
-            && state.player._authority === 'GRANTED' && (state.player.isPlaying || state.player._isPlayingNext)
-            && item?.isOptimistic !== true && item?.status === 'APPROVED' && !birthdayRef.current.pending
-            && state.rooms.entities[state.user.roomId]?.status !== 'closed'
-        }
-        const started = await karaokeStartRef.current.wait(manualTurn, valid, async () => {
-          if (store.getState().animation.snapshot?.karaokeTurn?.phase === 'waiting') await animationRef.current.keepTransition(before.queueId === -1 || before.queueId === upcoming.queueId ? null : before.queueId, upcoming.queueId)
-        }, async (turn) => {
-          if (turn.phase === 'countdown') {
-            void animationRef.current.stopTransition(KARAOKE_FADE_MS)
-            void karaokeCuesRef.current.play({ queueId: turn.queueId, kind: 'countdown', token: `${turn.runId}-${turn.revision}`, runId: turn.runId, revision: turn.revision })
-          } else if (turn.phase === 'waiting' && turn.reminderAt && animationTime() >= turn.reminderAt) {
-            await karaokeCuesRef.current.play({ queueId: turn.queueId, kind: 'reminder', token: `${turn.runId}-${turn.reminderAt}`, runId: turn.runId, revision: turn.revision })
-          }
-        }).catch(() => false)
-        if (!started) {
-          const pending = ensureState(store.getState().queue).entities[manualTurn.queueId]
-          if (birthdayRef.current.pending) {
-            await animationRef.current.stopTransition(80)
-            retryAfterBirthday = true
-          } else if (mounted.current && socket.connected && controlVersion === animationRef.current.controlVersion()
-            && (!pending || (pending.isOptimistic !== true && pending.status !== 'APPROVED'))) {
-            await finishTransition()
-            retryHouseSelection = true
-          } else if (valid()) setTimeout(() => {
-            if (mounted.current) retryAdvance(value => value + 1)
-          }, 1000)
-          return
-        }
-      }
+      if (!owned && manualTurn && !await waitForOperator(manualTurn)) return
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       const current = store.getState().player
       if (!socket.connected || current._authority !== 'GRANTED' || current._isReplayingQueueId !== null
