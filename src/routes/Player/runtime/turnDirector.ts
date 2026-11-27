@@ -3,7 +3,7 @@ import type { planNormalTurn } from './turnPlan'
 type Plan = ReturnType<typeof planNormalTurn>
 type Phase = 'prepared' | 'intro' | 'reserving' | 'recovering' | 'voice' | 'curtain' | 'handoff' | 'exit' | 'finished' | 'cancelled'
 type CancelReason = 'pause' | 'stop' | 'skip' | 'remote-close' | 'unmount' | 'disconnect' | 'authority-lost' | 'replaced' | 'deadline' | 'uncertain-start' | 'adapter-error'
-type Event = { type: 'ended' | 'intro-ended' | 'unanswered' | 'omitted' | 'voice-ended' | 'curtain-ended' | 'playing' | 'exited' }
+type Event = { type: 'ended' | 'intro-ended' | 'unanswered' | 'omitted' | 'voice-ended' | 'curtain-ended' | 'sequence-settled' | 'playing' | 'exited' }
   | { type: 'permit', identity: string, id: string, startBefore: number, start: 'unused' | 'uncertain' }
   | { type: 'cancel', reason: CancelReason }
 type Command = { type: 'prepare-backdrop' | 'start-bed' | 'intro' | 'reserve' | 'lookup' | 'finish-curtain' | 'start-song' | 'exit-on-playing' }
@@ -26,6 +26,8 @@ export function reduceTurn (plan: Plan, phase: Phase, event: Event, serverNow: n
   if (phase === 'intro' && event.type === 'intro-ended') return reserve()
   if (phase === 'reserving' && event.type === 'unanswered') return move('recovering', { type: 'lookup' })
   if (phase === 'reserving' || phase === 'recovering') {
+    // The existing animator adapter owns one server-authorized voice/effect sequence.
+    if (phase === 'reserving' && event.type === 'sequence-settled') return handoff()
     if (event.type === 'omitted') return handoff()
     if (event.type === 'permit' && event.identity === plan.identity) {
       if (event.start === 'uncertain') return { ...move('cancelled'), reason: 'uncertain-start' }

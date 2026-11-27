@@ -16,6 +16,7 @@ const httpsUi = process.env.KARAOKE_E2E_HTTPS_UI === '1'
 const realYouTube = process.env.KARAOKE_E2E_REAL_YOUTUBE === '1'
 const reducedMotion = process.env.KARAOKE_E2E_REDUCED_MOTION === '1'
 const delayedAcknowledgments = process.env.KARAOKE_E2E_DELAYED_ACKS === '1'
+const directedTurns = process.env.KARAOKE_E2E_PLAYER_V2 === '1'
 const latePlaybackReceipts = process.env.KARAOKE_E2E_LATE_PLAYBACK_RECEIPTS === '1'
 const slowLink = process.env.KARAOKE_E2E_SLOW_LINK === '1'
 const diagnostics = process.env.KARAOKE_E2E_DIAGNOSTICS === '1'
@@ -137,6 +138,7 @@ try {
     headless: true, args: ['--autoplay-policy=no-user-gesture-required'] })
   context = await browser.newContext({ viewport: { width: 1440, height: 900 }, storageState: await api.storageState(),
     reducedMotion: reducedMotion ? 'reduce' : 'no-preference' })
+  if (directedTurns) await context.addInitScript(() => sessionStorage.setItem('karaoke:player-executor', 'v2'))
   if ((delayedAcknowledgments || latePlaybackReceipts || slowLink || diagnostics) && !httpsUi) await context.routeWebSocket('**/socket.io/**', (client) => {
     diagnosticConnection = client
     const upstream = client.connectToServer()
@@ -439,6 +441,7 @@ try {
       const events = await page.evaluate(() => window.karaokePlaybackTrace.snapshot().events)
       const turn = events.filter(event => event.sourceQueueId === source && event.monotonicMs >= since && event.monotonicMs <= play.at)
       const shadow = turn.find(event => event.event === 'v2-plan-observed' && event.observedQueueId === destination)
+      assert.equal(turn.filter(event => event.event === 'v2-turn-executing').length, directedTurns ? 1 : 0, `${label}: selected executor runs exactly once`)
       assert.equal(shadow?.state, 'match', `${label}: passive plan agrees with V1 selection and scene`)
       assert.ok(turn.some(event => event.event === 'v2-plan-handoff' && event.turnIdentity === shadow.turnIdentity && event.state === 'match'), `${label}: same planned turn reaches handoff`)
       const selected = turn.some(event => event.queueId === destination && event.event === 'background-reply' && event.state === 'selected')
