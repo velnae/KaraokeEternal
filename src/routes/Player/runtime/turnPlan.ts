@@ -13,6 +13,7 @@ export interface TurnInputs {
   backdrop: boolean
   animator: boolean
   greetings: boolean
+  listeningPresentations?: boolean
   ambience: boolean
 }
 
@@ -28,13 +29,15 @@ export function planNormalTurn (input: TurnInputs) {
   const destination = next?.queueId ?? null
   const token = playbackToken(source, input.replayKey)
   const identity = turnIdentity(input.roomId, input.epoch, source, input.replayKey, destination)
-  // Requests, karaoke and empty-queue announcements keep their dedicated recipes.
-  const kind = !next ? 'empty' : next.origin === 'HOUSE' ? 'normal' : 'special'
-  const scene = kind === 'normal' && input.boundary !== 'idle' && input.announce && (input.backdrop || input.animator || input.greetings)
+  const listening = next?.origin === 'PARTICIPANT' && next.requestIntent === 'LISTEN'
+  const kind = !next ? 'empty' : listening ? 'listening' : next.origin === 'HOUSE' ? 'normal' : 'special'
+  const call = listening && !!input.listeningPresentations
+  const scene = (kind === 'normal' || listening) && input.boundary !== 'idle' && (input.announce || call) && (input.backdrop || input.animator || input.greetings || call)
   const steps: string[] = []
-  if (kind === 'normal') {
+  if (kind === 'normal' || listening) {
     if (scene) steps.push('prepare-backdrop')
     if (scene && input.ambience) steps.push('start-eligible-bed')
+    if (listening) steps.push('present-request')
     if (input.announce && input.animator) steps.push('attempt-voice', 'finish-eligible-curtain')
     steps.push('start-song')
     if (scene) steps.push('exit-on-playing')
@@ -44,6 +47,6 @@ export function planNormalTurn (input: TurnInputs) {
 
 export function compareTurnSelection (plan: ReturnType<typeof planNormalTurn>, destination: number | null, scene: boolean) {
   if (plan.destination !== destination) return 'destination-mismatch'
-  if (plan.kind === 'normal' && plan.scene !== scene) return 'scene-eligibility-mismatch'
-  return plan.kind === 'normal' ? 'match' : 'selection-only'
+  if (plan.kind !== 'normal' && plan.kind !== 'listening') return 'selection-only'
+  return plan.scene === scene ? 'match' : 'scene-eligibility-mismatch'
 }

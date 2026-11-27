@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { createTurnDirector } from './turnDirector'
+import { reduceTurn } from './turnDirector'
 import { planNormalTurn } from './turnPlan'
 
 const plan = planNormalTurn({ source: 1, replayKey: 0, epoch: 2, roomId: 1, boundary: 'ended', held: null, announce: true,
@@ -30,6 +31,17 @@ function fixture () {
 }
 
 const permit = { type: 'permit', identity: plan.identity, id: 'grant', startBefore: 11000, start: 'unused' } as const
+it.each([true, false])('listening presentation handled=%s gates the generic announcement', (handled) => {
+  const request = planNormalTurn({ source: 1, replayKey: 0, roomId: 1, epoch: 2, boundary: 'ended', announce: true, held: null,
+    queue: { result: [2], entities: { 2: { queueId: 2, origin: 'PARTICIPANT', requestIntent: 'LISTEN', status: 'APPROVED' } } },
+    listeningPresentations: true, animator: true, greetings: true, backdrop: true, ambience: true })
+  expect(request.kind).toBe('listening')
+  const presenting = reduceTurn(request, 'intro', { type: 'intro-ended' }, 100)
+  expect(presenting.commands).toEqual([{ type: 'present-request' }])
+  const decision = reduceTurn(request, presenting.phase, { type: 'presentation', handled }, 101)
+  expect(decision.commands).toEqual([{ type: handled ? 'start-song' : 'reserve' }])
+  expect(reduceTurn(request, decision.phase, { type: 'presentation', handled }, 102).commands).toEqual([])
+})
 it('recovers one permit, advances once, and exits only on real playing', () => {
   const { commands, release, disarm, director, run, boundary } = fixture()
   expect(director.begin(plan, 1000)).toBe(run)

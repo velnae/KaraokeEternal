@@ -1,12 +1,13 @@
 import type { planNormalTurn } from './turnPlan'
 
 type Plan = ReturnType<typeof planNormalTurn>
-type Phase = 'prepared' | 'intro' | 'reserving' | 'recovering' | 'voice' | 'curtain' | 'handoff' | 'exit' | 'finished' | 'cancelled'
+type Phase = 'prepared' | 'intro' | 'presenting' | 'reserving' | 'recovering' | 'voice' | 'curtain' | 'handoff' | 'exit' | 'finished' | 'cancelled'
 type CancelReason = 'pause' | 'stop' | 'skip' | 'remote-close' | 'unmount' | 'disconnect' | 'authority-lost' | 'replaced' | 'deadline' | 'uncertain-start' | 'adapter-error'
 type Event = { type: 'ended' | 'intro-ended' | 'unanswered' | 'omitted' | 'voice-ended' | 'curtain-ended' | 'sequence-settled' | 'playing' | 'exited' }
   | { type: 'permit', identity: string, id: string, startBefore: number, start: 'unused' | 'uncertain' }
   | { type: 'cancel', reason: CancelReason }
-type Command = { type: 'prepare-backdrop' | 'start-bed' | 'intro' | 'reserve' | 'lookup' | 'finish-curtain' | 'start-song' | 'exit-on-playing' }
+  | { type: 'presentation', handled: boolean }
+type Command = { type: 'prepare-backdrop' | 'start-bed' | 'intro' | 'present-request' | 'reserve' | 'lookup' | 'finish-curtain' | 'start-song' | 'exit-on-playing' }
   | { type: 'play-voice', permitId: string }
 type Decision = { phase: Phase, commands: Command[], reason?: CancelReason }
 const move = (phase: Phase, ...commands: Command[]): Decision => ({ phase, commands })
@@ -15,15 +16,17 @@ const move = (phase: Phase, ...commands: Command[]): Decision => ({ phase, comma
 export function reduceTurn (plan: Plan, phase: Phase, event: Event, serverNow: number): Decision {
   const handoff = () => move('handoff', { type: 'start-song' })
   const reserve = () => plan.steps.includes('attempt-voice') ? move('reserving', { type: 'reserve' }) : handoff()
+  const present = () => plan.steps.includes('present-request') ? move('presenting', { type: 'present-request' }) : reserve()
   if (phase === 'finished' || phase === 'cancelled') return move(phase)
   if (event.type === 'cancel') return { ...move('cancelled'), reason: event.reason }
   if (phase === 'prepared' && event.type === 'ended') {
-    if (!plan.scene) return reserve()
+    if (!plan.scene) return present()
     const result = move('intro', { type: 'intro' })
     if (plan.steps.includes('start-eligible-bed')) result.commands.unshift({ type: 'start-bed' })
     return result
   }
-  if (phase === 'intro' && event.type === 'intro-ended') return reserve()
+  if (phase === 'intro' && event.type === 'intro-ended') return present()
+  if (phase === 'presenting' && event.type === 'presentation') return event.handled ? handoff() : reserve()
   if (phase === 'reserving' && event.type === 'unanswered') return move('recovering', { type: 'lookup' })
   if (phase === 'reserving' || phase === 'recovering') {
     // The existing animator adapter owns one server-authorized voice/effect sequence.
@@ -59,7 +62,7 @@ export function createTurnDirector (ports: Ports) {
   let active: TurnRun | undefined
   const cancel = (reason: CancelReason) => active?.report({ type: 'cancel', reason })
   const begin = (plan: Plan, budgetMs: number) => {
-    if (plan.kind !== 'normal' || !Number.isFinite(budgetMs) || budgetMs <= 0) throw new Error('Expected a bounded normal turn')
+    if (!['normal', 'listening'].includes(plan.kind) || !Number.isFinite(budgetMs) || budgetMs <= 0) throw new Error('Expected a bounded music turn')
     if (active?.plan.identity === plan.identity) return active
     cancel('replaced')
     const controller = new AbortController()

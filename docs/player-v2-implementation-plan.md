@@ -56,7 +56,11 @@ Run with Node 24.22.2 and isolated fixtures. Extend `config/youtube-preparation.
 
 ### Stage 4 development pilot
 
-On the development `/player` tab, run `sessionStorage.setItem('karaoke:player-executor', 'v2')` to opt in for the **next** eligible HOUSE transition with a scene. Use `observe` (default) for V1 with passive comparison, or `legacy` for V1 without comparison. No reload is needed. Other recipes stay on V1. The selector has no effect in production.
+On the development `/player` tab, run `sessionStorage.setItem('karaoke:player-executor', 'v2')` to opt in for the **next** eligible HOUSE transition with a scene or participant LISTEN request. Use `observe` (default) for V1 with passive comparison, or `legacy` for V1 without comparison. No reload is needed. The selector has no effect in production.
+
+### Stage 5: listening requests
+
+The director attempts the request presentation once, with the turn's cancellation signal and remaining budget. A handled presentation (including a screen-only card) advances directly to the song. A confirmed absence can use the ordinary announcement fallback; an ambiguous reservation must not trigger a second announcement. The greeting adapter retains card commit, reading time and server attribution. Withdrawing a greeting stops its foreground and its own bed, preserving an independently owned transition bed.
 
 V2 starts the visual and ambience adapters independently, runs the intro, delegates the authorized voice/curtain sequence to the existing animator, and unlocks the shared queue promotion only after that sequence settles. The incoming media's play event drives exit; cancellation invalidates outstanding adapter callbacks. Look for `v2-turn-executing` and `v2-turn-released` in the development trace.
 

@@ -7,6 +7,7 @@ import { greetingDuration, type Greeting, type GreetingAsset, type GreetingGrant
 import { ANIMATION_EVENT, ANIMATION_LIMITS, ambienceBedVolume } from 'shared/animation'
 import { animationPlaybackEvent, animationRequest, animationTime, syncAnimation } from 'lib/animationApi'
 import { transitionRequest } from 'lib/transitionRequest'
+import { presentationRecipe } from '../../runtime/presentationRecipe'
 import { PLAYER_CMD_NEXT, PLAYER_CMD_PAUSE, PLAYER_CMD_STOP, PLAYER_CMD_PLAY, PLAYER_CMD_REPLAY } from 'shared/actionTypes'
 import { getPlaybackQueue } from 'routes/Queue/selectors/getRoundRobinQueue'
 import GreetingCommitGate from './GreetingCommitGate'
@@ -101,13 +102,14 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
     }
   }, [enabled, authority, roomId, queue, queueId, channel, refreshReadiness])
 
-  const attempt = useCallback(async (expectedQueueId: number, remainingMs = 25000, diagnostic?: TransitionDiagnostic, expectsCall = false): Promise<boolean> => {
+  const attempt = useCallback(async (expectedQueueId: number, remainingMs = 25000, diagnostic?: TransitionDiagnostic, expectsCall = false, signal?: AbortSignal): Promise<boolean> => {
     if (running.current) return false
     const generation = version.current
     let grant: GreetingGrant | undefined
     let deadline = performance.now() + Math.max(0, Math.min(25000, remainingMs))
     let done = false
     let interrupted = false
+    let uncertainReserve = false
     let scheduled = false
     let visualStarted = false
     let rendered = false
@@ -129,7 +131,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       const item = ensureState(state.queue).entities[expectedQueueId]
       const sameCall = !grant?.transition?.call || (item && 'userDisplayName' in item && item.userDisplayName === grant.performer.name
         && item.title === grant.performer.title && (item.tableLabelSnapshot ?? null) === grant.performer.tableLabel && item.requestIntent === grant.performer.requestIntent)
-      return mounted.current && !interrupted && generation === version.current && socket.connected && state.player._authority === 'GRANTED'
+      return mounted.current && !signal?.aborted && !interrupted && generation === version.current && socket.connected && state.player._authority === 'GRANTED'
         && (state.player.isPlaying || state.player._isPlayingNext)
         && state.rooms.entities[state.user.roomId]?.status !== 'closed' && sameCall && performance.now() < deadline && upcoming() === expectedQueueId
     }
@@ -153,6 +155,15 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       return animationRequest(ANIMATION_EVENT, { interventionId: intervention.interventionId, playerEpoch: intervention.playerEpoch, event, clipId }, ANIMATION_LIMITS.startMs)
     }
     let bedStarted = false
+    const stopPresentation = (reason: string) => {
+      if (!signal) channel.stop(reason)
+      else {
+        if (scheduled) channel.stopForeground(reason)
+        if (bedStarted) void channel.stopBed(30)
+      }
+      commit.current.cancel()
+    }
+    const cancelled = () => stopPresentation('turn-cancelled')
     const play = async (asset: GreetingAsset, first: boolean, onStarted?: () => Promise<void>) => {
       const duration = (channel.buffers.get(asset.checksum)?.duration ?? Infinity) * 1000
       if (!voiceValid() || duration + 250 > deadline - performance.now()) throw new Error('La voz no puede comenzar dentro de esta pausa')
@@ -192,6 +203,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
     try {
       if (!valid()) return false
       running.current = true
+      signal?.addEventListener('abort', cancelled, { once: true })
       setError('')
       if (enabled && !channel.ready) {
         // The trusted Play gesture may still be resuming the already-preloaded
@@ -232,6 +244,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
         remainingMs: Math.max(0, deadline - performance.now()), ...correlation }, animationTime())
       const reply = await transitionRequest(reserve, syncAnimation, valid).catch(async (error) => {
         if (!error?.uncertain || !valid()) throw error
+        uncertainReserve = true
         return greetingRequest('receipt', { queueId: expectedQueueId, receiptId }, animationTime())
       })
       const interventionId = reply.grant?.transition?.intervention.interventionId
@@ -239,14 +252,15 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
         state: interventionId ? 'audio' : reply.grant ? 'visual-only' : 'no-grant' })
       if (diagnostic && performance.now() - stageAt >= 1000) diagnostic.flag('greeting-reserve-slow', { queueId: expectedQueueId, interventionId })
       if (expectsCall && !interventionId) diagnostic?.flag('presentation-not-reserved', { queueId: expectedQueueId })
-      if (!reply.grant) return false
+      if (!reply.grant) return !!signal && uncertainReserve
       step('playback')
       grant = reply.grant
+      if (!valid()) return true
       setScene(grant)
       deadline = Math.min(deadline, performance.now() + Math.max(0, Math.min(25000, grant.until - animationTime())))
       setPerformer(grant.performer)
       checkActive.current = () => {
-        if (!valid() || (scheduled && !voiceValid())) channel.stop('greeting-permission-changed')
+        if (!valid() || (scheduled && !voiceValid())) stopPresentation('greeting-permission-changed')
       }
       const monitor = async () => {
         while (!done && valid()) {
@@ -258,18 +272,16 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
           const item = fresh.items.find(item => item.greetingId === grant!.items[0].greetingId)
           if (fresh.paused || !item || !['RESERVED', 'DISPLAYING'].includes(item.status)) {
             interrupted = true
-            channel.stop('greeting-withdrawn')
-            commit.current.cancel()
+            stopPresentation('greeting-withdrawn')
             break
           }
         }
-        if (!done && !valid()) channel.stop('greeting-window-ended')
+        if (!done && !valid()) stopPresentation('greeting-window-ended')
       }
       void monitor().catch(() => {
         if (!done) {
           interrupted = true
-          channel.stop('greeting-monitor-failed')
-          commit.current.cancel()
+          stopPresentation('greeting-monitor-failed')
         }
       })
 
@@ -279,7 +291,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
           const key = `greeting-started:${intervention.interventionId}`
           if (sessionStorage.getItem(key)) throw new Error('Esta lectura ya se inició')
           sessionStorage.setItem(key, '1')
-          const entry = grant.transition.assets.find(asset => asset.role === 'entry')
+          const { entry, foreground, voicedCard } = presentationRecipe(grant.transition.assets)
           let entryCompletion: Promise<'ENDED' | 'STOPPED'> | undefined
           if (entry) {
             if (!voiceValid() || animationTime() >= intervention.startBefore!) throw new Error('La entrada ya no está autorizada')
@@ -289,11 +301,9 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
             await audioEvent('STARTED')
             await delay(KARAOKE_ENTRY_ATTACK_MS - (performance.now() - began))
           }
-          const greeting = grant.transition.assets.find(asset => asset.role === 'greeting')
-          const foreground = grant.transition.assets.filter(asset => asset.role !== 'bed' && asset.role !== 'entry')
-          for (const [index, asset] of foreground.entries()) {
+          for (const [index, { asset, showCard }] of foreground.entries()) {
             if (asset.role === 'intro') setIntro(asset.displayText)
-            if ((asset.role === 'call' && !greeting) || asset.role === 'greeting') await show(!!greeting)
+            if (showCard) await show(voicedCard)
             const onStarted = asset.role === 'greeting'
               ? async () => { await greetingRequest('audioStarted', { turnKey: grant!.turnKey, greetingId: grant!.items[0].greetingId }) }
               : undefined
@@ -301,13 +311,13 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
           }
           if (entryCompletion && await entryCompletion !== 'ENDED') throw new Error('La entrada fue interrumpida')
           voiceCompleted = true
-          if (greeting) void greetingRequest('audioEnded', { turnKey: grant.turnKey, greetingId: grant.items[0].greetingId }).catch(() => {})
+          if (voicedCard) void greetingRequest('audioEnded', { turnKey: grant.turnKey, greetingId: grant.items[0].greetingId }).catch(() => {})
         } catch (error) {
           diagnostic?.flag('greeting-playback-failed', { queueId: expectedQueueId, interventionId: grant.transition.intervention.interventionId, state: scheduled ? 'scheduled' : 'not-started' })
           tracePlayback('greeting-playback-failed', { roomId, queueId: expectedQueueId, interventionId: grant.transition.intervention.interventionId,
             reason: scheduled ? 'playback-or-receipt-failed' : 'not-started' })
           channel.stopForeground('greeting-playback-failed')
-          if (ownsBed) await channel.stopBed(30)
+          if (bedStarted) await channel.stopBed(30)
           if (!valid()) throw error
           if (grant.items.length) {
             if (!visualStarted) await show(false)
@@ -319,7 +329,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
       } else await show(false)
       while (valid() && performance.now() < readUntil) await delay(Math.min(200, readUntil - performance.now()))
       if (valid()) {
-        if (ownsBed) await channel.stopBed(250)
+        if (bedStarted) await channel.stopBed(250)
         if (valid() && grant.items.length) void greetingRequest('end', { turnKey: grant.turnKey, greetingId: grant.items[0].greetingId }).catch(() => {})
       }
     } catch (error) {
@@ -327,12 +337,13 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
         { queueId: expectedQueueId, state: stage, elapsedMs: performance.now() - stageAt })
       if (mounted.current && generation === version.current && !interrupted) setError(`Saludo no completado: ${(error as Error).message}. La música continúa.`)
     } finally {
+      signal?.removeEventListener('abort', cancelled)
       done = true
       checkActive.current = null
       commit.current.cancel()
       if (grant?.transition) {
         channel.stopForeground('greeting-settled')
-        if (ownsBed) await channel.stopBed(30)
+        if (bedStarted) await channel.stopBed(30)
         markStopped(grant.transition.intervention.interventionId)
         if (socket.connected) await audioEvent(valid() && voiceCompleted ? 'ENDED' : scheduled ? 'STOPPED' : 'NOT_STARTED').catch(() => {})
       }
@@ -345,7 +356,7 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
         setScene(null)
       }
     }
-    return !!grant
+    return !!grant || (!!signal && uncertainReserve)
   }, [channel, markStopped, enabled, roomId])
   return { active, intro, scene, performer, error, attempt, confirmMounted, busy: running.current }
 }

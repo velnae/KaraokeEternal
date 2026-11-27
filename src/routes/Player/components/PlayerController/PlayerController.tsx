@@ -205,6 +205,7 @@ const PlayerController = (props: PlayerControllerProps) => {
     }
     if (directed.current?.destination === playing.queueId) {
       directed.current.report({ type: 'playing' })
+      if (!scene) dispatch(playerPlay())
       return
     }
     if (release?.turn.queueId === playing.queueId) {
@@ -425,6 +426,7 @@ const PlayerController = (props: PlayerControllerProps) => {
           replayKey: before._lastReplayTime, boundary, queue: getPlaybackQueue(state), held: heldItem ?? null, announce,
           backdrop: !!backgroundRef.current || state.rooms.entities[state.user.roomId]?.prefs?.transitionVideo?.mode === 'all',
           animator: !!snapshot?.prefs.enabled, greetings: !!snapshot?.greetingVoiceEnabled,
+          listeningPresentations: snapshot?.listeningPresentationsEnabled,
           ambience: !!snapshot?.prefs.ambienceEnabled && snapshot.prefs.ambienceVolume !== 0 })
         tracePlayback('v2-plan-observed', { diagnosticId: diagnostic?.diagnosticId, roomId: state.user.roomId, sourceQueueId: sourceId,
           queueId: observedPlan.destination, observedQueueId: upcoming?.queueId ?? null, turnIdentity: observedPlan.identity,
@@ -438,12 +440,14 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (upcoming || boundary !== 'idle') await animationRef.current.stopAmbience()
       // A pause can arrive while the previous ambience is being released.
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
-      if (executor === 'v2' && observedPlan?.kind === 'normal' && observedPlan.destination === upcoming?.queueId && scene && turnValid() && !manualTurn) {
+      if (executor === 'v2' && observedPlan && upcoming && (observedPlan.kind === 'listening' || (observedPlan.kind === 'normal' && scene))
+        && observedPlan.destination === upcoming.queueId && observedPlan.scene === !!scene && turnValid() && !manualTurn) {
         directed.current?.cancel('replaced')
-        const valid = (signal: AbortSignal) => !signal.aborted && turnValid() && transitionRef.current?.id === scene.id
+        const valid = (signal: AbortSignal) => !signal.aborted && turnValid() && (!scene || transitionRef.current?.id === scene.id)
         owned = beginBrowserTurn(observedPlan, Math.max(1, deadline - performance.now()), {
           serverNow: animationTime,
           backdrop: async (signal) => {
+            if (!scene) return
             let visual = prepared ? await prepared.visual : undefined
             if (visual === undefined && valid(signal)) visual = await resolveVisual(scene.id, upcoming.queueId)
             if (visual !== undefined && valid(signal)) updateTransition({ ...transitionRef.current!, background: visual })
@@ -452,15 +456,20 @@ const PlayerController = (props: PlayerControllerProps) => {
             const grant = await animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming.queueId, () => valid(signal))
             if (valid(signal) && !transitionRef.current!.background && grant?.background) updateTransition({ ...transitionRef.current!, background: grant.background })
           },
+          presentation: async (signal) => {
+            if (!valid(signal)) return true
+            if (scene) updateTransition({ ...transitionRef.current!, phase: 'voice' })
+            return greetingsRef.current.attempt(upcoming.queueId, deadline - performance.now(), diagnostic, !!callRequested, signal)
+          },
           announcement: async (signal) => {
             if (!valid(signal)) return
-            updateTransition({ ...transitionRef.current!, phase: 'voice' })
+            if (scene) updateTransition({ ...transitionRef.current!, phase: 'voice' })
             await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming.queueId, diagnostic, () => valid(signal), deadline)
           },
           exit: () => {
             animationRef.current.channel.musicStarted()
             void animationRef.current.stopTransition(80).then((): void => {
-              if (directed.current === owned && transitionRef.current?.id === scene.id) {
+              if (scene && directed.current === owned && transitionRef.current?.id === scene.id) {
                 updateTransition({ ...transitionRef.current, phase: 'exiting' })
                 dispatch(playerPlay())
               }
@@ -472,7 +481,7 @@ const PlayerController = (props: PlayerControllerProps) => {
             if (directed.current !== owned) return
             directed.current = null
             if (reason !== 'finished') animationRef.current.abort(reason)
-            if (transitionRef.current?.id === scene.id) void finishTransition(0)
+            if (scene && transitionRef.current?.id === scene.id) void finishTransition(0)
           },
         })
         directed.current = owned
@@ -512,7 +521,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         updateTransition({ ...scene, phase: 'voice' })
       }
-      const greeted = upcoming && upcoming.origin !== 'HOUSE' && !manualTurn?.presented && turnValid()
+      const greeted = !owned && upcoming && upcoming.origin !== 'HOUSE' && !manualTurn?.presented && turnValid()
         ? await greetingsRef.current.attempt(upcoming.queueId, deadline - performance.now(), diagnostic, !!callRequested)
         : false
       if (!owned && !greeted && !manualTurn?.presented && announce && turnValid()) {

@@ -15,6 +15,7 @@ interface Adapters {
   backdrop: (signal: AbortSignal) => Promise<void>
   bed: (signal: AbortSignal) => Promise<void>
   announcement: (signal: AbortSignal) => Promise<void>
+  presentation: (signal: AbortSignal) => Promise<boolean>
   exit: () => void
   released: (reason: string) => void
 }
@@ -42,6 +43,8 @@ export function beginBrowserTurn (plan: ReturnType<typeof planNormalTurn>, budge
           run.signal.addEventListener('abort', () => clearTimeout(timer), { once: true })
           return undefined
         })
+          break
+        case 'present-request': void adapters.presentation(run.signal).then(handled => run.report({ type: 'presentation', handled }), () => run.report({ type: 'cancel', reason: 'adapter-error' }))
           break
         case 'reserve': void adapters.announcement(run.signal).then(() => run.report({ type: 'sequence-settled' }), () => run.report({ type: 'cancel', reason: 'adapter-error' }))
           break
