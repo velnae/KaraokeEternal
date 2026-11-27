@@ -38,6 +38,7 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
     let ambience
     let background
     let karaokeCue
+    let cueOmission: string | undefined
     let eligible: boolean | undefined
     if (type === KARAOKE_CUE) {
       if (!Number.isSafeInteger(input.queueId) || input.queueId < 1) throw new Error('Turno no válido.')
@@ -45,7 +46,11 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
       else {
         if (input.operation !== 'reserve' || !karaokeCueKinds.includes(input.kind) || !isId(input.token)
           || (input.runId !== undefined && !isId(input.runId)) || (input.revision !== undefined && !Number.isSafeInteger(input.revision))) throw new Error('Efecto de karaoke no válido.')
-        grant = Animation.reserveKaraokeCue(identity, { queueId: input.queueId, kind: input.kind, token: input.token, runId: input.runId, revision: input.revision }, sock._lastPlayerStatus ?? {})
+        const ready: unknown = input.readyClips
+        if (ready !== undefined && (input.kind !== 'countdown' || !Array.isArray(ready) || ready.length > 30 || ready.some(hash => typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash)))) throw new Error('Preparación de audio no válida')
+        grant = Animation.reserveKaraokeCue(identity, { queueId: input.queueId, kind: input.kind, token: input.token, runId: input.runId, revision: input.revision }, sock._lastPlayerStatus ?? {}, (reason) => {
+          cueOmission = reason
+        }, ready as string[] | undefined)
       }
     } else if (type === KARAOKE_TURN) {
       if (!['start', 'cancel'].includes(input.operation) && !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad')
@@ -131,7 +136,7 @@ export default Object.fromEntries(actions.map(type => [type, (sock, action, ackn
     if (acknowledge) {
       const payload = Animation.snapshot(roomId)
       trace?.(grant ? 'ready' : 'no-audio', grant?.interventionId)
-      acknowledge({ type: ANIMATION_STATE, payload, ...(karaokeCue ? { karaokeCue } : {}), ...(background !== undefined ? { background } : {}), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
+      acknowledge({ type: ANIMATION_STATE, payload, ...(cueOmission && { cueOmission }), ...(karaokeCue ? { karaokeCue } : {}), ...(background !== undefined ? { background } : {}), ...(eligible !== undefined ? { eligible } : {}), ...(grant ? { grant } : {}), ...(ambience ? { ambience } : {}) })
     }
   } catch (error) {
     trace?.('rejected')

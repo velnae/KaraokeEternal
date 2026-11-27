@@ -473,6 +473,8 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
       const waitForOperator = async (turn: KaraokeTurn, signal?: AbortSignal) => {
         if (!upcoming || turn.queueId !== upcoming.queueId || signal?.aborted) return false
+        // Report cue readiness during the wait, outside the short approval window.
+        void karaokeCuesRef.current.prepare(turn.queueId).catch(() => tracePlayback('karaoke-cue-skipped', { queueId: turn.queueId, state: 'prepare', reason: 'warmup-failed' }))
         if (transitionRef.current) updateTransition({ ...transitionRef.current, phase: 'waiting' })
         const valid = () => {
           const state = store.getState()
@@ -815,6 +817,13 @@ const PlayerController = (props: PlayerControllerProps) => {
   const startTurn = animation.snapshot?.karaokeTurn
   const heldTrack = startTurn ? rawQueue.entities[startTurn.queueId] : null
   const presentedTracks = heldTrack && heldTrack.isOptimistic !== true ? { ...selectedTracks, incoming: heldTrack } : selectedTracks
+  const cueQueueId = presentedTracks.incoming?.requestIntent === 'SING' && presentedTracks.incoming.status === 'APPROVED'
+    ? presentedTracks.incoming.queueId
+    : null
+  useEffect(() => {
+    if (player._authority !== 'GRANTED' || !cueQueueId) return
+    void karaokeCuesRef.current.prepare(cueQueueId).catch(() => tracePlayback('karaoke-cue-skipped', { queueId: cueQueueId, state: 'prepare', reason: 'early-warmup-failed' }))
+  }, [cueQueueId, roomId, player._authority, animation.snapshot?.karaokeBackgroundRevision])
   const preparingItem = preparingQueueId === null ? undefined : rawQueue.entities[preparingQueueId]
   const preparedYouTube = preparingItem && preparingItem.isOptimistic !== true
     && preparingItem.source === 'YOUTUBE' && preparingItem.status === 'APPROVED' && preparingItem.externalId

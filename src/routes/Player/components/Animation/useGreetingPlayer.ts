@@ -220,7 +220,8 @@ export default function useGreetingPlayer (channel: AnnouncementAudio, refreshRe
         if (!valid()) return false
         step('decode')
         const voiceMs = preparation?.call?.assets.find(asset => asset.role === 'call')?.durationMs ?? 3000
-        const waitMs = Math.max(0, Math.min(4000, deadline - performance.now() - voiceMs - 2250))
+        const coldKaraoke = preparation?.call && !preparation.call.kind
+        const waitMs = Math.max(0, Math.min(coldKaraoke ? 8000 : 4000, deadline - performance.now() - voiceMs - (coldKaraoke ? KARAOKE_ENTRY_ATTACK_MS : 0) - 2250))
         let preparing = true
         let timer: ReturnType<typeof setTimeout> | undefined
         try {

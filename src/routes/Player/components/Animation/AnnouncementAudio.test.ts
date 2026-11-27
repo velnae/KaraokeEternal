@@ -49,6 +49,37 @@ it('prepares an urgent turn without waiting for an unrelated catalog download', 
   } finally { audio.close() }
 })
 
+it('joins a slow warm-up and decodes karaoke entry and bed before alternate calls', async () => {
+  const audio = new AnnouncementAudio()
+  const decode = vi.fn(async () => ({ duration: 1, length: 24000, numberOfChannels: 1 }))
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: decode } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'https://localhost/' })
+  let release!: (r: Response) => void
+  const urls: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const id = url.split('/').pop()!
+    urls.push(id)
+    if (id === 'primary') return new Promise<Response>((resolve) => {
+      release = resolve
+    })
+    return new Response(id)
+  }))
+  const assets = [['primary', 'call'], ['alternate', 'call'], ['entry', 'entry'], ['bed', 'bed']].map(([id, role]) => ({
+    id, role, source: 'Karaoke', roomId: 1, kind: role === 'bed' ? 'ambience' : role === 'entry' ? 'effect' : 'voice',
+    url: `api/rooms/1/karaoke-calls/backgrounds/assets/${id}`, durationMs: 1000, checksum: createHash('sha256').update(id).digest('hex'),
+  } as GreetingAsset))
+  try {
+    const warm = audio.prepareGreetingAssets(assets)
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    const urgent = audio.prepareGreetingAssets(assets, () => true, true)
+    release(new Response('primary'))
+    await Promise.all([warm, urgent])
+    expect(urls).toEqual(['primary', 'entry', 'bed', 'alternate'])
+    expect(decode).toHaveBeenCalledTimes(4)
+    expect(audio.readyChecksums).toEqual(expect.arrayContaining(assets.map(asset => asset.checksum)))
+  } finally { audio.close() }
+})
+
 it('retains Karaoke reminder buffers across ordinary preparation and releases them when their turn changes', async () => {
   const audio = new AnnouncementAudio()
   audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration: 1, length: 24000, numberOfChannels: 1 }) } as unknown as AudioContext

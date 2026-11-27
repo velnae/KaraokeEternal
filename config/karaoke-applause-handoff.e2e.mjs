@@ -109,6 +109,11 @@ try {
     await context.routeWebSocket('**/socket.io/**', socket => socket.close())
   }
   await installYouTubeTransitionFixture(context, video)
+  // A cold effect takes a substantial part of the countdown to download.
+  await context.route(`**/karaoke-calls/backgrounds/assets/${asset.id}`, async (route) => {
+    await new Promise(resolve => setTimeout(resolve, 1600))
+    await route.fallback()
+  })
   await context.addInitScript(() => {
     window.applauseRuns = []
     const create = AudioContext.prototype.createBufferSource
@@ -138,9 +143,8 @@ try {
   await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
   await expect(page.getByRole('navigation', { name: 'Secciones de administración' })).toBeVisible()
   await page.goto(uiBase + 'player', { waitUntil: 'domcontentloaded', timeout: 60000 })
-  await page.locator('body').click({ position: { x: 10, y: 10 } })
+  await page.getByRole('button', { name: 'Reproducir', exact: true }).last().click()
   await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.audioUnlocked, { timeout: 15000 }).toBe(true)
-  await emit('server/PLAYER_REQ_PLAY')
   const turn = () => db.prepare('SELECT * FROM karaokeStartTurns WHERE roomId=1').get()
   await expect.poll(() => turn()?.phase, { timeout: 15000 }).toBe('waiting')
   await emit('server/KARAOKE_TURN', { ...turn(), operation: 'start' })
@@ -152,10 +156,12 @@ try {
   const before = Date.now()
   await emit('server/KARAOKE_TURN', { ...turn(), operation: 'start' })
   assert.ok(turn().endsAt - before >= 2900 && turn().endsAt - before < 3500, 'The countdown starts at three')
+  const endsAt = turn().endsAt
   await page.waitForFunction(() => !!window.musicAt, undefined, { timeout: 10000 })
   await page.waitForFunction(() => !!window.applauseRuns[1]?.endedAt, undefined, { timeout: 10000 })
   const evidence = await page.evaluate(() => ({ runs: window.applauseRuns, musicAt: window.musicAt, trace: window.karaokePlaybackTrace.snapshot() }))
   const applause = evidence.runs[1]
+  assert.ok(evidence.trace.timeOrigin + applause.at < endsAt, 'The native applause must start during its countdown')
   assert.ok(applause.audioEnd - applause.audioAt >= 5.9 && applause.audioEnd - applause.audioAt < 6.2, 'Complete six-second source')
   assert.ok(evidence.musicAt - applause.at > 2000 && evidence.musicAt - applause.at < 4500, 'Music starts after countdown, not after applause')
   assert.ok(applause.endedAt - evidence.musicAt > 1500, 'The applause tail overlaps native YouTube-fixture video playback')

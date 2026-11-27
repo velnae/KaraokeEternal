@@ -184,6 +184,7 @@ export interface AnimationSnapshot extends AnimationRoomState {
   greetingVoiceEnabled?: boolean
 }
 export interface AnimationReply {
+  cueOmission?: string
   code?: string
   karaokeCue?: import('./karaokeStage.js').KaraokeCuePreparation
   background?: TransitionVideoBackground | null

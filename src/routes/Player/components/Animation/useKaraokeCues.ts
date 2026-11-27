@@ -15,12 +15,27 @@ export default function useKaraokeCues (channel: AnnouncementAudio, refreshReadi
   const running = useRef(false)
   const active = useRef<Intervention | null>(null)
   const attempts = useRef(new Set<string>())
+  const warming = useRef<{ key: string, done: Promise<void> } | null>(null)
+  const countdownAsset = useRef<{ queueId: number, id: string, checksum: string } | null>(null)
   const prepare = useCallback(async (queueId: number) => {
-    const reply = await animationRequest(KARAOKE_CUE, { operation: 'prepare', queueId })
-    if (!mounted.current || !socket.connected) return
-    channel.karaokeQueueId = queueId
-    await channel.prepare(reply.karaokeCue?.assets ?? [], 'karaoke')
-    if (mounted.current) await refreshReadiness()
+    const state = store.getState()
+    const key = `${socket.id}:${state.user.roomId}:${queueId}:${state.animation.snapshot?.karaokeBackgroundRevision}`
+    if (warming.current?.key === key) return warming.current.done
+    const load = async () => {
+      const reply = await animationRequest(KARAOKE_CUE, { operation: 'prepare', queueId })
+      if (!mounted.current || !socket.connected || warming.current?.key !== key) return
+      const assets = reply.karaokeCue?.assets ?? []
+      const countdown = assets.find(asset => asset.id === reply.payload?.karaokeStage?.countdownEffectId)
+      countdownAsset.current = countdown ? { queueId, id: countdown.id, checksum: countdown.checksum } : null
+      channel.karaokeQueueId = queueId
+      await channel.prepare(assets, 'karaoke')
+      if (mounted.current && warming.current?.key === key) await refreshReadiness()
+    }
+    const done = load().finally(() => {
+      if (warming.current?.key === key) warming.current = null
+    })
+    warming.current = { key, done }
+    return done
   }, [channel, refreshReadiness])
 
   useEffect(() => {
@@ -65,7 +80,15 @@ export default function useKaraokeCues (channel: AnnouncementAudio, refreshReadi
 
   const play = useCallback(async (cue: KaraokeCueContext) => {
     const key = `${cue.queueId}:${cue.kind}:${cue.token}`
-    if (running.current || (cue.kind !== 'reminder' && attempts.current.has(key)) || !socket.connected || !channel.ready) return
+    const remainingMs = () => {
+      const turn = store.getState().animation.snapshot?.karaokeTurn
+      return cue.kind === 'countdown' && turn?.endsAt ? turn.endsAt - animationTime() : undefined
+    }
+    if (running.current || !socket.connected || !channel.ready) {
+      tracePlayback('karaoke-cue-skipped', { queueId: cue.queueId, state: cue.kind, reason: running.current ? 'channel-busy' : !socket.connected ? 'disconnected' : 'audio-locked', remainingMs: remainingMs() })
+      return
+    }
+    if (cue.kind !== 'reminder' && attempts.current.has(key)) return
     if (attempts.current.size > 100) attempts.current.clear()
     if (cue.kind !== 'reminder') attempts.current.add(key)
     running.current = true
@@ -77,16 +100,36 @@ export default function useKaraokeCues (channel: AnnouncementAudio, refreshReadi
     let ducked = false
     const valid = () => mounted.current && epoch === version.current && socket.connected && store.getState().player._authority === 'GRANTED'
     try {
-      await prepare(cue.queueId)
+      if (cue.kind !== 'countdown') {
+        await prepare(cue.queueId)
+        if (!valid()) return
+        const state = store.getState()
+        const status = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
+        await animationRequest(PLAYER_EMIT_STATUS, { ...status, visualizer: state.playerVisualizer })
+      }
       if (!valid()) return
-      const state = store.getState()
-      const status = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
-      await animationRequest(PLAYER_EMIT_STATUS, { ...status, visualizer: state.playerVisualizer })
+      if (cue.kind === 'countdown' && warming.current) {
+        // If approval came during the prefetch, wait for just its effect,
+        // leaving time for the reservation round trip, never delaying music.
+        while (warming.current && valid() && (remainingMs() ?? 0) > 950) {
+          const turn = store.getState().animation.snapshot?.karaokeTurn
+          const id = store.getState().animation.snapshot?.karaokeStage?.countdownEffectId
+          const asset = countdownAsset.current
+          if (!id || turn?.runId !== cue.runId || turn.revision !== cue.revision || turn.phase !== 'countdown') return
+          if (asset?.queueId === cue.queueId && asset.id === id && channel.buffers.has(asset.checksum)) break
+          await new Promise(resolve => setTimeout(resolve, 40))
+        }
+      }
       if (!valid()) return
-      const reply = await animationRequest(KARAOKE_CUE, { operation: 'reserve', ...cue })
+      const reply = await animationRequest(KARAOKE_CUE, { operation: 'reserve', ...cue,
+        ...(cue.kind === 'countdown' && { readyClips: channel.readyChecksums }) })
       grant = reply.grant
-      if (!grant) tracePlayback('karaoke-cue-skipped', { queueId: cue.queueId, state: cue.kind, reason: 'not-granted' })
-      if (!grant || !valid() || animationTime() >= grant.startBefore!) return
+      const turn = store.getState().animation.snapshot?.karaokeTurn
+      const changed = !valid() || (cue.kind === 'countdown' && (turn?.phase !== 'countdown' || turn.runId !== cue.runId || turn.revision !== cue.revision))
+      if (!grant || changed || animationTime() >= grant.startBefore!) {
+        tracePlayback('karaoke-cue-skipped', { queueId: cue.queueId, state: cue.kind, reason: !grant ? reply.cueOmission ?? 'not-granted' : changed ? 'turn-changed' : 'deadline-expired', remainingMs: remainingMs() })
+        return
+      }
       active.current = grant
       const assets = JSON.parse(grant.sequenceJSON!) as KaraokeCueClip[]
       if (cue.kind === 'reminder') {

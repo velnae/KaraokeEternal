@@ -31,6 +31,7 @@ export default class AnnouncementAudio {
   private effectChecksum: string | null = null
   private generation = 0
   private preparing: Promise<string[]> = Promise.resolve([])
+  private pendingBuffers = new WeakMap<AudioContext, Map<string, { promise: Promise<AudioBuffer>, consumers: Set<() => boolean> }>>()
   private playingChecksum: string | null = null
   private catalogKeys = new Set<string>()
   private preparedBed: string | null = null
@@ -135,20 +136,18 @@ export default class AnnouncementAudio {
         }
         let stage = 'download'
         try {
-          const bytes = await this.download(clip.url ?? `api/animation/assets/${encodeURIComponent(clip.id)}`, clip.kind === 'ambience' || isKaraokeBedClip(clip) ? 15000 : 4000)
-          assertCurrent()
-          stage = 'checksum'
-          const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
-          if (checksum !== clip.checksum) throw new Error('La versión del clip cambió')
-          assertCurrent()
-          stage = 'decode'
-          const buffer = await decodeClip(context, clip, bytes)
+          const buffer = await this.loadBuffer(context, clip)
           assertCurrent()
           stage = 'duration'
           if (buffer.duration <= 0 || buffer.duration * 1000 > durationLimit(clip) || Math.abs(buffer.duration * 1000 - clip.durationMs) > 100) throw new Error('La duración del clip no es válida')
           const size = buffer.length * buffer.numberOfChannels * 4
           stage = 'memory'
           if (size > this.maxDecodedBytes) throw new Error('El audio supera la memoria disponible para este canal.')
+          if (this.buffers.has(clip.checksum)) {
+            retained.add(clip.checksum)
+            if (clip === bed) onBedReady?.()
+            continue
+          }
           for (const hash of this.buffers.keys()) {
             if (this.decodedBytes + size <= this.maxDecodedBytes) break
             if (hash !== this.playingChecksum && hash !== this.bedChecksum && hash !== this.preparedBed && !this.karaokeKeys.has(hash) && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
@@ -157,19 +156,52 @@ export default class AnnouncementAudio {
           this.buffers.set(clip.checksum, buffer)
           retained.add(clip.checksum)
           if (clip === bed) onBedReady?.()
-        } catch {
+        } catch (error) {
           assertCurrent()
           this.preparationErrors.set(clip.id, `No se pudo preparar el audio «${clip.title ?? clip.id}». Vuelva a intentarlo.`)
-          tracePlayback('catalog-asset-failed', { channelId: this.traceChannelId, checksum: clip.checksum, reason: stage })
+          tracePlayback('catalog-asset-failed', { channelId: this.traceChannelId, checksum: clip.checksum, reason: (error as { stage?: string }).stage ?? stage })
         }
       }
       return [...this.buffers.keys()]
     }
+    // A countdown has a hard deadline. Its small effects cannot queue behind
+    // unrelated catalog downloads; loadBuffer still coalesces shared assets.
+    if (group === 'karaoke') return prepare()
     this.preparing = this.preparing.catch((): string[] => []).then(prepare)
     return this.preparing
   }
 
   get ready () { return this.context?.state === 'running' }
+
+  private loadBuffer (context: AudioContext, clip: AnimationClip, isCurrent = () => true): Promise<AudioBuffer> {
+    let pending = this.pendingBuffers.get(context)
+    if (!pending) this.pendingBuffers.set(context, pending = new Map())
+    const existing = pending.get(clip.checksum)
+    if (existing) {
+      existing.consumers.add(isCurrent)
+      return existing.promise
+    }
+    const consumers = new Set([isCurrent])
+    const generation = this.generation
+    const load = async () => {
+      let stage = 'download'
+      try {
+        const bytes = await this.download(clip.url ?? `api/animation/assets/${encodeURIComponent(clip.id)}`, clip.kind === 'ambience' ? 15000 : 4000)
+        stage = 'checksum'
+        const digest = await crypto.subtle.digest('SHA-256', bytes)
+        const checksum = [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('')
+        if (checksum !== clip.checksum) throw new Error('checksum')
+        if (this.context !== context || generation !== this.generation || ![...consumers].some(current => current())) throw new Error('cancelled')
+        stage = 'decode'
+        return await decodeClip(context, clip, bytes)
+      } catch (error) {
+        throw Object.assign(new Error('Audio preparation failed'), { stage, cause: error })
+      }
+    }
+    const promise = load().finally(() => pending.delete(clip.checksum))
+    pending.set(clip.checksum, { promise, consumers })
+    return promise
+  }
 
   private async download (url: string, timeoutMs = 4000) {
     if (!url.startsWith('api/')) throw new Error('Ruta de audio no válida')
@@ -198,7 +230,10 @@ export default class AnnouncementAudio {
       this.callKeys = new Set(calls.map(asset => asset.checksum))
       this.greetingKeys = new Set(greetings.map(asset => asset.checksum))
       const retained = new Set<string>()
-      const ordered = [...calls, ...greetings.sort((a, b) => Number(b.role === 'greeting') - Number(a.role === 'greeting'))]
+      const stageAssets = greetings.filter(asset => asset.role === 'entry' || (asset.role === 'bed' && isKaraokeBedClip(asset)))
+        .sort((a, b) => Number(b.role === 'entry') - Number(a.role === 'entry'))
+      const ordered = [...calls.slice(0, 1), ...stageAssets, ...calls.slice(1),
+        ...greetings.filter(asset => !stageAssets.includes(asset)).sort((a, b) => Number(b.role === 'greeting') - Number(a.role === 'greeting'))]
       const began = diagnostic ? performance.now() : 0
       let cacheHits = 0
       for (const asset of ordered) {
@@ -206,17 +241,15 @@ export default class AnnouncementAudio {
         try {
           if (!current()) break
           if (!this.buffers.has(asset.checksum)) {
-            const bytes = await this.download(asset.url, isKaraokeBedClip(asset) ? 15000 : 4000)
-            const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
-            if (!current()) break
-            stage = 'checksum'
-            if (checksum !== asset.checksum) throw new Error('checksum')
-            stage = 'decode'
-            const buffer = await decodeClip(context, asset, bytes)
+            const buffer = await this.loadBuffer(context, asset, current)
             if (!current()) break
             const limit = asset.role === 'greeting' ? 20000 : durationLimit(asset)
             stage = 'duration'
             if (buffer.duration <= 0 || buffer.duration * 1000 > limit || Math.abs(buffer.duration * 1000 - asset.durationMs) > 100) throw new Error('duration')
+            if (this.buffers.has(asset.checksum)) {
+              retained.add(asset.checksum)
+              continue
+            }
             const size = buffer.length * buffer.numberOfChannels * 4
             for (const hash of this.buffers.keys()) {
               if (this.decodedBytes + size <= this.maxDecodedBytes) break
@@ -228,7 +261,8 @@ export default class AnnouncementAudio {
             tracePlayback('turn-asset-ready', { channelId: this.traceChannelId, checksum: asset.checksum, state: asset.role })
           } else if (diagnostic) cacheHits++
           retained.add(asset.checksum)
-        } catch {
+        } catch (error) {
+          stage = (error as { stage?: string }).stage ?? stage
           diagnostic?.flag('turn-asset-failed', { checksum: asset.checksum, state: stage })
           tracePlayback('turn-asset-failed', { channelId: this.traceChannelId, checksum: asset.checksum, state: asset.role, reason: stage })
         }
@@ -363,6 +397,7 @@ export default class AnnouncementAudio {
       gain.gain.linearRampToValueAtTime(0, until)
       let settled = false
       let stopped = false
+      const runId = nextTraceIdentity()
       const watchdog = setTimeout(() => stop(), buffer.duration * 1000 + 100)
       const finish = () => {
         if (settled) return
@@ -375,6 +410,7 @@ export default class AnnouncementAudio {
         this.effectStop = null
         this.effectFinish = null
         this.effectChecksum = null
+        tracePlayback('entry-effect-finish', { channelId: this.traceChannelId, runId, checksum, state: stopped ? 'STOPPED' : 'ENDED', audioElapsedMs: (context.currentTime - began) * 1000 })
         resolve(stopped ? 'STOPPED' : 'ENDED')
       }
       const stop = () => {
@@ -394,6 +430,7 @@ export default class AnnouncementAudio {
       context.addEventListener('statechange', stateChanged)
       source.onended = finish
       source.start()
+      tracePlayback('entry-effect-start', { channelId: this.traceChannelId, runId, checksum, volume, durationMs: buffer.duration * 1000 })
       source.stop(until)
     })
   }

@@ -201,8 +201,12 @@ export default class Greetings {
     if (current && !status.isAtQueueEnd && !['PLAYED', 'FAILED'].includes(current.status)) throw new Error('La canción todavía ocupa la sala')
     const turn = order.turns.find(turn => turn.ids.includes(next!))
     const call = prepareCall(roomId, next!)
-    if (!turn && !call) return null
-    if (db.get('SELECT 1 FROM greetingTurns WHERE turnKey=?', [next])) return null
+    const omit = (reason: string) => {
+      getLogger('calls').info('Presentation omitted room=%s queue=%s reason=%s remainingMs=%s', roomId, next, reason, remainingMs)
+      return null
+    }
+    if (!turn && !call) return omit('no-presentation')
+    if (db.get('SELECT 1 FROM greetingTurns WHERE turnKey=?', [next])) return omit('turn-already-reserved')
     const turnKey = next!
     const selected = Greetings.items(roomId).find(item => item.queueId === next && item.status === 'QUEUED')
     const reason = Greetings.paused(roomId) ? 'Publicación pausada' : blocker
@@ -223,9 +227,16 @@ export default class Greetings {
     try {
       if (candidate) {
         const text = candidate.call ? candidate.assets.find(asset => asset.role === 'call' || asset.role === 'signature')!.displayText : selected!.message
-        const intervention = Animation.reserveGreeting({ roomId, socketId, userId }, turnKey, candidate.assets, candidate.durationMs, candidate.voiceMs, text, candidate.call)
+        const intervention = Animation.reserveGreeting({ roomId, socketId, userId }, turnKey, candidate.assets, candidate.durationMs, candidate.voiceMs, text, candidate.call, omit)
         if (intervention) {
           transition = { ...candidate, intervention }
+          if (call && !call.kind) {
+            for (const asset of prepared?.assets ?? []) {
+              if ((asset.role === 'entry' || asset.role === 'bed') && !candidate.assets.some(selected => selected.role === asset.role)) {
+                getLogger('calls').info('Presentation asset omitted room=%s queue=%s role=%s reason=%s remainingMs=%s', roomId, next, asset.role, ready.includes(asset.checksum) ? 'transition-time' : 'audio-not-ready', remainingMs)
+              }
+            }
+          }
           displayMs = candidate.displayMs
           until = intervention.leaseUntil!
         }
@@ -266,7 +277,7 @@ export default class Greetings {
       throw error
     }
     const song = order.entities[next!]
-    if (blocker || (!call && (reason || !selected))) return null
+    if (blocker || (!call && (reason || !selected))) return omit(blocker ?? reason ?? 'no-greeting')
     const senderAvatar = selected && !reason && db.get<{ avatarId: string | null }>('SELECT avatarId FROM users WHERE userId = ?', [selected.userId])
     return { turnKey, until, displayMs, items: selected && !reason ? [{ ...selected, avatarUrl: avatarUrl(senderAvatar && senderAvatar.avatarId) ?? avatarUrl(defaultAvatar), turnKey, status: 'RESERVED' }] : [], transition, callMode: !!call,
       background: transition?.intervention.background ?? captureTransitionBackground(roomId, `greeting:${roomId}:${turnKey}`, until),

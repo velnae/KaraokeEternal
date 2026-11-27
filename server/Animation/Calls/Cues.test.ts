@@ -112,6 +112,14 @@ it('keeps a complete six-second applause authorized through the three-second cou
   expect(Animation.history(1).find(row => row.interventionId === grant.interventionId)?.status).toBe('PLAYED')
 })
 
+it('uses current countdown readiness if an intervening voice reservation replaced the published list', () => {
+  const countdown = operateKaraokeTurn(1, 'operator', { ...waiting(), operation: 'start' })!
+  Animation.ready(identity, true, [])
+  const cue: KaraokeCueContext = { queueId: 1, kind: 'countdown', runId: countdown.runId, revision: countdown.revision, token: 'approval' }
+  expect(Animation.reserveKaraokeCue(identity, cue, {}, undefined, ['unrelated'])).toBeNull()
+  expect(Animation.reserveKaraokeCue(identity, cue, {}, undefined, ['applause'])).not.toBeNull()
+})
+
 it('stops a started countdown applause on cancellation instead of authorizing its tail', () => {
   const turn = waiting()
   const countdown = operateKaraokeTurn(1, 'operator', { ...turn, operation: 'start' })!
@@ -125,7 +133,9 @@ it('rejects foreign owners, unprepared audio and birthday collisions', () => {
   const cue: KaraokeCueContext = { queueId: 1, kind: 'entry', token: 'entry' }
   expect(Animation.reserveKaraokeCue({ ...identity, socketId: 'other' }, cue, {})).toBeNull()
   Animation.ready(identity, true, [])
-  expect(Animation.reserveKaraokeCue(identity, cue, {})).toBeNull()
+  const omitted = vi.fn()
+  expect(Animation.reserveKaraokeCue(identity, cue, {}, omitted)).toBeNull()
+  expect(omitted).toHaveBeenCalledWith('audio-not-ready')
   Animation.ready(identity, true, ['applause'])
   db.run(`INSERT INTO birthdays(id,roomId,requestId,name,sex,birthYear,celebrationYear,voiceId,settingsJSON,createdAt,playback) VALUES('birthday',1,'fixture','Guest','male',2000,2026,'voice','{}',1,'scheduled')`)
   expect(Animation.reserveKaraokeCue(identity, cue, {})).toBeNull()

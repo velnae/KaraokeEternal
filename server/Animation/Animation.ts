@@ -111,14 +111,23 @@ export default class Animation {
   }
 
   /** Greetings share the same exclusive intervention, epoch and persisted room fence. */
-  static reserveGreeting (identity: AnimationIdentity, queueId: number, assets: AnimationClip[], durationMs: number, voiceMs: number, text: string, call?: CallContext): Intervention | null {
-    if (birthdayOwnsAudio(identity.roomId)) return null
+  static reserveGreeting (identity: AnimationIdentity, queueId: number, assets: AnimationClip[], durationMs: number, voiceMs: number, text: string, call?: CallContext, onOmission?: (reason: string) => void): Intervention | null {
+    const omit = (reason: string) => {
+      onOmission?.(reason)
+      return null
+    }
+    if (birthdayOwnsAudio(identity.roomId)) return omit('birthday-active')
     const owner = owners.get(identity.roomId)
     const snapshot = Animation.snapshot(identity.roomId)
     const now = Date.now()
-    if (!owner || owner.socketId !== identity.socketId || !owner.unlocked || (call ? !validCall(identity.roomId, call) : !Animation.greetingEnabled(identity.roomId))
-      || snapshot.active || snapshot.blockedUntil > now || (snapshot.ambience && !Animation.transitionAmbience(identity, queueId)) || snapshot.prefs.volume <= 0
-      || Animation.room(identity.roomId).status !== 'open' || voiceMs > (snapshot.voiceBudgetRemainingMs ?? 0)) return null
+    if (!owner || owner.socketId !== identity.socketId) return omit('owner-changed')
+    if (!owner.unlocked) return omit('audio-locked')
+    if (Animation.room(identity.roomId).status !== 'open') return omit('room-closed')
+    if (call ? !validCall(identity.roomId, call) : !Animation.greetingEnabled(identity.roomId)) return omit('request-changed')
+    if (snapshot.active || snapshot.blockedUntil > now) return omit('channel-busy')
+    if (snapshot.ambience && !Animation.transitionAmbience(identity, queueId)) return omit('ambience-occupied')
+    if (snapshot.prefs.volume <= 0) return omit('muted')
+    if (voiceMs > (snapshot.voiceBudgetRemainingMs ?? 0)) return omit('voice-budget')
     if (!assets.length || durationMs <= 0 || durationMs > 25000 - GREETING_START_MS || voiceMs <= 0 || voiceMs > durationMs) throw new Error('La transición supera el tiempo disponible.')
     const id = randomUUID()
     const startBefore = now + GREETING_START_MS
@@ -138,28 +147,42 @@ export default class Animation {
   }
 
   /** Karaoke cues use the same exclusive, finite intervention as announcements. */
-  static reserveKaraokeCue (identity: AnimationIdentity, cue: KaraokeCueContext, status: { queueId?: number }) {
+  static reserveKaraokeCue (identity: AnimationIdentity, cue: KaraokeCueContext, status: { queueId?: number }, onOmission?: (reason: string) => void, readyNow?: readonly string[]) {
     Animation.sweep()
     const now = Date.now()
     const owner = owners.get(identity.roomId)
     const snapshot = Animation.snapshot(identity.roomId)
     const requestId = `karaoke-${cue.kind}-${cue.queueId}-${cue.token}`
-    if (owner?.socketId !== identity.socketId || !owner.unlocked || Animation.room(identity.roomId).status !== 'open'
-      || !karaokeCueAllowed(identity.roomId, cue, identity.socketId)
-      || (cue.kind === 'ended' && status.queueId !== cue.queueId)
-      || db.get('SELECT 1 FROM animationInterventions WHERE roomId=? AND requestId=?', [identity.roomId, requestId])) return null
+    const turn = snapshot.karaokeTurn
+    const remainingMs = cue.kind === 'countdown' && turn?.endsAt ? turn.endsAt - now : null
+    const omit = (reason: string) => {
+      onOmission?.(reason)
+      getLogger('calls').info('Cue omitted room=%s queue=%s kind=%s reason=%s remainingMs=%s', identity.roomId, cue.queueId, cue.kind, reason, remainingMs)
+      return null
+    }
+    if (owner?.socketId !== identity.socketId) return omit('owner-changed')
+    if (!owner.unlocked) return omit('audio-locked')
+    if (Animation.room(identity.roomId).status !== 'open') return omit('room-closed')
+    if (birthdayOwnsAudio(identity.roomId)) return omit('birthday-active')
+    if (remainingMs !== null && remainingMs <= 250) return omit('deadline-expired')
+    if (!karaokeCueAllowed(identity.roomId, cue, identity.socketId) || (cue.kind === 'ended' && status.queueId !== cue.queueId)) return omit('turn-changed')
+    if (db.get('SELECT 1 FROM animationInterventions WHERE roomId=? AND requestId=?', [identity.roomId, requestId])) return omit('already-reserved')
     if (cue.kind === 'reminder') consumeReminder(identity.roomId)
-    if (birthdayOwnsAudio(identity.roomId) || snapshot.active || snapshot.blockedUntil > now || snapshot.prefs.volume <= 0) return null
+    if (snapshot.active || snapshot.blockedUntil > now) return omit('channel-busy')
+    if (snapshot.prefs.volume <= 0) return omit('muted')
     const assets = karaokeCueAssets(identity.roomId, cue)
     const voiceMs = cue.kind === 'reminder' ? assets.reduce((sum, asset) => sum + asset.durationMs, 0) : 0
     const durationMs = assets.reduce((sum, asset) => sum + karaokeCueDuration(asset), 0) + 250
-    if (!assets.length || assets.some(asset => !owner.readyClips.includes(asset.checksum)) || durationMs > 10000
-      || voiceMs > (snapshot.voiceBudgetRemainingMs ?? 0)) return null
+    if (!assets.length) return omit('asset-unavailable')
+    const ready = cue.kind === 'countdown' && readyNow ? readyNow : owner.readyClips
+    if (assets.some(asset => !ready.includes(asset.checksum))) return omit('audio-not-ready')
+    if (durationMs > 10000) return omit('duration-limit')
+    if (voiceMs > (snapshot.voiceBudgetRemainingMs ?? 0)) return omit('voice-budget')
     const id = randomUUID()
     const startBefore = cue.kind === 'countdown'
       ? Math.min(now + 1500, (snapshot.karaokeTurn?.endsAt ?? now) - 250)
       : now + 1500
-    if (startBefore <= now) return null
+    if (startBefore <= now) return omit('deadline-expired')
     const until = startBefore + durationMs
     db.run(`INSERT INTO animationInterventions(interventionId,roomId,requestId,requestedByUserId,clipId,clipChecksum,displayText,durationMs,voiceDurationMs,status,
       playerEpoch,ownerSocketId,contextKey,transitionId,requestedAt,expiresAt,startBefore,leaseUntil,origin,family,sequenceJSON,karaokeCueJSON)

@@ -23,7 +23,8 @@ export function karaokeCuePreparation (roomId: number, queueId: number): Karaoke
   const voice = reminderVoice(roomId)
   const ending = effects.reminderEffectId ?? (voice ? clip(voice) : null)
   const reminder = tablePart && saved?.spokenText === tablePart.text && ending ? [clip(tablePart), ending] : []
-  return { assets: [...new Map([...Object.values(effects).filter((asset): asset is AnimationClip => !!asset), ...reminder].map(asset => [asset.id, asset])).values()], reminder }
+  const cues = [effects.countdownEffectId, ...Object.values(effects)].filter((asset): asset is AnimationClip => !!asset)
+  return { assets: [...new Map([...cues, ...reminder].map(asset => [asset.id, asset])).values()], reminder }
 }
 
 export function karaokeCueAllowed (roomId: number, cue: KaraokeCueContext, owner: string, checkDeadline = true, started = false) {
