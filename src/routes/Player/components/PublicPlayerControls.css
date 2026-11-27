@@ -1,9 +1,46 @@
 .controls {
   position: absolute;
-  bottom: max(1rem, env(safe-area-inset-bottom));
-  right: max(1rem, env(safe-area-inset-right));
+  inset: 0;
   z-index: 30;
-  display: flex;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.controls button {
+  display: inline-flex;
   align-items: center;
-  gap: .5rem;
+  justify-content: center;
+  gap: .625rem;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.controls .play {
+  width: min(220px, calc(100% - 32px));
+  min-height: 64px;
+  font-size: 22px;
+}
+
+.controls .fullscreen, .error {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  background: var(--stage);
+  color: var(--lyrics);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.controls .fullscreen {
+  min-height: 44px;
+  min-width: 44px;
+  border: 1px solid var(--edge);
+}
+
+.error { margin-top: 52px; }
+
+@media (max-width: 600px) {
+  .controls .fullscreen { padding: 8px; }
+  .fullscreen span { display: none; }
 }
