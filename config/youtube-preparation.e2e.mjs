@@ -33,6 +33,8 @@ const uiBase = httpsUi ? 'https://dev-karaoke.puyu.pe/' : `${origin}/`
 const api = await request.newContext()
 let server, browser, context, page, socket, db
 let diagnosticConnection
+let lostGrant = false
+let lostSceneId
 let rejectedGreeting = false
 const errors = []
 const diagnosticLogs = []
@@ -58,8 +60,9 @@ const uploadAudio = async (id, kind, family, seconds, frequency) => {
     'closing-three': 'La música continúa con otro gran tema.',
   }
   const file = path.join(data, `${id}.wav`)
-  const input = id === 'turn' && process.env.KARAOKE_E2E_VOICE_FILE
-    ? ['-i', process.env.KARAOKE_E2E_VOICE_FILE]
+  const recording = id === 'turn' ? process.env.KARAOKE_E2E_VOICE_FILE : kind === 'ambience' ? process.env.KARAOKE_E2E_BED_FILE : undefined
+  const input = recording
+    ? ['-i', recording]
     : ['-f', 'lavfi', '-i', `sine=frequency=${frequency}:sample_rate=44100`, '-t', String(seconds)]
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...input, file])
   const response = await api.post(`${origin}/api/animation/resources/upload`, { multipart: {
@@ -99,7 +102,7 @@ try {
   db = new DatabaseSync(path.join(data, 'database.sqlite3'))
   for (const [index, id] of videos.entries()) {
     db.prepare(`INSERT INTO queue(roomId,userId,prevQueueId,source,externalId,title,artistOrChannel,origin)
-      VALUES(1,1,?,'YOUTUBE',?,?,'Fixture','OPERATOR')`).run(index || null, id, `Preparation ${index + 1}`)
+      VALUES(1,1,?,'YOUTUBE',?,?,'Fixture',?)`).run(index || null, id, `Preparation ${index + 1}`, delayedAcknowledgments ? 'HOUSE' : 'OPERATOR')
   }
   for (const [name, duration] of [['background', 1], ['song', 8]]) {
     const source = name === 'background' ? 'testsrc2=size=320x180:rate=10' : 'color=c=blue:s=320x180:r=10'
@@ -136,9 +139,22 @@ try {
     diagnosticConnection = client
     const upstream = client.connectToServer()
     const delayed = new Set()
+    const lostSceneReplies = new Set()
+    const bedReplies = new Set()
     const lateReceipts = new Set()
     client.onMessage((message) => {
       const match = String(message).match(/^42(\d+)\[/)
+      if (delayedAcknowledgments && match) {
+        const [, action] = JSON.parse(String(message).slice(String(message).indexOf('[')))
+        if (action.type === 'server/ANIMATION_AMBIENCE_STARTED' || (action.type === 'server/ANIMATION_AMBIENCE' && action.payload.transition?.expectedNextQueueId === 3)) bedReplies.add(match[1])
+      }
+      if (delayedAcknowledgments && match && !lostSceneId) {
+        const [, action] = JSON.parse(String(message).slice(String(message).indexOf('[')))
+        if (action.type === 'server/TRANSITION_VIDEO_SCENE' && action.payload.queueId === 4 && !action.payload.finished) {
+          lostSceneId = action.payload.sceneId
+          lostSceneReplies.add(match[1])
+        }
+      }
       if (diagnostics && match) {
         const [, action] = JSON.parse(String(message).slice(String(message).indexOf('[')))
         if (action.type === 'server/ANIMATION_CANCEL') {
@@ -156,13 +172,20 @@ try {
         const [, action] = JSON.parse(String(message).slice(String(message).indexOf('[')))
         if (action.type === 'server/ANIMATION_EVENT' && ['STARTED', 'ASSET_STARTED'].includes(action.payload.event)) lateReceipts.add(match[1])
       }
-      if (slowLink) setTimeout(() => upstream.send(message), 600)
+      if (delayedAcknowledgments && match && String(message).includes('server/ANIMATION_EVENT') && String(message).includes('"event":"STARTED"')) setTimeout(() => upstream.send(message), 1800)
+      else if (slowLink) setTimeout(() => upstream.send(message), 600)
       else upstream.send(message)
     })
     upstream.onMessage((message) => {
       const match = String(message).match(/^43(\d+)\[/)
+      if (match && bedReplies.delete(match[1])) return
+      if (match && lostSceneReplies.delete(match[1])) return
       if (match && lateReceipts.delete(match[1])) setTimeout(() => client.send(message), 1800)
-      else if (match && delayed.delete(match[1])) setTimeout(() => client.send(message), 650)
+      else if (match && delayed.delete(match[1])) {
+        // Lose the first successful reservation *after* the real server committed it.
+        if (!lostGrant && JSON.parse(String(message).slice(String(message).indexOf('[')))[0]?.grant) lostGrant = true
+        else setTimeout(() => client.send(message), 1800)
+      }
       else if (slowLink) setTimeout(() => client.send(message), 600)
       else client.send(message)
     })
@@ -205,10 +228,10 @@ try {
     let hadScene = false
     const recordFrame = (at) => {
       const scene = document.querySelector('[data-testid="transition-scene"]')
-      const youtube = document.querySelector('[data-youtube-mode]')
+      const youtube = document.querySelector('[data-youtube-mode="active"]') ?? document.querySelector('[data-youtube-mode]')
       const incoming = scene?.querySelector('[data-testid="transition-incoming"]')
       if (scene || hadScene) probe.frames.push({ at, scene: !!scene,
-        opacity: scene ? Number(getComputedStyle(scene).opacity) : null, exiting: scene?.dataset.exiting === 'true',
+        opacity: scene ? Number(getComputedStyle(scene).opacity) : null, exiting: scene?.dataset.exiting === 'true', preroll: scene?.dataset.preroll === 'true',
         incoming: incoming?.dataset.queueId,
         notice: /Preparando la próxima canción|Reproducción en pausa/.test(scene?.textContent ?? ''), width: innerWidth,
         youtube: youtube?.dataset.youtubeVideoId, mode: youtube?.dataset.youtubeMode,
@@ -246,7 +269,7 @@ try {
         const clip = decoded.get(node.buffer)
         run = { kind: clip?.kind, clipId: clip?.id, durationMs: clip?.durationMs,
           at: performance.now(), endedAt: null, scene: !!document.querySelector('[data-testid="transition-scene"]'),
-          peakRms: 0, audibleSamples: 0, contextState: this.state }
+          peakRms: 0, audibleSamples: 0, audibleBedAt: [], contextState: this.state }
         probe.audio.push(run)
         // Measure after the gain, not merely whether a source was scheduled.
         meter = this.createAnalyser()
@@ -256,17 +279,24 @@ try {
           meter.getFloatTimeDomainData(samples)
           const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length)
           run.peakRms = Math.max(run.peakRms, rms)
+          if (run.kind === 'ambience' && rms > 0.001) run.audibleBedAt.push(performance.now())
           if (rms > 0.005) run.audibleSamples++
         }, 50)
         return start(...values)
       }
       return node
     }
+    const surfaces = new WeakMap()
+    probe.activePlayer = () => probe.players.findLast(player => {
+      const surface = surfaces.get(player)
+      return surface?.isConnected && surface.dataset.youtubeMode === 'active'
+    })
     const record = (command, videoId, player) => probe.commands.push({ command, videoId, at: performance.now(),
       position: player.getCurrentTime(), scene: !!document.querySelector('[data-testid="transition-scene"]'),
-      mode: document.querySelector('[data-youtube-mode]')?.dataset.youtubeMode })
+      mode: surfaces.get(player)?.dataset.youtubeMode })
     const instrument = Player => new Proxy(Player, {
       construct (Target, args) {
+        const surface = args[0].closest('[data-youtube-mode]')
         const options = args[1]
         const stateChange = options.events.onStateChange
         options.events.onStateChange = (event) => {
@@ -288,6 +318,7 @@ try {
           ready(event)
         }
         const instance = Reflect.construct(Target, args)
+        surfaces.set(instance, surface)
         probe.players.push(instance)
         return instance
       },
@@ -374,11 +405,11 @@ try {
     await button.press('Enter')
   }
   const status = id => db.prepare('SELECT status FROM queue WHERE queueId=?').get(id)?.status
-  const position = () => page.evaluate(() => window.youtubePreparation.players.at(-1)?.getCurrentTime?.() ?? 0)
-  const playbackState = () => page.evaluate(() => window.youtubePreparation.players.at(-1)?.getPlayerState?.())
+  const position = () => page.evaluate(() => window.youtubePreparation.activePlayer()?.getCurrentTime?.() ?? 0)
+  const playbackState = () => page.evaluate(() => window.youtubePreparation.activePlayer()?.getPlayerState?.())
   const finishNaturally = async () => {
     if (realYouTube) await page.evaluate(() => {
-      const player = window.youtubePreparation.players.at(-1)
+      const player = window.youtubePreparation.activePlayer()
       player.seekTo(player.getDuration() - 0.7, true)
     })
   }
@@ -392,7 +423,12 @@ try {
     const voice = parts.find(run => run.kind === 'voice')
     const curtain = parts.find(run => run.kind === 'effect')
     const ambience = parts.find(run => run.kind === 'ambience')
+    if (delayedAcknowledgments) assert.equal(parts.filter(run => run.kind === 'voice').length, 1, `${label}: recovering a receipt must not replay speech`)
     assert.ok(voice && curtain && ambience, `${label}: missing a transition part: ${parts.map(run => run.kind).join(', ')}`)
+    if (delayedAcknowledgments) {
+      assert.equal(parts.filter(run => run.kind === 'ambience').length, 1, `${label}: only one bed per turn`)
+      assert.ok(ambience.audibleBedAt.some(at => at < voice.at) && ambience.audibleBedAt.some(at => at > voice.at && at < voice.endedAt), `${label}: audible bed before and under speech`)
+    }
     assert.equal(voice.contextState, 'running', `${label}: voice requires a running audio context`)
     assert.ok(voice.peakRms > 0.01 && voice.audibleSamples >= voice.durationMs / 100,
       `${label}: voice must have a sustained non-silent signal after gain: ${JSON.stringify(voice)}`)
@@ -419,7 +455,7 @@ try {
       const elapsed = hidden.at - started.at
       if (reducedMotion) assert.ok(elapsed < 400, `${label}: reduced motion must finish without waiting for CSS events (${Math.round(elapsed)} ms)`)
       else {
-        assert.ok(elapsed >= 950 && elapsed < 1600, `${label}: expected a one-second overlap, received ${Math.round(elapsed)} ms`)
+        assert.ok(elapsed >= 1450 && elapsed < 2100, `${label}: expected a 1.5-second overlap, received ${Math.round(elapsed)} ms`)
         const fade = probe.frames.filter(frame => frame.at >= started.at && frame.at <= hidden.at && frame.scene)
         assert.ok(fade.some(frame => frame.opacity > 0.1 && frame.opacity < 0.9), `${label}: intermediate opacity must actually be painted`)
         assert.ok(fade.some(frame => frame.opacity < 0.1), `${label}: the fade must finish before removing the scene`)
@@ -534,7 +570,6 @@ try {
   if (diagnostics) await checkDiagnostic('greeting', greetingFailure)
   if (captureError) throw captureError
   await page.evaluate(() => {
-    window.firstPreparedPlayer = window.youtubePreparation.players.at(-1)
   })
   await keyboard('Pausar')
   await expect.poll(playbackState).toBe(2)
@@ -547,6 +582,7 @@ try {
   await expect.poll(playbackState).toBe(1)
   await finishNaturally()
   await expect(page.locator(`[data-youtube-mode="preparing"][data-youtube-video-id="${videos[1]}"]`)).toHaveCount(1, { timeout: 15000 })
+  await expect.poll(() => page.evaluate(() => window.youtubePreparation.states.some(state => state.state === 0))).toBe(true)
   assert.equal(status(2), 'APPROVED', 'cueing must not start the reserved queue item')
   await keyboard('Pausar')
   await page.waitForTimeout(2300)
@@ -563,7 +599,6 @@ try {
     assert.ok(scenes.length > 0, `${width}px: exercise the transition presentation`)
     assert.ok(scenes.every(frame => !frame.notice), `${width}px: transient notices must never appear`)
   }
-  assert.ok(await page.evaluate(() => window.firstPreparedPlayer === window.youtubePreparation.players.at(-1)), 'song-to-song handoff must preserve the player instance')
   const trace = await page.evaluate(() => window.youtubePreparation.commands)
   const second = trace.filter(command => command.videoId === videos[1])
   assert.ok(second.some(command => command.command === 'cueVideoById' && command.mode === 'preparing'))
@@ -596,17 +631,30 @@ try {
   await expect.poll(() => status(4), { timeout: slowLink ? 35000 : 20000 }).toBe('PLAYING')
   await expect.poll(position, { timeout: 45000 }).toBeGreaterThan(0.2)
   await assertFullTransition(naturalBoundary, 'Natural song-to-song boundary', false)
-  assert.ok(await page.evaluate(() => window.firstPreparedPlayer === window.youtubePreparation.players.at(-1)))
+  if (delayedAcknowledgments) assert.ok(lostGrant, 'Exercise actual recovery after a committed reservation lost its response')
+  if (!realYouTube && !reducedMotion && !slowLink) {
+    const { states, frames } = await page.evaluate(() => window.youtubePreparation)
+    const end = states.find(state => state.state === 0 && state.at > naturalBoundary)
+    const first = frames.find(frame => frame.at < end.at && frame.at >= naturalBoundary && frame.preroll && frame.opacity > 0.01)
+    if (delayedAcknowledgments) {
+      assert.ok(lostSceneId)
+      const events = await page.evaluate(() => window.karaokePlaybackTrace.snapshot().events)
+      assert.ok(events.some(e => e.event === 'background-reply' && e.queueId === 4 && e.state === 'selected' && e.monotonicMs > end.at), 'Recover the lost warmup selection at the boundary')
+    } else {
+      assert.ok(first && end.at - first.at >= 850 && end.at - first.at <= 2000, 'A ready backdrop appears before natural end while the outgoing player stays active')
+      assert.equal(first.mode, 'active')
+    }
+  }
   const finalTrace = await page.evaluate(() => window.youtubePreparation.commands)
   const finalCue = finalTrace.filter(command => command.command === 'cueVideoById' && command.videoId === videos[3]).at(-1)
   const finalPlay = finalTrace.find(command => command.command === 'playVideo' && command.at > finalCue.at)
   assert.ok(finalPlay && finalPlay.at - finalCue.at >= 1900, 'an uninterrupted handoff prepares during the two-second intro')
   assert.equal(finalPlay.scene, true)
   assert.ok(finalPlay.position < 0.1)
-  console.log(`YouTube preparation began ${Math.round(finalPlay.at - finalCue.at)} ms before playback; same player, start position ${finalPlay.position}`)
+  console.log(`YouTube preparation began ${Math.round(finalPlay.at - finalCue.at)} ms before playback; start position ${finalPlay.position}`)
   // Cancel the final overlap. Its old completion must not affect later playback.
   // With a delayed link, the server's PLAYING observation can arrive after the
-  // one-second fade. Earlier frame probes still verify the full visual handoff.
+  // fade. Earlier frame probes still verify the full visual handoff.
   if (!reducedMotion && !slowLink) await expect(page.getByTestId('transition-scene')).toHaveAttribute('data-exiting', 'true')
   await emit('server/PLAYER_REQ_PAUSE')
   await expect.poll(playbackState).toBe(2)
@@ -622,7 +670,7 @@ try {
   assert.deepEqual(errors, [])
   fs.writeFileSync(path.join(data, 'trace.json'), JSON.stringify(await page.evaluate(() => ({ commands: window.youtubePreparation.commands,
     audio: window.youtubePreparation.audio, frames: window.youtubePreparation.frames, states: window.youtubePreparation.states })), null, 2))
-  console.log(`PASS full audio sequence, one-second visual crossfade, buffered background continuity, cancellation, same YouTube player and zero-position start (${httpsUi ? 'shared HTTPS frontend + isolated API' : development ? 'development StrictMode' : 'production'}, ${realYouTube ? 'real YouTube' : 'YouTube fixture'}${reducedMotion ? ', reduced motion' : ''}${diagnostics ? ', diagnostic visibility/logging and recovery' : soundPermission ? ', sound permission recovery' : ''}). Artifacts: ${data}`)
+  console.log(`PASS full audio sequence, 1.5-second visual crossfade, buffered background continuity, cancellation and zero-position start (${httpsUi ? 'shared HTTPS frontend + isolated API' : development ? 'development StrictMode' : 'production'}, ${realYouTube ? 'real YouTube' : 'YouTube fixture'}${reducedMotion ? ', reduced motion' : ''}${diagnostics ? ', diagnostic visibility/logging and recovery' : soundPermission ? ', sound permission recovery' : ''}). Artifacts: ${data}`)
 } catch (error) {
   if (page && !page.isClosed()) {
     await page.screenshot({ path: path.join(data, 'failure.png') })
