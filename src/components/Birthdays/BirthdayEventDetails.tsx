@@ -2,22 +2,25 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import Button from 'components/Button/Button'
 import Modal from 'components/Modal/Modal'
-import { approachLabels, birthdayLabels, type BirthdayEvent } from 'shared/birthdays'
+import { approachLabels, birthdayLabels, type BirthdayEvent, type BirthdayQueueEvent } from 'shared/birthdays'
+import { useAppSelector } from 'store/hooks'
 import { birthdayApi, birthdayUrl } from './api'
-import useBirthdayOverview from './useBirthdayOverview'
+import { useBirthdayQueueOverview } from './useBirthdayOverview'
 import BirthdayForm from './BirthdayForm'
 import BirthdayEventSceneEditor from './BirthdayEventSceneEditor'
 import styles from './Birthdays.css'
 
 export default function BirthdayEventDetails ({ id, initial, listen = false, onClose, onChanged, onScheduled }: {
   id: string
-  initial?: BirthdayEvent
+  initial?: BirthdayEvent | BirthdayQueueEvent
   listen?: boolean
   onClose(removed?: boolean): void
   onChanged?(): void
   onScheduled?(): void
 }) {
-  const { overview, error: loadError, refresh } = useBirthdayOverview()
+  const admin = useAppSelector(state => state.user.isAdmin)
+  const { overview, error: loadError, refresh } = useBirthdayQueueOverview()
+  const full = overview && 'settings' in overview ? overview : null
   const event = overview ? overview.events.find(event => event.id === id) : initial
   const [view, setView] = useState<'details' | 'edit' | 'scene'>('details')
   const [busy, setBusy] = useState(false)
@@ -70,7 +73,7 @@ export default function BirthdayEventDetails ({ id, initial, listen = false, onC
   if (event && view === 'edit') return (
     <BirthdayForm
       event={event}
-      profiles={overview?.settings.rules}
+      profiles={full?.settings.rules}
       onClose={() => setView('details')}
       onSaved={() => {
         changed()
@@ -78,8 +81,8 @@ export default function BirthdayEventDetails ({ id, initial, listen = false, onC
       }}
     />
   )
-  if (event && view === 'scene') return (
-    <BirthdayEventSceneEditor event={event} assets={overview?.assets ?? []} onClose={() => setView('details')} onSaved={changed} />
+  if (admin && event && 'voiceId' in event && view === 'scene') return (
+    <BirthdayEventSceneEditor event={event} assets={full?.assets ?? []} onClose={() => setView('details')} onSaved={changed} />
   )
   const pending = !!event && ['held', 'interrupted'].includes(event.playback)
   const editable = pending && !!event && ['ready', 'failed'].includes(event.preparation)
@@ -110,7 +113,7 @@ export default function BirthdayEventDetails ({ id, initial, listen = false, onC
           )}
           {event.script && <p className={styles.script}>{event.script}</p>}
           <div className={styles.actions}>
-            {pending && event.preparation !== 'failed' && <Button variant='primary' disabled={busy} onClick={() => void execute('schedule')}>Programar</Button>}
+            {pending && (admin ? event.preparation !== 'failed' : event.preparation === 'ready') && <Button variant='primary' disabled={busy} onClick={() => void execute('schedule')}>Programar</Button>}
             {event.playback === 'scheduled' && <Button variant='default' disabled={busy} onClick={() => void execute('unschedule')}>Retirar</Button>}
             {pending && event.preparation === 'failed' && <Button variant='primary' disabled={busy} onClick={() => void execute('retry')}>Reintentar</Button>}
             {editable && (
@@ -125,7 +128,7 @@ export default function BirthdayEventDetails ({ id, initial, listen = false, onC
                 Editar datos
               </Button>
             )}
-            {pending && event.assets.some(asset => asset.kind === 'intro') && event.assets.some(asset => asset.kind === 'video') && (
+            {admin && pending && event.assets.some(asset => asset.kind === 'intro') && event.assets.some(asset => asset.kind === 'video') && (
               <Button
                 variant='default'
                 disabled={busy}
@@ -139,18 +142,20 @@ export default function BirthdayEventDetails ({ id, initial, listen = false, onC
             )}
           </div>
           {busy && <p role='status'>Guardando…</p>}
-          <details>
-            <summary>Opciones avanzadas</summary>
-            <div className={styles.actions}>
-              {editable && <Button variant='default' disabled={busy} onClick={() => void execute('regenerate')}>Generar otro saludo</Button>}
-              {editable && <Button variant='default' disabled={busy} onClick={() => void execute('revoice')}>Actualizar solo la voz</Button>}
-              {editable && event.personalization?.speech.provider === 'gemini' && <Button variant='default' disabled={busy} onClick={() => void execute('lite')}>Probar voz Flash-Lite</Button>}
-            </div>
-            <ul>{event.assets.filter(asset => asset.kind !== 'greeting').map(asset => <li key={asset.id}>{asset.title}</li>)}</ul>
-            {event.personalization && <p>{`${event.personalization.profile.title || 'Predeterminado'} · ${approachLabels[event.personalization.approach]} · ${event.personalization.speech.voice}`}</p>}
-            <Link to='/admin/settings/birthdays?view=settings'>Configuración de cumpleaños</Link>
-          </details>
-          {event.playback !== 'playing' && !['completed', 'cancelled'].includes(event.playback) && <Button variant='danger' disabled={busy} onClick={() => void execute('cancel')}>Cancelar cumpleaños</Button>}
+          {admin && 'voiceId' in event && (
+            <details>
+              <summary>Opciones avanzadas</summary>
+              <div className={styles.actions}>
+                {editable && <Button variant='default' disabled={busy} onClick={() => void execute('regenerate')}>Generar otro saludo</Button>}
+                {editable && <Button variant='default' disabled={busy} onClick={() => void execute('revoice')}>Actualizar solo la voz</Button>}
+                {editable && event.personalization?.speech.provider === 'gemini' && <Button variant='default' disabled={busy} onClick={() => void execute('lite')}>Probar voz Flash-Lite</Button>}
+              </div>
+              <ul>{event.assets.filter(asset => asset.kind !== 'greeting').map(asset => <li key={asset.id}>{asset.title}</li>)}</ul>
+              {event.personalization && <p>{`${event.personalization.profile.title || 'Predeterminado'} · ${approachLabels[event.personalization.approach]} · ${event.personalization.speech.voice}`}</p>}
+              <Link to='/admin/settings/birthdays?view=settings'>Configuración de cumpleaños</Link>
+            </details>
+          )}
+          {admin && event.playback !== 'playing' && !['completed', 'cancelled'].includes(event.playback) && <Button variant='danger' disabled={busy} onClick={() => void execute('cancel')}>Cancelar cumpleaños</Button>}
         </div>
       )}
     </Modal>

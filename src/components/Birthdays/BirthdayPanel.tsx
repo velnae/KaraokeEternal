@@ -1,25 +1,26 @@
 import React, { useRef, useState } from 'react'
 import Button from 'components/Button/Button'
-import { birthdayLabels, type BirthdayEvent } from 'shared/birthdays'
+import { birthdayLabels, type BirthdayEvent, type BirthdayQueueEvent } from 'shared/birthdays'
 import { useAppSelector } from 'store/hooks'
 import { selectBirthdays } from 'store/modules/birthdays'
 import { birthdayApi } from './api'
-import useBirthdayOverview from './useBirthdayOverview'
+import { useBirthdayQueueOverview } from './useBirthdayOverview'
 import BirthdayForm from './BirthdayForm'
 import BirthdayEventDetails from './BirthdayEventDetails'
 import styles from './Birthdays.css'
 
 export default function BirthdayPanel ({ onScheduled }: { onScheduled?(): void }) {
-  const { overview, error: loadError, refresh } = useBirthdayOverview()
+  const { overview, error: loadError, refresh } = useBirthdayQueueOverview()
+  const admin = useAppSelector(state => state.user.isAdmin)
   const queued = useAppSelector(selectBirthdays)
   const [form, setForm] = useState(false)
-  const [details, setDetails] = useState<{ event: BirthdayEvent, listen: boolean, opener: HTMLButtonElement } | null>(null)
+  const [details, setDetails] = useState<{ event: BirthdayEvent | BirthdayQueueEvent, listen: boolean, opener: HTMLButtonElement } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
   const working = useRef(false)
   const panel = useRef<HTMLElement>(null)
   const focusPrepare = () => panel.current?.querySelector<HTMLButtonElement>('[data-birthday-prepare]')?.focus({ preventScroll: true })
-  const execute = async (event: BirthdayEvent, operation: string) => {
+  const execute = async (event: BirthdayEvent | BirthdayQueueEvent, operation: string) => {
     if (working.current) return
     working.current = true
     setBusy(event.id)
@@ -55,14 +56,14 @@ export default function BirthdayPanel ({ onScheduled }: { onScheduled?(): void }
           </div>
           <div className={styles.actions}>
             {event.assets.some(asset => asset.kind === 'greeting') && <Button variant='default' aria-label={`Escuchar saludo de ${event.name}`} onClick={click => setDetails({ event, listen: true, opener: click.currentTarget })}>Escuchar</Button>}
-            <Button variant='primary' disabled={!!busy} onClick={() => void execute(event, event.preparation === 'failed' ? 'retry' : 'schedule')}>{event.preparation === 'failed' ? 'Reintentar' : 'Programar'}</Button>
+            {(admin || ['ready', 'failed'].includes(event.preparation)) && <Button variant='primary' disabled={!!busy} onClick={() => void execute(event, event.preparation === 'failed' ? 'retry' : 'schedule')}>{event.preparation === 'failed' ? 'Reintentar' : 'Programar'}</Button>}
             <Button variant='default' className={styles.more} aria-label={`Más opciones de cumpleaños de ${event.name}`} onClick={click => setDetails({ event, listen: false, opener: click.currentTarget })}>⋯</Button>
           </div>
         </article>
       ))}
       {form && (
         <BirthdayForm
-          profiles={overview?.settings.rules}
+          profiles={overview && 'settings' in overview ? overview.settings.rules : undefined}
           onClose={() => {
             setForm(false)
             requestAnimationFrame(focusPrepare)

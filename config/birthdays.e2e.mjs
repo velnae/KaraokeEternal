@@ -92,7 +92,7 @@ const emit = async (type, payload = {}) => {
   return response.payload
 }
 const event = async id => (await call('birthdays/')).events.find(item => item.id === id)
-try {
+scenario: try {
   await start()
   await call('setup', { username: 'admin', name: 'Operator', newPassword: 'birthday-test', newPasswordConfirm: 'birthday-test' })
   await stop()
@@ -176,6 +176,47 @@ try {
     await context.route(`${uiBase}socket.io/**`, route => forward(route, true))
   }
   const admin = await context.newPage()
+  if (process.env.KARAOKE_E2E_BIRTHDAY_OPERATOR === '1') {
+    assert.ok(!httpsUi, 'Use the isolated local API for the role check')
+    await call('user', { username: 'operator', role: 'operator', name: 'Operator', newPassword: 'birthday-test', newPasswordConfirm: 'birthday-test' })
+    await admin.goto(`${uiBase}account?roomId=1&redirect=${encodeURIComponent('/queue')}`)
+    await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).click()
+    await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('operator')
+    await admin.getByPlaceholder('contraseña', { exact: true }).fill('birthday-test')
+    await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
+    await admin.getByRole('button', { name: 'Preparar cumpleaños' }).click()
+    const form = admin.getByRole('dialog')
+    await form.getByLabel('Nombre', { exact: true }).fill('María')
+    await form.getByLabel('Año de nacimiento').fill('1990')
+    await form.getByRole('button', { name: 'Preparar saludo' }).click()
+    const card = admin.getByRole('article', { name: 'Cumpleaños de María' })
+    await card.getByRole('button', { name: 'Escuchar saludo de María' }).click({ timeout: 30000 })
+    await expect.poll(() => form.locator('audio').evaluate(el => el.currentTime)).toBeGreaterThan(0)
+    await expect(form.getByText('Opciones avanzadas')).toHaveCount(0)
+    const response = await context.request.get(`${base}api/birthdays/queue`)
+    const operational = await response.json()
+    assert.deepEqual(Object.keys(operational), ['events'])
+    const [prepared] = operational.events
+    assert.equal(prepared.playback, 'held')
+    assert.ok(!('voiceId' in prepared) && !('personalization' in prepared))
+    assert.equal((await context.request.post(`${base}api/birthdays/events/${prepared.id}`, { data: { operation: 'regenerate', revision: prepared.revision } })).status(), 403)
+    await form.getByRole('button', { name: 'Programar' }).click()
+    await expect.poll(async () => (await event(prepared.id)).playback).toBe('scheduled')
+    await admin.getByRole('button', { name: 'Retirar', exact: true }).click()
+    await expect.poll(async () => (await event(prepared.id)).playback).toBe('held')
+    await call('rooms', { name: 'Other room', status: 'open' })
+    const otherRoom = await request.newContext()
+    try {
+      assert.equal((await otherRoom.post(`${base}api/login`, { data: { username: 'operator', password: 'birthday-test', roomId: 2 } })).status(), 200)
+      assert.deepEqual((await (await otherRoom.get(`${base}api/birthdays/queue`)).json()).events, [])
+      const held = await event(prepared.id)
+      const foreign = await otherRoom.post(`${base}api/birthdays/events/${prepared.id}`, { data: { operation: 'schedule', revision: held.revision } })
+      assert.equal(foreign.status(), 422)
+      assert.equal((await event(prepared.id)).playback, 'held')
+    } finally { await otherRoom.dispose() }
+    console.log('PASS operator privately prepares and hears a birthday, schedules and withdraws it from the queue')
+    break scenario
+  }
   admin.on('pageerror', error => errors.push(error.message))
   await admin.goto(`${uiBase}account?roomId=1&redirect=${encodeURIComponent('/queue')}`)
   await admin.getByRole('button', { name: 'Tengo una cuenta', exact: true }).click()

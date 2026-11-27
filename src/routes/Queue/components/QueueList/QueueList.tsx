@@ -200,7 +200,7 @@ const QueueList = () => {
 
   return (
     <>
-      {user.isAdmin && <BirthdayPanel key={user.roomId} onScheduled={() => setFilter('queue')} />}
+      {isOperator && <BirthdayPanel key={user.roomId} onScheduled={() => setFilter('queue')} />}
       {isOperator && (
         <div className={styles.filters}>
           {tableOptions.size > 0 && (
