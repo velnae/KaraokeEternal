@@ -4,11 +4,13 @@
 .shadow { box-shadow: 0 8px 28px #0005; }
 .imageSlot { position: relative; flex: 0 0 var(--image-slot-size); height: 0; }
 .messageImage { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: var(--icon-size); height: var(--icon-size); max-width: none; object-fit: contain; }
+.greetingIcon { width: min(var(--icon-size), calc(var(--title-size) * 1.5)); height: auto; }
 .messages { display: grid; min-width: 0; flex: 1; }
 .centered { justify-content: center; }
 .centered .messages { flex: 0 1 auto; }
 .centered .message { text-align: center; }
 .message { grid-area: 1 / 1; align-self: center; opacity: 0; visibility: hidden; transition: opacity 200ms ease, visibility 200ms; overflow-wrap: anywhere; text-align: left; }
+.announcement[data-has-greeting='true'] .message:not(.current) { transition: none; }
 .current { opacity: 1; visibility: visible; }
 .message strong { display: block; font-size: var(--title-size); font-weight: 600; line-height: 1.3; }
 .message p { margin: .25em 0 0; font-size: var(--text-size); line-height: 1.4; }

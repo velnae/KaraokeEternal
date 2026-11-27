@@ -6,6 +6,7 @@ import { guestNameError } from './guestName.js'
 import { hasInvisibleCharacters, hasOffensiveText } from './textModeration.js'
 
 export const GREETINGS = 'server/GREETINGS'
+export const GREETING_ANNOUNCEMENTS_CHANGED = 'client/GREETING_ANNOUNCEMENTS_CHANGED'
 export const GREETING_LIMIT = 220
 // Greetings validate the visible card before starting audio: allow two network
 // round trips inside the existing 25-second transition, not extra playback time.
@@ -41,9 +42,11 @@ export interface Greeting extends GreetingDraft {
   createdAt: number
   turnKey: number | null
   title: string
+  announcementWithdrawnAt?: number | null
   audio?: GreetingAudio
   playback?: { status: GreetingVoiceStatus, reason: string | null }
 }
+export type GreetingAnnouncement = Pick<Greeting, 'greetingId' | 'queueId' | 'message' | 'sender'>
 export interface GreetingSnapshot {
   items: Greeting[]
   opportunities: Record<number, GreetingOpportunity>

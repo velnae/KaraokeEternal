@@ -478,7 +478,7 @@ const QueueItem = ({
             />
           )}
         </Buttons>
-        {greeting && <QueueGreeting operator greeting={greeting} descriptionId={`queue-title-${queueId}`} paused={greetingsPaused} busy={greetingBusy} onRemove={onRemoveGreeting} />}
+        {greeting && <QueueGreeting operator greeting={greeting} descriptionId={`queue-title-${queueId}`} paused={greetingsPaused} busy={greetingBusy} onRemove={onRemoveGreeting} hasAnnouncements={source === 'YOUTUBE' && requestIntent === 'LISTEN'} />}
       </div>
       {isAdmin && menuAnchor && <QueueItemMenu id={menuId} anchor={menuAnchor} title={title} local={isLocal} removable={isRemovable} movable={isMovable} replayable={isReplayable} requeueable={isPlayed} skippable={isSkippable} infoable={isInfoable} blockable={!!onBlock} starred={isStarred} focusLast={focusLast} onClose={closeMenu} onSelect={selectMenuAction} />}
     </div>

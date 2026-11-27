@@ -3,18 +3,20 @@ import Button from 'components/Button/Button'
 import { greetingLabels, greetingAudioLabels, greetingVoiceLabels, type Greeting } from 'shared/greetings'
 import styles from './Greetings.css'
 
-export default function QueueGreeting ({ greeting, paused, busy, onRemove, descriptionId, operator = false }: {
+export default function QueueGreeting ({ greeting, paused, busy, onRemove, descriptionId, operator = false, hasAnnouncements = false }: {
   greeting: Greeting
   paused?: boolean
   busy: boolean
   onRemove?: () => void
   descriptionId?: string
   operator?: boolean
+  hasAnnouncements?: boolean
 }) {
   const pending = greeting.status === 'QUEUED' || greeting.status === 'RESERVED'
   const removed = greeting.status === 'REMOVED' || greeting.status === 'CANCELLED'
   const failed = greeting.status === 'SKIPPED' || greeting.status === 'INTERRUPTED'
-  const canRemove = !!onRemove && (pending || greeting.status === 'DISPLAYING')
+  const announcementOnly = greeting.status === 'DISPLAYED' || failed
+  const canRemove = !!onRemove && (pending || greeting.status === 'DISPLAYING' || (hasAnnouncements && announcementOnly && !greeting.announcementWithdrawnAt))
   return (
     <div className={styles.inline} role='group' aria-label='Saludo' data-greeting-id={greeting.greetingId} data-greeting-status={greeting.status}>
       <div className={styles.inlineText}>
@@ -53,7 +55,7 @@ export default function QueueGreeting ({ greeting, paused, busy, onRemove, descr
               </>
             )}
       </div>
-      {operator && canRemove && <Button className={styles.remove} disabled={busy} aria-busy={busy} aria-describedby={descriptionId} onClick={onRemove}>{greeting.status === 'DISPLAYING' ? 'Retirar saludo' : 'Quitar saludo'}</Button>}
+      {operator && canRemove && <Button className={styles.remove} disabled={busy} aria-busy={busy} aria-describedby={descriptionId} onClick={onRemove}>{announcementOnly ? 'Retirar de los avisos' : greeting.status === 'DISPLAYING' ? 'Retirar saludo' : 'Quitar saludo'}</Button>}
     </div>
   )
 }

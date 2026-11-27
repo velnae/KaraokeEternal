@@ -3,14 +3,16 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { open, close, db } from '../lib/Database.js'
-import { GREETINGS } from '../../shared/greetings.js'
+import { GREETINGS, GREETING_ANNOUNCEMENTS_CHANGED } from '../../shared/greetings.js'
 import handlers from './socket.js'
 import Greetings from './Greetings.js'
 import Rooms from '../Rooms/Rooms.js'
 
 let directory: string
-const actor = { user: { roomId: 1, userId: 1, isAdmin: false }, server: {}, id: 'client' }
+const emit = vi.fn()
+const actor = { user: { roomId: 1, userId: 1, isAdmin: false }, server: { to: vi.fn(() => ({ emit })) }, id: 'client' }
 beforeEach(() => {
+  emit.mockClear()
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'greeting-permissions-'))
   open({ file: path.join(directory, 'db.sqlite'), ro: false })
   db.exec(`INSERT INTO rooms(roomId,name,status,data) VALUES(1,'Room','open','{}'),(2,'Other','open','{}');
@@ -48,6 +50,26 @@ it('requires player authority even for administrators and rejects expired comman
   expect(invoke('pause', { paused: true }, admin).payload.paused).toBe(true)
   expect(invoke('prepareAudio', { enabled: true }, admin).payload.audioEnabled).toBe(true)
   expect(Greetings.audioEnabled(2)).toBe(false)
+})
+
+it('withdraws a delivered greeting from announcements without rewriting its delivery', () => {
+  const admin = { ...actor, user: { ...actor.user, isAdmin: true } }
+  db.run('UPDATE queue SET requestIntent=?', ['LISTEN'])
+  db.run('UPDATE greetings SET status=? WHERE queueId=1', ['DISPLAYED'])
+  expect(invoke('readAnnouncements', {}, actor).error).toContain('autoridad')
+  expect(invoke('readAnnouncements', {}, admin).error).toContain('autoridad')
+  vi.spyOn(Rooms, 'isAuthoritativePlayer').mockReturnValue(true)
+  expect(invoke('readAnnouncements', {}, admin).announcements).toEqual([{ queueId: 1, greetingId: 1, sender: 'Sender', message: 'Own' }])
+  expect(invoke('remove', { greetingId: 1 }).error).toBeTruthy()
+  expect(invoke('pause', { paused: true }, admin).payload.paused).toBe(true)
+  expect(invoke('readAnnouncements', {}, admin).announcements).toEqual([])
+  expect(invoke('pause', { paused: false }, admin).payload.paused).toBe(false)
+  expect(invoke('readAnnouncements', {}, admin).announcements).toHaveLength(1)
+  const removed = invoke('remove', { greetingId: 1 }, admin).payload.items[0]
+  expect(removed).toMatchObject({ status: 'DISPLAYED', announcementWithdrawnAt: expect.any(Number) })
+  expect(invoke('remove', { greetingId: 1 }, admin).payload.items[0]).toEqual(removed)
+  expect(invoke('readAnnouncements', {}, admin).announcements).toEqual([])
+  expect(emit).toHaveBeenCalledWith('action', { type: GREETING_ANNOUNCEMENTS_CHANGED, payload: expect.objectContaining({ roomId: 1, greetingId: 1 }) })
 })
 
 it('rejects revoked table membership before reading or changing messages', () => {

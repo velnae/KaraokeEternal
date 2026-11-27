@@ -5,6 +5,7 @@ import Player from '../Player/Player'
 import PlayerTextOverlay from '../PlayerTextOverlay/PlayerTextOverlay'
 import PlayerQR from '../PlayerQR/PlayerQR'
 import PlayerDisplayOverlay from 'components/PlayerDisplay/PlayerDisplayOverlay'
+import useGreetingAnnouncements from './useGreetingAnnouncements'
 import { turnPlacement } from 'components/PlayerDisplay/layout'
 import useBirthdayPlayer from '../Birthday/useBirthdayPlayer'
 import BirthdayScene from '../Birthday/BirthdayScene'
@@ -73,6 +74,7 @@ const PlayerController = (props: PlayerControllerProps) => {
   const roomId = useAppSelector(state => state.user.roomId)
   const uiError = useAppSelector(state => state.ui.isErrored ? state.ui.errorMessage : null)
   const queueItem = queue.entities[player.queueId]
+  const greetingAnnouncement = useGreetingAnnouncements(roomId, player._authority === 'GRANTED' && prefs.playerDisplay.announcement.enabled, player.queueId)
   const currentIndex = queue.result.indexOf(player.queueId)
   const nextQueueItem = queue.result
     .slice(currentIndex === -1 ? 0 : currentIndex + 1)
@@ -950,7 +952,7 @@ const PlayerController = (props: PlayerControllerProps) => {
         </div>
       )}
       {!showScene && !birthday.scene && idleOverlay}
-      {showBranding && <PlayerDisplayOverlay key={queueItem.queueId} branding={prefs.branding} settings={prefs.playerDisplay} viewport={props} intent={queueItem.requestIntent} isPlaying={player.isPlaying} />}
+      {showBranding && <PlayerDisplayOverlay key={queueItem.queueId} branding={prefs.branding} settings={prefs.playerDisplay} viewport={props} intent={queueItem.requestIntent} isPlaying={player.isPlaying} greeting={greetingAnnouncement} />}
       {developmentTools}
       {roomPrefs?.qr?.isEnabled && !youtubeSong && (
         <PlayerQR

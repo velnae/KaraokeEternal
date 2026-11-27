@@ -3,7 +3,7 @@ import { canOperate } from '../../shared/permissions.js'
 import Rooms from '../Rooms/Rooms.js'
 import Animation from '../Animation/Animation.js'
 import { participation } from '../Tables/admission.js'
-import { GREETINGS, normalizeGreetingMessage } from '../../shared/greetings.js'
+import { GREETINGS, GREETING_ANNOUNCEMENTS_CHANGED, normalizeGreetingMessage } from '../../shared/greetings.js'
 import getLogger from '../lib/Log.js'
 import { transitionReservationTrace } from '../lib/transitionDiagnostics.js'
 import { prepareGreetingTransition } from './transition.js'
@@ -33,6 +33,10 @@ export default {
         return payload[key] as number
       }
       if (operation === 'read') return acknowledge({ payload: Greetings.snapshot(identity, status) })
+      if (operation === 'readAnnouncements') {
+        if (!canOperate(identity) || !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad')
+        return acknowledge({ announcements: Greetings.announcements(roomId, status.queueId) })
+      }
       if (!Number.isFinite(payload?.expiresAt) || payload.expiresAt < Date.now() || payload.expiresAt > Date.now() + 10000) return acknowledge({ error: 'La orden venció. Actualiza e intenta nuevamente.', code: 'COMMAND_EXPIRED' })
       if (operation === 'receipt') {
         if (!canOperate(identity) || !Rooms.isAuthoritativePlayer(sock)) throw new Error('Reproductor sin autoridad')
@@ -96,6 +100,12 @@ export default {
         else if (['audioStarted', 'audioEnded', 'audioFailed'].includes(operation)) Greetings.voiceEvent(roomId, sock.id, number('turnKey'), number('greetingId'), operation, payload.reason)
         else Greetings.event(roomId, sock.id, number('turnKey'), number('greetingId'), operation)
       } else throw new Error('Operación de saludos no válida')
+      if (['attach', 'remove', 'pause'].includes(operation)) {
+        sock.server.to(Rooms.prefix(roomId)).emit('action', {
+          type: GREETING_ANNOUNCEMENTS_CHANGED,
+          payload: { roomId, greetingId: operation === 'remove' ? number('greetingId') : undefined, reset: operation === 'pause' && payload.paused },
+        })
+      }
       Animation.publish(roomId)
       acknowledge({ payload: Greetings.snapshot(identity, status) })
     } catch (error) {

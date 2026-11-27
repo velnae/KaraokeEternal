@@ -121,6 +121,16 @@ export default class Greetings {
     }
   }
 
+  static announcements (roomId: number, currentQueueId = -1) {
+    if (Greetings.paused(roomId) || Rooms.get(roomId).entities[roomId]?.status !== 'open') return []
+    return db.all<Pick<Greeting, 'greetingId' | 'queueId' | 'message' | 'sender'>>(`
+      SELECT g.greetingId,g.queueId,g.message,g.sender FROM greetings g JOIN queue q USING(queueId)
+      WHERE g.roomId=? AND q.roomId=g.roomId AND q.source='YOUTUBE' AND q.requestIntent='LISTEN'
+        AND (q.status IN ('PENDING_APPROVAL','APPROVED','PLAYING') OR (q.queueId=? AND q.status='PLAYED'))
+        AND g.announcementWithdrawnAt IS NULL AND g.status NOT IN ('REMOVED','CANCELLED')`, [roomId, currentQueueId])
+      .filter(item => isGreetingAllowed(item))
+  }
+
   static paused (roomId: number) { return db.get<{ paused: number }>('SELECT paused FROM greetingControls WHERE roomId=?', [roomId])?.paused === 1 }
 
   static audioEnabled (roomId: number) { return db.get<{ audioEnabled: number }>('SELECT audioEnabled FROM greetingControls WHERE roomId=?', [roomId])?.audioEnabled === 1 }
@@ -154,10 +164,14 @@ export default class Greetings {
 
   static remove (identity: Identity, greetingId: number) {
     const item = Greetings.items(identity.roomId).find(item => item.greetingId === greetingId)
-    if (!item || (!canOperate(identity) && (item.userId !== identity.userId || item.status !== 'QUEUED'))) throw new Error('No puedes retirar este saludo')
-    db.run(`UPDATE greetings SET status=?,reason=? WHERE greetingId=? AND status IN ('QUEUED','RESERVED','DISPLAYING')`,
-      [canOperate(identity) ? 'REMOVED' : 'CANCELLED', canOperate(identity) ? 'Retirado por el operador' : 'Cancelado por el remitente', greetingId])
-    if (item.turnKey) {
+    const operator = canOperate(identity)
+    if (!item || (!operator && (item.userId !== identity.userId || item.status !== 'QUEUED'))) throw new Error('No puedes retirar este saludo')
+    const result = db.run(`UPDATE greetings SET status=?,reason=? WHERE greetingId=? AND status IN ('QUEUED','RESERVED','DISPLAYING')`,
+      [operator ? 'REMOVED' : 'CANCELLED', operator ? 'Retirado por el operador' : 'Cancelado por el remitente', greetingId])
+    if (operator && ['DISPLAYED', 'INTERRUPTED', 'SKIPPED'].includes(item.status)) {
+      db.run('UPDATE greetings SET announcementWithdrawnAt=? WHERE greetingId=? AND announcementWithdrawnAt IS NULL', [Date.now(), greetingId])
+    }
+    if (result.changes && item.turnKey) {
       const delivery = db.get<Delivery>('SELECT * FROM greetingTurns WHERE turnKey=?', [item.turnKey])
       if (delivery?.interventionId) Animation.cancel(identity.roomId, 'Saludo retirado', delivery.interventionId)
     }

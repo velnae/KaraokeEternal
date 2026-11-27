@@ -18,6 +18,7 @@ import type { ClientBranding } from '../../shared/branding.js'
 import type { Prefs as PrefsType } from '../../shared/types.js'
 import { validateModeration } from '../../shared/textModeration.js'
 import Greetings from '../Greetings/Greetings.js'
+import { GREETING_ANNOUNCEMENTS_CHANGED } from '../../shared/greetings.js'
 import { validateMusicBlocking } from '../../shared/musicBlocking.js'
 import { db } from '../lib/Database.js'
 
@@ -113,6 +114,7 @@ router.put('/moderation', (ctx) => {
   ctx.io.emit('action', { type: PREFS_PUSH, payload: { moderation } })
   for (const { room, roomId } of Rooms.getActive(ctx.io)) {
     Greetings.reconcile(roomId)
+    ctx.io.to(room).emit('action', { type: GREETING_ANNOUNCEMENTS_CHANGED, payload: { roomId, reset: true } })
     ctx.io.to(room).emit('action', { type: QUEUE_PUSH, payload: Queue.get(roomId) })
   }
 })

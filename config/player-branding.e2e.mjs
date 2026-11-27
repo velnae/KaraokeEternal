@@ -10,6 +10,7 @@ import { installYouTubeTransitionFixture } from './transition-ambience-checks.e2
 import { checkPlayerDisplay } from './player-display-checks.e2e.mjs'
 import { checkPlayerLogo } from './player-logo-checks.e2e.mjs'
 import { checkPhraseBank } from './phrase-bank-checks.e2e.mjs'
+import { checkGreetingAnnouncements } from './greeting-announcement-checks.e2e.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -166,11 +167,13 @@ try {
   for (const page of [editor, player]) page.on('pageerror', error => errors.push(error.message))
   const logoOnly = process.env.KARAOKE_E2E_LOGO_ONLY === '1'
   const phrasesOnly = process.env.KARAOKE_E2E_PHRASES_ONLY === '1'
+  const greetingsOnly = process.env.KARAOKE_E2E_GREETING_ANNOUNCEMENTS_ONLY === '1'
+  if (greetingsOnly) await checkGreetingAnnouncements({ player, call, emit, db, uiBase, data })
   if (phrasesOnly) await checkPhraseBank({ editor, call, uiBase, data })
-  if (!logoOnly && !phrasesOnly) await checkPlayerDisplay({ browser, context, editor, player, api, secondApi, call, emit, db, base, uiBase, data, realYouTube, errors })
+  if (!logoOnly && !phrasesOnly && !greetingsOnly) await checkPlayerDisplay({ browser, context, editor, player, api, secondApi, call, emit, db, base, uiBase, data, realYouTube, errors })
   if (logoOnly || process.env.KARAOKE_E2E_LOGO === '1') await checkPlayerLogo({ editor, player, call, emit, uiBase, data, realYouTube, initialize: logoOnly })
   assert.deepEqual(errors, [])
-  console.log(`PASS ${phrasesOnly ? 'phrase-bank regression' : logoOnly ? 'custom-logo regression' : 'display checklist'} (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS origin + isolated API/socket' : ''}${worktreeUi ? ', worktree assets' : ''}${realYouTube ? ', real YouTube' : ', media fixture'}). Artifacts: ${data}`)
+  console.log(`PASS ${greetingsOnly ? 'greeting announcements' : phrasesOnly ? 'phrase-bank regression' : logoOnly ? 'custom-logo regression' : 'display checklist'} (${development ? 'development StrictMode' : 'production'}${httpsUi ? ', HTTPS origin + isolated API/socket' : ''}${worktreeUi ? ', worktree assets' : ''}${realYouTube ? ', real YouTube' : ', media fixture'}). Artifacts: ${data}`)
 } catch (error) {
   for (const [name, page] of [['player', player], ['editor', editor]]) if (page && !page.isClosed()) await page.screenshot({ path: path.join(data, `${name}-failure.png`) }).catch(() => {})
   console.error({ artifacts: data, errors })
