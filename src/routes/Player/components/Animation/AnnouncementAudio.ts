@@ -33,6 +33,7 @@ export default class AnnouncementAudio {
   private preparing: Promise<string[]> = Promise.resolve([])
   private playingChecksum: string | null = null
   private catalogKeys = new Set<string>()
+  private preparedBed: string | null = null
   private karaokeKeys = new Set<string>()
   karaokeQueueId: number | null = null
   private greetingKeys = new Set<string>()
@@ -61,8 +62,10 @@ export default class AnnouncementAudio {
 
   musicStarted () { this.ambienceHeld = false }
   get readyChecksums () {
-    return [...new Set([this.playingChecksum, this.effectChecksum, this.bedChecksum, ...this.karaokeKeys, ...this.callKeys, ...this.greetingKeys, ...this.buffers.keys()])]
+    const ready = [...new Set([this.playingChecksum, this.effectChecksum, this.bedChecksum, ...this.karaokeKeys, ...this.callKeys, ...this.greetingKeys, ...this.buffers.keys()])]
       .filter((hash): hash is string => !!hash && this.buffers.has(hash)).slice(0, 30)
+    if (this.preparedBed && this.buffers.has(this.preparedBed) && !ready.includes(this.preparedBed)) ready[29] = this.preparedBed
+    return ready
   }
 
   private ensureContext () {
@@ -103,7 +106,7 @@ export default class AnnouncementAudio {
   }
 
   // Decoding does not require autoplay permission; prepare before a possible gesture.
-  async prepare (clips: AnimationClip[], group: 'catalog' | 'karaoke' = 'catalog') {
+  async prepare (clips: AnimationClip[], group: 'catalog' | 'karaoke' = 'catalog', onBedReady?: () => void) {
     const context = this.ensureContext()
     const generation = this.generation
     const assertCurrent = () => {
@@ -116,6 +119,8 @@ export default class AnnouncementAudio {
       assertCurrent()
       this.preparationErrors.clear()
       const desired = new Set(clips.slice(0, 24).map(clip => clip.checksum))
+      const bed = group === 'catalog' ? clips.slice(0, 24).find(clip => clip.kind === 'ambience' && !isKaraokeBedClip(clip)) : undefined
+      if (group === 'catalog') this.preparedBed = bed?.checksum ?? null
       if (group === 'karaoke') this.karaokeKeys = desired
       else this.catalogKeys = desired
       for (const hash of this.buffers.keys()) {
@@ -125,11 +130,12 @@ export default class AnnouncementAudio {
       for (const clip of clips.slice(0, 24)) {
         if (this.buffers.has(clip.checksum)) {
           retained.add(clip.checksum)
+          if (clip === bed) onBedReady?.()
           continue
         }
         let stage = 'download'
         try {
-          const bytes = await this.download(clip.url ?? `api/animation/assets/${encodeURIComponent(clip.id)}`, isKaraokeBedClip(clip) ? 15000 : 4000)
+          const bytes = await this.download(clip.url ?? `api/animation/assets/${encodeURIComponent(clip.id)}`, clip.kind === 'ambience' || isKaraokeBedClip(clip) ? 15000 : 4000)
           assertCurrent()
           stage = 'checksum'
           const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
@@ -145,11 +151,12 @@ export default class AnnouncementAudio {
           if (size > this.maxDecodedBytes) throw new Error('El audio supera la memoria disponible para este canal.')
           for (const hash of this.buffers.keys()) {
             if (this.decodedBytes + size <= this.maxDecodedBytes) break
-            if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.karaokeKeys.has(hash) && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
+            if (hash !== this.playingChecksum && hash !== this.bedChecksum && hash !== this.preparedBed && !this.karaokeKeys.has(hash) && !this.greetingKeys.has(hash) && !this.callKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
           }
           if (this.decodedBytes + size > this.maxDecodedBytes) continue
           this.buffers.set(clip.checksum, buffer)
           retained.add(clip.checksum)
+          if (clip === bed) onBedReady?.()
         } catch {
           assertCurrent()
           this.preparationErrors.set(clip.id, `No se pudo preparar el audio «${clip.title ?? clip.id}». Vuelva a intentarlo.`)
@@ -213,7 +220,7 @@ export default class AnnouncementAudio {
             const size = buffer.length * buffer.numberOfChannels * 4
             for (const hash of this.buffers.keys()) {
               if (this.decodedBytes + size <= this.maxDecodedBytes) break
-              if (hash !== this.playingChecksum && hash !== this.bedChecksum && !this.karaokeKeys.has(hash) && !this.callKeys.has(hash) && !this.greetingKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
+              if (hash !== this.playingChecksum && hash !== this.bedChecksum && hash !== this.preparedBed && !this.karaokeKeys.has(hash) && !this.callKeys.has(hash) && !this.greetingKeys.has(hash) && !retained.has(hash)) this.buffers.delete(hash)
             }
             stage = 'memory'
             if (this.decodedBytes + size > this.maxDecodedBytes) throw new Error('memory')
@@ -304,7 +311,7 @@ export default class AnnouncementAudio {
       }
       this.bedFinish = finish
       this.bedVolumeChange = (value) => {
-        if (stopped || settled || context.currentTime >= until - 0.25) return
+        if (level === value || stopped || settled || context.currentTime >= until - 0.25) return
         level = value
         gain.gain.cancelScheduledValues(context.currentTime)
         gain.gain.setValueAtTime(gain.gain.value, context.currentTime)
@@ -520,6 +527,7 @@ export default class AnnouncementAudio {
     this.buffers.clear()
     this.preparationErrors.clear()
     this.catalogKeys.clear()
+    this.preparedBed = null
     this.karaokeKeys.clear()
     this.karaokeQueueId = null
     this.bedDucked = false

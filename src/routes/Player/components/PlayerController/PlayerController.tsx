@@ -411,7 +411,9 @@ const PlayerController = (props: PlayerControllerProps) => {
       if (scene) {
         // A scene owns one choice across intro, speech and loading. Preview and
         // audio-permit renewals must not consume another position in the rotation.
+        const beginBed = () => turnValid() ? animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null, turnValid) : null
         const firstVisual = prepared?.visual ?? resolveVisual(scene.id, upcoming?.queueId ?? null)
+        const earlyBed = upcoming?.requestIntent !== 'SING' ? beginBed() : null
         let visual = await firstVisual
         // An unanswered warmup is not a choice of no video. Recover the same
         // scene (and rotation slot) instead of carrying an empty backdrop forward.
@@ -425,7 +427,7 @@ const PlayerController = (props: PlayerControllerProps) => {
           await karaokeCuesRef.current.play({ queueId: upcoming.queueId, kind: 'entry', token: manualTurn?.runId ?? scene.id })
           if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
         }
-        const grant = await animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null)
+        const grant = await (earlyBed ?? beginBed())
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
         if (!scene.background && grant?.background) {
           scene.background = grant.background

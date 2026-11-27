@@ -36,6 +36,9 @@ export function preparationClips (roomId: number) {
   const ambient = Animation.ambience(roomId)
   if (ambient) add(ambient.clip)
   const karaokeBeds = karaokeBedClips(roomId)
+  // Decode one eligible transition bed before filling the cache with voice families.
+  const beds = prefs.ambienceEnabled ? eligibleAmbience(clips, prefs) : []
+  if (beds.length) add(beds[0])
   if (karaokeBeds.length) {
     // Keep a usable voice for each enabled event before warming long backgrounds.
     const families = new Set(result.filter(clip => clip.kind === 'voice').map(clip => clip.family))
@@ -46,8 +49,8 @@ export function preparationClips (roomId: number) {
     }
   }
   if (prefs.ambienceEnabled) {
-    let remaining = ambient ? 1 : 2
-    for (const clip of eligibleAmbience(clips, prefs)) {
+    let remaining = 1
+    for (const clip of beds) {
       if (selected.has(clip.checksum)) continue
       add(clip)
       if (--remaining === 0) break

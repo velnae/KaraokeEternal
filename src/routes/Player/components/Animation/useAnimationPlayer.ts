@@ -239,7 +239,11 @@ export default function useAnimationPlayer () {
     const current = () => alive && mounted.current && token === preparationVersion.current && owner === audioOwnerKey()
     void fetchPreparedAnimationClips().then(async (clips): Promise<void> => {
       if (!current()) return undefined
-      await audio.current.prepare(clips)
+      await audio.current.prepare(clips, 'catalog', () => {
+        if (!current()) return
+        preparedOwner.current = owner
+        void publishReadiness()
+      })
       if (current()) {
         preparedOwner.current = owner
         await publishReadiness()
@@ -301,7 +305,7 @@ export default function useAnimationPlayer () {
     await transitionCompletion.current
   }, [])
 
-  const startTransition = useCallback(async (sourceQueueId: number | null, expectedNextQueueId: number | null) => {
+  const startTransition = useCallback(async (sourceQueueId: number | null, expectedNextQueueId: number | null, turnValid: () => boolean = () => true) => {
     const state = store.getState()
     const current = state.animation.snapshot
     const item = expectedNextQueueId === null ? null : ensureState(state.queue).entities[expectedNextQueueId]
@@ -309,19 +313,32 @@ export default function useAnimationPlayer () {
     const generation = version.current
     if (!socket.connected || !audio.current.ready || audio.current.waitingForMusic || state.player._authority !== 'GRANTED'
       || !current || (!karaoke && !current.prefs.ambienceEnabled) || !voiceRequested(current)) return null
+    const socketId = socket.id
+    const ownsTurn = () => generation === version.current && mounted.current && socket.connected && socket.id === socketId && turnValid()
+    const currentPermit = () => {
+      const fresh = store.getState()
+      const snapshot = fresh.animation.snapshot
+      const permit = snapshot?.ambience
+      if (ownsTurn() && fresh.player._authority === 'GRANTED' && permit?.transition && permit.ownerSocketId === socketId
+        && permit.playerEpoch === current.playerEpoch && snapshot.playerEpoch === current.playerEpoch && permit.until > animationTime() + 200
+        && permit.transition.sourceQueueId === sourceQueueId && permit.transition.expectedNextQueueId === expectedNextQueueId
+        && (permit.karaoke ? snapshot.karaokeCallsEnabled || snapshot.karaokeTurn : snapshot.prefs.ambienceEnabled && snapshot.prefs.ambienceVolume !== 0)) return permit
+    }
     let grant: AmbienceGrant | undefined
     try {
       await stopAmbience()
       await stopTransition(30)
-      store.dispatch(playerStatusCancel())
-      const status = Object.fromEntries(Object.entries(state.player).filter(([key]) => !key.startsWith('_')))
-      await animationRequest(PLAYER_EMIT_STATUS, { ...status, visualizer: state.playerVisualizer }, ANIMATION_LIMITS.startMs)
-      if (generation !== version.current || !mounted.current) return null
-      const reply = await animationRequest(ANIMATION_AMBIENCE, { playerEpoch: current.playerEpoch, transition: { sourceQueueId, expectedNextQueueId } }, ANIMATION_LIMITS.startMs)
+      if (!ownsTurn()) return null
+      const reserve = () => animationRequest(ANIMATION_AMBIENCE, { playerEpoch: current.playerEpoch, transition: { sourceQueueId, expectedNextQueueId } }, ANIMATION_LIMITS.startMs)
+      const reply = await transitionRequest(reserve, syncAnimation, ownsTurn).catch(async (error) => {
+        if (!(error instanceof AnimationReceiptTimeout) || !ownsTurn()) throw error
+        if (!currentPermit()) await syncAnimation()
+        return { ambience: currentPermit() }
+      })
       grant = reply.ambience
       if (!grant) return null
       const fresh = store.getState()
-      if (generation !== version.current || !mounted.current || fresh.player._authority !== 'GRANTED' || !socket.connected
+      if (currentPermit()?.id !== grant.id
         || audio.current.waitingForMusic || (grant.karaoke ? !fresh.animation.snapshot?.karaokeCallsEnabled && !fresh.animation.snapshot?.karaokeTurn : !fresh.animation.snapshot?.prefs.ambienceEnabled)) throw new Error('La transición cambió antes de iniciar')
       const completion = audio.current.playBed(grant.clip.checksum, grant.volume ?? ambienceBedVolume(fresh.animation.snapshot!.prefs), grant.until - animationTime() - 200, grant.clip.loop !== false)
       transitionGrant.current = grant
@@ -333,7 +350,9 @@ export default function useAnimationPlayer () {
         if (transitionGrant.current?.id === id) transitionGrant.current = null
         return undefined
       })
-      void animationRequest(ANIMATION_AMBIENCE_STARTED, { id, runId: id }, ANIMATION_LIMITS.startMs).catch(() => {
+      void animationRequest(ANIMATION_AMBIENCE_STARTED, { id, runId: id }, ANIMATION_LIMITS.startMs).catch((error) => {
+        // This receipt records usage; the live permit already authorizes playback.
+        if (error instanceof AnimationReceiptTimeout && currentPermit()?.id === id) return
         if (transitionGrant.current?.id === id) void audio.current.stopBed(30)
       })
       return grant

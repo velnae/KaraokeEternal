@@ -84,6 +84,25 @@ it('publishes the prepared Karaoke reminder ahead of a full ordinary readiness w
   } finally { audio.close() }
 })
 
+it('advertises a decoded transition bed before other downloads and retains it under greeting pressure', async () => {
+  const audio = new AnnouncementAudio()
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => ({ duration: 10, length: 441000, numberOfChannels: 2 }) } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(url.split('/').pop())))
+  const clip = (id: string, kind: 'ambience' | 'voice') => ({ id, kind, checksum: createHash('sha256').update(id).digest('hex'), durationMs: 10000, url: `api/${id}` } as AnimationClip & { url: string })
+  const bed = clip('bed', 'ambience')
+  const voices = Array.from({ length: 18 }, (_, i) => clip(`voice-${i}`, 'voice'))
+  const advertised: string[][] = []
+  try {
+    await audio.prepare([bed, ...voices], 'catalog', () => advertised.push(audio.readyChecksums))
+    expect(advertised).toEqual([[bed.checksum]])
+    await audio.prepareGreetingAssets([{ ...clip('greeting', 'voice'), role: 'greeting' }])
+    await audio.prepareGreetingAssets([{ ...clip('greeting', 'voice'), role: 'greeting' }, { ...clip('intro', 'voice'), role: 'intro' }])
+    expect(audio.readyChecksums).toContain(bed.checksum)
+    expect(audio.decodedBytes).toBeLessThanOrEqual(audio.maxDecodedBytes)
+  } finally { audio.close() }
+})
+
 it('does not evict the current Karaoke reminder to make room for greeting preparation', async () => {
   const audio = new AnnouncementAudio()
   audio.context = { state: 'running', close: async () => {}, decodeAudioData: async (bytes: ArrayBuffer) => {
@@ -123,6 +142,21 @@ it('records failed preparation stages and rejects a late response for an obsolet
   expect(await pending).toEqual([])
   expect(decode).not.toHaveBeenCalled()
   audio.close()
+})
+
+it('identifies a decode error even after the presentation downloads with a matching checksum', async () => {
+  const audio = new AnnouncementAudio()
+  const diagnostic = { diagnosticId: crypto.randomUUID(), flag: vi.fn(), record: vi.fn(), flush: vi.fn() }
+  audio.context = { state: 'running', close: async () => {}, decodeAudioData: async () => {
+    throw new Error('Invalid audio')
+  } } as unknown as AudioContext
+  vi.stubGlobal('document', { baseURI: 'http://localhost/' })
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('turn')))
+  const checksum = createHash('sha256').update('turn').digest('hex')
+  try {
+    expect(await audio.prepareGreetingAssets([{ id: 'call', role: 'call', url: 'api/turn', checksum, durationMs: 1000, kind: 'voice' } as GreetingAsset], () => true, true, diagnostic)).toEqual([])
+    expect(diagnostic.flag).toHaveBeenCalledWith('turn-asset-failed', { checksum, state: 'decode' })
+  } finally { audio.close() }
 })
 
 it('retains the call and its fallbacks alongside greetings under catalog memory pressure', async () => {

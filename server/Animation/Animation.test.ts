@@ -100,6 +100,14 @@ function autoInput (overrides: Partial<Reservation> = {}): Reservation {
 }
 
 describe('automatic sessions and ambient authority', () => {
+  it('keeps a normal transition silent when its prepared ambience is disabled', async () => {
+    await automaticCatalog()
+    Animation.ready(identity, true, catalogClips(1).map(asset => asset.checksum), true)
+    Animation.control(1, Animation.state(1).controlVersion, { ambienceEnabled: false })
+    expect(Animation.reserveTransitionAmbience(identity, Animation.state(1).playerEpoch, { queueId: -1 }, { sourceQueueId: null, expectedNextQueueId: null })).toBeNull()
+    expect(Animation.ambience(1)).toBeNull()
+  })
+
   it('keeps a bounded transition bed through the matching announcement without adding another bed', async () => {
     await automaticCatalog()
     Animation.ready(identity, true, catalogClips(1).map(asset => asset.checksum), true)
