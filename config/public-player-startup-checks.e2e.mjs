@@ -6,7 +6,7 @@ import { installYouTubeTransitionFixture } from './transition-ambience-checks.e2
 
 // The login tab has already closed. Transfer auth only: this document has never
 // received a user gesture. Keep report data bounded; never save cookies or packets.
-export async function checkColdStartup ({ browser, auth, base, data, source, emit }) {
+export async function checkColdStartup ({ browser, auth, base, data, source, emit, bed }) {
   const context = await browser.newContext({ storageState: auth })
   const report = { source, controls: {}, events: [] }
   const output = path.join(data, `cold-start-${source}.json`)
@@ -24,6 +24,7 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
     })
     if (source === 'youtube') await installYouTubeTransitionFixture(context, path.join(data, 'song.mp4'), true)
     const page = await context.newPage()
+    if (source === 'local') await page.route(`**/api/animation/assets/${bed.id}`, route => route.fulfill({ status: 503, body: 'Unavailable fixture bed' }))
     const mark = (event, fields = {}) => report.events.push({ event, at: Date.now(), ...fields })
     const captureControls = async phase => {
       report.controls[phase] = await page.locator('button:visible,a:visible').evaluateAll(nodes => nodes.map(n => n.getAttribute('aria-label') || n.textContent.trim()).filter(Boolean))
@@ -41,6 +42,23 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
     await expect(play).toBeVisible()
     await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.playerPresent).toBe(true)
     mark('player-present')
+    if (source === 'local') {
+      await expect.poll(() => page.evaluate(hash => window.karaokePlaybackTrace.snapshot().events.some(e => e.event === 'catalog-asset-failed' && e.checksum === hash), bed.checksum), { timeout: 15000 }).toBe(true)
+      await expect(page.getByRole('alert')).toHaveCount(0)
+      await expect(page.getByLabel('Herramientas de desarrollo')).toHaveCount(0)
+      const other = await context.newPage()
+      let requests = 0
+      other.on('websocket', ws => ws.on('framesent', ({ payload }) => {
+        if (String(payload).includes('"server/PLAYER_REQ_PLAY"')) requests++
+      }))
+      await other.goto(`${base}player`)
+      await expect(other.getByRole('heading', { name: 'Ya hay un reproductor activo' })).toBeVisible()
+      await expect(other.getByRole('button', { name: 'Reproducir', exact: true })).toHaveCount(0)
+      await other.keyboard.press('Enter')
+      await other.close()
+      assert.equal(requests, 0)
+      await page.bringToFront()
+    }
     await captureControls('beforePlay')
     assert.deepEqual(report.controls.beforePlay.sort(), ['Pantalla completa', 'Reproducir'])
     assert.equal(await page.evaluate(() => window.coldStartup.activatedAtLoad), false)

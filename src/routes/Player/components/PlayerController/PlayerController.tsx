@@ -843,12 +843,13 @@ const PlayerController = (props: PlayerControllerProps) => {
   usePlayerDiagnostic('audio-status', audioStatus, 'info')
   usePlayerDiagnostic('greeting', greetings.error)
   usePlayerDiagnostic('animation', animation.error)
+  usePlayerDiagnostic('birthday', birthday.error)
   const developmentTools = DevPlayerTools && (
     <React.Suspense fallback={null}>
       <DevPlayerTools
         key={player.queueId}
         phase={phase}
-        diagnostics={[audioStatus, greetings.error, animation.error, uiError, player.isErrored && player.errorMessage].filter(Boolean) as string[]}
+        diagnostics={[audioStatus, greetings.error, animation.error, birthday.error, uiError, player.isErrored && player.errorMessage].filter(Boolean) as string[]}
         canSeek={queueItem?.source === 'YOUTUBE' && !foregroundScene && !player.isAtQueueEnd && !player.isErrored}
         isPlaying={player.isPlaying && !birthday.busy && !(startTurn && startTurn.queueId === queueItem?.queueId && startTurn.phase !== 'released')}
         onSeek={target => mediaPlayerRef.current?.seekForDevelopment(target)}
@@ -857,7 +858,9 @@ const PlayerController = (props: PlayerControllerProps) => {
   )
   if (player._authority !== 'GRANTED') return (
     <>
-      {player._authority === 'DENIED' && <div className={styles.authorityNotice} role='status'><h1>Ya hay un reproductor activo</h1></div>}
+      <div className={styles.authorityNotice} role='status'>
+        {player._authority === 'DENIED' ? <h1>Ya hay un reproductor activo</h1> : <p>Conectando el reproductor…</p>}
+      </div>
       {developmentTools}
     </>
   )
@@ -949,7 +952,7 @@ const PlayerController = (props: PlayerControllerProps) => {
           {(startTurn || presentedTracks.incoming?.requestIntent === 'SING') && <KaraokeMascot imageId={animation.snapshot?.karaokeStage?.mascotImageId ?? prefs.playerDisplay.logo.animatedImageId ?? prefs.playerDisplay.logo.staticImageId} fallback={prefs.branding.logoSrc} countdown={startTurn?.phase === 'countdown'} />}
         </PlayerTransitionScene>
       )}
-      <PublicPlayerControls showPlay={!player.isPlaying || birthday.needsSound || animation.needsGesture} />
+      <PublicPlayerControls showPlay={!player.isErrored && (!player.isPlaying || birthday.needsSound)} />
       {birthday.needsVolume && (
         <div className={animationStyles.unlock}>
           <p role='status'>Suba el volumen desde administración para iniciar el cumpleaños.</p>

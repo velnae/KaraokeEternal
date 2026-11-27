@@ -242,7 +242,7 @@ scenario: try {
   if (coldSource) {
     const auth = await context.storageState()
     await context.close()
-    await checkColdStartup({ browser, auth, base, data, source: coldSource, emit })
+    await checkColdStartup({ browser, auth, base, data, source: coldSource, emit, bed })
     break scenario
   }
   await expect(selection).toHaveValue('')

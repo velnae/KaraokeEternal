@@ -19,7 +19,15 @@ interface PlayerTextOverlayProps {
 const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueItem, queueItem, width, height, turnPlacement }: PlayerTextOverlayProps) => {
   let content
 
-  if (isQueueEmpty || (isAtQueueEnd && !nextQueueItem)) {
+  if (isErrored) {
+    content = (
+      <section className={styles.panel} role='alert'>
+        <Icon icon='ALERT_OUTLINE' size={44} />
+        <h1>No se pudo reproducir</h1>
+        <p>Revise la canción desde la cola.</p>
+      </section>
+    )
+  } else if (isQueueEmpty || (isAtQueueEnd && !nextQueueItem)) {
     content = (
       <section className={styles.panel} role='status'>
         <Icon icon='MICROPHONE' size={48} />
@@ -31,14 +39,6 @@ const PlayerTextOverlay = ({ isQueueEmpty, isAtQueueEnd, isErrored, nextQueueIte
       <section className={styles.panel}>
         <p className={styles.singer} translate='no'>{nextQueueItem?.userDisplayName}</p>
         <h1 translate='no'>{nextQueueItem?.title || 'Listo para cantar'}</h1>
-      </section>
-    )
-  } else if (isErrored) {
-    content = (
-      <section className={styles.panel} role='alert'>
-        <Icon icon='ALERT_OUTLINE' size={44} />
-        <h1>No se pudo reproducir</h1>
-        <p>Revise la canción desde la cola.</p>
       </section>
     )
   } else {
