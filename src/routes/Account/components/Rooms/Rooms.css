@@ -39,3 +39,15 @@
   .table td:first-child { width: auto; }
   .actions .createButton { width: 100%; }
 }
+.accessLinks {
+  margin-bottom: 16px;
+
+  h3 { margin: 0 0 8px; }
+
+  div {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+}

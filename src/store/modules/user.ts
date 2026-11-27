@@ -8,6 +8,7 @@ import HttpApi from 'lib/HttpApi'
 import Persistor from 'store/Persistor'
 import { fetchPrefs } from './prefs'
 import { TABLE_ACCESS_REQUIRED } from 'shared/tableAccess'
+import { canOperate } from 'shared/permissions'
 import { birthdayPreviewMemory } from 'lib/birthdayPreviewMemory'
 import { karaokePreviewMemory } from 'lib/karaokePreviewMemory'
 import {
@@ -25,15 +26,28 @@ const api = new HttpApi('')
 
 const receiveAccount = createAction<object>(ACCOUNT_RECEIVE)
 
+type LoginAccess = 'staff' | 'guest' | 'table'
+
+function loginDestination (user: { role?: string }, requested: string | null) {
+  if (!requested?.startsWith('/') || requested.startsWith('//') || requested.includes('\\')) return null
+  const url = new URL(requested, window.location.origin)
+  if (url.origin !== window.location.origin) return null
+  const staff = canOperate(user)
+  if (!/^\/(?:library|queue|requests)\/?$/.test(url.pathname)
+    && !(staff && /^\/(?:admin(?:\/.*)?|player\/?)$/.test(url.pathname))) return null
+  return url.pathname + url.search + url.hash
+}
+
 // ------------------------------------
 // Login
 // ------------------------------------
 export const login = createAsyncThunk(
   LOGIN,
-  async (creds: object, thunkAPI) => {
+  async ({ access, ...creds }: { access?: LoginAccess, username: string, password: string, roomId: number | null, roomPassword: string, invitation?: string }, thunkAPI) => {
+    const requested = new URLSearchParams(window.location.search).get('redirect')
     // calls api endpoint that should set an httpOnly cookie with
     // our JWT, then establish the sockiet.io connection
-    const user = await api.post('login', {
+    const user = await api.post<{ role: string }>(access ? `login/${access}` : 'login', {
       body: creds,
     })
     sessionStorage.removeItem('tableInvitation')
@@ -49,11 +63,13 @@ export const login = createAsyncThunk(
     await Persistor.get().flush()
 
     // redirect in query string?
-    const redirect = new URLSearchParams(window.location.search).get('redirect')
+    const redirect = access === 'table' ? null : loginDestination(user, requested)
 
     if (redirect) {
       AppRouter.navigate(redirect)
-    } else if (window.location.pathname.endsWith('/join')) {
+    } else if (access === 'staff') {
+      AppRouter.navigate(user.role === 'admin' ? '/admin/rooms' : '/queue', { replace: true })
+    } else if (access || window.location.pathname.endsWith('/join')) {
       AppRouter.navigate('/library', { replace: true })
     }
   },
@@ -90,7 +106,7 @@ export const createAccount = createAsyncThunk<void, FormData, { state: RootState
   async (data: FormData, thunkAPI) => {
     const isFirstRun = thunkAPI.getState().prefs.isFirstRun
 
-    const user = await api.post(isFirstRun ? 'setup' : 'user', {
+    const user = await api.post<{ role: string }>(data.has('invitation') ? 'table-guest' : isFirstRun ? 'setup' : 'user', {
       body: data,
     })
     sessionStorage.removeItem('tableInvitation')
@@ -106,13 +122,13 @@ export const createAccount = createAsyncThunk<void, FormData, { state: RootState
     await Persistor.get().flush()
 
     // redirect in query string?
-    const redirect = new URLSearchParams(window.location.search).get('redirect')
+    const redirect = loginDestination(user, new URLSearchParams(window.location.search).get('redirect'))
 
     if (data.get('role') === 'guest') {
       AppRouter.navigate('/library')
     } else if (redirect) {
       AppRouter.navigate(redirect)
-    } else if (window.location.pathname.endsWith('/join')) {
+    } else if (/\/(?:join|invitados)\/?$/.test(window.location.pathname)) {
       AppRouter.navigate('/library', { replace: true })
     }
   },

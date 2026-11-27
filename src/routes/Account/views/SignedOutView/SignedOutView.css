@@ -29,6 +29,13 @@
 
 .panel { padding: 24px; background: var(--equipment); border: 1px solid var(--edge); border-radius: 22px; }
 
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.room { margin-bottom: 16px; }
+
 .radioContainer {
   display: flex;
   flex-direction: column;

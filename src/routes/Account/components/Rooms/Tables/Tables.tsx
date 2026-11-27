@@ -11,6 +11,7 @@ import TableVoice from './TableVoice'
 import type { Room } from 'shared/types'
 import { tableMode, type RoomTable, type TableMode } from 'shared/tableAccess'
 import styles from './Tables.css'
+import CopyAccessLink from 'components/CopyAccessLink/CopyAccessLink'
 
 const api = new HttpApi()
 const label = (table: RoomTable) => `Mesa ${table.code}${table.name ? ` · ${table.name}` : ''}`
@@ -311,6 +312,7 @@ export default function Tables ({ room, onClose }: { room: Room, onClose: () => 
               {notice.startsWith('QR renovado') && <p className={styles.notice} role='status'>{notice}</p>}
               {error && <p className={styles.error} role='alert'>{error}</p>}
               <div className={styles.dialogActions}>
+                <CopyAccessLink className={styles.secondary} url={joinURL(qr.token)} name={label(qr.table)} label='Copiar enlace de la mesa' />
                 <Button
                   className={styles.secondary}
                   onClick={() => {

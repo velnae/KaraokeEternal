@@ -158,6 +158,44 @@ it('applies table requirement to returning accounts and reuses guest identity on
 it('keeps room-password requirements for table QR admission', async () => {
   const { default: crypto } = await import('../lib/crypto.js')
   db.run('UPDATE rooms SET password = ? WHERE roomId = 1', [await crypto.hash('room-secret')])
-  expect((await call('user', { role: 'guest', name: 'Singer', roomId: 1, invitation: token })).status).toBe(401)
-  expect((await call('user', { role: 'guest', name: 'Singer', roomId: 1, invitation: token, roomPassword: 'room-secret' })).status).toBe(200)
+  expect((await call('table-guest', { name: 'Singer', roomId: 1, invitation: token })).status).toBe(401)
+  const admission = await call('table-guest', { name: 'Singer', roomId: 1, invitation: token, roomPassword: 'room-secret' })
+  expect(admission.status).toBe(200)
+  expect(await admission.json()).toMatchObject({ role: 'guest', tableId })
+})
+
+it('restricts dedicated access by role and preserves table admission for registered singers', async () => {
+  const password = 'test-password'
+  for (const role of ['standard', 'operator', 'manager', 'admin']) {
+    await User.create({ username: role, name: role, newPassword: password, newPasswordConfirm: password, image: undefined }, role)
+  }
+  for (const username of ['operator', 'manager', 'admin']) {
+    const creds = { username, password, roomId: 1 }
+    const staff = await call('login/staff', creds)
+    expect(staff.status).toBe(200)
+    expect(await staff.json()).toMatchObject({ role: username })
+    for (const [route, data] of [['login/guest', creds], ['login/table', { ...creds, invitation: token }]] as const) {
+      const denied = await call(route, data)
+      expect(denied.status).toBe(403)
+      expect(denied.headers.get('set-cookie')).toBeNull()
+    }
+  }
+  const singer = { username: 'standard', password, roomId: 1 }
+  expect((await call('login/staff', singer)).status).toBe(403)
+  expect((await call('login/guest', singer)).status).toBe(403)
+  expect((await call('login/table', singer)).status).toBe(403)
+  const admitted = await call('login/table', { ...singer, invitation: token })
+  expect(admitted.status).toBe(200)
+  expect(await admitted.json()).toMatchObject({ role: 'standard', tableId })
+})
+
+it('requires a valid QR for the name-only entry point and always creates a guest', async () => {
+  const name = { name: 'Ana', roomId: 1 }
+  expect((await call('table-guest', name)).status).toBe(403)
+  expect((await call('table-guest', { ...name, invitation: 'invalid' })).status).toBe(401)
+  expect((await call('table-guest', { ...name, invitation: token }, adminCookie)).status).toBe(401)
+  expect(db.all('SELECT * FROM users')).toHaveLength(0)
+  const created = await call('table-guest', { ...name, invitation: token })
+  expect(created.status).toBe(200)
+  expect(await created.json()).toMatchObject({ name: 'Ana', role: 'guest', tableId })
 })

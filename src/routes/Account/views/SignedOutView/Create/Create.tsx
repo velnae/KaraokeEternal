@@ -14,6 +14,7 @@ interface CreateProps {
   onPasswordChange: (password: string) => void
   onSubmit: (params: { name: string, image: Blob | undefined, passwordConfirm: string }) => void
   onFirstFieldRef: (el: HTMLInputElement | null) => void
+  children?: React.ReactNode
 }
 
 const Create = ({
@@ -25,6 +26,7 @@ const Create = ({
   onPasswordChange,
   onSubmit,
   onFirstFieldRef,
+  children,
 }: CreateProps) => {
   const terms = useAppSelector(state => state.prefs.moderation.terms)
   const [name, setName] = useState('')
@@ -89,12 +91,12 @@ const Create = ({
           aria-describedby={guest && nameTouched && nameError ? 'guest-name-error' : undefined}
           value={name}
           onChange={e => setName(e.target.value)}
-          onBlur={() => setNameTouched(true)}
           ref={guest ? onFirstFieldRef : undefined}
         />
       </div>
 
       {nameTouched && nameError && <small id='guest-name-error' role='alert'>{nameError}</small>}
+      {children}
       <Button type='submit' variant='primary' disabled={isSubmitting}>
         {isSubmitting ? 'Entrando…' : 'Entrar'}
       </Button>

@@ -13,3 +13,7 @@
     margin: var(--space-m) auto;
   }
 }
+.switchAccount {
+  padding: 24px;
+  text-align: center;
+}

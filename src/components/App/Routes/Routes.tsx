@@ -18,6 +18,8 @@ const AppRoutes = () => {
     <Routes>
       <Route path='/join' element={<JoinView />} />
       <Route path='/account' element={<AccountView />} />
+      <Route path='/personal' element={<AccountView access='staff' />} />
+      <Route path='/invitados' element={<AccountView access='guest' />} />
       <Route path='/admin/*' element={<AdminRoutes />} />
       <Route
         path='/library'
@@ -46,7 +48,7 @@ const AppRoutes = () => {
       <Route
         path='/player'
         element={(
-          <RequireAuth path='/player' redirectTo='/account'>
+          <RequireAuth path='/player' redirectTo='/personal'>
             <PlayerView />
           </RequireAuth>
         )}
@@ -92,10 +94,6 @@ const RequireAuth = ({
 
   if (!isOperator && tableAccessError) return <Navigate to='/join' replace />
 
-  if (path === '/player' && !isOperator) {
-    return <Navigate to='/' replace />
-  }
-
   if (userId === null) {
     // set their originally-desired location in query parameter
     const params = new URLSearchParams(location.search)
@@ -103,6 +101,8 @@ const RequireAuth = ({
 
     return <Navigate to={redirectTo + '?' + params.toString()} replace />
   }
+
+  if (path === '/player' && !isOperator) return <Navigate to='/' replace />
 
   return children
 }

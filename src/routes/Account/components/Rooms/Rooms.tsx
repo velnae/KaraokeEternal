@@ -3,6 +3,7 @@ import { useAppDispatch, useAppSelector } from 'store/hooks'
 import { formatDateTime } from 'lib/dateTime'
 import Panel from 'components/Panel/Panel'
 import Button from 'components/Button/Button'
+import CopyAccessLink from 'components/CopyAccessLink/CopyAccessLink'
 import EditRoom from './EditRoom/EditRoom'
 import { closeRoomEditor, fetchRooms, filterByStatus, openRoomEditor } from 'store/modules/rooms'
 import { filterByGroup, filterByRoom } from '../../modules/users'
@@ -94,6 +95,15 @@ const Rooms = () => {
   return (
     <Panel title='Salas' titleComponent={roomsFilter}>
       <>
+        <section className={styles.accessLinks} aria-labelledby='room-access-links'>
+          <h3 id='room-access-links'>Enlaces de acceso</h3>
+          {[['personal', 'Acceso del personal'], ['invitados', 'Acceso de invitados']].map(([path, name]) => (
+            <div key={path}>
+              <span>{name}</span>
+              <CopyAccessLink url={new URL(path, document.baseURI).href} name={name} />
+            </div>
+          ))}
+        </section>
         <table className={styles.table}>
           <thead>
             <tr>

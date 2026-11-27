@@ -5,7 +5,8 @@ import { fetchAccount, joinTable } from 'store/modules/user'
 import { fetchPrefs } from 'store/modules/prefs'
 import HttpApi from 'lib/HttpApi'
 import Button from 'components/Button/Button'
-import SignedOutView from './SignedOutView/SignedOutView'
+import AccessForm from './AccessForm'
+import { canOperate } from 'shared/permissions'
 import type { TableInvitation } from 'shared/tableAccess'
 import { tableMode } from 'shared/tableAccess'
 import type { Room } from 'shared/types'
@@ -69,13 +70,14 @@ export default function JoinView () {
     }
   }
 
-  const showsGuestForm = !loading && !user.isAdmin && !!destination && !user.userId
+  const staff = canOperate(user)
+  const showsGuestForm = !loading && !staff && !!destination && !user.userId
 
   return (
     <main style={{ padding: `${headerHeight + (showsGuestForm ? 0 : 24)}px 20px 100px`, maxWidth: 560, margin: 'auto' }}>
       {loading
         ? <p role='status'>Verificando mesa…</p>
-        : user.isAdmin
+        : staff
           ? (
               <>
                 <h1>Ingreso para cantantes</h1>
@@ -85,7 +87,7 @@ export default function JoinView () {
             )
           : destination && !user.userId
             ? (
-                <SignedOutView key={invitation} invitation={invitation} destination={destination} />
+                <AccessForm key={invitation} access='table' invitation={invitation} destination={destination} />
               )
             : (
                 <>
@@ -100,7 +102,7 @@ export default function JoinView () {
                   )}
                   {destination && user.userId && <Button disabled={busy} variant='primary' onClick={() => void enter()}>{busy ? 'Entrando…' : `Entrar como ${user.name}`}</Button>}
                   {!destination && canContinue && user.userId && <Button disabled={busy} onClick={() => void enter(true)}>Continuar sin mesa</Button>}
-                  {!user.userId && <Link to='/account'>Volver al ingreso</Link>}
+                  {!user.userId && <Link to='/invitados'>Volver al ingreso</Link>}
                 </>
               )}
       {error && <p role='alert'>{error}</p>}

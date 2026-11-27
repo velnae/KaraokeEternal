@@ -24,7 +24,7 @@ export default function AdminRoutes () {
   const user = useAppSelector(state => state.user)
   const { isAdmin, userId, roomId } = user
   const location = useLocation()
-  if (!canOperate(user)) return <Navigate to={userId === null ? `/account?redirect=${encodeURIComponent(location.pathname + location.search)}` : '/queue'} replace />
+  if (!canOperate(user)) return <Navigate to={userId === null ? `/personal?redirect=${encodeURIComponent(location.pathname + location.search + location.hash)}` : '/queue'} replace />
   if (!isAdmin) return (
     <Routes>
       <Route path='account' element={<AdminPage title='Mi cuenta' description=''><Account /></AdminPage>} />

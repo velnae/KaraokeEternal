@@ -8,8 +8,11 @@ import SignedOutView from './SignedOutView/SignedOutView'
 import styles from './AccountView.css'
 import { Navigate, useLocation } from 'react-router'
 import { legacyAdminPaths } from 'components/Admin/legacyAdminPaths'
+import AccessForm from './AccessForm'
+import Button from 'components/Button/Button'
+import { requestLogout } from 'store/modules/user'
 
-const AccountView = () => {
+const AccountView = ({ access }: { access?: 'staff' | 'guest' }) => {
   const isAdmin = useAppSelector(state => canOperate(state.user))
   const location = useLocation()
   const isSignedIn = useAppSelector(state => state.user.userId !== null)
@@ -30,6 +33,8 @@ const AccountView = () => {
     return <Navigate to={legacyAdminPaths[location.hash] || redirect} replace />
   }
 
+  if (access === 'guest' && isSignedIn && !isFirstRun) return <Navigate to='/library' replace />
+
   return (
     <div
       ref={scrollContainerRef}
@@ -40,11 +45,18 @@ const AccountView = () => {
         scrollPaddingTop: ui.headerHeight + 12,
       }}
     >
-      {isSignedIn
+      {isSignedIn && access === 'staff' && !isAdmin && !isFirstRun && (
+        <div className={styles.switchAccount}>
+          <p>Hay una sesión de cantante abierta en este dispositivo.</p>
+          <Button onClick={() => void dispatch(requestLogout())}>Cerrar sesión para ingresar como personal</Button>
+        </div>
+      )}
+
+      {isSignedIn && !access
         && <SignedInView scrollContainerRef={scrollContainerRef} />}
 
       {!isFirstRun && !isSignedIn
-        && <SignedOutView />}
+        && (access ? <AccessForm key={access} access={access} /> : <SignedOutView />)}
 
       {isFirstRun
         && <FirstRun />}

@@ -69,14 +69,27 @@ const createUserCtx = (user, roomId, sessionId?: string | null) => {
 }
 
 // login
-router.post('/login', async (ctx) => {
+router.post(['/login', '/login/:access'], async (ctx) => {
   const req = ctx.request as unknown as RequestWithBody
   const roomId = parseInt(req.body.roomId, 10) || null
+  const { access } = ctx.params
+  if (access && !['staff', 'guest', 'table'].includes(access)) ctx.throw(404)
+  if (access === 'table' && !req.body.invitation) ctx.throw(403, 'Escanee el QR de su mesa para entrar')
+  if ((access === 'staff' || access === 'guest') && req.body.invitation) ctx.throw(422, 'Use el enlace de la mesa para ingresar con QR')
   let user
 
   try {
     user = await User.validate({ username: req.body.username, password: req.body.password })
+  } catch (err) {
+    ctx.throw(401, err.message)
+  }
 
+  if ((access === 'staff' && !canOperate(user))
+    || ((access === 'guest' || access === 'table') && !['standard', 'guest'].includes(user.role))) {
+    ctx.throw(403, 'Esta cuenta no puede iniciar sesión desde este acceso')
+  }
+
+  try {
     if (roomId) {
       await Rooms.validate(roomId, req.body.roomPassword, {
         isOpen: !canOperate(user),
@@ -412,8 +425,13 @@ router.put('/user/:userId', async (ctx) => {
 })
 
 // create account
-router.post('/user', async (ctx) => {
+router.post(['/user', '/table-guest'], async (ctx) => {
   const req = ctx.request as unknown as RequestWithBody
+  if (/\/table-guest\/?$/i.test(ctx.path)) {
+    if (ctx.user.userId !== null || ctx.user.isAdmin) ctx.throw(401, 'Ya inició sesión')
+    if (!req.body.invitation) ctx.throw(403, 'Escanee el QR de su mesa para entrar')
+    req.body.role = 'guest'
+  }
   let image
 
   if (ctx.user.isAdmin && req.body.role === undefined) req.body.role = 'standard'

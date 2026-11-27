@@ -28,6 +28,16 @@ it('does not replace API or asset responses with the application index', async (
   }
 })
 
+it('serves shared access URLs directly under the configured base', async () => {
+  const middleware = createClientIndex('/karaoke/', () => '<base href="/">')
+  for (const route of ['personal', 'invitados', 'join']) {
+    const ctx = context(`/karaoke/${route}`)
+    await middleware(ctx as unknown as Context, vi.fn())
+    expect(ctx.status).toBe(200)
+    expect(ctx.body).toBe('<base href="/karaoke/">')
+  }
+})
+
 it('serves admin deep links under the configured base without capturing unrelated paths', async () => {
   const middleware = createClientIndex('/karaoke/', () => '<base href="/">')
   for (const route of ['rooms', 'users', 'playlists', 'account', 'settings/animator', 'settings/karaoke', 'settings/audio-providers', 'settings/playback', 'settings/files', 'settings/branding', 'settings/moderation', 'settings/music-blocking', 'settings/display']) {

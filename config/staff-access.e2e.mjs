@@ -396,7 +396,7 @@ try {
   await expect(operatorPage.getByRole('button', { name: 'Actualizar cuenta', exact: true })).toHaveCount(0)
   const beforeLogout = db.prepare('SELECT status FROM queue WHERE queueId=?').get(queueId).status
   await operatorPage.getByRole('button', { name: 'Cerrar sesión', exact: true }).click()
-  await expect(operatorPage.getByRole('button', { name: 'Tengo una cuenta', exact: true })).toBeVisible()
+  await expect(operatorPage.getByRole('button', { name: 'Iniciar sesión', exact: true })).toBeVisible()
   assert.equal(db.prepare('SELECT status FROM queue WHERE queueId=?').get(queueId).status, beforeLogout)
   pass('staff can update their own account and sign out without removing room songs')
 

@@ -9,6 +9,8 @@ interface SignInProps {
   onPasswordChange: (password: string) => void
   onSubmit: (e: React.FormEvent) => void
   onFirstFieldRef: (el: HTMLInputElement | null) => void
+  isSubmitting?: boolean
+  children?: React.ReactNode
 }
 
 const SignIn = ({
@@ -18,12 +20,15 @@ const SignIn = ({
   onPasswordChange,
   onSubmit,
   onFirstFieldRef,
+  isSubmitting,
+  children,
 }: SignInProps) => {
   return (
     <form noValidate onSubmit={onSubmit} className={styles.container}>
       <input
         type='email'
         autoComplete='username'
+        aria-label='Usuario o correo electrónico'
         placeholder='nombre de usuario o correo electrónico'
         value={username}
         onChange={e => onUsernameChange(e.target.value)}
@@ -32,12 +37,14 @@ const SignIn = ({
       <input
         type='password'
         autoComplete='current-password'
+        aria-label='Contraseña'
         placeholder='contraseña'
         value={password}
         onChange={e => onPasswordChange(e.target.value)}
       />
-      <Button type='submit' variant='primary'>
-        Iniciar sesión
+      {children}
+      <Button type='submit' variant='primary' disabled={isSubmitting}>
+        {isSubmitting ? 'Entrando…' : 'Iniciar sesión'}
       </Button>
     </form>
   )
