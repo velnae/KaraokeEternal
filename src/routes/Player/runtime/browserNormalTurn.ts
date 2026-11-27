@@ -20,6 +20,7 @@ interface Adapters {
   operatorRelease: (signal: AbortSignal) => Promise<{ runId: string, queueId: number } | null>
   exit: () => void
   released: (reason: string) => void
+  onCommand?: (name: string) => void
 }
 
 export function beginBrowserTurn (plan: ReturnType<typeof planNormalTurn>, budgetMs: number, adapters: Adapters) {
@@ -34,6 +35,7 @@ export function beginBrowserTurn (plan: ReturnType<typeof planNormalTurn>, budge
       return () => clearTimeout(timer)
     },
     execute: (command, run) => {
+      adapters.onCommand?.(command.type)
       switch (command.type) {
         case 'prepare-backdrop': void adapters.backdrop(run.signal).catch(() => {})
           break
@@ -46,8 +48,12 @@ export function beginBrowserTurn (plan: ReturnType<typeof planNormalTurn>, budge
             run.report({ type: 'intro-ended' })
             return
           }
-          const timer = setTimeout(() => run.report({ type: 'intro-ended' }), TRANSITION_INTRO_MS)
-          run.signal.addEventListener('abort', () => clearTimeout(timer), { once: true })
+          const cancel = () => clearTimeout(timer)
+          const timer = setTimeout(() => {
+            run.signal.removeEventListener('abort', cancel)
+            run.report({ type: 'intro-ended' })
+          }, TRANSITION_INTRO_MS)
+          run.signal.addEventListener('abort', cancel, { once: true })
           return undefined
         }).catch(() => run.report({ type: 'cancel', reason: 'adapter-error' }))
           break

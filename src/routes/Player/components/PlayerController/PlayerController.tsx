@@ -259,10 +259,12 @@ const PlayerController = (props: PlayerControllerProps) => {
   useEffect(() => {
     const cancel = () => {
       roomBoundary.cancel()
-      directed.current?.cancel('stop')
+      const run = directed.current
+      run?.cancel('stop')
       cancelWarmup()
       releasedKaraoke.current = null
       setPreparingQueueId(null)
+      if (run) return // The director's release adapter already owns bed and scene cleanup.
       const scene = transitionRef.current
       if (scene && socket.connected) void animationRequest(TRANSITION_VIDEO_SCENE, { sceneId: scene.id, finished: true }, 1000).catch(() => {})
       updateTransition(null)
@@ -284,10 +286,12 @@ const PlayerController = (props: PlayerControllerProps) => {
   useEffect(() => {
     if (player._authority !== 'GRANTED') {
       roomBoundary.cancel()
-      directed.current?.cancel('authority-lost')
+      const run = directed.current
+      run?.cancel('authority-lost')
       cancelWarmup()
       releasedKaraoke.current = null
       setPreparingQueueId(null)
+      if (run) return
       updateTransition(null)
       void animationRef.current.stopTransition(30)
     }
@@ -296,7 +300,8 @@ const PlayerController = (props: PlayerControllerProps) => {
   useEffect(() => {
     if (transition?.phase !== 'loading' && transition?.phase !== 'handoff') return
     if (!player.isPlaying) {
-      void finishTransition(30)
+      if (directed.current) directed.current.cancel('pause')
+      else void finishTransition(30)
       return
     }
     if (transition.phase === 'loading' && queueItem?.source === 'YOUTUBE') {
@@ -311,7 +316,8 @@ const PlayerController = (props: PlayerControllerProps) => {
     // an opaque transition over the player's recovery UI indefinitely.
     const timer = setTimeout(() => {
       diagnosticRef.current?.flag('incoming-media-start-timeout', { queueId: queueItem?.queueId })
-      void finishTransition()
+      if (directed.current) directed.current.cancel('deadline')
+      else void finishTransition()
     }, 10000)
     return () => clearTimeout(timer)
   }, [transition, player.isPlaying, queueItem?.source, queueItem?.queueId, finishTransition, updateTransition])
@@ -500,40 +506,44 @@ const PlayerController = (props: PlayerControllerProps) => {
         }, 1000)
         return false
       }
+      // The executor chooses the order; only these adapters touch the media.
+      const valid = (signal?: AbortSignal) => !signal?.aborted && turnValid() && (!scene || transitionRef.current?.id === scene.id)
+      const backdrop = async (signal?: AbortSignal) => {
+        if (!scene || !valid(signal)) return
+        let visual = prepared ? await prepared.visual : undefined
+        if (visual === undefined && valid(signal)) visual = await resolveVisual(scene.id, upcoming?.queueId ?? null)
+        if (visual !== undefined && valid(signal)) updateTransition({ ...transitionRef.current!, background: visual })
+      }
+      const bed = async (signal?: AbortSignal) => {
+        if (!scene || !valid(signal)) return
+        const grant = await animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null, () => valid(signal))
+        if (valid(signal) && !transitionRef.current!.background && grant?.background) updateTransition({ ...transitionRef.current!, background: grant.background })
+      }
+      const entry = async (signal?: AbortSignal) => {
+        if (scene && upcoming && valid(signal)) await karaokeCuesRef.current.play({ queueId: upcoming.queueId, kind: 'entry', token: manualTurn?.runId ?? scene.id })
+      }
+      const presentation = async (signal?: AbortSignal) => {
+        if (!upcoming || !valid(signal)) return true
+        if (scene) updateTransition({ ...transitionRef.current!, phase: 'voice' })
+        return greetingsRef.current.attempt(upcoming.queueId, deadline - performance.now(), diagnostic, !!callRequested, signal)
+      }
+      const announcement = async (signal?: AbortSignal) => {
+        if (!valid(signal)) return
+        if (scene) updateTransition({ ...transitionRef.current!, phase: 'voice' })
+        await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null, diagnostic, () => valid(signal), deadline)
+      }
       if (executor === 'v2' && observedPlan && upcoming && (observedPlan.kind === 'karaoke' || observedPlan.kind === 'listening' || (observedPlan.kind === 'normal' && scene))
         && observedPlan.destination === upcoming.queueId && observedPlan.scene === !!scene && turnValid()) {
         directed.current?.cancel('replaced')
-        const valid = (signal: AbortSignal) => !signal.aborted && turnValid() && (!scene || transitionRef.current?.id === scene.id)
         owned = beginBrowserTurn(observedPlan, Math.max(1, deadline - performance.now()), {
           serverNow: animationTime,
-          entry: async (signal) => {
-            if (scene && valid(signal)) await karaokeCuesRef.current.play({ queueId: upcoming.queueId, kind: 'entry', token: manualTurn?.runId ?? scene.id })
-          },
+          entry, backdrop, bed, presentation, announcement,
+          onCommand: state => diagnostic?.record('v2-turn-command', { state, turnIdentity: observedPlan.identity, queueId: upcoming.queueId }),
           operatorRelease: async (signal) => {
             if (!manualTurn || !await waitForOperator(manualTurn, signal)) return null
             await animationRef.current.stopTransition(KARAOKE_FADE_MS)
             const live = store.getState().animation.snapshot?.karaokeTurn
             return !signal.aborted && live?.phase === 'released' && live.runId === manualTurn.runId && live.queueId === upcoming.queueId ? live : null
-          },
-          backdrop: async (signal) => {
-            if (!scene) return
-            let visual = prepared ? await prepared.visual : undefined
-            if (visual === undefined && valid(signal)) visual = await resolveVisual(scene.id, upcoming.queueId)
-            if (visual !== undefined && valid(signal)) updateTransition({ ...transitionRef.current!, background: visual })
-          },
-          bed: async (signal) => {
-            const grant = await animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming.queueId, () => valid(signal))
-            if (valid(signal) && !transitionRef.current!.background && grant?.background) updateTransition({ ...transitionRef.current!, background: grant.background })
-          },
-          presentation: async (signal) => {
-            if (!valid(signal)) return true
-            if (scene) updateTransition({ ...transitionRef.current!, phase: 'voice' })
-            return greetingsRef.current.attempt(upcoming.queueId, deadline - performance.now(), diagnostic, !!callRequested, signal)
-          },
-          announcement: async (signal) => {
-            if (!valid(signal)) return
-            if (scene) updateTransition({ ...transitionRef.current!, phase: 'voice' })
-            await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming.queueId, diagnostic, () => valid(signal), deadline)
           },
           exit: () => {
             animationRef.current.channel.musicStarted()
@@ -546,7 +556,7 @@ const PlayerController = (props: PlayerControllerProps) => {
             })
           },
           released: (reason) => {
-            diagnostic?.record('v2-turn-released', { state: reason })
+            diagnostic?.record('v2-turn-released', { state: reason, turnIdentity: observedPlan.identity, queueId: upcoming.queueId })
             if (directed.current !== owned) return
             directed.current = null
             if (reason !== 'finished') animationRef.current.abort(reason)
@@ -559,28 +569,16 @@ const PlayerController = (props: PlayerControllerProps) => {
       } else if (scene) {
         // A scene owns one choice across intro, speech and loading. Preview and
         // audio-permit renewals must not consume another position in the rotation.
-        const beginBed = () => turnValid() ? animationRef.current.startTransition(boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null, turnValid) : null
-        const firstVisual = prepared?.visual ?? resolveVisual(scene.id, upcoming?.queueId ?? null)
-        const earlyBed = upcoming?.requestIntent !== 'SING' ? beginBed() : null
-        let visual = await firstVisual
-        // An unanswered warmup is not a choice of no video. Recover the same
-        // scene (and rotation slot) instead of carrying an empty backdrop forward.
-        if (prepared && visual === undefined && turnValid() && transitionRef.current?.id === scene.id) {
-          visual = await resolveVisual(scene.id, upcoming?.queueId ?? null)
-        }
+        const firstVisual = backdrop()
+        const earlyBed = upcoming?.requestIntent !== 'SING' ? bed() : null
+        await firstVisual
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
-        if (visual !== undefined) scene.background = visual
-        updateTransition({ ...scene })
         if (upcoming?.requestIntent === 'SING' && !manualTurn?.presented && !callRequested) {
-          await karaokeCuesRef.current.play({ queueId: upcoming.queueId, kind: 'entry', token: manualTurn?.runId ?? scene.id })
+          await entry()
           if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return
         }
-        const grant = await (earlyBed ?? beginBed())
+        await (earlyBed ?? bed())
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
-        if (!scene.background && grant?.background) {
-          scene.background = grant.background
-          updateTransition({ ...scene })
-        }
         const now = performance.now()
         // A visual pre-roll does not play the bed and cannot replace its lead-in.
         const until = now + (manualTurn?.presented || upcoming?.requestIntent === 'SING' ? 0 : TRANSITION_INTRO_MS)
@@ -588,13 +586,13 @@ const PlayerController = (props: PlayerControllerProps) => {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
         if (!mounted.current || controlVersion !== animationRef.current.controlVersion() || transitionRef.current?.id !== scene.id) return
-        updateTransition({ ...scene, phase: 'voice' })
+        updateTransition({ ...transitionRef.current, phase: 'voice' })
       }
       const greeted = !owned && upcoming && upcoming.origin !== 'HOUSE' && !manualTurn?.presented && turnValid()
-        ? await greetingsRef.current.attempt(upcoming.queueId, deadline - performance.now(), diagnostic, !!callRequested)
+        ? await presentation()
         : false
       if (!owned && !greeted && !manualTurn?.presented && announce && turnValid()) {
-        await animationRef.current.attempt(boundary, boundary === 'ended' ? sourceId : null, upcoming?.queueId ?? null, diagnostic, turnValid, deadline)
+        await announcement()
       }
       if (!owned && manualTurn && !await waitForOperator(manualTurn)) return
       if (!mounted.current || controlVersion !== animationRef.current.controlVersion()) return

@@ -54,6 +54,12 @@ Run with Node 24.22.2 and isolated fixtures. Extend `config/youtube-preparation.
 
 ## Rollout and rollback
 
+### Stage 8: shared media ownership and cutover status
+
+Both executors use the same guarded backdrop, bed, entry, greeting and animator adapters. When a directed turn is active, cancellation and handoff timeout go through the director's release path. In development, correlate `v2-plan-observed`, `v2-turn-command` and `v2-turn-released` with the turn identity and the media observations. A `start-song` command is an intent; the incoming `PLAYING` event confirms the handoff.
+
+The final switch remains gated on room acceptance for normal playback, listening requests, manual karaoke, birthdays and idle transitions. Until that evidence is available, retain the per-turn executor selector and rollback path.
+
 ### Stage 7: birthdays and idle ambience
 
 In the V2 pilot a room boundary drains any active or pending idle ambience before a song or birthday takes ownership. A birthday scheduled during a directed handoff invalidates the pending promotion before reserving the celebration. Birthday phases still use `birthdayTimeline` and the existing renewable server permit, independently of the ordinary presentation deadline. After completion the scheduler reads the current queue again; a manual karaoke release is still required. Cancellation prevents a delayed finish from resuming a replaced turn.

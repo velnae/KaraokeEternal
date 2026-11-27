@@ -442,6 +442,8 @@ try {
       const turn = events.filter(event => event.sourceQueueId === source && event.monotonicMs >= since && event.monotonicMs <= play.at)
       const shadow = turn.find(event => event.event === 'v2-plan-observed' && event.observedQueueId === destination)
       assert.equal(turn.filter(event => event.event === 'v2-turn-executing').length, directedTurns ? 1 : 0, `${label}: selected executor runs exactly once`)
+      const starts = turn.filter(event => event.event === 'v2-turn-command' && event.state === 'start-song' && event.turnIdentity === shadow?.turnIdentity)
+      assert.equal(starts.length, directedTurns ? 1 : 0, `${label}: exactly one promotion from the selected director`)
       assert.equal(shadow?.state, 'match', `${label}: passive plan agrees with V1 selection and scene`)
       assert.ok(turn.some(event => event.event === 'v2-plan-handoff' && event.turnIdentity === shadow.turnIdentity && event.state === 'match'), `${label}: same planned turn reaches handoff`)
       const selected = turn.some(event => event.queueId === destination && event.event === 'background-reply' && event.state === 'selected')
