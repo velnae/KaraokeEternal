@@ -735,7 +735,11 @@ const PlayerController = (props: PlayerControllerProps) => {
     mounted.current = true
     return () => {
       mounted.current = false
-      dispatch(playerLeave())
+      // A StrictMode effect replay is not a room departure. A spurious LEAVE
+      // revokes our grant and unmounts the iframe just prepared for this turn.
+      queueMicrotask(() => {
+        if (!mounted.current) dispatch(playerLeave())
+      })
     }
   }, [dispatch])
 
@@ -766,11 +770,11 @@ const PlayerController = (props: PlayerControllerProps) => {
     && animation.snapshot.active.durationMs <= (animation.snapshot.voiceBudgetRemainingMs ?? 120000)
   const automaticIdleVoice = !animation.snapshot?.active && animation.snapshot?.prefs.enabled && animation.snapshot?.prefs.automation && animation.snapshot?.session?.sessionId
   useEffect(() => {
-    if (!player._isQueueStopped && !animation.busy && !animation.blocked && animation.unlocked && (pendingIdleVoice || automaticIdleVoice)
+    if (!nextQueueItem && !player._isQueueStopped && !animation.busy && !animation.blocked && animation.unlocked && (pendingIdleVoice || automaticIdleVoice)
       && !player.isErrored && (player.isAtQueueEnd || player.queueId === -1)) {
       void handleLoadNext(false, true, 'idle')
     }
-  }, [pendingIdleVoice, automaticIdleVoice, animation.snapshot?.active?.interventionId, animation.snapshot?.active?.status, animation.snapshot?.prefs.automation,
+  }, [nextQueueItem, pendingIdleVoice, automaticIdleVoice, animation.snapshot?.active?.interventionId, animation.snapshot?.active?.status, animation.snapshot?.prefs.automation,
     animation.snapshot?.session?.sessionId, animation.snapshot?.session?.status, animation.snapshot?.pendingEventJSON,
     animation.snapshot?.microphoneOccupied, animation.snapshot?.prefs.enabled, animation.snapshot?.prefs.volume,
     animation.snapshot?.active?.durationMs, animation.snapshot?.voiceBudgetRemainingMs,

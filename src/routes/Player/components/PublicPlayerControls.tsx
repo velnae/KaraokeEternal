@@ -5,7 +5,7 @@ import { isPlayerFullscreenShortcut, requestPlayerFullscreen } from 'lib/playerF
 import { localPlay } from '../runtime/localPlay'
 import styles from './PublicPlayerControls.css'
 
-export default function PublicPlayerControls ({ showPlay }: { showPlay: boolean }) {
+export default function PublicPlayerControls ({ showPlay, onPlay = localPlay.start }: { showPlay: boolean, onPlay?: () => void }) {
   const [fullscreen, setFullscreen] = useState(screenfull.isFullscreen)
   const [error, setError] = useState(false)
   const toggle = useCallback(() => {
@@ -29,7 +29,7 @@ export default function PublicPlayerControls ({ showPlay }: { showPlay: boolean 
   }, [toggle])
   return (
     <div className={styles.controls} role='group' aria-label='Controles del reproductor'>
-      {showPlay && <Button variant='primary' icon='PLAY' onClick={localPlay.start}>Reproducir</Button>}
+      {showPlay && <Button variant='primary' icon='PLAY' onClick={onPlay}>Reproducir</Button>}
       {screenfull.isEnabled && <Button icon='FULLSCREEN' size={24} aria-keyshortcuts='Control+Alt+K' onClick={toggle}>{fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}</Button>}
       {error && <span role='alert'>No se pudo cambiar la pantalla completa.</span>}
     </div>

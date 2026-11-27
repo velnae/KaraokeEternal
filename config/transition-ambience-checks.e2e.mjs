@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 export async function installYouTubeTransitionFixture (context, mediaPath, blockFirstPlay = false) {
   await context.route('**/transition-youtube.mp4', route => route.fulfill({ path: mediaPath, contentType: 'video/mp4' }))
   await context.addInitScript((blockFirstPlay) => {
-    window.youtubeTransition = { endedAt: 0, sceneAt: 0, video: null }
+    window.youtubeTransition = { endedAt: 0, sceneAt: 0, video: null, instances: 0 }
     document.addEventListener('DOMContentLoaded', () => {
       new MutationObserver(() => {
         if (window.youtubeTransition.endedAt && !window.youtubeTransition.sceneAt && document.querySelector('[data-testid="transition-scene"]')) {
@@ -16,6 +16,7 @@ export async function installYouTubeTransitionFixture (context, mediaPath, block
       PlayerState: { ENDED: 0, PLAYING: 1, PAUSED: 2 },
       Player: class {
         constructor (target, options) {
+          window.youtubeTransition.instances++
           this.options = options
           this.video = document.createElement('video')
           this.video.playbackRate = 0.85

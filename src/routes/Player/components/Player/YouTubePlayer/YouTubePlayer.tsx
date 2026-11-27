@@ -120,6 +120,11 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
   componentDidMount () {
     this.isMounted = true
     const generation = ++this.mountGeneration
+    if (generation > 1 && this.player) {
+      // StrictMode replay kept the same iframe and instance across this mount.
+      if (this.isReady && this.props.isActive !== false && this.props.isPlaying) this.startStatusUpdates()
+      return
+    }
     if (this.props.isActive !== false) this.props.onLoad()
     loadYouTubeIframeApi()
       .then((api): void => {
@@ -187,13 +192,16 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
 
   componentWillUnmount () {
     this.isMounted = false
-    this.isReady = false
-    this.cuePending = false
-    ++this.mountGeneration
+    const generation = ++this.mountGeneration
     this.stopStatusUpdates()
-    const player = this.player
-    this.player = null
-    player?.destroy()
+    queueMicrotask(() => {
+      if (this.isMounted || generation !== this.mountGeneration) return
+      this.isReady = false
+      this.cuePending = false
+      const player = this.player
+      this.player = null
+      player?.destroy()
+    })
   }
 
   createPlayer = (api: YouTubeApi) => {

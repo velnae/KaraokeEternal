@@ -4,7 +4,7 @@ import combinedReducer from 'store/reducers'
 import { useAppSelector, useAppDispatch } from 'store/hooks'
 import playerReducer, { sliceInjectNoOp } from '../modules/player'
 import playerVisualizerReducer from '../modules/playerVisualizer'
-import PlayerController from '../components/PlayerController/PlayerController'
+import PlayerStartup from '../components/PlayerStartup'
 import { fetchCurrentRoom } from 'store/modules/rooms'
 import styles from './PlayerView.css'
 import useRemotePlayerControls from '../useRemotePlayerControls'
@@ -24,6 +24,7 @@ const PlayerView = () => {
   }
 
   const closed = useRemotePlayerControls()
+  const roomId = useAppSelector(state => state.user.roomId)
 
   // once per mount
   useEffect(() => {
@@ -66,7 +67,8 @@ const PlayerView = () => {
           overflow: 'hidden',
         }}
       >
-        <PlayerController
+        <PlayerStartup
+          key={roomId}
           width={innerWidth}
           height={playerHeight}
         />

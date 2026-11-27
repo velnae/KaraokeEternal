@@ -33,7 +33,7 @@ The printed `cold-start-<source>.json` records visible controls, the first scree
 | --- | --- |
 | Cold tab, local song ready | One Play starts the room. Confirm real media playback and sound; do not treat `requestPlay()` as success. |
 | Cold tab, YouTube requests another gesture | Show the same Play control. Retry the active iframe synchronously without changing queue item or repeating the announcement. |
-| Remote Play before local activation | Start if the browser permits it. Otherwise retain the pending intent and request one local gesture. Remote pause/stop cancels that intent. |
+| Remote Play before local activation | Remain at the local start screen even if autoplay is permitted. Only local Play mounts the runtime. Once started, remote transport works normally. |
 | Empty queue, then first approval | Wait quietly, with no audio error. If the session was started, the newly eligible song proceeds under normal queue rules; do not bypass manual karaoke authorization. |
 | Active announcement or optional asset unavailable | The public screen shows the scene, not **Animador** or **Detener anuncio**. Continue according to the recipe's existing fallback. |
 | Duplicate player, disconnect, remount or late callback | Only the current authorized player may start. Reconnecting does not replay an old intent. |
@@ -43,4 +43,4 @@ The printed `cold-start-<source>.json` records visible controls, the first scree
 
 Use the stage 1 command with `KARAOKE_E2E_COLD_SOURCE` set to `local`, `youtube`, `empty` or `remote`. Each run creates a temporary room, records the Chromium version, queue item, actual media start and local/remote Play counts, and writes its own JSON report. All four cases passed with Node 24.22.2. `empty` starts with no songs and adds the first approved local track after Play. `remote` restarts the isolated server, waits for renewed player authority, then sends Play from administration before any local click. The blocked YouTube fixture requires one recovery click and zero local room Play requests.
 
-The shared development HTTPS check reached the authority-denied screen because another player already owned the room. Physical acceptance is still open: on the authorized room display, open a fresh session and record source, visible controls, first audible output through the speakers and any second gesture. Do not take over an active room to run the fixture.
+Fresh documents now acquire room authority and wait for room metadata and the initial queue before offering Play. The remote scenario also changes the queue and waits 60 seconds without local activation: no media mount, clip fetch, audio resume or song start is allowed. Only the trusted local gesture mounts the media runtime. The development HTTPS player remained at its two controls after 118 seconds without a local Play, iframe or catalog asset request.

@@ -25,6 +25,8 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
     })
     if (youtube) await installYouTubeTransitionFixture(context, path.join(data, 'song.mp4'), true)
     const page = await context.newPage()
+    const requests = []
+    page.on('request', r => requests.push(r.url()))
     if (source === 'local') await page.route(`**/api/animation/assets/${bed.id}`, route => route.fulfill({ status: 503, body: 'Unavailable fixture bed' }))
     const mark = (event, fields = {}) => report.events.push({ event, at: Date.now(), ...fields })
     const starts = () => page.evaluate(() => window.karaokePlaybackTrace.snapshot().events.filter(e => e.event === 'music-playing'))
@@ -45,7 +47,6 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
     await expect.poll(async () => (await emit('server/ANIMATION_SYNC')).payload.playerPresent).toBe(true)
     mark('player-present')
     if (source === 'local') {
-      await expect.poll(() => page.evaluate(hash => window.karaokePlaybackTrace.snapshot().events.some(e => e.event === 'catalog-asset-failed' && e.checksum === hash), bed.checksum), { timeout: 15000 }).toBe(true)
       await expect(page.getByRole('alert')).toHaveCount(0)
       await expect(page.getByLabel('Herramientas de desarrollo')).toHaveCount(0)
       const other = await context.newPage()
@@ -64,7 +65,7 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
     await captureControls('beforePlay')
     assert.deepEqual(report.controls.beforePlay.sort(), ['Pantalla completa', 'Reproducir'])
     assert.equal(await page.evaluate(() => window.coldStartup.activatedAtLoad), false)
-    if (source === 'empty') await expect(page.getByRole('heading', { name: 'Sin canciones' })).toBeVisible()
+    await expect(page.locator('#player-fs-container h1')).toHaveCount(0)
     if (source === 'youtube') {
       await page.keyboard.press('Control+Alt+k')
       await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('player-fs-container')
@@ -85,11 +86,20 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
       mark('authority-reacquired')
       mark('operator-play')
       await emit('server/PLAYER_REQ_PLAY')
-    } else {
-      mark('click-play')
-      await play.press('Enter')
+      // Queue churn and remote intent must leave the fresh document at its local gate.
+      await emit('server/QUEUE_ADD', { songId: 1, requestId: crypto.randomUUID() })
+      await emit('server/QUEUE_REMOVE', { queueId: 2 })
+      await page.waitForTimeout(60000)
+      await expect(play).toBeVisible()
     }
-    await expect.poll(() => report.events.filter(e => e.event === 'play-command').length).toBe(1)
+    assert.equal(requests.filter(url => url.includes('/api/animation/assets/') || url.includes('youtube.com/embed/') || url.includes('transition-youtube.mp4')).length, 0)
+    assert.equal(await page.locator('#player-fs-container iframe, [data-youtube-mode]').count(), 0)
+    if (youtube) assert.equal(await page.evaluate(() => window.youtubeTransition.instances), 0)
+    assert.equal(await page.evaluate(() => window.coldStartup.audio.length), 0)
+    assert.equal((await starts()).length, 0)
+    mark('click-play')
+    await play.press('Enter')
+    await expect.poll(() => report.events.filter(e => e.event === 'play-command').length).toBe(source === 'remote' ? 2 : 1)
     if (source === 'empty') {
       await expect(page.getByRole('alert')).toHaveCount(0)
       assert.equal((await starts()).length, 0)
@@ -112,7 +122,8 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
     const first = (await starts())[0]
     mark('media-playing', { at: first.wallTime, queueId: first.queueId })
     assert.equal(first.queueId, 1)
-    assert.equal(report.events.filter(e => e.event === 'play-request').length, source === 'remote' ? 0 : 1)
+    if (youtube) assert.equal(await page.evaluate(() => window.youtubeTransition.instances), 1, 'One YouTube instance for the first turn, including recovery')
+    assert.equal(report.events.filter(e => e.event === 'play-request').length, 1)
     assert.ok(report.events.find(e => e.event === 'play-command').at <= first.wallTime)
     await captureControls('playing')
     report.activation = await page.evaluate(() => window.coldStartup)
