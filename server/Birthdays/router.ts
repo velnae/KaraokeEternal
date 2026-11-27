@@ -9,24 +9,58 @@ import { elevenLabsConfig } from '../AudioProviders/config.js'
 import { validateBirthdaySettings, type BirthdayInput, type BirthdaySettings, type BirthdaySceneInput } from '../../shared/birthdays.js'
 import { changeScene } from './scenes.js'
 import { listBirthdayVoices } from './gemini.js'
-import { speechProfile } from './personalization.js'
+import { readPersonalization, speechProfile } from './personalization.js'
 import { readPreview, recordPreviewSample, savePreviewDraft } from './preview.js'
 import { validateBirthdaySample } from '../../shared/birthdayPreview.js'
 import { birthdayHistory, birthdayHistoryDetail } from './history.js'
 import { birthdayService } from './Service.js'
 import { importBirthdayAsset, type BirthdayImport } from './import.js'
-import { assertRoom, asset, assetDTO, changeBirthday, createBirthday, eventDTO, getBirthday, rows, saveSettings, settings, type AssetRow } from './Store.js'
+import { assertRoom, asset, assetDTO, changeBirthday, createBirthday, eventDTO, getBirthday, queueEventDTO, rows, saveSettings, settings, type AssetRow, type BirthdayRow } from './Store.js'
 
 const router = new Router({ prefix: '/api/birthdays' })
 router.use(async (ctx, next) => {
   if (!canOperate(ctx.user) || !Number.isInteger(ctx.user.roomId)) ctx.throw(403)
-  if (!ctx.user.isAdmin && (!['GET', 'HEAD'].includes(ctx.method) || !/\/assets\/[\w-]+\/?$/.test(ctx.path))) ctx.throw(403)
   ctx.set('Cache-Control', 'private, no-store')
   try {
     await next()
   } catch (error) {
     ctx.throw((error as { status?: number }).status ?? 422, (error as Error).message)
   }
+})
+router.get('/queue', (ctx) => {
+  const events = db.all<BirthdayRow>(`SELECT * FROM birthdays WHERE roomId=? AND playback IN ('held','interrupted','scheduled','playing') ORDER BY createdAt DESC,id`, [ctx.user.roomId])
+  ctx.body = { events: events.map(queueEventDTO) }
+})
+router.post('/events', (ctx) => {
+  const input = ctx.request.body as unknown as BirthdayInput & { requestId: string }
+  if (!ctx.user.isAdmin && (input?.profileId || (input?.approach && input.approach !== 'auto'))) ctx.throw(403)
+  const row = createBirthday(ctx.user.roomId, input?.requestId, input)
+  ctx.body = ctx.user.isAdmin ? eventDTO(row) : queueEventDTO(row)
+  void birthdayService().drain()
+})
+router.post('/events/:id', (ctx) => {
+  const input = ctx.request.body as unknown as { revision: number, operation: string, input?: BirthdayInput }
+  let changes = input?.input
+  if (!ctx.user.isAdmin) {
+    if (!['edit', 'schedule', 'unschedule', 'retry'].includes(input?.operation)) ctx.throw(403)
+    const current = getBirthday(ctx.user.roomId, ctx.params.id)
+    if (input.operation === 'retry' && current.preparation !== 'failed') ctx.throw(409, 'Solo se pueden reintentar preparaciones fallidas.')
+    if (input.operation === 'schedule' && current.preparation !== 'ready') ctx.throw(409, 'Espere a que termine la preparación.')
+    if (input.operation === 'edit') {
+      if (!changes) ctx.throw(422, 'Ingrese los datos del cumpleaños.')
+      if (changes.profileId || (changes.approach && changes.approach !== 'auto')) ctx.throw(403)
+      const previous = readPersonalization(current)
+      changes = { ...changes, approach: previous?.approachOverride ?? 'auto', profileId: previous?.profileOverride ?? '' }
+    } else if (changes !== undefined) ctx.throw(422, 'Operación de cumpleaños no válida.')
+  }
+  const row = changeBirthday(ctx.user.roomId, ctx.params.id, input?.revision, input?.operation, changes)
+  ctx.body = ctx.user.isAdmin ? eventDTO(row) : queueEventDTO(row)
+  birthdayService().publish(ctx.user.roomId)
+  void birthdayService().drain()
+})
+router.use(async (ctx, next) => {
+  if (!ctx.user.isAdmin && (!['GET', 'HEAD'].includes(ctx.method) || !/\/assets\/[\w-]+\/?$/.test(ctx.path))) ctx.throw(403)
+  await next()
 })
 router.get('/', (ctx) => {
   ctx.body = { settings: settings(ctx.user.roomId), events: rows(ctx.user.roomId).map(eventDTO),
@@ -84,17 +118,6 @@ router.put('/preview/:roomId', (ctx) => {
   if (Number(ctx.params.roomId) !== ctx.user.roomId) ctx.throw(409, 'La sala cambió. Vuelva a abrir la previsualización.')
   const input = ctx.request.body as { draft?: unknown, revision?: number }
   ctx.body = savePreviewDraft(ctx.user.userId, ctx.user.roomId, input?.draft, input?.revision as number)
-})
-router.post('/events', (ctx) => {
-  const input = ctx.request.body as unknown as BirthdayInput & { requestId: string }
-  ctx.body = eventDTO(createBirthday(ctx.user.roomId, input?.requestId, input))
-  void birthdayService().drain()
-})
-router.post('/events/:id', (ctx) => {
-  const input = ctx.request.body as unknown as { revision: number, operation: string, input?: BirthdayInput }
-  ctx.body = eventDTO(changeBirthday(ctx.user.roomId, ctx.params.id, input?.revision, input?.operation, input?.input))
-  birthdayService().publish(ctx.user.roomId)
-  void birthdayService().drain()
 })
 router.put('/events/:id/scene', (ctx) => {
   assertRoom(ctx.user.roomId)

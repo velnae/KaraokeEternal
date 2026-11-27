@@ -219,7 +219,9 @@ async function serverWorker ({ env, startScanner, stopScanner, shutdownHandlers 
     if (isTransitionVideoPath(ctx.path, urlPath) || isPlayerLogoPath(ctx.path, urlPath) || isCallPromotionPath(ctx.path, urlPath)
       || /\/api\/rooms\/\d+\/karaoke-calls\/backgrounds\/upload\/?$/i.test(ctx.path)) return next()
     if (ctx.path.toLowerCase().startsWith(`${urlPath}api/birthdays/`.toLowerCase())) {
-      if (!canOperate(ctx.user) || !Number.isInteger(ctx.user.roomId) || (!ctx.user.isAdmin && !['GET', 'HEAD'].includes(ctx.method))) ctx.throw(403)
+      const endpoint = ctx.path.slice(`${urlPath}api/birthdays/`.length)
+      const eventWrite = ctx.method === 'POST' && /^events(?:\/[\w-]+)?\/?$/.test(endpoint)
+      if (!canOperate(ctx.user) || !Number.isInteger(ctx.user.roomId) || (!ctx.user.isAdmin && !eventWrite && !['GET', 'HEAD'].includes(ctx.method))) ctx.throw(403)
       if (['import', 'video/upload'].some(suffix => ctx.path.toLowerCase().replace(/\/+$/, '') === `${urlPath}api/birthdays/${suffix}`.toLowerCase())) return parseBirthdayImport(ctx, next)
       return ctx.path.replace(/\/+$/, '') === `${urlPath}api/birthdays/upload` ? parseAudio(ctx, next) : parseBody(ctx, next)
     }

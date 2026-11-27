@@ -182,7 +182,11 @@ try {
     await call(api, `user/${identity.userId}`, { password: 'staff-access-test', role: 'admin' }, 'PUT', 403)
     await call(api, 'animation/production/jobs', { inputs: [] }, 'POST', 403)
     await call(api, 'animation/resources/upload', {}, 'POST', 403)
-    await call(api, 'birthdays/events', {}, 'POST', 403)
+    assert.deepEqual(Object.keys(await call(api, 'birthdays/queue')), ['events'])
+    await call(api, 'birthdays/events', {}, 'POST', 422)
+    await call(api, 'birthdays/', undefined, 'GET', 403)
+    await call(api, 'birthdays/settings', {}, 'PUT', 403)
+    await call(api, 'birthdays/events/missing', { operation: 'regenerate' }, 'POST', 403)
     await call(api, 'rooms/1/playlists', { name: 'Forbidden list' }, 'POST', 403)
     await call(api, 'rooms/1/playlists')
     await call(api, 'animation/catalog')
@@ -200,6 +204,10 @@ try {
   await call(roles.standard.api, 'prefs/branding', { name: 'Forbidden' }, 'PUT', 403)
   const standardIdentity = await call(roles.standard.api, 'login', { username: 'standard', password: 'staff-access-test', roomId: 1, invitation })
   const standardSocket = await connect(roles.standard.api)
+  for (const api of [guest, roles.standard.api]) {
+    await call(api, 'birthdays/queue', undefined, 'GET', 403)
+    await call(api, 'birthdays/events', {}, 'POST', 403)
+  }
   assert.ok((await command(standardSocket, 'server/PLAYER_REQ_PLAY')).error)
   await call(admin, 'user', { username: 'reserved', name: 'Reserved', role: 'player', newPassword: 'staff-access-test', newPasswordConfirm: 'staff-access-test' }, 'POST', 422)
   db.prepare(`INSERT INTO users(username,password,name,roleId) SELECT 'reserved',password,'Reserved',2 FROM users WHERE username='operator'`).run()

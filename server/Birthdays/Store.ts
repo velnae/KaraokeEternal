@@ -54,6 +54,13 @@ export function eventDTO (row: BirthdayRow): BirthdayEvent {
     revision: row.revision, script: row.script, voiceId: row.voiceId, error: row.error, assets: eventAssets(row).map(assetDTO),
     personalization: readPersonalization(row), scene: readScene(row), bedVolume: JSON.parse(row.settingsJSON).bedVolume ?? 0.2 }
 }
+export function queueEventDTO (row: BirthdayRow): import('../../shared/birthdays.js').BirthdayQueueEvent {
+  const greeting = row.greetingId && asset(row.roomId, row.greetingId)
+  const { id, name, sex, birthYear, revision, playback, preparation, phase, script } = row
+  return { id, name, sex, birthYear, revision, playback, preparation, phase, script,
+    error: preparation === 'failed' ? 'No se pudo preparar el saludo.' : null,
+    dedication: readPersonalization(row)?.dedication ?? '', assets: greeting ? [assetDTO(greeting)] : [] }
+}
 export function saveSettings (roomId: number, value: unknown) {
   assertRoom(roomId)
   const next = validateBirthdaySettings(value)

@@ -116,6 +116,8 @@ export interface BirthdayEvent extends PublicBirthday, BirthdayInput {
   bedVolume?: number
 }
 export interface BirthdaySnapshot { roomId: number, events: PublicBirthday[] }
+export type BirthdayQueueEvent = Pick<BirthdayEvent, 'id' | 'name' | 'sex' | 'birthYear' | 'revision' | 'playback' | 'preparation' | 'phase' | 'error' | 'script' | 'assets'> & { dedication: string }
+export interface BirthdayQueueOverview { events: BirthdayQueueEvent[] }
 export interface BirthdayOverview { settings: BirthdaySettings, events: BirthdayEvent[], assets: BirthdayAsset[], configured: { text: boolean, voice: boolean } }
 export interface BirthdayGrant { event: PublicBirthday, assets: BirthdayAsset[], token: string, remainingMs: number, bedVolume?: number, warning?: string, choreographyVersion?: 1 }
 
