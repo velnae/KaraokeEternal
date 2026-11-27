@@ -24,9 +24,7 @@ export function cleanupQueue (roomId: number, actorId: number, input: QueueClean
     const now = Date.now()
     if (!Number.isFinite(input.expiresAt) || input.expiresAt <= now || input.expiresAt > now + 60000) throw new Error('La confirmación venció. Vuelve a confirmar la limpieza.')
     let changedCount = 0
-    let houseStopped = false
     if (input.operation === 'pending') {
-      houseStopped = Playlists.suspendForQueueCleanup(roomId, currentQueueId)
       db.run('INSERT INTO queueCleanupState(roomId,generation) VALUES(?,1) ON CONFLICT(roomId) DO UPDATE SET generation=generation+1', [roomId])
       // A full clear covers the room at commit time, including the playing item.
       const rows = db.all<{ queueId: number, status: string }>(`SELECT queueId,status FROM queue WHERE roomId=?
@@ -37,14 +35,15 @@ export function cleanupQueue (roomId: number, actorId: number, input: QueueClean
       }
       changedCount = rows.length + Number(db.run(`UPDATE queue SET historyClearedAt=? WHERE roomId=?
         AND historyClearedAt IS NULL AND status IN ('PLAYED','FAILED','REJECTED')`, [now, roomId]).changes)
+      Playlists.restartForQueueCleanup(roomId, actorId)
     } else {
       changedCount = Number(db.run(`UPDATE queue SET historyClearedAt=? WHERE roomId=? AND queueId<=? AND queueId!=?
         AND historyClearedAt IS NULL AND status IN ('PLAYED','FAILED','REJECTED')`, [now, roomId, input.throughQueueId, currentQueueId]).changes)
     }
     db.run(`INSERT INTO queueCleanupReceipts(roomId,requestId,actorId,operation,throughQueueId,changedCount,houseStopped,createdAt)
-      VALUES(?,?,?,?,?,?,?,?)`, [roomId, input.requestId, actorId, input.operation, input.throughQueueId, changedCount, Number(houseStopped), now])
+      VALUES(?,?,?,?,?,?,0,?)`, [roomId, input.requestId, actorId, input.operation, input.throughQueueId, changedCount, now])
     db.exec('COMMIT')
-    return { operation: input.operation, requestId: input.requestId, changedCount, houseStopped }
+    return { operation: input.operation, requestId: input.requestId, changedCount, houseStopped: false }
   } catch (error) {
     db.exec('ROLLBACK')
     throw error

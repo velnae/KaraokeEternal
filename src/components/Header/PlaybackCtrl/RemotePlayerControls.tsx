@@ -10,7 +10,7 @@ import { PLAYER_WINDOW_REQUEST_MS, playerWindowMessages, playerWindowResult, typ
 import styles from './RemotePlayerControls.css'
 import toolbarStyles from './PlaybackCtrl.css'
 
-export default function RemotePlayerControls ({ available }: { available: boolean }) {
+export default function RemotePlayerControls ({ available, showFeedback = false }: { available: boolean, showFeedback?: boolean }) {
   const roomId = useAppSelector(state => state.user.roomId)
   const [busy, setBusy] = useState<'fullscreen' | 'close' | null>(null)
   const [result, setResult] = useState<PlayerWindowResult | null>(null)
@@ -61,12 +61,12 @@ export default function RemotePlayerControls ({ available }: { available: boolea
   return (
     <div className={styles.control}>
       <div className={styles.actions}>
-        <Button className={clsx(toolbarStyles.btn, busy === 'fullscreen' && styles.pending)} icon={busy === 'fullscreen' ? 'REFRESH' : 'FULLSCREEN'} disabled={!available || !!busy} onClick={() => void request()} aria-label='Pantalla completa del reproductor' title={busy === 'fullscreen' ? 'Solicitando pantalla completa…' : 'Pantalla completa del reproductor'} aria-busy={busy === 'fullscreen'} aria-describedby={feedbackId} />
         <Button className={clsx(toolbarStyles.btn, busy === 'close' && styles.pending)} icon={busy === 'close' ? 'REFRESH' : 'CLEAR'} disabled={!available || !!busy} onClick={() => setConfirmClose(true)} aria-label='Cerrar reproductor' title={busy === 'close' ? 'Cerrando reproductor…' : 'Cerrar reproductor'} aria-busy={busy === 'close'} aria-describedby={feedbackId} />
         {needsSetup && <Button className={styles.help} onClick={() => setHelp(true)} aria-label='Ver pasos para fullscreen remoto'>Ver pasos</Button>}
+        <Button className={clsx(toolbarStyles.btn, busy === 'fullscreen' && styles.pending)} icon={busy === 'fullscreen' ? 'REFRESH' : 'FULLSCREEN'} disabled={!available || !!busy} onClick={() => void request()} aria-label='Pantalla completa del reproductor' title={busy === 'fullscreen' ? 'Solicitando pantalla completa…' : 'Pantalla completa del reproductor'} aria-busy={busy === 'fullscreen'} aria-describedby={feedbackId} />
       </div>
-      <p id={feedbackId} className={hasError ? styles.feedback : styles.srOnly} role='status' aria-atomic='true' data-result={result?.status}>
-        {!available ? 'Abre el reproductor para continuar.' : busy ? 'Esperando confirmación del reproductor…' : result && playerWindowMessages[result.status]}
+      <p id={feedbackId} className={hasError || (showFeedback && (busy || result)) ? styles.feedback : styles.srOnly} role='status' aria-atomic='true' data-result={result?.status}>
+        {busy ? 'Esperando confirmación del reproductor…' : result ? playerWindowMessages[result.status] : !available ? 'Abre el reproductor para continuar.' : null}
       </p>
       {confirmClose && (
         <Modal

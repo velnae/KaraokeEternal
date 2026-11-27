@@ -9,7 +9,7 @@ import Playlists from '../Playlists/Playlists.js'
 import Rooms from '../Rooms/Rooms.js'
 import handlers from './socket.js'
 import { youtubeSongSource } from '../SongSources/YouTubeSongSource.js'
-import { QUEUE_ADD, QUEUE_CLEANUP, QUEUE_PUSH, PLAYER_CMD_STOP } from '../../shared/actionTypes.js'
+import { QUEUE_ADD, QUEUE_CLEANUP, QUEUE_PUSH, PLAYER_CMD_STOP, PLAYER_CMD_PLAY } from '../../shared/actionTypes.js'
 import { isQueueHistoryHidden, type QueueCleanupRequest } from '../../shared/queueCleanup.js'
 import type { ResolvedSong } from '../../shared/songSource.js'
 import { buildRoundRobinQueue } from '../../src/routes/Queue/selectors/roundRobin.js'
@@ -40,7 +40,7 @@ afterEach(() => {
   fs.rmSync(directory, { recursive: true, force: true })
 })
 
-it('clears current, pending and visible history atomically, stops house refill and preserves saved lists and another room', () => {
+it('clears current, pending and visible history, then rebuilds the house queue without changing the saved list or another room', () => {
   const played = enqueue()
   Queue.transition(1, played, 'PLAYING')
   Queue.transition(1, played, 'PLAYED')
@@ -50,21 +50,27 @@ it('clears current, pending and visible history atomically, stops house refill a
   const other = enqueue(2)
   const listId = Playlists.create(1, 'Daily')
   Playlists.addResolved(1, listId, song)
-  Playlists.configure(1, 1, { playlistId: listId, enabled: true, repeat: true })
+  Playlists.addResolved(1, listId, { ...song, sourceId: 'fixture0002', externalId: 'fixture0002' })
+  const saved = Playlists.get(1, listId)
+  Playlists.configure(1, 1, { playlistId: listId, enabled: true, repeat: false })
   Playlists.reconcile(1)
   const generated = db.all<{ queueId: number }>('SELECT queueId FROM queue WHERE houseRunId IS NOT NULL').map(row => row.queueId)
   const input = request()
   const result = cleanupQueue(1, 1, input, current)
-  expect(result).toMatchObject({ changedCount: pending.length + generated.length + 2, houseStopped: true })
+  expect(result.changedCount).toBe(pending.length + generated.length + 2)
   for (const id of [...pending, ...generated]) expect(status(id)).toBe('REMOVED')
   expect(status(current)).toBe('REMOVED')
   expect(status(played)).toBe('PLAYED')
   expect(status(other)).toBe('APPROVED')
-  expect(Playlists.snapshot(1).playback.enabled).toBe(false)
-  expect(Playlists.get(1, listId).items).toHaveLength(1)
+  expect(Playlists.snapshot(1).playback).toMatchObject({ enabled: true, repeat: false, playlistId: listId })
+  expect(Playlists.get(1, listId)).toEqual(saved)
+  close()
+  open({ file: path.join(directory, 'db.sqlite'), ro: false })
   expect(Playlists.reconcile(1)).toBe(false)
   const cleared = Queue.get(1)
-  expect(cleared.result.filter(id => !isQueueHistoryHidden(cleared.entities[id]))).toEqual([])
+  const visible = cleared.result.map(id => cleared.entities[id]).filter(item => !isQueueHistoryHidden(item))
+  expect(visible.map(item => item.origin)).toEqual(['HOUSE', 'HOUSE'])
+  expect(visible.map(item => item.externalId)).toEqual(['fixture0002', 'fixture0001'])
   expect(Queue.countPending(1, 1)).toBe(0)
   expect(db.all('PRAGMA foreign_key_check')).toHaveLength(0)
   Queue.syncPlayerLifecycle(1, { queueId: current, historyJSON: JSON.stringify(pending) })
@@ -85,23 +91,32 @@ it.each([true, false])('clears every request present at execution and stops curr
   expect(status(newer)).toBe('REMOVED')
   expect(ack.mock.calls[0][0].payload.result.changedCount).toBe(3)
   expect(actor.emit).toHaveBeenCalledWith('action', { type: PLAYER_CMD_STOP })
+  expect(actor.emit).not.toHaveBeenCalledWith('action', { type: PLAYER_CMD_PLAY })
   expect(Rooms.getPlayerStatus(actor.server, 1)).toMatchObject({ queueId: -1, isAtQueueEnd: true, isPlaying: false, position: 0 })
   expect(actor.server.to).toHaveBeenCalledWith(Rooms.prefix(1))
   expect(actor.emit).toHaveBeenCalledWith('action', { type: QUEUE_PUSH, payload: Queue.get(1) })
 })
 
-it('receipt recovery never repeats STOP against a subsequent playback', () => {
+it('publishes the new house queue before playing and receipt recovery does not restart it again', () => {
   enqueue()
+  const id = Playlists.create(1, 'Daily')
+  Playlists.addResolved(1, id, song)
+  Playlists.configure(1, 1, { playlistId: id, enabled: true, repeat: true })
   const input = request()
   const actor = socket()
   const ack = vi.fn()
   handlers[QUEUE_CLEANUP](actor, { payload: { ...input, confirmed: true } }, ack)
+  const rebuilt = Queue.get(1)
+  expect(actor.emit.mock.calls.map(([, action]) => action.type)).toEqual([PLAYER_CMD_STOP, QUEUE_PUSH, PLAYER_CMD_PLAY])
+  expect(actor.emit.mock.calls[1][1].payload).toEqual(rebuilt)
   const later = enqueue()
   Queue.transition(1, later, 'PLAYING')
   actor.emit.mockClear()
   handlers[QUEUE_CLEANUP](actor, { payload: { ...input, confirmed: true } }, ack)
   handlers[QUEUE_CLEANUP](actor, { payload: { ...input, checkOnly: true } }, ack)
   expect(actor.emit).not.toHaveBeenCalledWith('action', { type: PLAYER_CMD_STOP })
+  expect(actor.emit).not.toHaveBeenCalledWith('action', { type: PLAYER_CMD_PLAY })
+  expect(Queue.get(1).result).toEqual([...rebuilt.result, later])
   expect(status(later)).toBe('PLAYING')
 })
 
@@ -185,7 +200,7 @@ it('rolls back removals, house selection, generation and receipt if any step fai
   Playlists.addResolved(1, list, song)
   Playlists.configure(1, 1, { playlistId: list, enabled: true, repeat: true })
   const input = request()
-  db.exec(`CREATE TRIGGER abort_cleanup BEFORE UPDATE OF status ON queue WHEN NEW.queueId=${second} AND NEW.status='REMOVED' BEGIN SELECT RAISE(ABORT,'fixture failure'); END`)
+  db.exec(`CREATE TRIGGER abort_cleanup BEFORE INSERT ON queue WHEN NEW.origin='HOUSE' BEGIN SELECT RAISE(ABORT,'fixture failure'); END`)
   expect(() => cleanupQueue(1, 1, input)).toThrow('fixture failure')
   expect(status(first)).toBe('APPROVED')
   expect(status(second)).toBe('APPROVED')

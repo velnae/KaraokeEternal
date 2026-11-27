@@ -7,9 +7,11 @@
 .play, .pause { color: var(--stage); background: var(--cyan); border-color: transparent; }
 .volume { display: flex; flex: 1; align-items: center; min-width: 120px; max-width: 250px; gap: 12px; output { min-width: 36px; color: var(--secondary); font-size: 12px; font-variant-numeric: tabular-nums; } }
 .displayCtrl[aria-expanded='true'] { color: var(--cyan); border-color: var(--cyan); }
+.queueControls { padding-inline-start: 12px; border-inline-start: 1px solid var(--edge); }
 @media (max-width: 540px) {
   .context { flex-basis: calc(100% - 112px); }
   .viewActions { order: 1; margin-left: auto; }
   .transport { order: 2; }
   .volume { order: 3; max-width: none; }
+  .queueControls { order: 4; flex-basis: 100%; margin-left: 0; padding-inline-start: 0; border-inline-start: 0; }
 }

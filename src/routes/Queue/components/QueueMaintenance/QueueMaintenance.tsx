@@ -5,10 +5,11 @@ import store from 'store/store'
 import socket from 'lib/socket'
 import Button from 'components/Button/Button'
 import Modal from 'components/Modal/Modal'
+import { usePlaylists } from 'components/Playlists/usePlaylists'
 import { useConnection } from 'routes/Participant/useConnection'
 import { queuePush } from '../../modules/queue'
 import { QUEUE_CLEANUP } from 'shared/actionTypes'
-import { isQueueHistoryHidden, type QueueCleanupOperation, type QueueCleanupRequest, type QueueCleanupResult } from 'shared/queueCleanup'
+import type { QueueCleanupRequest, QueueCleanupResult } from 'shared/queueCleanup'
 import styles from './QueueMaintenance.css'
 
 function restore (key: string): QueueCleanupRequest | null {
@@ -24,34 +25,29 @@ function restore (key: string): QueueCleanupRequest | null {
 export default function QueueMaintenance () {
   const { roomId, userId } = useAppSelector(state => state.user)
   const queue = useAppSelector(state => ensureState(state.queue))
-  const { queueId, isAtQueueEnd } = useAppSelector(state => state.status)
   const connected = useConnection()
   const dispatch = useAppDispatch()
   const key = `queue-cleanup:${roomId}:${userId}`
   const [pending, setPending] = useState<QueueCleanupRequest | null>(() => restore(key))
-  const [operation, setOperation] = useState<QueueCleanupOperation | null>(null)
+  const [showConfirmation, setShowConfirmation] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
   const inFlight = useRef(false)
-  const eligible = Object.values(queue.entities).filter(item => item.isOptimistic !== true && (item.queueId !== queueId || isAtQueueEnd))
-  const history = eligible.filter(item => item.isOptimistic !== true && !isQueueHistoryHidden(item) && ['PLAYED', 'FAILED', 'REJECTED'].includes(item.status)).length
   const clearPending = () => {
     setPending(null)
     try {
       sessionStorage.removeItem(key)
     } catch { /* A stale receipt can still be checked safely after reload. */ }
   }
-  const open = (choice: QueueCleanupOperation) => {
-    setOperation(pending?.operation || choice)
+  const open = () => {
+    setShowConfirmation(true)
     setError('')
-    setNotice('')
   }
   const execute = async () => {
-    if (!operation || !connected || inFlight.current) return
+    if (!showConfirmation || !connected || inFlight.current) return
     const checkOnly = !!pending
     const request: QueueCleanupRequest = pending || {
-      operation,
+      operation: 'pending',
       requestId: Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join(''),
       throughQueueId: queue.result.reduce((max, id) => Math.max(max, id), 0),
       expiresAt: Date.now() + 15000,
@@ -59,7 +55,7 @@ export default function QueueMaintenance () {
     try {
       sessionStorage.setItem(key, JSON.stringify(request))
     } catch {
-      setError('Permite el almacenamiento del navegador para confirmar la limpieza.')
+      setError('Permite el almacenamiento del navegador para confirmar el reinicio.')
       return
     }
     setPending(request)
@@ -85,10 +81,7 @@ export default function QueueMaintenance () {
       const result = response.payload.result as QueueCleanupResult
       if (result.requestId !== request.requestId || result.operation !== request.operation) throw new Error('Mismatched acknowledgment')
       clearPending()
-      setOperation(null)
-      setNotice(result.operation === 'pending'
-        ? `Cola vaciada completamente. Reproducción detenida.${result.houseStopped ? ' Se desactivó la lista de la casa.' : ''}`
-        : `${result.changedCount === 1 ? 'Se retiró 1 canción' : `Se retiraron ${result.changedCount} canciones`} del historial visible.`)
+      setShowConfirmation(false)
     } catch {
       setError('No se recibió la confirmación. Comprueba el resultado antes de repetir la operación.')
     } finally {
@@ -99,48 +92,41 @@ export default function QueueMaintenance () {
   return (
     <section className={styles.container} aria-label='Limpieza de la cola'>
       <div className={styles.actions}>
-        <Button variant='default' disabled={!connected || queue.isLoading} onClick={() => open('pending')}>Vaciar cola</Button>
-        <Button variant='default' disabled={!connected || queue.isLoading} onClick={() => open('history')}>Limpiar historial</Button>
+        <Button className={styles.trigger} variant='default' icon={pending ? 'CHECK' : 'REPLAY'} size={18} aria-label={pending ? 'Comprobar resultado' : 'Reiniciar cola'} disabled={!connected || queue.isLoading} onClick={open} />
       </div>
-      {!connected && <p role='status'>Sin conexión. Espera a reconectar para limpiar la cola.</p>}
+      {!connected && <p role='status'>Sin conexión. Espera a reconectar para reiniciar la cola.</p>}
       {connected && queue.isLoading && <p role='status'>Actualizando la cola…</p>}
-      {notice && <p role='status'>{notice}</p>}
-      {pending && !operation && (
-        <p role='status'>
-          Hay una limpieza sin confirmar.
-          <Button onClick={() => open(pending.operation)}>Comprobar resultado</Button>
-        </p>
-      )}
-      {operation && (
-        <Modal title={operation === 'pending' ? '¿Vaciar completamente la cola?' : 'Limpiar historial'} onClose={() => { if (!busy) setOperation(null) }}>
+      {showConfirmation && (
+        <Modal title={pending ? 'Comprobar resultado' : '¿Reiniciar la cola?'} onClose={() => { if (!busy) setShowConfirmation(false) }}>
           <div className={styles.confirmation}>
             {busy
               ? <p role='status'>Esperando la confirmación del servidor…</p>
               : pending
-                ? <p>Esta operación quedó sin confirmar. Comprobar consulta su resultado sin ejecutar otra limpieza.</p>
-                : operation === 'pending'
-                  ? (
-                      <>
-                        <p>Se detendrá la reproducción y se quitarán todas las canciones de esta cola, incluido el historial visible. Tus listas guardadas se conservarán.</p>
-                        <p>También se retirará la canción actual si está pausada y se desactivará la reposición automática de la casa. Los pedidos nuevos podrán seguir entrando después del vaciado.</p>
-                      </>
-                    )
-                  : (
-                      <>
-                        <p>{history === 1 ? '1 canción finalizada en el historial visible.' : `${history} canciones finalizadas en el historial visible.`}</p>
-                        <p>Se retirarán de la vista las canciones reproducidas, fallidas y rechazadas de todas las mesas. Los datos internos se conservan para evitar duplicados.</p>
-                        <p>La canción actual, los pedidos pendientes y las listas guardadas se conservan.</p>
-                      </>
-                    )}
+                ? <p>Comprueba si se aplicó la operación antes de intentarlo de nuevo.</p>
+                : <ResetDetails />}
             {error && <p role='alert' className={styles.error}>{error}</p>}
             {!connected && <p role='status'>Reconecta para continuar.</p>}
             <div className={styles.actions}>
-              <button type='button' autoFocus ref={button => button?.setAttribute('autofocus', '')} className={styles.cancel} disabled={busy} onClick={() => setOperation(null)}>Cancelar</button>
-              <Button variant={pending ? 'primary' : 'danger'} disabled={busy || !connected} onClick={() => void execute()}>{busy ? 'Procesando…' : pending ? 'Comprobar resultado' : operation === 'pending' ? 'Vaciar cola' : 'Limpiar historial'}</Button>
+              <button type='button' autoFocus ref={button => button?.setAttribute('autofocus', '')} className={styles.cancel} disabled={busy} onClick={() => setShowConfirmation(false)}>Cancelar</button>
+              <Button variant={pending ? 'primary' : 'danger'} disabled={busy || !connected} onClick={() => void execute()}>{busy ? 'Procesando…' : pending ? 'Comprobar resultado' : 'Reiniciar cola'}</Button>
             </div>
           </div>
         </Modal>
       )}
     </section>
+  )
+}
+
+function ResetDetails () {
+  const { data } = usePlaylists()
+  const active = data?.playback.enabled && data.playlists.find(list => list.playlistId === data.playback.playlistId)
+  return (
+    <p>
+      Se detendrá la canción actual y se quitarán todos los pedidos y el historial visible de esta sala.
+      {' '}
+      {active
+        ? `La lista «${active.name}» volverá a empezar y se mezclará.`
+        : data ? 'La cola quedará vacía.' : 'Si hay una lista activa, volverá a empezar y se mezclará.'}
+    </p>
   )
 }

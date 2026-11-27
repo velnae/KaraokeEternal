@@ -14,7 +14,6 @@ import Button from 'components/Button/Button'
 import styles from './QueueList.css'
 import { Link, useSearchParams } from 'react-router'
 import HousePlaylistControl from 'components/Playlists/HousePlaylistControl'
-import QueueMaintenance from '../QueueMaintenance/QueueMaintenance'
 import { isQueueHistoryHidden } from 'shared/queueCleanup'
 import useGreetings from 'components/Greetings/useGreetings'
 import Modal from 'components/Modal/Modal'
@@ -200,7 +199,6 @@ const QueueList = () => {
 
   return (
     <>
-      {isOperator && <BirthdayPanel key={user.roomId} onScheduled={() => setFilter('queue')} />}
       {isOperator && (
         <div className={styles.filters}>
           {tableOptions.size > 0 && (
@@ -218,7 +216,7 @@ const QueueList = () => {
             Cola
           </Button>
           <Button
-            className={clsx(styles.filter, filter === 'pending' && styles.active)}
+            className={clsx(styles.filter, filter === 'pending' && styles.active, pendingIds.length > 0 && styles.hasPending)}
             aria-pressed={filter === 'pending'}
             onClick={() => setFilter('pending')}
           >
@@ -231,24 +229,20 @@ const QueueList = () => {
           >
             {houseLabel}
           </Button>
+          <BirthdayPanel key={user.roomId} onScheduled={() => setFilter('queue')} />
         </div>
       )}
-      {isOperator && (
+      {isOperator && (greetings.snapshot?.paused || greetings.snapshot?.items.some(item => ['QUEUED', 'RESERVED', 'DISPLAYING'].includes(item.status))) && (
         <div className={styles.queueActions}>
-          <QueueMaintenance key={`${user.roomId}:${user.userId}`} />
-          {(greetings.snapshot?.paused || greetings.snapshot?.items.some(item => ['QUEUED', 'RESERVED', 'DISPLAYING'].includes(item.status))) && (
-            <Button className={styles.greetingControl} disabled={greetings.busy} aria-pressed={greetings.snapshot.paused} onClick={() => void greetings.execute('pause', { paused: !greetings.snapshot?.paused })}>
-              {greetings.snapshot.paused ? 'Reanudar saludos' : 'Pausar saludos'}
-            </Button>
-          )}
+          <Button className={styles.greetingControl} disabled={greetings.busy} aria-pressed={greetings.snapshot.paused} onClick={() => void greetings.execute('pause', { paused: !greetings.snapshot?.paused })}>
+            {greetings.snapshot.paused ? 'Reanudar saludos' : 'Pausar saludos'}
+          </Button>
         </div>
       )}
       {greetings.error && <p role='alert'>{greetings.error}</p>}
       {user.isAdmin && <p ref={feedback} tabIndex={-1} role='status' className={styles.blockFeedback}>{blockMessage}</p>}
-      {isOperator && houseIds.length > 0 && queue.housePolicy.reason && (
-        <p className={styles.houseNotice} role='status'>
-          {`De la casa en espera: ${queue.housePolicy.reason === 'backlog' ? 'hay 3 o más pedidos pendientes.' : 'un pedido lleva 10 minutos o más esperando.'}`}
-        </p>
+      {isOperator && filter === 'house' && houseIds.length > 0 && queue.housePolicy.reason && (
+        <p className={styles.houseNotice} role='status'>En espera por pedidos</p>
       )}
       {isOperator && filter === 'house' && <HousePlaylistControl key={user.roomId} />}
       {isOperator && filter === 'queue' && result.length === 0 && !birthdays.length && (

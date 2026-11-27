@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react'
 import Button from 'components/Button/Button'
+import Modal from 'components/Modal/Modal'
 import { birthdayLabels, type BirthdayEvent, type BirthdayQueueEvent } from 'shared/birthdays'
 import { useAppSelector } from 'store/hooks'
 import { selectBirthdays } from 'store/modules/birthdays'
@@ -13,13 +14,24 @@ export default function BirthdayPanel ({ onScheduled }: { onScheduled?(): void }
   const { overview, error: loadError, refresh } = useBirthdayQueueOverview()
   const admin = useAppSelector(state => state.user.isAdmin)
   const queued = useAppSelector(selectBirthdays)
+  const [open, setOpen] = useState(false)
   const [form, setForm] = useState(false)
   const [details, setDetails] = useState<{ event: BirthdayEvent | BirthdayQueueEvent, listen: boolean, opener: HTMLButtonElement } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
   const working = useRef(false)
   const panel = useRef<HTMLElement>(null)
+  const trigger = useRef<HTMLButtonElement | null>(null)
   const focusPrepare = () => panel.current?.querySelector<HTMLButtonElement>('[data-birthday-prepare]')?.focus({ preventScroll: true })
+  const close = () => {
+    setOpen(false)
+    setDetails(null)
+    requestAnimationFrame(() => trigger.current?.focus({ preventScroll: true }))
+  }
+  const scheduled = () => {
+    onScheduled?.()
+    close()
+  }
   const execute = async (event: BirthdayEvent | BirthdayQueueEvent, operation: string) => {
     if (working.current) return
     working.current = true
@@ -27,7 +39,7 @@ export default function BirthdayPanel ({ onScheduled }: { onScheduled?(): void }
     setError('')
     try {
       await birthdayApi.post(`events/${event.id}`, { body: { operation, revision: event.revision } })
-      if (operation === 'schedule') onScheduled?.()
+      if (operation === 'schedule') scheduled()
       refresh()
       requestAnimationFrame(focusPrepare)
     } catch (failure) {
@@ -39,11 +51,11 @@ export default function BirthdayPanel ({ onScheduled }: { onScheduled?(): void }
     }
   }
   const events = overview?.events.filter(event => ['held', 'interrupted'].includes(event.playback) && !queued.some(active => active.id === event.id)) ?? []
-  return (
-    <section ref={panel} className={styles.panel} aria-label='Cumpleaños preparados'>
+  const attention = events.filter(event => event.playback === 'interrupted' || ['ready', 'failed'].includes(event.preparation)).length
+  const content = (
+    <section ref={panel} className={styles.queuePanel} aria-label='Cumpleaños preparados'>
       <div className={styles.heading}>
-        <h2>Cumpleaños</h2>
-        <Button variant='default' aria-label='Preparar cumpleaños' data-birthday-prepare onClick={() => setForm(true)}>+ Preparar</Button>
+        <Button variant='default' data-birthday-prepare onClick={() => setForm(true)}>Preparar cumpleaños</Button>
       </div>
       {(error || loadError) && <p role='alert'>{error || loadError}</p>}
       {busy && <p role='status'>Guardando cumpleaños…</p>}
@@ -81,7 +93,7 @@ export default function BirthdayPanel ({ onScheduled }: { onScheduled?(): void }
           initial={details.event}
           listen={details.listen}
           onChanged={refresh}
-          onScheduled={onScheduled}
+          onScheduled={scheduled}
           onClose={(removed) => {
             const opener = details.opener
             setDetails(null)
@@ -93,5 +105,22 @@ export default function BirthdayPanel ({ onScheduled }: { onScheduled?(): void }
         />
       )}
     </section>
+  )
+  return (
+    <>
+      <Button
+        variant='default'
+        className={styles.queueTrigger}
+        aria-haspopup='dialog'
+        data-birthday-trigger
+        onClick={(event) => {
+          trigger.current = event.currentTarget
+          setOpen(true)
+        }}
+      >
+        {attention ? `Cumpleaños (${attention})` : 'Cumpleaños'}
+      </Button>
+      {open && <Modal title='Cumpleaños' onClose={close} scrollable>{content}</Modal>}
+    </>
   )
 }

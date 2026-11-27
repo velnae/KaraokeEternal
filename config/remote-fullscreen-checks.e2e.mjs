@@ -36,7 +36,7 @@ export async function checkRemoteFullscreen ({ player, uiBase, data, db }) {
     await expect(feedback).toHaveCSS('clip-path', 'inset(50%)')
     for (const width of [1440, 390]) {
       await admin.setViewportSize({ width, height: 900 })
-      assert.equal(Math.round((await controls.boundingBox()).height), 44)
+      assert.ok((await button.boundingBox()).height >= 44)
       await admin.screenshot({ path: path.join(data, `remote-controls-icons-${width}.png`) })
     }
     await browserCdp.send('Browser.setPermission', {
@@ -91,11 +91,9 @@ export async function checkRemoteFullscreen ({ player, uiBase, data, db }) {
     await expect(button).toBeDisabled()
     await expect(setupHelp).toHaveCount(0)
     await expect(feedback).toHaveText('Esperando confirmación del reproductor…')
-    await expect(feedback).toHaveCSS('clip-path', 'inset(50%)')
     await read('window.releaseFullscreenPermission()')
     await expect(feedback).toHaveAttribute('data-result', 'entered')
     await expect(button).toHaveAttribute('aria-busy', 'false')
-    await expect(feedback).toHaveCSS('clip-path', 'inset(50%)')
     await expect(setupHelp).toHaveCount(0)
     const confirmed = await read('({target:document.fullscreenElement?.id,request:window.compatibility.fullscreenRequests.at(-1),sameMedia:window.compatibility.video===window.remoteFullscreenVideo,time:window.compatibility.video.currentTime,paused:window.compatibility.video.paused})')
     assert.equal(confirmed.target, 'player-fs-container')

@@ -184,15 +184,17 @@ scenario: try {
     await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('operator')
     await admin.getByPlaceholder('contraseña', { exact: true }).fill('birthday-test')
     await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
+    await admin.getByRole('button', { name: /^Cumpleaños(?: \(\d+\))?$/ }).click()
     await admin.getByRole('button', { name: 'Preparar cumpleaños' }).click()
-    const form = admin.getByRole('dialog')
+    const form = admin.getByRole('dialog', { name: 'Preparar cumpleaños', exact: true })
     await form.getByLabel('Nombre', { exact: true }).fill('María')
     await form.getByLabel('Año de nacimiento').fill('1990')
     await form.getByRole('button', { name: 'Preparar saludo' }).click()
     const card = admin.getByRole('article', { name: 'Cumpleaños de María' })
     await card.getByRole('button', { name: 'Escuchar saludo de María' }).click({ timeout: 30000 })
-    await expect.poll(() => form.locator('audio').evaluate(el => el.currentTime)).toBeGreaterThan(0)
-    await expect(form.getByText('Opciones avanzadas')).toHaveCount(0)
+    const details = admin.getByRole('dialog', { name: 'Cumpleaños de María', exact: true })
+    await expect.poll(() => details.locator('audio').evaluate(el => el.currentTime)).toBeGreaterThan(0)
+    await expect(details.getByText('Opciones avanzadas')).toHaveCount(0)
     const response = await context.request.get(`${base}api/birthdays/queue`)
     const operational = await response.json()
     assert.deepEqual(Object.keys(operational), ['events'])
@@ -200,7 +202,7 @@ scenario: try {
     assert.equal(prepared.playback, 'held')
     assert.ok(!('voiceId' in prepared) && !('personalization' in prepared))
     assert.equal((await context.request.post(`${base}api/birthdays/events/${prepared.id}`, { data: { operation: 'regenerate', revision: prepared.revision } })).status(), 403)
-    await form.getByRole('button', { name: 'Programar' }).click()
+    await details.getByRole('button', { name: 'Programar' }).click()
     await expect.poll(async () => (await event(prepared.id)).playback).toBe('scheduled')
     await admin.getByRole('button', { name: 'Retirar', exact: true }).click()
     await expect.poll(async () => (await event(prepared.id)).playback).toBe('held')
@@ -223,8 +225,10 @@ scenario: try {
   await admin.getByPlaceholder('nombre de usuario o correo electrónico').fill('admin')
   await admin.getByPlaceholder('contraseña', { exact: true }).fill('birthday-test')
   await admin.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
+  const birthdayTrigger = admin.getByRole('button', { name: /^Cumpleaños(?: \(\d+\))?$/ })
+  await birthdayTrigger.click()
   await admin.getByRole('button', { name: 'Preparar cumpleaños', exact: true }).click()
-  const dialog = admin.getByRole('dialog')
+  const dialog = admin.getByRole('dialog', { name: 'Preparar cumpleaños', exact: true })
   await dialog.getByLabel('Nombre', { exact: true }).fill('María')
   await dialog.getByRole('combobox', { name: 'Sexo', exact: true }).selectOption('female')
   await dialog.getByLabel('Año de nacimiento', { exact: true }).fill(personalized ? '1969' : '2000')
@@ -263,6 +267,7 @@ scenario: try {
     assert.equal(speech.body.generationConfig.speechConfig.voiceConfig.voice, global.defaultVoiceId)
   }
   await admin.reload()
+  await birthdayTrigger.click()
   await expect(admin.getByRole('article', { name: 'Cumpleaños de María', exact: true })).toBeVisible()
   await expect(admin.getByRole('button', { name: 'Escuchar prueba', exact: true })).toHaveCount(0)
   assert.equal((await event(birthday.id)).playback, 'held')
@@ -284,6 +289,7 @@ scenario: try {
   }
   await admin.goto(`${uiBase}queue`)
   if (personalized) {
+    await birthdayTrigger.click()
     const textRequestsBeforeRevoice = calls.filter(item => item.body?.generationConfig?.responseSchema).length
     const card = admin.getByRole('article', { name: 'Cumpleaños de María', exact: true })
     await card.getByRole('button', { name: 'Más opciones de cumpleaños de María', exact: true }).click()
@@ -298,6 +304,7 @@ scenario: try {
     birthday.revision = (await event(birthday.id)).revision
     await admin.keyboard.press('Escape')
     await expect(detail).toHaveCount(0)
+    await admin.keyboard.press('Escape')
   }
   await context.addInitScript(() => {
     window.birthdayTrace = []
@@ -437,6 +444,7 @@ scenario: try {
   assert.equal((await event(interrupted.id)).playback, 'interrupted')
   const cancelledBefore = await event(interrupted.id)
   const callsBeforeCancel = calls.length
+  await birthdayTrigger.click()
   const interruptedCard = admin.getByRole('article', { name: 'Cumpleaños de Ana', exact: true })
   await interruptedCard.getByRole('button', { name: 'Más opciones de cumpleaños de Ana', exact: true }).click()
   const cancelDetail = admin.getByRole('dialog', { name: 'Cumpleaños de Ana', exact: true })

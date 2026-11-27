@@ -11,6 +11,7 @@ export async function checkBirthdayScene ({ admin, api, base, calls, birthday, d
   const providerCount = calls.length
   const card = admin.getByRole('article', { name: 'Cumpleaños de María', exact: true })
   const panel = admin.getByRole('region', { name: 'Cumpleaños preparados', exact: true })
+  const birthdayTrigger = admin.getByRole('button', { name: /^Cumpleaños(?: \(\d+\))?$/ })
   await expect(card.getByRole('button')).toHaveCount(3)
   await expect(card.getByRole('button', { name: 'Configurar celebración', exact: true })).toHaveCount(0)
   await expect(panel.getByRole('link')).toHaveCount(0)
@@ -56,7 +57,9 @@ export async function checkBirthdayScene ({ admin, api, base, calls, birthday, d
   await admin.keyboard.press('Escape')
   await expect(details).toHaveCount(0)
   const operationPattern = `**/api/birthdays/events/${birthday.id}`
+  await admin.keyboard.press('Escape')
   await admin.getByRole('button', { name: /^Por aprobar/ }).click()
+  await birthdayTrigger.click()
   const refuse = route => route.fulfill({ status: 409, body: 'El cumpleaños cambió. Actualice antes de programar.' })
   await admin.route(operationPattern, refuse)
   await card.getByRole('button', { name: 'Programar', exact: true }).click()
@@ -67,7 +70,7 @@ export async function checkBirthdayScene ({ admin, api, base, calls, birthday, d
   await admin.keyboard.press('Enter')
   await expect.poll(async () => (await event(birthday.id)).playback).toBe('scheduled')
   await expect(admin).toHaveURL(/[?&]view=queue/)
-  await expect(panel.getByRole('article')).toHaveCount(0)
+  await expect(panel).toHaveCount(0)
   await expect(card).toHaveCount(1)
   await expect(card.getByRole('button', { name: 'Retirar', exact: true })).toBeVisible()
   const queuedOptions = card.getByRole('button', { name: 'Más opciones de cumpleaños de María', exact: true })
@@ -85,6 +88,7 @@ export async function checkBirthdayScene ({ admin, api, base, calls, birthday, d
   }
   await card.getByRole('button', { name: 'Retirar', exact: true }).click()
   await expect.poll(async () => (await event(birthday.id)).playback).toBe('held')
+  await birthdayTrigger.click()
   await expect(panel.getByRole('article')).toHaveCount(1)
   await expect(admin.locator('[data-birthday-id]')).toHaveCount(0)
   assert.equal(calls.length, providerCount, 'Scene adjustments never call providers')

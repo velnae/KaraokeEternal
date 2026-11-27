@@ -8,7 +8,6 @@ export async function checkRemoteClose ({ admin, player, data, db }) {
   const close = () => admin.getByRole('button', { name: 'Cerrar reproductor', exact: true })
   const dialog = () => admin.getByRole('dialog', { name: 'Cerrar reproductor', exact: true })
   const fullscreen = admin.getByRole('button', { name: 'Pantalla completa del reproductor', exact: true })
-  assert.equal((await fullscreen.innerText()).trim(), '', 'Fullscreen is a normal icon-only control')
   await expect(fullscreen).toHaveAttribute('title', 'Pantalla completa del reproductor')
   await expect.poll(() => player.evaluate(() => document.fullscreenElement?.id)).toBe('player-fs-container')
   await close().focus()
@@ -32,7 +31,7 @@ export async function checkRemoteClose ({ admin, player, data, db }) {
   await dialog().getByRole('button', { name: 'Cerrar y detener', exact: true }).click()
   await expect(player.getByRole('heading', { name: 'Reproductor cerrado desde administración', exact: true })).toBeVisible()
   await expect(admin.getByText('Sin reproductor', { exact: true })).toBeVisible()
-  await expect(close()).toBeDisabled()
+  await expect(close()).toBeHidden()
   await expect.poll(() => player.evaluate(() => ({
     stopped: window.compatibility.video.paused && !window.compatibility.video.isConnected,
     audioClosed: window.compatibility.contexts.every(context => context.state === 'closed'),

@@ -10,6 +10,7 @@ import {
   QUEUE_REMOVE,
   QUEUE_PUSH,
   QUEUE_CLEANUP,
+  PLAYER_CMD_PLAY,
   PLAYER_CMD_STOP,
 } from '../../shared/actionTypes.js'
 import { normalizeQueuePrefs } from '../../shared/queueRules.js'
@@ -44,19 +45,24 @@ const ACTION_HANDLERS = {
       const current = status?.isAtQueueEnd !== true && Number.isSafeInteger(status?.queueId) ? status.queueId : -1
       const previous = cleanupReceipt(roomId, sock.user.userId, payload)
       const result = payload.checkOnly === true ? previous : previous || cleanupQueue(roomId, sock.user.userId, payload, current)
-      if (result?.operation === 'pending' && !previous && payload.checkOnly !== true) {
+      const restarted = result?.operation === 'pending' && !previous && payload.checkOnly !== true
+      const room = sock.server.to(Rooms.prefix(roomId))
+      if (restarted) {
         // Receipt recovery must never stop a newer playback or repeat the clear.
         for (const player of sock.server.of('/').sockets.values()) {
           if (player.user?.roomId === roomId && player._lastPlayerStatus) {
             player._lastPlayerStatus = { ...player._lastPlayerStatus, ...clearedQueuePlayback }
           }
         }
-        sock.server.to(Rooms.prefix(roomId)).emit('action', { type: PLAYER_CMD_STOP })
-        Animation.cancel(roomId, 'Cola vaciada por el operador')
+        room.emit('action', { type: PLAYER_CMD_STOP })
+        Animation.cancel(roomId, 'Cola reiniciada por el operador')
       }
       const queue = Queue.get(roomId)
       acknowledge({ type: QUEUE_CLEANUP + '_SUCCESS', payload: { found: !!result, result, queue } })
-      if (result) sock.server.to(Rooms.prefix(roomId)).emit('action', { type: QUEUE_PUSH, payload: queue })
+      if (result) room.emit('action', { type: QUEUE_PUSH, payload: queue })
+      if (restarted && Object.values(queue.entities).some(item => item.origin === 'HOUSE' && item.status === 'APPROVED')) {
+        room.emit('action', { type: PLAYER_CMD_PLAY })
+      }
     } catch (error) {
       acknowledge({ type: QUEUE_CLEANUP + '_ERROR', error: (error as Error).message })
     }

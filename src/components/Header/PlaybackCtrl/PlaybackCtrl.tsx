@@ -7,6 +7,7 @@ import screenfull from 'screenfull'
 import { requestOptions, requestPause, requestPlay, requestPlayNext, requestVolume } from 'store/modules/status'
 import Button from 'components/Button/Button'
 import Icon from 'components/Icon/Icon'
+import QueueMaintenance from 'routes/Queue/components/QueueMaintenance/QueueMaintenance'
 import VolumeSlider from './VolumeSlider/VolumeSlider'
 import NoPlayer from './NoPlayer/NoPlayer'
 import DisplayCtrl from './DisplayCtrl/DisplayCtrl'
@@ -21,16 +22,24 @@ import { selectBirthdays } from 'store/modules/birthdays'
 import { nextBirthday } from 'shared/playbackSequence'
 import { localPlay } from 'routes/Player/runtime/localPlay'
 
-const PlaybackCtrl = () => {
+export default function PlaybackCtrl () {
+  const { pathname } = useLocation()
+  const { roomId, userId } = useAppSelector(state => state.user)
+  return <PlaybackToolbar key={`${pathname}:${roomId}:${userId}`} />
+}
+
+function PlaybackToolbar () {
   useBirthdaySync()
   const birthday = nextBirthday(useAppSelector(selectBirthdays))
   const [isDisplayCtrlVisible, setDisplayCtrlVisible] = useState(false)
   const [fullscreenError, setFullscreenError] = useState(false)
   const location = useLocation()
   const isPlayer = location.pathname.replace(/\/$/, '').endsWith('/player')
+  const isQueue = location.pathname.replace(/\/$/, '') === '/queue'
 
   const isAdmin = useAppSelector(state => canOperate(state.user))
-  const isInRoom = useAppSelector(state => state.user.roomId !== null)
+  const { roomId, userId } = useAppSelector(state => state.user)
+  const isInRoom = roomId !== null
   const roomName = useAppSelector(state => state.rooms.entities[state.user.roomId]?.name)
   const status = useAppSelector(state => state.status)
 
@@ -63,11 +72,8 @@ const PlaybackCtrl = () => {
     setDisplayCtrlVisible(!isDisplayCtrlVisible)
   }
 
-  if (!status.isPlayerPresent) {
-    return (isAdmin && isInRoom) ? <NoPlayer remoteControls={!isPlayer} /> : null
-  }
-
-  return (
+  const showQueueControls = isQueue && isAdmin && isInRoom
+  const toolbar = (
     <div className={styles.container} role='toolbar' aria-label='Controles de reproducción'>
       <div className={styles.context}>
         {isPlayer && <Link to='/queue' className={styles.back} aria-label='Volver a la cola'><Icon icon='CHEVRON_LEFT' size={24} /></Link>}
@@ -100,17 +106,19 @@ const PlaybackCtrl = () => {
         <output aria-label='Nivel de volumen'>{`${Math.round(status.volume * 100)}%`}</output>
       </div>
 
-      <div className={styles.viewActions}>
+      <div className={clsx(styles.viewActions, showQueueControls && styles.queueControls)}>
         {isPlayer && <AnimationQuickControls player />}
-        {!isPlayer && isAdmin && <RemotePlayerControls available={status.isPlayerPresent} />}
-        <Button
-          className={clsx(styles.btn, styles.displayCtrl)}
-          icon='TUNE'
-          onClick={toggleDisplayCtrl}
-          size={24}
-          aria-label='Opciones de pantalla'
-          aria-expanded={isDisplayCtrlVisible}
-        />
+        {!isPlayer && isAdmin && <RemotePlayerControls available showFeedback={showQueueControls} />}
+        {!showQueueControls && (
+          <Button
+            className={clsx(styles.btn, styles.displayCtrl)}
+            icon='TUNE'
+            onClick={toggleDisplayCtrl}
+            size={24}
+            aria-label='Opciones de pantalla'
+            aria-expanded={isDisplayCtrlVisible}
+          />
+        )}
 
         {isPlayer && screenfull.isEnabled && (
           <Button
@@ -125,7 +133,13 @@ const PlaybackCtrl = () => {
       </div>
 
       {fullscreenError && <span role='alert'>No se pudo abrir la pantalla completa. Intenta de nuevo.</span>}
-      {isDisplayCtrlVisible && (
+    </div>
+  )
+
+  return (
+    <>
+      {status.isPlayerPresent ? toolbar : isAdmin && isInRoom && <NoPlayer iconOnly={showQueueControls} remoteControls={!isPlayer && !showQueueControls}>{showQueueControls && <QueueMaintenance key={`${roomId}:${userId}`} />}</NoPlayer>}
+      {isDisplayCtrlVisible && status.isPlayerPresent && (
         <DisplayCtrl
           cdgAlpha={status.cdgAlpha}
           cdgSize={status.cdgSize}
@@ -140,8 +154,6 @@ const PlaybackCtrl = () => {
           visualizerPresetName={status.visualizer.presetName}
         />
       )}
-    </div>
+    </>
   )
 }
-
-export default PlaybackCtrl

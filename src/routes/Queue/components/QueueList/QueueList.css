@@ -1,7 +1,4 @@
 .filters {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -26,6 +23,8 @@
   border-radius: 10px;
 }
 
+.filter.hasPending:not(.active) { color: var(--amber); }
+
 .filter.active {
   color: var(--cyan);
   border-color: var(--cyan);
@@ -39,7 +38,6 @@
 }
 
 .queueActions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0; }
-.queueActions > section { padding: 0; min-width: 0; max-width: 100%; }
 .greetingControl { flex-shrink: 0; width: auto; min-height: 44px; padding: 10px 12px; color: var(--secondary); background: var(--equipment); border: 1px solid var(--edge); border-radius: 10px; font-size: 13px; }
 .greetingControl[aria-pressed='true'] { color: var(--amber); border-color: var(--amber); }
 .blockDialog { width: min(480px, calc(100% - 24px)); }

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomInt, randomUUID } from 'node:crypto'
 import type { Server } from 'socket.io'
 import { db } from '../lib/Database.js'
 import Queue from '../Queue/Queue.js'
@@ -11,7 +11,7 @@ import getLogger from '../lib/Log.js'
 import Prefs from '../Prefs/Prefs.js'
 import { findMusicBlock } from '../../shared/musicBlocking.js'
 
-interface PlaybackRow { roomId: number, playlistId: number | null, enabled: number, repeat: number, cursor: number, runId: string, actorId: number | null, message: string }
+interface PlaybackRow { roomId: number, playlistId: number | null, enabled: number, repeat: number, cursor: number, runId: string, actorId: number | null, message: string, itemOrderJSON: string | null }
 const log = getLogger('house-playlists')
 const identifier = (value: number) => {
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error('El identificador no es válido')
@@ -97,7 +97,7 @@ export default class Playlists {
     try {
       order.forEach((id, index) => db.run('UPDATE musicPlaylistItems SET position=? WHERE itemId=?', [index + 1, id]))
       // A newly mixed repertoire starts from the beginning, even after a previous run.
-      if (requireInactive && playback) db.run('UPDATE housePlayback SET cursor=0,runId=?,message=\'\' WHERE roomId=?', [randomUUID(), roomId])
+      if (requireInactive && playback) db.run('UPDATE housePlayback SET cursor=0,runId=?,itemOrderJSON=NULL,message=\'\' WHERE roomId=?', [randomUUID(), roomId])
       db.exec('COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')
@@ -132,28 +132,49 @@ export default class Playlists {
     const reset = !previous || previous.playlistId !== playlistId || input.restart === true
     let cursor = reset ? 0 : previous.cursor
     if (!reset && (!input.enabled || Number(input.repeat) !== previous.repeat)) {
-      cursor = this.playedCursor(roomId, previous.runId)
+      cursor = this.playedCursor(previous)
     }
     if (reset || !input.enabled || Number(input.repeat) !== previous.repeat) this.clearPending(roomId)
-    db.run(`INSERT INTO housePlayback(roomId,playlistId,enabled,repeat,cursor,runId,actorId,message) VALUES(?,?,?,?,?,?,?,'')
+    db.run(`INSERT INTO housePlayback(roomId,playlistId,enabled,repeat,cursor,runId,actorId,itemOrderJSON,message) VALUES(?,?,?,?,?,?,?,?,'')
       ON CONFLICT(roomId) DO UPDATE SET playlistId=excluded.playlistId,enabled=excluded.enabled,repeat=excluded.repeat,
-      cursor=excluded.cursor,runId=excluded.runId,actorId=excluded.actorId,message=''`,
-    [roomId, playlistId, Number(input.enabled), Number(input.repeat), cursor, reset ? randomUUID() : previous.runId, actorId])
+      cursor=excluded.cursor,runId=excluded.runId,actorId=excluded.actorId,itemOrderJSON=excluded.itemOrderJSON,message=''`,
+    [roomId, playlistId, Number(input.enabled), Number(input.repeat), cursor, reset ? randomUUID() : previous.runId, actorId, reset ? null : previous.itemOrderJSON])
   }
 
-  private static playedCursor (roomId: number, runId: string, currentQueueId = -1) {
-    return db.get<{ position: number }>(`SELECT i.position FROM queue q JOIN musicPlaylistItems i ON i.itemId=q.playlistItemId
-      WHERE q.roomId=? AND q.houseRunId=? AND (q.status IN ('PLAYING','PLAYED','FAILED') OR q.queueId=?) ORDER BY q.queueId DESC LIMIT 1`,
-    [roomId, runId, currentQueueId])?.position ?? 0
+  private static playbackPosition (state: PlaybackRow) {
+    const ids: number[] = state.itemOrderJSON ? JSON.parse(state.itemOrderJSON) : []
+    const positions = new Map(ids.map((id, index) => [id, index + 1]))
+    return (item: { itemId: number, position: number }) => positions.get(item.itemId) ?? ids.length + item.position
   }
 
-  // Called inside the queue-cleanup transaction; the caller removes pending rows.
-  static suspendForQueueCleanup (roomId: number, currentQueueId: number): boolean {
+  private static playedCursor (state: PlaybackRow) {
+    const item = db.get<{ itemId: number, position: number }>(`SELECT i.itemId,i.position FROM queue q JOIN musicPlaylistItems i ON i.itemId=q.playlistItemId
+      WHERE q.roomId=? AND q.houseRunId=? AND q.status IN ('PLAYING','PLAYED','FAILED') ORDER BY q.queueId DESC LIMIT 1`,
+    [state.roomId, state.runId])
+    return item ? this.playbackPosition(state)(item) : 0
+  }
+
+  // Called after removing the old queue, inside the same transaction.
+  static restartForQueueCleanup (roomId: number, actorId: number) {
     const state = db.get<PlaybackRow>('SELECT * FROM housePlayback WHERE roomId=?', [roomId])
-    if (!state?.enabled) return false
-    db.run('UPDATE housePlayback SET enabled=0,cursor=?,message=? WHERE roomId=?',
-      [this.playedCursor(roomId, state.runId, currentQueueId), 'Lista desactivada al vaciar la cola.', roomId])
-    return true
+    if (!state?.enabled || !state.playlistId) return
+    const items = this.get(roomId, state.playlistId).items
+    const previous = db.get<{ playlistItemId: number }>('SELECT playlistItemId FROM queue WHERE roomId=? AND houseRunId=? ORDER BY queueId LIMIT 1', [roomId, state.runId])?.playlistItemId
+    for (let index = items.length - 1; index > 0; index--) {
+      const swap = randomInt(index + 1)
+      ;[items[index], items[swap]] = [items[swap], items[index]]
+    }
+    const blocking = Prefs.getMusicBlocking()
+    const available = items.filter(item => !findMusicBlock(item.song, blocking))
+    if (available.length > 1 && available[0].itemId === previous) {
+      const replacement = available[randomInt(1, available.length)]
+      const first = items.indexOf(available[0])
+      const next = items.indexOf(replacement)
+      ;[items[first], items[next]] = [items[next], items[first]]
+    }
+    db.run('UPDATE housePlayback SET cursor=0,runId=?,actorId=?,itemOrderJSON=?,message=\'\' WHERE roomId=?',
+      [randomUUID(), state.actorId ?? actorId, JSON.stringify(items.map(item => item.itemId)), roomId])
+    this.reconcile(roomId, true)
   }
 
   private static clearPending (roomId: number, itemId?: number) {
@@ -166,7 +187,7 @@ export default class Playlists {
     return db.all<{ playlistItemId: number }>('SELECT DISTINCT playlistItemId FROM queue WHERE roomId=? AND houseRunId=? AND status=\'FAILED\' AND playlistItemId IS NOT NULL', [state.roomId, state.runId]).map(row => row.playlistItemId)
   }
 
-  static reconcile (roomId: number): boolean {
+  static reconcile (roomId: number, withinTransaction = false): boolean {
     const state = db.get<PlaybackRow>('SELECT * FROM housePlayback WHERE roomId=?', [roomId])
     if (!state?.enabled || !state.playlistId) return false
     const room = Rooms.get(roomId, { status: ['open', 'closed'] }).entities[roomId]
@@ -176,30 +197,31 @@ export default class Playlists {
       return this.clearPending(roomId)
     }
     const list = this.get(roomId, state.playlistId)
+    const position = this.playbackPosition(state)
     const failed = this.skipped(state)
     let changed = false
     for (const id of failed) changed = this.clearPending(roomId, id) || changed
     const musicBlocking = Prefs.getMusicBlocking()
     const blocked = list.items.filter(item => findMusicBlock(item.song, musicBlocking))
-    const available = list.items.filter(item => !failed.includes(item.itemId) && !blocked.includes(item))
+    const available = list.items.filter(item => !failed.includes(item.itemId) && !blocked.includes(item)).sort((a, b) => position(a) - position(b))
     if (!available.length) {
       db.run('UPDATE housePlayback SET message=? WHERE roomId=?', [blocked.length ? 'No hay canciones disponibles: revise Música bloqueada y los errores de la lista.' : list.items.length ? 'Todas las canciones fallaron. Revise la lista y pulse Reiniciar lista para reintentarlas.' : 'La lista está vacía. Agregue canciones desde Biblioteca.', roomId])
       return changed
     }
     // Prepare a complete cycle independently of interleaving; wrap only after
     // its prepared songs have been consumed, never on each timer/status tick.
-    db.exec('BEGIN IMMEDIATE')
+    if (!withinTransaction) db.exec('BEGIN IMMEDIATE')
     try {
       const prepared = new Set(db.all<{ playlistItemId: number }>('SELECT playlistItemId FROM queue WHERE roomId=? AND houseRunId=? AND status=\'APPROVED\'', [roomId, state.runId]).map(row => row.playlistItemId))
       let cursor = state.cursor
       let message = failed.length ? `${failed.length} canciones omitidas por error. Reinicie la lista para reintentarlas.` : ''
       if (blocked.length) message += ` ${blocked.length} canciones omitidas por la política de contenido del local.`
-      if (state.repeat && prepared.size === 0 && !available.some(item => item.position > cursor)) cursor = 0
+      if (state.repeat && prepared.size === 0 && !available.some(item => position(item) > cursor)) cursor = 0
       for (const item of available) {
-        if (item.position <= cursor || prepared.has(item.itemId)) continue
+        if (position(item) <= cursor || prepared.has(item.itemId)) continue
         Queue.add({ roomId, userId: state.actorId, song: item.song, origin: 'HOUSE', requestId: randomUUID(), playlistItemId: item.itemId, houseRunId: state.runId })
         prepared.add(item.itemId)
-        cursor = item.position
+        cursor = position(item)
         changed = true
       }
       if (!state.repeat && prepared.size === 0) {
@@ -208,9 +230,9 @@ export default class Playlists {
       if (cursor !== state.cursor || message !== state.message) {
         db.run('UPDATE housePlayback SET cursor=?,message=? WHERE roomId=?', [cursor, message, roomId])
       }
-      db.exec('COMMIT')
+      if (!withinTransaction) db.exec('COMMIT')
     } catch (error) {
-      db.exec('ROLLBACK')
+      if (!withinTransaction) db.exec('ROLLBACK')
       throw error
     }
     return changed

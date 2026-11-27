@@ -1,4 +1,4 @@
-.container { padding: 12px 0; }
+.actions .trigger { display: grid; place-items: center; width: 44px; padding: 0; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .actions button { width: auto; min-height: 44px; }
 .container p { color: var(--secondary); font-size: 14px; line-height: 1.5; margin: 12px 0 0; }

@@ -44,3 +44,5 @@
   .queued strong { flex-basis: 100%; }
   .preview audio { max-width: 100%; }
 }
+.queueTrigger { width: auto; min-height: 44px; padding: 8px 12px; font-size: 13px; }
+.queuePanel { display: grid; gap: 12px; }

@@ -25,7 +25,7 @@ export default function BirthdayQueueItem ({ event }: { event: PublicBirthday })
       const current = overview.events.find(item => item.id === event.id)
       if (current?.playback !== 'scheduled') throw new Error('El cumpleaños cambió de estado. Revise la cola.')
       await birthdayApi.post(`events/${event.id}`, { body: { operation: 'unschedule', revision: current.revision } })
-      requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-birthday-prepare]')?.focus({ preventScroll: true }))
+      requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-birthday-trigger]')?.focus({ preventScroll: true }))
     } catch (failure) {
       setError((failure as Error).message)
     } finally {
@@ -54,7 +54,7 @@ export default function BirthdayQueueItem ({ event }: { event: PublicBirthday })
             setDetails(null)
             requestAnimationFrame(() => {
               if (!removed && opener.isConnected) opener.focus({ preventScroll: true })
-              else document.querySelector<HTMLButtonElement>('[data-birthday-prepare]')?.focus({ preventScroll: true })
+              else document.querySelector<HTMLButtonElement>('[data-birthday-trigger]')?.focus({ preventScroll: true })
             })
           }}
         />
