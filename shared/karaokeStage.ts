@@ -3,7 +3,6 @@ import type { AnimationClip } from './animation.js'
 export const KARAOKE_CUE = 'server/KARAOKE_CUE'
 export const KARAOKE_REMINDER_MS = 10000
 export const KARAOKE_ENTRY_ATTACK_MS = 1500
-export const KARAOKE_EXIT_MS = 600
 export const KARAOKE_FADE_MS = 1200
 export const karaokeCueKinds = ['entry', 'reminder', 'countdown', 'ended'] as const
 export type KaraokeCueKind = typeof karaokeCueKinds[number]

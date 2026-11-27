@@ -95,6 +95,7 @@ interface YouTubePlayerProps {
   onError(error: string, diagnostic?: { category: 'iframe' | 'api-load', code?: number }): void
   onLoad(): void
   onPlay(): void
+  onProgress?(mediaKey: number, remainingMs: number | null): void
   onStatus(status: { isPlaying?: boolean, position?: number }): void
   videoId: string
   volume: number
@@ -263,8 +264,10 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
       // A previous video's pause can arrive while loadVideoById starts the next one.
       if (!this.awaitingPlayback && !this.awaitingPreparedStart) this.props.onStatus({ isPlaying: false })
       this.stopStatusUpdates()
+      this.props.onProgress?.(this.props.mediaKey, null)
     } else {
       this.stopStatusUpdates()
+      if (event.data !== window.YT?.PlayerState.ENDED) this.props.onProgress?.(this.props.mediaKey, null)
     }
 
     if (event.data === window.YT?.PlayerState.ENDED && !this.awaitingPreparedStart) this.props.onEnd()
@@ -341,7 +344,15 @@ class YouTubePlayer extends React.Component<YouTubePlayerProps> {
     this.stopStatusUpdates()
     this.statusTimer = setInterval(() => {
       const position = this.player?.getCurrentTime()
-      if (typeof position === 'number' && Number.isFinite(position)) this.props.onStatus({ position })
+      if (typeof position === 'number' && Number.isFinite(position)) {
+        this.props.onStatus({ position })
+        if (this.props.onProgress) {
+          const duration = this.player?.getDuration()
+          if (typeof duration === 'number' && duration > 0 && Number.isFinite(duration)) {
+            this.props.onProgress(this.props.mediaKey, (duration - position) * 1000)
+          }
+        }
+      }
     }, STATUS_INTERVAL_MS)
   }
 

@@ -39,6 +39,7 @@ interface PlayerProps {
   onError(error: string, diagnostic?: { category: 'iframe' | 'api-load', code?: number }): void
   onLoad(): void
   onPlay(): void
+  onProgress?(mediaKey: number, remainingMs: number | null): void
   onStatus(status: Partial<PlayerState>): void
 }
 
@@ -198,33 +199,39 @@ class Player extends React.PureComponent<PlayerProps> {
       this.props.isVideoKeyingEnabled,
     )
 
-    const prepared = !this.props.isVisible ? this.props.preparedYouTube : null
-    if (prepared || playerKind === 'youtube') {
-      const videoId = prepared?.videoId ?? this.props.externalId
-      const mediaKey = prepared?.mediaKey ?? this.props.mediaKey
-      if (!videoId || typeof mediaKey !== 'number') return null
-
-      return (
-        <YouTubePlayer
-          ref={this.youtubePlayer}
-          controls={0}
-          showAutoplayRecovery
-          height={this.props.height}
-          isActive={this.props.isVisible}
-          isPlaying={this.props.isVisible && this.props.isPlaying}
-          mediaKey={mediaKey}
-          mediaReplayKey={this.props.mediaReplayKey}
-          onEnd={this.props.onEnd}
-          onError={this.props.onError}
-          onLoad={this.props.onLoad}
-          onPlay={this.handlePlay}
-          onStatus={this.props.onStatus}
-          videoId={videoId}
-          volume={this.props.volume}
-          width={this.props.width}
-        />
-      )
-    }
+    const prepared = this.props.preparedYouTube
+    const current = playerKind === 'youtube' && this.props.externalId && typeof this.props.mediaKey === 'number'
+      ? { videoId: this.props.externalId, mediaKey: this.props.mediaKey }
+      : null
+    const youtube = [this.props.isVisible || !prepared ? current : null,
+      prepared?.mediaKey !== current?.mediaKey || !this.props.isVisible ? prepared : null]
+      .filter((item): item is NonNullable<typeof item> => !!item)
+      .map(({ videoId, mediaKey }) => {
+        const active = this.props.isVisible && mediaKey === current?.mediaKey
+        return (
+          <YouTubePlayer
+            key={mediaKey}
+            ref={active ? this.youtubePlayer : undefined}
+            controls={0}
+            showAutoplayRecovery
+            height={this.props.height}
+            isActive={active}
+            isPlaying={active && this.props.isPlaying}
+            mediaKey={mediaKey}
+            mediaReplayKey={this.props.mediaReplayKey}
+            onEnd={this.props.onEnd}
+            onError={this.props.onError}
+            onLoad={this.props.onLoad}
+            onPlay={this.handlePlay}
+            onProgress={this.props.onProgress}
+            onStatus={this.props.onStatus}
+            videoId={videoId}
+            volume={this.props.volume}
+            width={this.props.width}
+          />
+        )
+      })
+    if (playerKind === 'youtube' || !this.props.isVisible) return <>{youtube}</>
 
     if (!this.props.isVisible || typeof this.props.mediaKey !== 'number' || typeof this.props.mediaId !== 'number') return null
 
@@ -247,6 +254,7 @@ class Player extends React.PureComponent<PlayerProps> {
 
     return (
       <>
+        {youtube}
         {media}
         {isVisualizerActive && (
           <PlayerVisualizer

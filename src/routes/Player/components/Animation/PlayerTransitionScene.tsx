@@ -2,22 +2,27 @@ import React, { useEffect, useState } from 'react'
 import TransitionBackground from 'components/TransitionBackground/TransitionBackground'
 import type { TransitionVideoBackground } from 'shared/transitionVideo'
 import styles from './PlayerTransitionScene.css'
-import { KARAOKE_EXIT_MS } from 'shared/karaokeStage'
+const EXIT_DURATION_MS = 1500
 
-const EXIT_DURATION_MS = KARAOKE_EXIT_MS
-
-export default function PlayerTransitionScene ({ background, playing, sceneId, exiting = false, onExited, children }: {
+export default function PlayerTransitionScene ({ background, playing, sceneId, exiting = false, visibility, onBackgroundReady, onExited, children }: {
   background: TransitionVideoBackground | null
   playing: boolean
   sceneId: string
   exiting?: boolean
+  visibility?: 'warmup' | 'preroll'
+  onBackgroundReady?: (ready: boolean) => void
   onExited?: () => void
   children: React.ReactNode
 }) {
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  const [enteredScene, setEnteredScene] = useState<string | null>(() => playing ? sceneId : null)
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    onBackgroundReady?.(ready)
+  }, [onBackgroundReady, ready])
+  const visible = !visibility || (visibility === 'preroll' && ready)
+  const [enteredScene, setEnteredScene] = useState<string | null>(() => playing && visible ? sceneId : null)
   // Remember the first play so pausing freezes, rather than resets, the entrance.
-  if (playing && enteredScene !== sceneId) setEnteredScene(sceneId)
+  if (playing && visible && enteredScene !== sceneId) setEnteredScene(sceneId)
   useEffect(() => {
     const preference = window.matchMedia('(prefers-reduced-motion: reduce)')
     const update = () => setReducedMotion(preference.matches)
@@ -36,6 +41,9 @@ export default function PlayerTransitionScene ({ background, playing, sceneId, e
       data-testid='transition-scene'
       data-scene-id={sceneId}
       data-exiting={exiting}
+      data-preroll={visibility === 'preroll'}
+      data-hidden={!visible}
+      aria-hidden={!visible || undefined}
       data-playing={playing}
       data-scene-entered={enteredScene === sceneId}
       style={{ '--scene-exit-duration': `${EXIT_DURATION_MS}ms` } as React.CSSProperties}
@@ -43,7 +51,7 @@ export default function PlayerTransitionScene ({ background, playing, sceneId, e
         if (exiting && event.target === event.currentTarget && event.propertyName === 'opacity') onExited?.()
       }}
     >
-      <TransitionBackground className={styles.frame} resource={background?.resource ?? null} dimOpacity={background?.dimOpacity ?? 0.55} playing={playing && !reducedMotion}>
+      <TransitionBackground className={styles.frame} resource={background?.resource ?? null} dimOpacity={background?.dimOpacity ?? 0.55} playing={playing && !reducedMotion} onVisualReady={setReady}>
         {children}
       </TransitionBackground>
     </div>

@@ -11,13 +11,14 @@ interface Props {
   playing: boolean
   children: React.ReactNode
   onPlaybackStateChange?: (state: BackgroundPlaybackState) => void
+  onVisualReady?: (ready: boolean) => void
 }
 
 export default function TransitionBackground (props: Props) {
   return <Background {...props} />
 }
 
-function Background ({ resource, dimOpacity, playing, children, onPlaybackStateChange, className = '' }: Props) {
+function Background ({ resource, dimOpacity, playing, children, onPlaybackStateChange, onVisualReady, className = '' }: Props) {
   const video = useRef<HTMLVideoElement>(null)
   const pendingFrame = useRef<number | null>(null)
   const [status, setStatus] = useState<BackgroundPlaybackState>(playing ? 'loading' : 'idle')
@@ -89,6 +90,9 @@ function Background ({ resource, dimOpacity, playing, children, onPlaybackStateC
   useEffect(() => {
     onPlaybackStateChange?.(displayStatus)
   }, [displayStatus, onPlaybackStateChange])
+
+  const visualReady = posterReady || (hasFrame && displayStatus !== 'failed' && displayStatus !== 'blocked')
+  useEffect(() => onVisualReady?.(visualReady), [onVisualReady, visualReady])
 
   const revealFrame = () => {
     const element = video.current!
