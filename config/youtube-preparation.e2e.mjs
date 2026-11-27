@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 import { capturePlaybackTrace } from './diagnostics/capture.js'
+import { characterizeLayer } from './diagnostics/v1-normal-turn.js'
 
 const root = path.resolve(import.meta.dirname, '..')
 const development = process.env.KARAOKE_E2E_MODE === 'development'
@@ -35,6 +36,7 @@ let server, browser, context, page, socket, db
 let diagnosticConnection
 let lostGrant = false
 let lostSceneId
+const authorizedBeds = new Map()
 let rejectedGreeting = false
 const errors = []
 const diagnosticLogs = []
@@ -178,6 +180,10 @@ try {
     })
     upstream.onMessage((message) => {
       const match = String(message).match(/^43(\d+)\[/)
+      if (delayedAcknowledgments && match) {
+        const grant = JSON.parse(String(message).slice(String(message).indexOf('[')))[0]?.ambience
+        if (grant?.transition) authorizedBeds.set(grant.transition.expectedNextQueueId, grant.clip.id)
+      }
       if (match && bedReplies.delete(match[1])) return
       if (match && lostSceneReplies.delete(match[1])) return
       if (match && lateReceipts.delete(match[1])) setTimeout(() => client.send(message), 1800)
@@ -231,6 +237,7 @@ try {
       const youtube = document.querySelector('[data-youtube-mode="active"]') ?? document.querySelector('[data-youtube-mode]')
       const incoming = scene?.querySelector('[data-testid="transition-incoming"]')
       if (scene || hadScene) probe.frames.push({ at, scene: !!scene,
+        backdrop: scene?.querySelector('[data-video-visible="true"]')?.dataset.resourceId,
         opacity: scene ? Number(getComputedStyle(scene).opacity) : null, exiting: scene?.dataset.exiting === 'true', preroll: scene?.dataset.preroll === 'true',
         incoming: incoming?.dataset.queueId,
         notice: /Preparando la próxima canción|Reproducción en pausa/.test(scene?.textContent ?? ''), width: innerWidth,
@@ -242,12 +249,15 @@ try {
     requestAnimationFrame(recordFrame)
     const clips = new Map(catalog.map(clip => [clip.checksum, clip]))
     const decoded = new WeakMap()
+    probe.decodedAt = {}
     const decode = AudioContext.prototype.decodeAudioData
     AudioContext.prototype.decodeAudioData = async function (bytes) {
       if (!probe.contexts.includes(this)) probe.contexts.push(this)
       const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
       const buffer = await decode.call(this, bytes)
       decoded.set(buffer, clips.get(checksum))
+      const clip = clips.get(checksum)
+      if (clip) probe.decodedAt[clip.id] ??= performance.now()
       return buffer
     }
     const createSource = AudioContext.prototype.createBufferSource
@@ -413,7 +423,7 @@ try {
       player.seekTo(player.getDuration() - 0.7, true)
     })
   }
-  const assertFullTransition = async (since, label, verifyFade = true) => {
+  const assertFullTransition = async (since, label, destination, verifyFade = true) => {
     const { commands, audio } = await page.evaluate(() => ({ commands: window.youtubePreparation.commands, audio: window.youtubePreparation.audio }))
     // A cold iframe API may become ready only after the transition; its first
     // active load is valid. Later handoffs still assert reuse of the prepared cue.
@@ -423,6 +433,26 @@ try {
     const voice = parts.find(run => run.kind === 'voice')
     const curtain = parts.find(run => run.kind === 'effect')
     const ambience = parts.find(run => run.kind === 'ambience')
+    if (delayedAcknowledgments && development) {
+      assert.equal(play.videoId, videos[destination - 1])
+      const source = destination === 1 ? -1 : destination - 1
+      const events = await page.evaluate(() => window.karaokePlaybackTrace.snapshot().events)
+      const turn = events.filter(event => event.sourceQueueId === source && event.monotonicMs >= since && event.monotonicMs <= play.at)
+      const selected = turn.some(event => event.queueId === destination && event.event === 'background-reply' && event.state === 'selected')
+      const visible = await page.evaluate(({ since, until, id }) => window.youtubePreparation.frames.some(frame => frame.at > since && frame.at < until && frame.opacity > 0.5 && frame.backdrop === id), { since, until: play.at, id: background.id })
+      const decodedAt = await page.evaluate(() => window.youtubePreparation.decodedAt)
+      const layers = {
+        voice: characterizeLayer({ prepared: voice ? decodedAt[voice.clipId] <= voice.at : null, authorized: turn.some(event => event.queueId === destination && event.event === 'animator-reserve-reply' && event.state === 'granted'), rendered: voice?.peakRms > 0.01, complete: !!voice && voice.endedAt >= voice.at + voice.durationMs - 100 }),
+        backdrop: characterizeLayer({ authorized: selected, rendered: visible, complete: visible && play.scene }),
+        ambience: characterizeLayer({ prepared: decodedAt[bed.id] <= (ambience?.at ?? play.at), authorized: authorizedBeds.get(destination) === bed.id, rendered: !!ambience?.audibleBedAt.some(at => at < voice?.at), complete: !!ambience?.audibleBedAt.some(at => at > voice?.at && at < voice?.endedAt) }),
+        curtain: characterizeLayer({ prepared: curtain ? decodedAt[curtain.clipId] <= curtain.at : null, rendered: curtain?.audibleSamples > 0, complete: !!curtain && curtain.endedAt >= curtain.at + curtain.durationMs - 100 }),
+        greeting: characterizeLayer({ omission: 'house-track', rendered: turn.some(event => event.event === 'greeting-audio-event' && event.state === 'STARTED') }),
+      }
+      // Write before assertions so a regression leaves its evidence as well.
+      fs.writeFileSync(path.join(data, `v1-turn-${destination}.json`), JSON.stringify({ version: 1, source, destination, label, layers }, null, 2))
+      for (const key of ['voice', 'ambience', 'backdrop', 'curtain']) assert.equal(layers[key].outcome, 'completed', `${label}/${key}: ${JSON.stringify(layers[key])}`)
+      assert.equal(layers.greeting.outcome, 'omitted')
+    }
     if (delayedAcknowledgments) assert.equal(parts.filter(run => run.kind === 'voice').length, 1, `${label}: recovering a receipt must not replay speech`)
     assert.ok(voice && curtain && ambience, `${label}: missing a transition part: ${parts.map(run => run.kind).join(', ')}`)
     if (delayedAcknowledgments) {
@@ -564,7 +594,7 @@ try {
     await page.screenshot({ path: path.join(data, 'transition-background.png') })
   }
   await expect.poll(position, { timeout: 45000 }).toBeGreaterThan(0.2)
-  await assertFullTransition(firstBoundary, 'Initial playback')
+  await assertFullTransition(firstBoundary, 'Initial playback', 1)
   await visualCapture
   await cancellationCheck
   if (diagnostics) await checkDiagnostic('greeting', greetingFailure)
@@ -592,7 +622,7 @@ try {
   await keyboard('Reproducir')
   await expect.poll(() => status(2), { timeout: slowLink ? 30000 : 15000 }).toBe('PLAYING')
   await expect.poll(position, { timeout: 45000 }).toBeGreaterThan(0.2)
-  await assertFullTransition(resumedBoundary, 'Resumed between-song transition')
+  await assertFullTransition(resumedBoundary, 'Resumed between-song transition', 2)
   const frames = await page.evaluate(() => window.youtubePreparation.frames)
   for (const width of [1440, 390]) {
     const scenes = frames.filter(frame => frame.width === width && frame.scene)
@@ -625,12 +655,12 @@ try {
   await emit('server/PLAYER_REQ_NEXT')
   await expect.poll(() => status(3), { timeout: slowLink ? 30000 : 15000 }).toBe('PLAYING')
   await expect.poll(position, { timeout: 45000 }).toBeGreaterThan(0.2)
-  await assertFullTransition(nextBoundary, 'Play next after replay')
+  await assertFullTransition(nextBoundary, 'Play next after replay', 3)
   const naturalBoundary = await page.evaluate(() => performance.now())
   await finishNaturally()
   await expect.poll(() => status(4), { timeout: slowLink ? 35000 : 20000 }).toBe('PLAYING')
   await expect.poll(position, { timeout: 45000 }).toBeGreaterThan(0.2)
-  await assertFullTransition(naturalBoundary, 'Natural song-to-song boundary', false)
+  await assertFullTransition(naturalBoundary, 'Natural song-to-song boundary', 4, false)
   if (delayedAcknowledgments) assert.ok(lostGrant, 'Exercise actual recovery after a committed reservation lost its response')
   if (!realYouTube && !reducedMotion && !slowLink) {
     const { states, frames } = await page.evaluate(() => window.youtubePreparation)
