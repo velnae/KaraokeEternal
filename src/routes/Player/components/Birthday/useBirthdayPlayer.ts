@@ -63,10 +63,13 @@ export default function useBirthdayPlayer (channel: AnnouncementAudio) {
       setError('No se pudo activar el sonido. Vuelva a intentarlo en el reproductor.')
     })
   }
-  const attempt = useCallback(async (boundary: 'ended' | 'idle' | 'start', sourceQueueId: number): Promise<'none' | 'waiting' | 'finished' | 'interrupted'> => {
+  const attempt = useCallback(async (boundary: 'ended' | 'idle' | 'start', sourceQueueId: number, signal?: AbortSignal): Promise<'none' | 'waiting' | 'finished' | 'interrupted'> => {
+    if (signal?.aborted) return 'interrupted'
     if (abort.current) return 'waiting'
     const controller = new AbortController()
     abort.current = controller
+    const cancel = () => controller.abort()
+    signal?.addEventListener('abort', cancel, { once: true })
     let grant: BirthdayGrant | undefined
     let heartbeat: ReturnType<typeof setInterval> | undefined
     try {
@@ -127,6 +130,7 @@ export default function useBirthdayPlayer (channel: AnnouncementAudio) {
       if (live.current) setError(failure instanceof Error ? failure.message : 'La celebración se interrumpió.')
       return 'interrupted'
     } finally {
+      signal?.removeEventListener('abort', cancel)
       clearInterval(heartbeat)
       activeAudio.current?.stop()
       activeAudio.current = null

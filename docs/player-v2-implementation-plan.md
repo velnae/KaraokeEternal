@@ -54,6 +54,12 @@ Run with Node 24.22.2 and isolated fixtures. Extend `config/youtube-preparation.
 
 ## Rollout and rollback
 
+### Stage 7: birthdays and idle ambience
+
+In the V2 pilot a room boundary drains any active or pending idle ambience before a song or birthday takes ownership. A birthday scheduled during a directed handoff invalidates the pending promotion before reserving the celebration. Birthday phases still use `birthdayTimeline` and the existing renewable server permit, independently of the ordinary presentation deadline. After completion the scheduler reads the current queue again; a manual karaoke release is still required. Cancellation prevents a delayed finish from resuming a replaced turn.
+
+Isolated check: `KARAOKE_E2E_MODE=development KARAOKE_E2E_PLAYER_V2=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium mise exec node@24.22.2 -- node config/birthdays.e2e.mjs`.
+
 ### Stage 4 development pilot
 
 On the development `/player` tab, run `sessionStorage.setItem('karaoke:player-executor', 'v2')` to opt in for the **next** eligible HOUSE transition with a scene or participant LISTEN request. Use `observe` (default) for V1 with passive comparison, or `legacy` for V1 without comparison. No reload is needed. The selector has no effect in production.

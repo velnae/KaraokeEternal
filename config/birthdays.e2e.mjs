@@ -289,6 +289,8 @@ try {
   })
   player = await context.newPage()
   player.on('pageerror', error => errors.push(error.message))
+  const directed = process.env.KARAOKE_E2E_PLAYER_V2 === '1'
+  if (directed) await player.addInitScript(() => sessionStorage.setItem('karaoke:player-executor', 'v2'))
   await player.goto(`${uiBase}player`)
   for (let i = 0; i < 2; i++) await emit('server/QUEUE_ADD', { songId: 1, origin: 'OPERATOR', requestIntent: 'LISTEN', requestId: crypto.randomUUID() })
   await player.getByRole('button', { name: 'Reproducir', exact: true }).last().click()
@@ -372,6 +374,7 @@ try {
   await expect.poll(async () => (await event(idle.id)).preparation, { timeout: 20000 }).toBe('ready')
   await call(`birthdays/events/${idle.id}`, { operation: 'schedule', revision: idle.revision })
   await expect.poll(async () => (await event(idle.id)).playback).toBe('playing')
+  if (directed) assert.ok(await player.evaluate(() => window.karaokePlaybackTrace.snapshot().events.some(e => e.event === 'v2-birthday-executing' && e.state === 'idle')), 'Idle celebration must own a V2 boundary')
   await emit('server/QUEUE_ADD', { songId: 1, origin: 'OPERATOR', requestIntent: 'SING', requestId: crypto.randomUUID() })
   assert.equal(db.prepare('SELECT count(*) n FROM queue WHERE status=\'PLAYING\'').get().n, 0, 'A new turn cannot start during the idle birthday')
   await expect.poll(async () => (await event(idle.id)).playback, { timeout: 50000 }).toBe('completed')
