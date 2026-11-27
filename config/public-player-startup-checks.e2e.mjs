@@ -70,8 +70,10 @@ export async function checkColdStartup ({ browser, auth, base, data, source, emi
       await page.keyboard.press('Control+Alt+k')
       await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('player-fs-container')
       await expect(play).toBeVisible()
-      await page.getByRole('button', { name: 'Salir de pantalla completa' }).click()
+      await expect(page.getByRole('button', { name: /pantalla completa/i })).toHaveCount(0)
+      await page.keyboard.press('Control+Alt+k')
       await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull()
+      await expect(page.getByRole('button', { name: 'Pantalla completa', exact: true })).toBeVisible()
       assert.ok(!report.events.some(e => e.event === 'play-request'))
     }
     if (source === 'remote') {

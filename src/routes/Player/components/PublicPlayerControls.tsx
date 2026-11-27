@@ -30,8 +30,8 @@ export default function PublicPlayerControls ({ showPlay, onPlay = localPlay.sta
   return (
     <div className={styles.controls} role='group' aria-label='Controles del reproductor'>
       {showPlay && <Button className={styles.play} variant='primary' icon='PLAY' size={24} onClick={onPlay}>Reproducir</Button>}
-      {screenfull.isEnabled && <Button className={styles.fullscreen} icon='FULLSCREEN' size={24} aria-label={fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'} aria-keyshortcuts='Control+Alt+K' onClick={toggle}>
-        <span>{fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}</span>
+      {screenfull.isEnabled && !fullscreen && <Button className={styles.fullscreen} icon='FULLSCREEN' size={24} aria-label='Pantalla completa' aria-keyshortcuts='Control+Alt+K' onClick={toggle}>
+        <span>Pantalla completa</span>
       </Button>}
       {error && <span className={styles.error} role='alert'>No se pudo cambiar la pantalla completa.</span>}
     </div>
